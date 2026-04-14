@@ -18,11 +18,11 @@ export interface InputHitungGaji {
 }
 
 export interface AturanGaji {
-  potonganPerMenit: number;       // 1500
-  batasTelatBonus: number;        // 30 menit
-  nominalBonusDisiplin: number;   // 150000
-  potonganTidakAbsen: number;     // 75000
-  tarifLemburPerJam?: number;     // opsional: 1.5x gaji/jam
+  potonganPerMenit: number;       // Dari payrollRules.potonganTerlambat
+  batasTelatBonus: number;        // Dari payrollRules.ambangDisiplinMenit
+  nominalBonusDisiplin: number;   // Dari payrollRules.bonusDisiplin
+  potonganTidakAbsen: number;     // Dari payrollRules.potonganAlpha
+  tarifLemburPerJam?: number;
 }
 
 export interface HasilHitungGaji {
