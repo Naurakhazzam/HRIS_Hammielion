@@ -35,7 +35,7 @@ export default function TambahKaryawanPage() {
   }
 
   function handleJabatanChange(jabatan: string) {
-    const divisi = DIVISI_MAP[jabatan as keyof typeof DIVISI_MAP] ?? 'Back Office';
+    const divisi = (DIVISI_MAP[jabatan] ?? 'Back Office') as KaryawanFormInput['divisi'];
     setForm((prev) => ({ ...prev, jabatan: jabatan as KaryawanFormInput['jabatan'], divisi }));
   }
 

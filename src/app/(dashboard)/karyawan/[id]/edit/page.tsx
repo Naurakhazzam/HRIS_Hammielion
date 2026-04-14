@@ -45,8 +45,8 @@ export default function EditKaryawanPage() {
   }
 
   function handleJabatanChange(jabatan: string) {
-    const divisi = DIVISI_MAP[jabatan] ?? 'Back Office';
-    setForm((prev) => ({ ...prev, jabatan: jabatan as Karyawan['jabatan'], divisi: divisi as Karyawan['divisi'] }));
+    const divisi = (DIVISI_MAP[jabatan] ?? 'Back Office') as Karyawan['divisi'];
+    setForm((prev) => ({ ...prev, jabatan: jabatan as Karyawan['jabatan'], divisi }));
   }
 
   function validate(): boolean {
