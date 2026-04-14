@@ -10,6 +10,7 @@ interface AvatarProps {
 export default function Avatar({ nama, size = 'md', src }: AvatarProps) {
   if (src) {
     return (
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
         alt={nama}

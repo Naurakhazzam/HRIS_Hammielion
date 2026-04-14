@@ -33,9 +33,10 @@ export const useAuthStore = create<AuthStore>()(
 
       login: (identifier, password) => {
         const found = DUMMY_USERS.find(
-          (u) => (u.email === identifier || (u as any).username === identifier) && u.password === password,
+          (u) => (u.email === identifier || u.username === identifier) && u.password === password,
         );
         if (!found) return false;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { password: _password, ...user } = found;
         set({ user, isAuthenticated: true });
         return true;

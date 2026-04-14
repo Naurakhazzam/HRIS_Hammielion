@@ -4,6 +4,7 @@ export interface User {
   id: string;
   nama: string;
   email: string;
+  username?: string;
   role: UserRole;
   karyawanId?: string; // jika role adalah karyawan/manager
   avatar?: string;

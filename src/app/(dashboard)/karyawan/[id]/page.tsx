@@ -3,7 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, Pencil, User, Briefcase, Landmark,
-  Phone, Mail, MapPin, Calendar, CreditCard,
+  Phone, MapPin, Calendar,
 } from 'lucide-react';
 import { useKaryawanStore } from '@/stores/useKaryawanStore';
 import { formatTanggal, formatRupiah, getInisial } from '@/lib/utils/formatters';
