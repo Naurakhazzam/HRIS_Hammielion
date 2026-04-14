@@ -1,0 +1,155 @@
+.sidebar {
+  width: var(--sidebar-width);
+  height: 100vh;
+  background: var(--color-sidebar);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 100;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Logo */
+.logo {
+  padding: 20px 16px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.logoText {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--color-primary);
+  letter-spacing: -0.3px;
+}
+
+.logoSub {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* Nav */
+.nav {
+  padding: 10px 8px;
+  flex: 1;
+}
+
+.navGroup {
+  margin-bottom: 2px;
+}
+
+/* Parent menu item */
+.navParent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition);
+  user-select: none;
+}
+
+.navParent:hover {
+  background: var(--color-surface-2);
+}
+
+.navParentActive {
+  background: var(--color-primary-light);
+}
+
+.navParentLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.navIcon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+}
+
+.navParentActive .navIcon,
+.navParentActive .navLabel {
+  color: var(--color-primary);
+}
+
+.navLabel {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-sub);
+}
+
+.chevron {
+  color: var(--color-text-muted);
+  transition: transform var(--transition);
+  width: 14px;
+  height: 14px;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+/* Sub menu */
+.subMenu {
+  padding: 2px 0 4px 36px;
+  overflow: hidden;
+}
+
+.subItem {
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+  transition: all var(--transition);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.subItem:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+.subItemActive {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+/* Footer */
+.footer {
+  padding: 12px 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.userInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.userInfo:hover { background: var(--color-surface-2); }
+
+.userName {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.userRole {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

@@ -1,0 +1,150 @@
+.page { display: flex; flex-direction: column; gap: 20px; }
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.backBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  color: var(--color-text-sub);
+}
+
+.backBtn:hover { background: var(--color-bg); }
+
+.headerText { flex: 1; }
+
+.title { font-size: var(--text-2xl); font-weight: 700; color: var(--color-text); }
+.subtitle { font-size: var(--text-sm); color: var(--color-text-sub); margin-top: 2px; }
+
+/* ── Profile Hero Card ───────────────────────────────────────────────────── */
+.profileCard {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.profileName { font-size: var(--text-xl); font-weight: 700; color: var(--color-text); }
+.profileSub  { font-size: var(--text-sm); color: var(--color-text-sub); margin-top: 4px; }
+
+.profileMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.metaSep {
+  width: 1px;
+  height: 14px;
+  background: var(--color-border);
+}
+
+.metaText { font-size: var(--text-xs); color: var(--color-text-muted); }
+
+/* ── Info Grid ───────────────────────────────────────────────────────────── */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cardTitle {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* ── Info Rows ───────────────────────────────────────────────────────────── */
+.infoList { display: flex; flex-direction: column; gap: 10px; }
+
+.infoRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.infoLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+  min-width: 110px;
+  flex-shrink: 0;
+}
+
+.infoValue {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.infoValue.highlight {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.empty { color: var(--color-text-muted); font-weight: 400; }
+
+/* ── Catatan ─────────────────────────────────────────────────────────────── */
+.catatanText {
+  font-size: var(--text-sm);
+  color: var(--color-text-sub);
+  line-height: 1.6;
+}
+
+/* ── Not Found ───────────────────────────────────────────────────────────── */
+.notFound {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  gap: 12px;
+  color: var(--color-text-muted);
+}
