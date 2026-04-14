@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { NAV } from '@/lib/constants/navigation';
-import { ROLES } from '@/lib/constants/roles';
+import { ROLES, ROLE_ACCESS } from '@/lib/constants/roles';
 import { useAuthStore } from '@/stores/useAuthStore';
 import Avatar from '@/components/atoms/Avatar';
 import styles from './Sidebar.module.css';
@@ -23,8 +23,15 @@ const ICONS: Record<string, React.ElementType> = {
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user, logout, isPreviewMode, togglePreviewMode } = useAuthStore();
   const [openMenus, setOpenMenus] = useState<string[]>([]);
+
+  const filteredNav = NAV.filter((item) => {
+    if (isPreviewMode || (user && user.role === 'owner')) return true;
+    if (!user) return false;
+    const allowedPaths = ROLE_ACCESS[user.role] || [];
+    return allowedPaths.some((path) => item.basePath.startsWith(path) || path === '*');
+  });
 
   const toggleMenu = (label: string) => {
     setOpenMenus((prev) =>
@@ -40,14 +47,23 @@ export default function Sidebar() {
   return (
     <aside className={styles.sidebar}>
       {/* Logo */}
-      <div className={styles.logo}>
-        <div className={styles.logoText}>HRIS</div>
-        <div className={styles.logoSub}>Hammielion Petshop</div>
+      <div 
+        className={`${styles.logo} ${isPreviewMode ? styles.logoPreview : ''}`}
+        onClick={togglePreviewMode}
+        title={isPreviewMode ? 'God Mode Active — Click to Disable' : 'Enable Preview Mode'}
+      >
+        <div className={styles.logoText}>
+          {isPreviewMode ? 'GOD MODE' : 'HRIS'}
+        </div>
+        <div className={styles.logoSub}>
+          {isPreviewMode ? 'Full Access Enabled' : 'Hammielion Petshop'}
+        </div>
+        {isPreviewMode && <div className={styles.previewBadge} />}
       </div>
 
       {/* Navigation */}
       <nav className={styles.nav}>
-        {NAV.map((item) => {
+        {filteredNav.map((item) => {
           const Icon = ICONS[item.icon] ?? Settings;
           const isActive = pathname.startsWith(item.basePath);
           const isOpen = openMenus.includes(item.label);

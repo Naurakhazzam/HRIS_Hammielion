@@ -7,6 +7,8 @@ interface AuthStore {
   isAuthenticated: boolean;
   login: (email: string, password: string) => boolean;
   logout: () => void;
+  isPreviewMode: boolean;
+  togglePreviewMode: () => void;
 }
 
 // Dummy users untuk fase awal
@@ -43,6 +45,9 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: () => set({ user: null, isAuthenticated: false }),
+
+      isPreviewMode: false,
+      togglePreviewMode: () => set((state) => ({ isPreviewMode: !state.isPreviewMode })),
     }),
     { name: 'hris-auth' },
   ),

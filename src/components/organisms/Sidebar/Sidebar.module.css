@@ -17,6 +17,47 @@
 .logo {
   padding: 20px 16px 16px;
   border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.logo:hover {
+  background: var(--color-surface-2);
+}
+
+.logoPreview {
+  background: #fff7ed !important; /* Orange-50 */
+  border-bottom: 1px solid #fed7aa !important; /* Orange-200 */
+  position: relative;
+  overflow: hidden;
+  animation: logoPulse 2s ease-in-out infinite;
+}
+
+.logoPreview .logoText {
+  color: #ea580c !important; /* Orange-600 */
+}
+
+.logoPreview .logoSub {
+  color: #9a3412 !important; /* Orange-800 */
+  font-weight: 600;
+}
+
+.previewBadge {
+  position: absolute;
+  top: 10px;
+  right: -25px;
+  width: 100px;
+  height: 20px;
+  background: #ea580c;
+  transform: rotate(45deg);
+  box-shadow: 0 2px 10px rgba(234, 88, 12, 0.3);
+  pointer-events: none;
+}
+
+@keyframes logoPulse {
+  0% { background: #fff7ed; }
+  50% { background: #ffedd5; }
+  100% { background: #fff7ed; }
 }
 
 .logoText {
