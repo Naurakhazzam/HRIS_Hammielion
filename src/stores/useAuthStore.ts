@@ -36,7 +36,7 @@ export const useAuthStore = create<AuthStore>()(
           (u) => u.email === email && u.password === password,
         );
         if (!found) return false;
-        const { password: _, ...user } = found;
+        const { password: _password, ...user } = found;
         set({ user, isAuthenticated: true });
         return true;
       },

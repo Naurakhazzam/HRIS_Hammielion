@@ -61,7 +61,7 @@ export const STATUS_KARYAWAN = [
 export type StatusKaryawan = (typeof STATUS_KARYAWAN)[number];
 
 /** Mapping jabatan → divisi (otomatis saat input form) */
-export const DIVISI_MAP: Record<string, string> = {
+export const DIVISI_MAP: Record<string, Divisi> = {
   Kasir:        'Staff Toko',
   Helper:       'Staff Toko',
   Groomer:      'Staff Toko',
