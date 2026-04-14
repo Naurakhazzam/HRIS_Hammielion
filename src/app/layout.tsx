@@ -6,10 +6,15 @@ export const metadata: Metadata = {
   description: 'Human Resource Information System — Hammielion Petshop',
 };
 
+import { Toaster } from 'react-hot-toast';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id">
-      <body>{children}</body>
+      <body>
+        {children}
+        <Toaster position="top-center" />
+      </body>
     </html>
   );
 }

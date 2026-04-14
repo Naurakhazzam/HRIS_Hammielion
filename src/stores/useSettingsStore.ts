@@ -27,6 +27,7 @@ const INITIAL_RULES: PayrollRuleConfig = {
   potonganAlpha: 75000,
   bonusDisiplin: 150000,
   ambangDisiplinMenit: 30,
+  masterAuthCode: 'HAMMIELION2024',
 };
 
 const INITIAL_BRANCHES: BranchConfig[] = [

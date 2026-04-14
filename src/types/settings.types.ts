@@ -13,6 +13,7 @@ export interface PayrollRuleConfig {
   potonganAlpha: number; // per kejadian
   bonusDisiplin: number;
   ambangDisiplinMenit: number; // total menit terlambat maksimal untuk dapat bonus
+  masterAuthCode: string; // Kode untuk absen di cabang bukan utama
 }
 
 export interface BranchConfig {
