@@ -8,7 +8,7 @@ import styles from './login.module.css';
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuthStore();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,11 +18,11 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     await new Promise((r) => setTimeout(r, 500)); // simulasi loading
-    const ok = login(email, password);
+    const ok = login(identifier, password);
     if (ok) {
       router.push('/dashboard');
     } else {
-      setError('Email atau password salah');
+      setError('Username atau password salah');
       setLoading(false);
     }
   };
@@ -37,13 +37,13 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className={styles.form}>
           <div className={styles.field}>
-            <label className={styles.label}>Email</label>
+            <label className={styles.label}>Username</label>
             <input
               className={styles.input}
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@hammielion.com"
+              type="text"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="admin"
               required
             />
           </div>
@@ -68,7 +68,7 @@ export default function LoginPage() {
         </form>
 
         <p className={styles.hint}>
-          Demo: <code>admin@hammielion.com</code> / <code>admin123</code>
+          Demo: <code>admin</code> / <code>admin123</code>
         </p>
       </div>
     </div>

@@ -12,7 +12,7 @@ interface AuthStore {
 // Dummy users untuk fase awal
 const DUMMY_USERS: (User & { password: string })[] = [
   {
-    id: 'u001', nama: 'Admin HR', email: 'admin@hammielion.com',
+    id: 'u001', nama: 'Admin HR', email: 'admin@hammielion.com', username: 'admin',
     password: 'admin123', role: 'admin_hr',
   },
   {
@@ -31,9 +31,9 @@ export const useAuthStore = create<AuthStore>()(
       user: null,
       isAuthenticated: false,
 
-      login: (email, password) => {
+      login: (identifier, password) => {
         const found = DUMMY_USERS.find(
-          (u) => u.email === email && u.password === password,
+          (u) => (u.email === identifier || (u as any).username === identifier) && u.password === password,
         );
         if (!found) return false;
         const { password: _password, ...user } = found;
