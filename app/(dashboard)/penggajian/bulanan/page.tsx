@@ -1086,6 +1086,8 @@ export default function PenggajianBulananPage() {
                     ['Potongan Keterlambatan',  selectedPayroll.late_deduction],
                     ['Potongan Kasbon',         selectedPayroll.kasbon_deduction],
                     ['Tunjangan Loyalitas',     (selectedPayroll as any).loyalitas_deduction ?? 0],
+                    ['Kehilangan Barang',       (selectedPayroll as any).inventory_loss_deduction ?? 0],
+                    ['Kerugian Kasir',          (selectedPayroll as any).cashier_loss_deduction ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>

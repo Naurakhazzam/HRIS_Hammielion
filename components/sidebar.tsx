@@ -29,6 +29,7 @@ const navItems = [
       { name: 'Borongan (Rekap)', href: '/penggajian/borongan' },
       { name: 'Tunjangan Loyalitas', href: '/penggajian/loyalitas' },
       { name: 'Bonus Kinerja', href: '/penggajian/bonus' },
+      { name: 'Kehilangan & Kasir', href: '/penggajian/kehilangan' },
     ]
   },
   {
@@ -51,6 +52,7 @@ const navItems = [
       { name: 'Jabatan', href: '/jabatan' },
       { name: 'Komponen Gaji', href: '/penggajian/komponen' },
       { name: 'Bonus Kondisional', href: '/penggajian/bonus-kondisional' },
+      { name: 'Setup Kehilangan', href: '/penggajian/kehilangan' },
       { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
       { name: 'Pekerja Borongan', href: '/penggajian/borongan/pekerja' },
       { name: 'Tarif Borongan', href: '/penggajian/borongan/tarif' },
