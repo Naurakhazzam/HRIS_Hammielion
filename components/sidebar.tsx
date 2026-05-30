@@ -47,6 +47,7 @@ const navItems = [
   },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
   { name: 'Laporan', href: '/laporan', icon: '📄' },
+  { name: 'Manajemen User', href: '/users', icon: '🔑' },
 ]
 
 export default function Sidebar() {
