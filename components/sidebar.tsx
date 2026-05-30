@@ -50,6 +50,7 @@ const navItems = [
       { name: 'Cabang', href: '/cabang' },
       { name: 'Jabatan', href: '/jabatan' },
       { name: 'Komponen Gaji', href: '/penggajian/komponen' },
+      { name: 'Bonus Kondisional', href: '/penggajian/bonus-kondisional' },
       { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
       { name: 'Pekerja Borongan', href: '/penggajian/borongan/pekerja' },
       { name: 'Tarif Borongan', href: '/penggajian/borongan/tarif' },

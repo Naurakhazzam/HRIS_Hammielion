@@ -19,12 +19,13 @@ type Payroll = {
   kpi_bonus: number
   late_deduction: number
   kasbon_deduction: number
+  loyalitas_deduction: number
+  conditional_bonus: number
   gross_total: number
   net_total: number
   status: 'draft' | 'pending_approval' | 'approved' | 'paid'
   approved_by: string | null
   created_at: string
-  // relasi
   employee: {
     full_name: string
     employee_type: string
@@ -32,6 +33,20 @@ type Payroll = {
     positions: { name: string } | null
   } | null
   approver: { full_name: string } | null
+}
+
+type BonusCriteria = {
+  id: string
+  criteria_name: string
+  nominal_amount: number
+  is_active: boolean
+}
+
+type BonusAssessment = {
+  id: string
+  criteria_id: string
+  is_achieved: boolean
+  notes: string | null
 }
 
 type CurrentUser = {
@@ -104,6 +119,13 @@ export default function PenggajianBulananPage() {
 
   // ── State: modal detail slip (Part 5) ──
   const [selectedPayroll, setSelectedPayroll] = useState<Payroll | null>(null)
+
+  // ── State: modal bonus kondisional ──
+  const [bonusModal, setBonusModal] = useState<Payroll | null>(null)
+  const [bonusCriteria, setBonusCriteria] = useState<BonusCriteria[]>([])
+  const [bonusAssessments, setBonusAssessments] = useState<Record<string, boolean>>({})
+  const [bonusNotes, setBonusNotes] = useState<Record<string, string>>({})
+  const [bonusSaving, setBonusSaving] = useState(false)
 
   // ── Inisialisasi ──
   useEffect(() => {
@@ -493,6 +515,80 @@ export default function PenggajianBulananPage() {
     await fetchPayrolls()
   }
 
+  // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
+
+  async function openBonusModal(p: Payroll) {
+    setBonusModal(p)
+    // Ambil kriteria aktif karyawan
+    const { data: crit } = await supabase
+      .from('employee_bonus_criteria')
+      .select('*')
+      .eq('employee_id', p.employee_id)
+      .eq('is_active', true)
+    setBonusCriteria((crit as BonusCriteria[]) || [])
+
+    // Ambil assessment yang sudah ada
+    const { data: assess } = await supabase
+      .from('payroll_bonus_assessments')
+      .select('*')
+      .eq('payroll_id', p.id)
+    const achMap: Record<string, boolean> = {}
+    const notesMap: Record<string, string> = {}
+    ;(assess || []).forEach((a: BonusAssessment) => {
+      achMap[a.criteria_id] = a.is_achieved
+      notesMap[a.criteria_id] = a.notes || ''
+    })
+    setBonusAssessments(achMap)
+    setBonusNotes(notesMap)
+  }
+
+  async function handleSaveBonus() {
+    if (!bonusModal || !currentUser) return
+    setBonusSaving(true)
+
+    // Upsert semua assessment
+    const upserts = bonusCriteria.map(c => ({
+      payroll_id: bonusModal.id,
+      criteria_id: c.id,
+      employee_id: bonusModal.employee_id,
+      period_month: bonusModal.period_month,
+      period_year: bonusModal.period_year,
+      is_achieved: bonusAssessments[c.id] ?? false,
+      notes: bonusNotes[c.id] || null,
+      assessed_by: currentUser.employee_id
+    }))
+
+    if (upserts.length > 0) {
+      const { error } = await supabase
+        .from('payroll_bonus_assessments')
+        .upsert(upserts, { onConflict: 'payroll_id,criteria_id' })
+      if (error) { showMessage('error', 'Gagal menyimpan penilaian: ' + error.message); setBonusSaving(false); return }
+    }
+
+    // Hitung total bonus kondisional
+    const totalBonus = bonusCriteria.reduce((sum, c) => {
+      return sum + (bonusAssessments[c.id] ? Number(c.nominal_amount) : 0)
+    }, 0)
+
+    // Update payroll: conditional_bonus + recalc gross & net
+    const p = bonusModal
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + totalBonus
+    const newNet = newGross - Number(p.late_deduction) - Number(p.loyalitas_deduction ?? 0) - Number(p.kasbon_deduction)
+
+    const { error: updateErr } = await supabase
+      .from('payrolls')
+      .update({ conditional_bonus: totalBonus, gross_total: newGross, net_total: newNet })
+      .eq('id', p.id)
+
+    if (updateErr) showMessage('error', 'Gagal update payroll: ' + updateErr.message)
+    else {
+      showMessage('success', 'Penilaian bonus berhasil disimpan.')
+      setBonusModal(null)
+      await fetchPayrolls()
+    }
+    setBonusSaving(false)
+  }
+
   // ─── Summary kalkulasi ─────────────────────────────────────────────────────
 
   const totalGross   = payrolls.reduce((sum, p) => sum + Number(p.gross_total), 0)
@@ -814,13 +910,20 @@ export default function PenggajianBulananPage() {
                       {/* Aksi — Part 4 aktif */}
                       <td className="px-4 py-3 text-center whitespace-nowrap print-hide">
                         <div className="flex items-center justify-center gap-1.5">
-                          {/* Tombol Lihat — Part 5 aktif */}
                           <button
                             onClick={() => setSelectedPayroll(p)}
                             className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 hover:border-slate-400 transition"
                           >
                             Lihat
                           </button>
+                          {p.status === 'draft' && (
+                            <button
+                              onClick={() => openBonusModal(p)}
+                              className="px-2.5 py-1.5 text-xs font-medium bg-purple-50 border border-purple-200 rounded-lg text-purple-700 hover:bg-purple-100 transition"
+                            >
+                              Input Bonus
+                            </button>
+                          )}
 
                           {p.status === 'draft' && (
                             <button
@@ -960,11 +1063,12 @@ export default function PenggajianBulananPage() {
                     <td colSpan={2} className="px-4 py-1.5 text-xs font-bold text-emerald-700 uppercase tracking-wide">Pendapatan</td>
                   </tr>
                   {[
-                    ['Gaji Pokok',         selectedPayroll.base_salary],
-                    ['Tunjangan Jabatan',  selectedPayroll.position_allowance],
-                    ['Tunjangan Makan',    selectedPayroll.meal_allowance],
-                    ['Upah Lembur',        selectedPayroll.overtime_total],
-                    ['Bonus KPI',          selectedPayroll.kpi_bonus],
+                    ['Gaji Pokok',           selectedPayroll.base_salary],
+                    ['Tunjangan Jabatan',    selectedPayroll.position_allowance],
+                    ['Tunjangan Makan',      selectedPayroll.meal_allowance],
+                    ['Upah Lembur',          selectedPayroll.overtime_total],
+                    ['Bonus KPI',            selectedPayroll.kpi_bonus],
+                    ['Bonus Kondisional',    (selectedPayroll as any).conditional_bonus ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>
@@ -1015,6 +1119,77 @@ export default function PenggajianBulananPage() {
                 <span>Disetujui oleh: <strong className="text-slate-600">{selectedPayroll.approver.full_name}</strong></span>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Modal Bonus Kondisional ─── */}
+    {bonusModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+        onClick={e => { if (e.target === e.currentTarget) setBonusModal(null) }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+          <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+            <div>
+              <h2 className="text-base font-bold text-slate-700">Input Bonus Kondisional</h2>
+              <p className="text-sm text-slate-500">{bonusModal.employee?.full_name} — {MONTHS[bonusModal.period_month-1]} {bonusModal.period_year}</p>
+            </div>
+            <button onClick={() => setBonusModal(null)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium rounded-lg">✕ Tutup</button>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            {bonusCriteria.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">
+                <p className="text-sm">Karyawan ini belum memiliki kriteria bonus kondisional.</p>
+                <p className="text-xs mt-1 text-slate-400">Setup di menu Setup → Bonus Kondisional</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-slate-500">Centang kriteria yang terpenuhi bulan ini:</p>
+                <div className="space-y-3">
+                  {bonusCriteria.map(c => (
+                    <div key={c.id} className={`p-4 rounded-xl border transition ${bonusAssessments[c.id] ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200'}`}>
+                      <div className="flex items-center gap-3">
+                        <input type="checkbox" id={`crit-${c.id}`}
+                          checked={bonusAssessments[c.id] ?? false}
+                          onChange={e => setBonusAssessments(prev => ({ ...prev, [c.id]: e.target.checked }))}
+                          className="w-5 h-5 rounded text-green-600 cursor-pointer"
+                        />
+                        <label htmlFor={`crit-${c.id}`} className="flex-1 cursor-pointer">
+                          <div className="text-sm font-medium text-slate-800">{c.criteria_name}</div>
+                          <div className={`text-xs font-bold ${bonusAssessments[c.id] ? 'text-green-600' : 'text-slate-400'}`}>
+                            {bonusAssessments[c.id] ? `✓ +${formatRupiah(c.nominal_amount)}` : formatRupiah(c.nominal_amount)}
+                          </div>
+                        </label>
+                      </div>
+                      <div className="mt-2 ml-8">
+                        <input type="text" placeholder="Catatan (opsional)"
+                          value={bonusNotes[c.id] || ''}
+                          onChange={e => setBonusNotes(prev => ({ ...prev, [c.id]: e.target.value }))}
+                          className="w-full px-2 py-1 border border-slate-200 rounded text-xs text-slate-600 focus:ring-1 focus:ring-blue-400 outline-none"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* Total */}
+                <div className="flex items-center justify-between bg-blue-600 text-white rounded-xl px-4 py-3">
+                  <span className="font-semibold text-sm">Total Bonus Kondisional</span>
+                  <span className="font-bold text-lg">
+                    {formatRupiah(bonusCriteria.reduce((s, c) => s + (bonusAssessments[c.id] ? Number(c.nominal_amount) : 0), 0))}
+                  </span>
+                </div>
+              </>
+            )}
+            {bonusCriteria.length > 0 && (
+              <div className="flex justify-end gap-3 pt-2">
+                <button onClick={() => setBonusModal(null)}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">Batal</button>
+                <button onClick={handleSaveBonus} disabled={bonusSaving}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                  {bonusSaving ? 'Menyimpan...' : 'Simpan Penilaian'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
