@@ -8,11 +8,9 @@ import { useState } from 'react'
 const navItems = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
   { name: 'Karyawan', href: '/karyawan', icon: '👥' },
-  { name: 'Cabang', href: '/cabang', icon: '🏢' },
-  { name: 'Jabatan', href: '/jabatan', icon: '👔' },
-  { 
-    name: 'Absensi', 
-    href: '/absensi', 
+  {
+    name: 'Absensi',
+    href: '/absensi',
     icon: '📋',
     submenu: [
       { name: 'Jadwal Kerja', href: '/absensi/jadwal' },
@@ -21,25 +19,21 @@ const navItems = [
     ]
   },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
-  { 
-    name: 'Penggajian', 
-    href: '/penggajian', 
+  {
+    name: 'Penggajian',
+    href: '/penggajian',
     icon: '💰',
     submenu: [
-      { name: 'Bulanan', href: '/penggajian/bulanan' },
-      { name: 'Driver (Rekap Trip)', href: '/penggajian/driver' },
-      { name: 'Setup Tarif & Mobil', href: '/penggajian/driver/setup' },
+      { name: 'Gaji Staff', href: '/penggajian/bulanan' },
+      { name: 'Gaji Driver', href: '/penggajian/driver' },
       { name: 'Borongan (Rekap)', href: '/penggajian/borongan' },
-      { name: 'Pekerja Borongan', href: '/penggajian/borongan/pekerja' },
-      { name: 'Tarif Borongan', href: '/penggajian/borongan/tarif' },
-      { name: 'Komponen Gaji', href: '/penggajian/komponen' },
-      { name: 'Bonus Kinerja', href: '/penggajian/bonus' },
       { name: 'Tunjangan Loyalitas', href: '/penggajian/loyalitas' },
+      { name: 'Bonus Kinerja', href: '/penggajian/bonus' },
     ]
   },
-  { 
-    name: 'KPI', 
-    href: '/kpi', 
+  {
+    name: 'KPI',
+    href: '/kpi',
     icon: '📊',
     submenu: [
       { name: 'Dashboard KPI', href: '/kpi' },
@@ -48,6 +42,19 @@ const navItems = [
   },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
   { name: 'Laporan', href: '/laporan', icon: '📄' },
+  {
+    name: 'Setup',
+    href: '/setup',
+    icon: '⚙️',
+    submenu: [
+      { name: 'Cabang', href: '/cabang' },
+      { name: 'Jabatan', href: '/jabatan' },
+      { name: 'Komponen Gaji', href: '/penggajian/komponen' },
+      { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
+      { name: 'Pekerja Borongan', href: '/penggajian/borongan/pekerja' },
+      { name: 'Tarif Borongan', href: '/penggajian/borongan/tarif' },
+    ]
+  },
   { name: 'Manajemen User', href: '/users', icon: '🔑' },
 ]
 
@@ -57,6 +64,7 @@ export default function Sidebar() {
     'Absensi': pathname.startsWith('/absensi'),
     'Penggajian': pathname.startsWith('/penggajian'),
     'KPI': pathname.startsWith('/kpi'),
+    'Setup': pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif'),
   })
 
   const toggleMenu = (name: string) => {
