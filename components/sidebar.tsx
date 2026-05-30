@@ -52,7 +52,7 @@ const navItems = [
       { name: 'Jabatan', href: '/jabatan' },
       { name: 'Komponen Gaji', href: '/penggajian/komponen' },
       { name: 'Bonus Kondisional', href: '/penggajian/bonus-kondisional' },
-      { name: 'Setup Kehilangan', href: '/penggajian/kehilangan' },
+      { name: 'Setup Kehilangan', href: '/penggajian/kehilangan/setup' },
       { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
       { name: 'Pekerja Borongan', href: '/penggajian/borongan/pekerja' },
       { name: 'Tarif Borongan', href: '/penggajian/borongan/tarif' },
