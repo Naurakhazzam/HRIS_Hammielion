@@ -223,8 +223,6 @@ export default function MasterPekerjaBoronganPage() {
           </div>
         </div>
       </div>
-    </div>
-
       {/* Modal Edit Pekerja */}
       {editWorker && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
