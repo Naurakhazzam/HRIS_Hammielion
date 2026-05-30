@@ -236,10 +236,10 @@ export default function PenggajianBulananPage() {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
     try {
-      // 1. Ambil karyawan permanent aktif
+      // 1. Ambil karyawan permanent aktif (termasuk loyalitas_per_month)
       let empQ = supabase
         .from('employees')
-        .select('id, full_name, branch_id')
+        .select('id, full_name, branch_id, loyalitas_per_month')
         .eq('employee_type', 'permanent')
         .eq('is_active', true)
       if (filterBranch) empQ = empQ.eq('branch_id', filterBranch)
@@ -314,33 +314,35 @@ export default function PenggajianBulananPage() {
         const sc = salMap[emp.id]
         if (!sc) { noSalNames.push(emp.full_name); continue }
 
-        const att        = attMap[emp.id] ?? { ot: 0, lat: 0 }
-        const base       = Number(sc.base_salary         ?? 0)
-        const pos        = Number(sc.position_allowance  ?? 0)
-        const meal       = Number(sc.meal_allowance      ?? 0)
-        const otRate     = Number(sc.overtime_rate_per_hour    ?? 0)
-        const latRate    = Number(sc.late_penalty_per_minute   ?? 0)
-        const otTotal    = att.ot  * otRate
-        const latDed     = att.lat * latRate
-        const kpiBonus   = kpiMap[emp.id] ?? 0
-        const gross      = base + pos + meal + otTotal + kpiBonus
-        const net        = gross - latDed
+        const att          = attMap[emp.id] ?? { ot: 0, lat: 0 }
+        const base         = Number(sc.base_salary              ?? 0)
+        const pos          = Number(sc.position_allowance       ?? 0)
+        const meal         = Number(sc.meal_allowance           ?? 0)
+        const otRate       = Number(sc.overtime_rate_per_hour   ?? 0)
+        const latRate      = Number(sc.late_penalty_per_minute  ?? 0)
+        const otTotal      = att.ot  * otRate
+        const latDed       = att.lat * latRate
+        const kpiBonus     = kpiMap[emp.id] ?? 0
+        const loyalitasDed = Number((emp as any).loyalitas_per_month ?? 0)
+        const gross        = base + pos + meal + otTotal + kpiBonus
+        const net          = gross - latDed - loyalitasDed
 
         inserts.push({
-          employee_id:        emp.id,
-          period_month:       filterMonth,
-          period_year:        filterYear,
-          base_salary:        base,
-          position_allowance: pos,
-          meal_allowance:     meal,
-          overtime_total:     otTotal,
-          kpi_bonus:          kpiBonus,
-          late_deduction:     latDed,
-          kasbon_deduction:   0,
-          gross_total:        gross,
-          net_total:          net,
-          status:             'draft',
-          approved_by:        null,
+          employee_id:          emp.id,
+          period_month:         filterMonth,
+          period_year:          filterYear,
+          base_salary:          base,
+          position_allowance:   pos,
+          meal_allowance:       meal,
+          overtime_total:       otTotal,
+          kpi_bonus:            kpiBonus,
+          late_deduction:       latDed,
+          kasbon_deduction:     0,
+          loyalitas_deduction:  loyalitasDed,
+          gross_total:          gross,
+          net_total:            net,
+          status:               'draft',
+          approved_by:          null,
         })
       }
 
@@ -437,20 +439,52 @@ export default function PenggajianBulananPage() {
       return
     }
 
-    // Jika paid dan ada kasbon_deduction: kurangi current_balance di kasbon_limits
-    if (action === 'paid' && Number(p.kasbon_deduction) > 0) {
-      const { data: kl, error: klErr } = await supabase
-        .from('kasbon_limits')
-        .select('id, current_balance')
-        .eq('employee_id', p.employee_id)
-        .single()
-
-      if (!klErr && kl) {
-        const newBalance = Math.max(0, Number(kl.current_balance) - Number(p.kasbon_deduction))
-        await supabase
+    // Jika paid: kurangi kasbon + tambah saldo loyalitas
+    if (action === 'paid') {
+      // Kasbon
+      if (Number(p.kasbon_deduction) > 0) {
+        const { data: kl, error: klErr } = await supabase
           .from('kasbon_limits')
-          .update({ current_balance: newBalance, updated_at: new Date().toISOString() })
-          .eq('id', kl.id)
+          .select('id, current_balance')
+          .eq('employee_id', p.employee_id)
+          .single()
+        if (!klErr && kl) {
+          const newBalance = Math.max(0, Number(kl.current_balance) - Number(p.kasbon_deduction))
+          await supabase.from('kasbon_limits')
+            .update({ current_balance: newBalance, updated_at: new Date().toISOString() })
+            .eq('id', kl.id)
+        }
+      }
+      // Tunjangan Loyalitas — tambah ke saldo
+      const loyalitasDed = Number((p as any).loyalitas_deduction ?? 0)
+      if (loyalitasDed > 0) {
+        // Cek apakah sudah ada balance record
+        const { data: existBal } = await supabase
+          .from('loyalitas_balances')
+          .select('id, total_withheld')
+          .eq('employee_id', p.employee_id)
+          .single()
+        if (existBal) {
+          // Update total
+          await supabase.from('loyalitas_balances')
+            .update({ total_withheld: Number(existBal.total_withheld) + loyalitasDed, updated_at: new Date().toISOString() })
+            .eq('id', existBal.id)
+        } else {
+          // Insert baru
+          await supabase.from('loyalitas_balances').insert({
+            employee_id: p.employee_id,
+            total_withheld: loyalitasDed,
+            status: 'active'
+          })
+        }
+        // Catat transaksi
+        await supabase.from('loyalitas_transactions').insert({
+          employee_id: p.employee_id,
+          payroll_id: p.id,
+          type: 'deduction',
+          amount: loyalitasDed,
+          notes: `Potongan bulan ${p.period_month}/${p.period_year}`
+        })
       }
     }
 
@@ -945,8 +979,9 @@ export default function PenggajianBulananPage() {
                     <td colSpan={2} className="px-4 py-1.5 text-xs font-bold text-red-600 uppercase tracking-wide">Potongan</td>
                   </tr>
                   {[
-                    ['Potongan Keterlambatan', selectedPayroll.late_deduction],
-                    ['Potongan Kasbon',        selectedPayroll.kasbon_deduction],
+                    ['Potongan Keterlambatan',  selectedPayroll.late_deduction],
+                    ['Potongan Kasbon',         selectedPayroll.kasbon_deduction],
+                    ['Tunjangan Loyalitas',     (selectedPayroll as any).loyalitas_deduction ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>

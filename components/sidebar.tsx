@@ -34,6 +34,7 @@ const navItems = [
       { name: 'Tarif Borongan', href: '/penggajian/borongan/tarif' },
       { name: 'Komponen Gaji', href: '/penggajian/komponen' },
       { name: 'Bonus Kinerja', href: '/penggajian/bonus' },
+      { name: 'Tunjangan Loyalitas', href: '/penggajian/loyalitas' },
     ]
   },
   { 
