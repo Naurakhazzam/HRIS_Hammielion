@@ -18,6 +18,13 @@ const STATUS_COLOR: { [k: string]: string } = {
   present:'bg-green-100 text-green-800', absent:'bg-red-100 text-red-800',
   sick:'bg-blue-100 text-blue-800', permission:'bg-yellow-100 text-yellow-800', leave:'bg-slate-100 text-slate-600'
 }
+// Baris dengan notes "Belum Masuk (Training)" ditampilkan khusus
+function getStatusDisplay(att: { status: string; notes: string | null }) {
+  if (att.status === 'absent' && att.notes === 'Belum Masuk (Training)') {
+    return { label: 'Belum Masuk (Training)', color: 'bg-purple-100 text-purple-700' }
+  }
+  return { label: STATUS_LABEL[att.status] ?? att.status, color: STATUS_COLOR[att.status] ?? 'bg-purple-100 text-purple-800' }
+}
 
 export default function RekapAbsensiPage() {
   const supabase = createClient()
@@ -39,7 +46,7 @@ export default function RekapAbsensiPage() {
   const [editNotes, setEditNotes] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [absenModal, setAbsenModal] = useState(false)
-  const [absenForm, setAbsenForm] = useState({ employee_id: '', date: '', status: 'absent', notes: '' })
+  const [absenForm, setAbsenForm] = useState({ employee_id: '', date: '', status: 'absent', notes: '', isTraining: false })
   const [absenSaving, setAbsenSaving] = useState(false)
   const [formBranchId, setFormBranchId] = useState('')
   const [formData, setFormData] = useState({ employee_id:'', date:new Date().toISOString().split('T')[0], check_in:'', check_out:'', status:'present', notes:'' })
@@ -102,7 +109,13 @@ export default function RekapAbsensiPage() {
     e.preventDefault()
     if (!absenForm.employee_id||!absenForm.date) { showMsg('error','Lengkapi data.'); return }
     setAbsenSaving(true)
-    const { error } = await supabase.from('attendances').upsert({ employee_id:absenForm.employee_id, date:absenForm.date, check_in:null, check_out:null, late_minutes:0, overtime_hours:0, status:absenForm.status, notes:absenForm.notes||null }, { onConflict:'employee_id,date' })
+    // "Belum Masuk (Training)" disimpan sebagai absent dengan notes khusus
+    const finalStatus = absenForm.isTraining ? 'absent' : absenForm.status
+    const finalNotes  = absenForm.isTraining ? 'Belum Masuk (Training)' : (absenForm.notes || null)
+    const { error } = await supabase.from('attendances').upsert(
+      { employee_id:absenForm.employee_id, date:absenForm.date, check_in:null, check_out:null, late_minutes:0, overtime_hours:0, status:finalStatus, notes:finalNotes },
+      { onConflict:'employee_id,date' }
+    )
     if (error) showMsg('error','Gagal: '+error.message)
     else { showMsg('success','Keterangan disimpan.'); setAbsenModal(false); fetchAttendances() }
     setAbsenSaving(false)
@@ -168,7 +181,7 @@ export default function RekapAbsensiPage() {
           <p className="text-sm text-slate-500">Pantau kehadiran harian dan hitung keterlambatan/lembur.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={()=>{setAbsenModal(true);setAbsenForm({employee_id:filterEmployee||'',date:new Date().toISOString().split('T')[0],status:'absent',notes:''})}} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">Keterangan Tidak Hadir</button>
+          <button onClick={()=>{setAbsenModal(true);setAbsenForm({employee_id:filterEmployee||'',date:new Date().toISOString().split('T')[0],status:'absent',notes:'',isTraining:false})}} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">Keterangan Tidak Hadir</button>
           <button onClick={()=>setShowForm(!showForm)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">{showForm?'Batal':'+ Input Hadir Manual'}</button>
         </div>
       </div>
@@ -300,11 +313,11 @@ export default function RekapAbsensiPage() {
                   const dateLabel = dateObj.toLocaleDateString('id-ID', { weekday:'short', day:'2-digit', month:'short' })
 
                   if (dayAtts.length === 0) {
-                    // Tanggal tanpa data — tampil sebagai baris kosong
+                    // Tanggal tanpa data — default tampil sebagai Libur
                     const emp = employees.find(e => e.id === filterEmployee)
                     const sched = emp ? getScheduleForDept(emp.department_id) : null
                     return (
-                      <tr key={dateStr} className="hover:bg-slate-50 transition opacity-50">
+                      <tr key={dateStr} className="hover:bg-slate-50 transition bg-slate-50/40">
                         <td className="px-4 py-3 text-sm font-semibold text-slate-500 whitespace-nowrap">{dateLabel}</td>
                         <td className="px-4 py-3">
                           <div className="text-sm font-medium text-slate-500">{emp?.full_name ?? '—'}</div>
@@ -312,7 +325,7 @@ export default function RekapAbsensiPage() {
                         <td className="px-4 py-3 text-center">
                           {sched ? (
                             <div>
-                              <div className="text-xs font-semibold text-blue-400">{sched.name}</div>
+                              <div className="text-xs font-semibold text-blue-300">{sched.name}</div>
                               <div className="text-xs text-slate-300">{fmtTime(sched.check_in_time)} – {fmtTime(sched.check_out_time)}</div>
                             </div>
                           ) : <span className="text-slate-200 text-xs">—</span>}
@@ -321,8 +334,22 @@ export default function RekapAbsensiPage() {
                         <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
                         <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
                         <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
-                        <td className="px-4 py-3 text-center"><span className="bg-slate-100 text-slate-400 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium">Tidak Ada Data</span></td>
-                        <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="bg-slate-100 text-slate-500 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium">Libur</span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {emp && (
+                            <button
+                              onClick={() => {
+                                setAbsenModal(true)
+                                setAbsenForm({ employee_id: emp.id, date: dateStr, status: 'leave', notes: '' })
+                              }}
+                              className="px-2.5 py-1 text-xs font-medium bg-slate-100 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-200 transition"
+                            >
+                              Edit
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     )
                   }
@@ -355,8 +382,8 @@ export default function RekapAbsensiPage() {
                           {att.overtime_hours > 0 ? <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-xs font-semibold">{att.overtime_hours} jam</span> : <span className="text-slate-300 text-xs">-</span>}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLOR[att.status]??'bg-purple-100 text-purple-800'}`}>{STATUS_LABEL[att.status]??att.status}</span>
-                          {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
+                          {(() => { const s = getStatusDisplay(att); return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.color}`}>{s.label}</span> })()}
+                          {att.notes && att.notes !== 'Belum Masuk (Training)' && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
                         </td>
                         <td className="px-4 py-3 text-center">
                           {att.status === 'present' && att.late_minutes > 0 && (
@@ -469,12 +496,24 @@ export default function RekapAbsensiPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Keterangan *</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {['absent','sick','permission','leave'].map(val=>(
-                    <button key={val} type="button" onClick={()=>setAbsenForm({...absenForm,status:val})}
-                      className={'py-2.5 text-sm font-medium rounded-lg border-2 transition '+(absenForm.status===val?(val==='absent'?'border-red-400 bg-red-50 text-red-700':val==='sick'?'border-blue-400 bg-blue-50 text-blue-700':val==='permission'?'border-yellow-400 bg-yellow-50 text-yellow-700':'border-slate-400 bg-slate-50 text-slate-700'):'border-slate-200 text-slate-500 bg-white hover:bg-slate-50')}>
-                      {val==='absent'?'Alpha':val==='sick'?'Sakit':val==='permission'?'Izin':'Libur'}
+                  {[
+                    { val:'leave',      label:'Libur',      active:'border-slate-400 bg-slate-50 text-slate-700' },
+                    { val:'absent',     label:'Alpha',      active:'border-red-400 bg-red-50 text-red-700' },
+                    { val:'sick',       label:'Sakit',      active:'border-blue-400 bg-blue-50 text-blue-700' },
+                    { val:'permission', label:'Izin',       active:'border-yellow-400 bg-yellow-50 text-yellow-700' },
+                  ].map(({val,label,active})=>(
+                    <button key={val} type="button"
+                      onClick={()=>setAbsenForm({...absenForm, status:val, isTraining:false})}
+                      className={'py-2.5 text-sm font-medium rounded-lg border-2 transition '+(!absenForm.isTraining && absenForm.status===val ? active : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50')}>
+                      {label}
                     </button>
                   ))}
+                  {/* Baris penuh: Belum Masuk (Training) */}
+                  <button type="button"
+                    onClick={()=>setAbsenForm({...absenForm, status:'absent', isTraining:true})}
+                    className={'col-span-2 py-2.5 text-sm font-medium rounded-lg border-2 transition '+(absenForm.isTraining ? 'border-purple-400 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50')}>
+                    Belum Masuk <span className="text-xs font-normal">(Training)</span>
+                  </button>
                 </div>
               </div>
               <div>
