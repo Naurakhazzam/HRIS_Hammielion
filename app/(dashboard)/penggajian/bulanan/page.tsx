@@ -104,6 +104,7 @@ export default function PenggajianBulananPage() {
   const [payrolls, setPayrolls] = useState<Payroll[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
+  const [kasbonSaldoMap, setKasbonSaldoMap] = useState<Record<string, number>>({})
 
   // ── State: UI ──
   const [loading, setLoading] = useState(true)
@@ -214,6 +215,22 @@ export default function PenggajianBulananPage() {
     const initKasbon: Record<string, string> = {}
     result.forEach(p => { initKasbon[p.id] = String(p.kasbon_deduction ?? 0) })
     setKasbonEdit(initKasbon)
+
+    // Fetch saldo kasbon aktif per karyawan
+    if (result.length > 0) {
+      const empIds = result.map(p => p.employee_id)
+      const { data: kasbonData } = await supabase
+        .from('kasbon_requests')
+        .select('employee_id, amount_requested, total_deducted')
+        .in('employee_id', empIds)
+        .eq('status', 'approved')
+      const saldoMap: Record<string, number> = {}
+      ;(kasbonData || []).forEach((k: any) => {
+        const saldo = Number(k.amount_requested) - Number(k.total_deducted)
+        saldoMap[k.employee_id] = (saldoMap[k.employee_id] || 0) + Math.max(0, saldo)
+      })
+      setKasbonSaldoMap(saldoMap)
+    }
 
     setLoading(false)
   }
@@ -910,34 +927,47 @@ export default function PenggajianBulananPage() {
                         }
                       </td>
 
-                      {/* Potongan Kasbon — Part 3: inline edit saat draft, locked saat approved/paid */}
+                      {/* Potongan Kasbon — dengan info saldo */}
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {p.status === 'draft' ? (
-                          // Input inline aktif
-                          <div className="flex items-center justify-end gap-1 print-hide">
-                            <input
-                              type="number"
-                              min="0"
-                              step="1000"
-                              value={kasbonEdit[p.id] ?? '0'}
-                              onChange={e => setKasbonEdit(prev => ({ ...prev, [p.id]: e.target.value }))}
-                              onKeyDown={e => e.key === 'Enter' && handleSaveKasbon(p)}
-                              className="w-28 px-2 py-1 border border-slate-300 rounded text-xs text-right focus:ring-1 focus:ring-blue-400 outline-none"
-                            />
-                            <button
-                              onClick={() => handleSaveKasbon(p)}
-                              disabled={kasbonSaving[p.id]}
-                              title="Simpan kasbon"
-                              className="px-1.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition disabled:opacity-50"
-                            >
-                              {kasbonSaving[p.id] ? '...' : '✓'}
-                            </button>
+                          <div className="flex flex-col items-end gap-1 print-hide">
+                            {/* Info saldo aktif */}
+                            {(kasbonSaldoMap[p.employee_id] ?? 0) > 0 && (
+                              <div className="text-xs text-amber-600 font-medium">
+                                Saldo: {formatRupiah(kasbonSaldoMap[p.employee_id])}
+                              </div>
+                            )}
+                            {/* Input potongan */}
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value={kasbonEdit[p.id] ?? '0'}
+                                onChange={e => setKasbonEdit(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                onKeyDown={e => e.key === 'Enter' && handleSaveKasbon(p)}
+                                className="w-28 px-2 py-1 border border-slate-300 rounded text-xs text-right focus:ring-1 focus:ring-blue-400 outline-none"
+                              />
+                              <button
+                                onClick={() => handleSaveKasbon(p)}
+                                disabled={kasbonSaving[p.id]}
+                                title="Simpan kasbon"
+                                className="px-1.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition disabled:opacity-50"
+                              >
+                                {kasbonSaving[p.id] ? '...' : '✓'}
+                              </button>
+                            </div>
                           </div>
                         ) : (
-                          // Terkunci saat pending_approval / approved / paid
-                          Number(p.kasbon_deduction) > 0
-                            ? <span className="text-red-500 font-medium">-{formatRupiah(p.kasbon_deduction)}</span>
-                            : <span className="text-slate-300">—</span>
+                          <div className="flex flex-col items-end gap-0.5">
+                            {Number(p.kasbon_deduction) > 0
+                              ? <span className="text-red-500 font-medium">-{formatRupiah(p.kasbon_deduction)}</span>
+                              : <span className="text-slate-300">—</span>
+                            }
+                            {(kasbonSaldoMap[p.employee_id] ?? 0) > 0 && p.status !== 'paid' && (
+                              <span className="text-xs text-amber-500">Sisa: {formatRupiah(kasbonSaldoMap[p.employee_id])}</span>
+                            )}
+                          </div>
                         )}
                       </td>
 
@@ -1166,9 +1196,24 @@ export default function PenggajianBulananPage() {
                       {Number(selectedPayroll.late_deduction) > 0 ? `-${formatRupiah(Number(selectedPayroll.late_deduction))}` : <span className="text-slate-300">—</span>}
                     </td>
                   </tr>
+                  {/* Kasbon dengan info saldo */}
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 text-slate-700">
+                      <div>Potongan Kasbon</div>
+                      {(kasbonSaldoMap[selectedPayroll.employee_id] ?? 0) > 0 && (
+                        <div className="text-xs text-amber-600 mt-0.5">
+                          └ Saldo kasbon aktif: {formatRupiah(kasbonSaldoMap[selectedPayroll.employee_id])}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">
+                      {Number(selectedPayroll.kasbon_deduction) > 0
+                        ? `-${formatRupiah(Number(selectedPayroll.kasbon_deduction))}`
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
                   {/* Potongan lainnya */}
                   {[
-                    ['Potongan Kasbon',         selectedPayroll.kasbon_deduction],
                     ['Tunjangan Loyalitas',     (selectedPayroll as any).loyalitas_deduction ?? 0],
                     ['Kehilangan Barang',       (selectedPayroll as any).inventory_loss_deduction ?? 0],
                     ['Kerugian Kasir',          (selectedPayroll as any).cashier_loss_deduction ?? 0],
