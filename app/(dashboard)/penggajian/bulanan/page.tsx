@@ -477,7 +477,11 @@ export default function PenggajianBulananPage() {
     const allPeriodDates: string[] = []
     const cur = new Date(firstDay + 'T00:00:00')
     const endD = new Date(lastDay + 'T00:00:00')
-    while (cur <= endD) { allPeriodDates.push(cur.toISOString().split('T')[0]); cur.setDate(cur.getDate()+1) }
+    const pad = (n: number) => String(n).padStart(2, '0')
+    while (cur <= endD) {
+      allPeriodDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`)
+      cur.setDate(cur.getDate()+1)
+    }
     const emptyDays   = allPeriodDates.filter(d => !recordedDates.has(d)).length
     const autoIzin    = Math.max(emptyDays - 4, 0)  // kosong >4 jadi izin
 
