@@ -21,6 +21,8 @@ type Payroll = {
   kasbon_deduction: number
   loyalitas_deduction: number
   conditional_bonus: number
+  inventory_loss_deduction: number
+  cashier_loss_deduction: number
   gross_total: number
   net_total: number
   status: 'draft' | 'pending_approval' | 'approved' | 'paid'
@@ -29,6 +31,7 @@ type Payroll = {
   employee: {
     full_name: string
     employee_type: string
+    branch_id: string
     branches: { name: string } | null
     positions: { name: string } | null
   } | null
@@ -124,6 +127,18 @@ export default function PenggajianBulananPage() {
   const [lateRate, setLateRate] = useState(0)
   const [loadingLate, setLoadingLate] = useState(false)
 
+  // ── State: detail kehilangan barang di slip ──
+  type LossDetail = {
+    totalLoss: number
+    companyPct: number
+    employeeSharePct: number
+    unassignedPct: number
+    companyTotalCover: number
+    employeeDeduction: number
+  }
+  const [lossDetail, setLossDetail] = useState<LossDetail | null>(null)
+  const [loadingLoss, setLoadingLoss] = useState(false)
+
   // ── State: modal bonus kondisional ──
   const [bonusModal, setBonusModal] = useState<Payroll | null>(null)
   const [bonusCriteria, setBonusCriteria] = useState<BonusCriteria[]>([])
@@ -173,7 +188,9 @@ export default function PenggajianBulananPage() {
         id, employee_id, period_month, period_year,
         base_salary, position_allowance, meal_allowance,
         overtime_total, kpi_bonus, late_deduction,
-        kasbon_deduction, gross_total, net_total,
+        kasbon_deduction, loyalitas_deduction, conditional_bonus,
+        inventory_loss_deduction, cashier_loss_deduction,
+        gross_total, net_total,
         status, approved_by, created_at,
         employee:employees!payrolls_employee_id_fkey(
           full_name, employee_type, branch_id,
@@ -591,6 +608,69 @@ export default function PenggajianBulananPage() {
     setLoadingLate(false)
   }
 
+  // ─── Fetch Detail Kehilangan Barang ────────────────────────────────────────
+  async function fetchLossDetail(p: Payroll) {
+    setLoadingLoss(true)
+    setLossDetail(null)
+
+    const branchId = p.employee?.branch_id
+    if (!branchId) { setLoadingLoss(false); return }
+
+    const [lossRes, configRes, shareRes] = await Promise.all([
+      // Total kehilangan bulan ini di cabang karyawan
+      supabase.from('loss_monthly_inputs')
+        .select('total_loss_amount')
+        .eq('branch_id', branchId)
+        .eq('period_month', p.period_month)
+        .eq('period_year', p.period_year)
+        .single(),
+      // % kantor terbaru untuk cabang ini
+      supabase.from('branch_loss_configs')
+        .select('company_coverage_percent')
+        .eq('branch_id', branchId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single(),
+      // % tanggung jawab karyawan ini
+      supabase.from('loss_employee_shares')
+        .select('share_percent')
+        .eq('employee_id', p.employee_id)
+        .eq('branch_id', branchId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single(),
+    ])
+
+    if (!lossRes.data) { setLoadingLoss(false); return }
+
+    const totalLoss = Number(lossRes.data.total_loss_amount)
+    const companyPct = Number(configRes.data?.company_coverage_percent ?? 0)
+    const employeeSharePct = Number(shareRes.data?.share_percent ?? 0)
+
+    // Hitung total % yang sudah di-assign ke karyawan di cabang ini
+    const { data: allShares } = await supabase
+      .from('loss_employee_shares')
+      .select('employee_id, share_percent, created_at')
+      .eq('branch_id', branchId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+
+    // Ambil share terbaru per employee
+    const latestMap: Record<string, number> = {}
+    ;(allShares || []).forEach((s: any) => {
+      if (latestMap[s.employee_id] === undefined) latestMap[s.employee_id] = Number(s.share_percent)
+    })
+    const totalAssigned = Object.values(latestMap).reduce((a, b) => a + b, 0)
+    const unassignedPct = Math.max(0, 100 - companyPct - totalAssigned)
+    const companyTotalCover = totalLoss * ((companyPct + unassignedPct) / 100)
+    const employeeTotalShare = totalLoss * (totalAssigned / 100)
+    const employeeDeduction = employeeTotalShare * (employeeSharePct / totalAssigned || 0)
+
+    setLossDetail({ totalLoss, companyPct, employeeSharePct, unassignedPct, companyTotalCover, employeeDeduction: Math.round(employeeDeduction) })
+    setLoadingLoss(false)
+  }
+
   // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
 
   async function openBonusModal(p: Payroll) {
@@ -649,7 +729,7 @@ export default function PenggajianBulananPage() {
     // Update payroll: conditional_bonus + recalc gross & net
     const p = bonusModal
     const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + totalBonus
-    const newNet = newGross - Number(p.late_deduction) - Number(p.loyalitas_deduction ?? 0) - Number(p.kasbon_deduction)
+    const newNet = newGross - Number(p.late_deduction) - Number(p.kasbon_deduction) - Number(p.loyalitas_deduction ?? 0) - Number(p.inventory_loss_deduction ?? 0) - Number(p.cashier_loss_deduction ?? 0)
 
     const { error: updateErr } = await supabase
       .from('payrolls')
@@ -1000,7 +1080,7 @@ export default function PenggajianBulananPage() {
                       <td className="px-4 py-3 text-center whitespace-nowrap print-hide">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p) }}
+                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p); fetchLossDetail(p) }}
                             className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 hover:border-slate-400 transition"
                           >
                             Lihat
@@ -1214,9 +1294,8 @@ export default function PenggajianBulananPage() {
                   </tr>
                   {/* Potongan lainnya */}
                   {[
-                    ['Tunjangan Loyalitas',     (selectedPayroll as any).loyalitas_deduction ?? 0],
-                    ['Kehilangan Barang',       (selectedPayroll as any).inventory_loss_deduction ?? 0],
-                    ['Kerugian Kasir',          (selectedPayroll as any).cashier_loss_deduction ?? 0],
+                    ['Tunjangan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
+                    ['Kerugian Kasir',     selectedPayroll.cashier_loss_deduction ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>
@@ -1225,6 +1304,32 @@ export default function PenggajianBulananPage() {
                       </td>
                     </tr>
                   ))}
+                  {/* Kehilangan Barang dengan detail */}
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 text-slate-700">
+                      <div>Kehilangan Barang</div>
+                      {loadingLoss && <div className="text-xs text-slate-400 mt-0.5">Memuat detail...</div>}
+                      {!loadingLoss && lossDetail && lossDetail.totalLoss > 0 && (
+                        <div className="mt-1 space-y-0.5 text-xs text-slate-400">
+                          <div>└ Total kehilangan cabang : <span className="text-slate-600">{formatRupiah(lossDetail.totalLoss)}</span></div>
+                          <div>
+                            └ Kantor menanggung ({lossDetail.companyPct + lossDetail.unassignedPct}%)
+                            {lossDetail.unassignedPct > 0 && <span className="text-slate-400"> (termasuk sisa {lossDetail.unassignedPct}% tak ter-assign)</span>}
+                            <span className="ml-1">: <span className="text-blue-500">{formatRupiah(lossDetail.companyTotalCover)}</span></span>
+                          </div>
+                          <div>└ Tanggungan Anda ({lossDetail.employeeSharePct}%) : <span className="text-red-400">{formatRupiah(lossDetail.employeeDeduction)}</span></div>
+                        </div>
+                      )}
+                      {!loadingLoss && !lossDetail && Number(selectedPayroll.inventory_loss_deduction) > 0 && (
+                        <div className="text-xs text-slate-400 mt-0.5">└ Tidak ada data kehilangan bulan ini</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">
+                      {Number(selectedPayroll.inventory_loss_deduction) > 0
+                        ? `-${formatRupiah(Number(selectedPayroll.inventory_loss_deduction))}`
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
 
                   {/* Total Bruto */}
                   <tr className="bg-slate-50 border-t border-slate-200">

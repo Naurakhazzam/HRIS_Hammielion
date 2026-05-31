@@ -57,6 +57,13 @@ export default function PortalSlipGajiPage() {
   const [lateRate, setLateRate] = useState(0)
   const [loadingLate, setLoadingLate] = useState(false)
 
+  type LossDetail = {
+    totalLoss: number; companyPct: number; employeeSharePct: number
+    unassignedPct: number; companyTotalCover: number; employeeDeduction: number
+  }
+  const [lossDetail, setLossDetail] = useState<LossDetail | null>(null)
+  const [loadingLoss, setLoadingLoss] = useState(false)
+
   useEffect(() => { init() }, [])
   useEffect(() => { if (myEmployeeId) fetchPayrolls() }, [myEmployeeId, filterYear])
 
@@ -112,6 +119,38 @@ export default function PortalSlipGajiPage() {
       deduction: Number(a.late_minutes) * rate
     })))
     setLoadingLate(false)
+  }
+
+  async function fetchLossDetail(p: Payroll) {
+    setLoadingLoss(true)
+    setLossDetail(null)
+    // Ambil branch_id karyawan
+    const { data: empData } = await supabase.from('employees').select('branch_id').eq('id', myEmployeeId).single()
+    const branchId = empData?.branch_id
+    if (!branchId) { setLoadingLoss(false); return }
+
+    const [lossRes, configRes, shareRes] = await Promise.all([
+      supabase.from('loss_monthly_inputs').select('total_loss_amount').eq('branch_id', branchId).eq('period_month', p.period_month).eq('period_year', p.period_year).single(),
+      supabase.from('branch_loss_configs').select('company_coverage_percent').eq('branch_id', branchId).order('created_at', { ascending: false }).limit(1).single(),
+      supabase.from('loss_employee_shares').select('share_percent').eq('employee_id', myEmployeeId).eq('branch_id', branchId).eq('is_active', true).order('created_at', { ascending: false }).limit(1).single(),
+    ])
+    if (!lossRes.data) { setLoadingLoss(false); return }
+
+    const totalLoss = Number(lossRes.data.total_loss_amount)
+    const companyPct = Number(configRes.data?.company_coverage_percent ?? 0)
+    const employeeSharePct = Number(shareRes.data?.share_percent ?? 0)
+
+    const { data: allShares } = await supabase.from('loss_employee_shares').select('employee_id, share_percent, created_at').eq('branch_id', branchId).eq('is_active', true).order('created_at', { ascending: false })
+    const latestMap: Record<string, number> = {}
+    ;(allShares || []).forEach((s: any) => { if (latestMap[s.employee_id] === undefined) latestMap[s.employee_id] = Number(s.share_percent) })
+    const totalAssigned = Object.values(latestMap).reduce((a, b) => a + b, 0)
+    const unassignedPct = Math.max(0, 100 - companyPct - totalAssigned)
+    const companyTotalCover = totalLoss * ((companyPct + unassignedPct) / 100)
+    const employeeTotalShare = totalLoss * (totalAssigned / 100)
+    const employeeDeduction = totalAssigned > 0 ? employeeTotalShare * (employeeSharePct / totalAssigned) : 0
+
+    setLossDetail({ totalLoss, companyPct, employeeSharePct, unassignedPct, companyTotalCover, employeeDeduction: Math.round(employeeDeduction) })
+    setLoadingLoss(false)
   }
 
   async function fetchPayrolls() {
@@ -170,7 +209,7 @@ export default function PortalSlipGajiPage() {
             const cfg = STATUS_CONFIG[p.status] ?? STATUS_CONFIG.draft
             return (
               <div key={p.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 hover:shadow-md transition cursor-pointer"
-                onClick={() => { setSelectedPayroll(p); fetchLateDetails(p) }}>
+                onClick={() => { setSelectedPayroll(p); fetchLateDetails(p); fetchLossDetail(p) }}>
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-bold text-slate-800">{MONTHS[p.period_month - 1]} {p.period_year}</h3>
@@ -297,7 +336,6 @@ export default function PortalSlipGajiPage() {
                     {[
                       ['Kasbon',              selectedPayroll.kasbon_deduction],
                       ['Tunjangan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
-                      ['Kehilangan Barang',   selectedPayroll.inventory_loss_deduction ?? 0],
                       ['Kerugian Kasir',      selectedPayroll.cashier_loss_deduction ?? 0],
                     ].map(([label, val]) => (
                       <tr key={String(label)}>
@@ -307,6 +345,28 @@ export default function PortalSlipGajiPage() {
                         </td>
                       </tr>
                     ))}
+                    {/* Kehilangan Barang dengan detail */}
+                    <tr>
+                      <td className="px-4 py-2.5 text-slate-700">
+                        <div>Kehilangan Barang</div>
+                        {loadingLoss && <div className="text-xs text-slate-400 mt-0.5">Memuat detail...</div>}
+                        {!loadingLoss && lossDetail && lossDetail.totalLoss > 0 && (
+                          <div className="mt-1 space-y-0.5 text-xs text-slate-400">
+                            <div>└ Total kehilangan cabang : <span className="text-slate-600">{fmtRp(lossDetail.totalLoss)}</span></div>
+                            <div>└ Kantor menanggung ({(lossDetail.companyPct + lossDetail.unassignedPct).toFixed(0)}%) : <span className="text-blue-500">{fmtRp(lossDetail.companyTotalCover)}</span></div>
+                            <div>└ Tanggungan Anda ({lossDetail.employeeSharePct}%) : <span className="text-red-400">{fmtRp(lossDetail.employeeDeduction)}</span></div>
+                          </div>
+                        )}
+                        {!loadingLoss && !lossDetail && Number(selectedPayroll.inventory_loss_deduction) > 0 && (
+                          <div className="text-xs text-slate-400 mt-0.5">└ Detail tidak tersedia</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">
+                        {Number(selectedPayroll.inventory_loss_deduction) > 0
+                          ? `-${fmtRp(Number(selectedPayroll.inventory_loss_deduction))}`
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                    </tr>
                     <tr className="bg-slate-50 border-t border-slate-200">
                       <td className="px-4 py-2.5 text-sm font-semibold text-slate-700">Total Kotor</td>
                       <td className="px-4 py-2.5 text-right font-semibold text-slate-800">{fmtRp(selectedPayroll.gross_total)}</td>
