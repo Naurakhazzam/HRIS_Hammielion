@@ -132,13 +132,32 @@ export default function RankingPage() {
       .gte('date', startDate)
       .lte('date', todayStr)
 
-    // Hitung metrik per karyawan
+    // Generate semua tanggal dalam periode siklus (pakai format lokal, bukan toISOString)
+    const allPeriodDates: string[] = []
+    const cur = new Date(startDate + 'T12:00:00')
+    const endD = new Date(todayStr + 'T12:00:00')
+    while (cur <= endD) {
+      allPeriodDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`)
+      cur.setDate(cur.getDate() + 1)
+    }
+
+    // Hitung metrik per karyawan — pakai logika yang sama dengan rekap absensi
     const raw: Omit<RankRow, 'score' | 'rank'>[] = (emps as any[]).map(emp => {
       const empAtts = (atts || []).filter((a: any) => a.employee_id === emp.id)
+      const recordedDates = new Set(empAtts.map((a: any) => a.date))
+
+      // Hitung jumlah bulan kalender dalam periode siklus → tiap bulan dapat 4 hari libur gratis
+      const distinctMonths = new Set(allPeriodDates.map(d => d.substring(0, 7))).size
+      const freeLiburTotal = distinctMonths * 4
+
+      // Hari kosong → ≤ freeLiburTotal = libur gratis, sisanya = izin
+      const emptyDays = allPeriodDates.filter(d => !recordedDates.has(d)).length
+      const autoIzin  = Math.max(emptyDays - freeLiburTotal, 0)
+
       return {
         employee: emp,
         late_minutes:   empAtts.reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0),
-        izin_days:      empAtts.filter((a: any) => a.status === 'permission').length,
+        izin_days:      empAtts.filter((a: any) => a.status === 'permission').length + autoIzin,
         sakit_days:     empAtts.filter((a: any) => a.status === 'sick').length,
         alpha_days:     empAtts.filter((a: any) => a.status === 'absent').length,
         overtime_hours: empAtts.reduce((s: number, a: any) => s + Number(a.overtime_hours ?? 0), 0),
