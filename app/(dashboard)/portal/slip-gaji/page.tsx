@@ -144,12 +144,15 @@ export default function PortalSlipGajiPage() {
     const latestMap: Record<string, number> = {}
     ;(allShares || []).forEach((s: any) => { if (latestMap[s.employee_id] === undefined) latestMap[s.employee_id] = Number(s.share_percent) })
     const totalAssigned = Object.values(latestMap).reduce((a, b) => a + b, 0)
-    const unassignedPct = Math.max(0, 100 - companyPct - totalAssigned)
-    const companyTotalCover = totalLoss * ((companyPct + unassignedPct) / 100)
-    const employeeTotalShare = totalLoss * (totalAssigned / 100)
-    const employeeDeduction = totalAssigned > 0 ? employeeTotalShare * (employeeSharePct / totalAssigned) : 0
+    // Hard cap: total % kantor + % karyawan tidak boleh > 100
+    const effectiveCompanyPct    = Math.min(companyPct, 100)
+    const effectiveTotalAssigned = Math.min(totalAssigned, Math.max(0, 100 - effectiveCompanyPct))
+    const unassignedPct       = Math.max(0, 100 - effectiveCompanyPct - effectiveTotalAssigned)
+    const companyTotalCover   = totalLoss * ((effectiveCompanyPct + unassignedPct) / 100)
+    const employeeTotalShare  = totalLoss * (effectiveTotalAssigned / 100)
+    const employeeDeduction   = effectiveTotalAssigned > 0 ? employeeTotalShare * (employeeSharePct / effectiveTotalAssigned) : 0
 
-    setLossDetail({ totalLoss, companyPct, employeeSharePct, unassignedPct, companyTotalCover, employeeDeduction: Math.round(employeeDeduction) })
+    setLossDetail({ totalLoss, companyPct: effectiveCompanyPct, employeeSharePct, unassignedPct, companyTotalCover, employeeDeduction: Math.round(employeeDeduction) })
     setLoadingLoss(false)
   }
 

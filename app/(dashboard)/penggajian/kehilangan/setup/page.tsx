@@ -70,6 +70,10 @@ export default function SetupKehilanganPage() {
     if (!selectedBranch) return
     const pct = parseFloat(kantorForm.percent)
     if (isNaN(pct) || pct < 0 || pct > 100) { showMsg('error', 'Persentase harus 0–100.'); return }
+    if (pct + totalSharePercent > 100) {
+      showMsg('error', `% Kantor (${pct}%) + total % karyawan (${totalSharePercent.toFixed(1)}%) = ${(pct + totalSharePercent).toFixed(1)}% — melebihi 100%. Kurangi % karyawan terlebih dahulu.`)
+      return
+    }
     setKantorSubmitting(true)
     const { error } = await supabase.from('branch_loss_configs').insert({ branch_id: selectedBranch, company_coverage_percent: pct, effective_date: kantorForm.effective_date, notes: kantorForm.notes || null })
     if (error) showMsg('error', 'Gagal: ' + error.message)
@@ -82,14 +86,22 @@ export default function SetupKehilanganPage() {
     setShareSubmitting(true)
     const today = new Date().toISOString().split('T')[0]
     const inserts: any[] = []
+    let newTotal = 0
     for (const emp of branchEmployees) {
       const f = shareForm[emp.id]
       if (!f?.percent) continue
       const pct = parseFloat(f.percent)
       if (isNaN(pct) || pct < 0) continue
+      newTotal += pct
       inserts.push({ employee_id: emp.id, branch_id: selectedBranch, share_percent: pct, effective_date: today, notes: f.notes || null, is_active: true })
     }
     if (inserts.length === 0) { showMsg('error', 'Tidak ada persentase yang diisi.'); setShareSubmitting(false); return }
+    const companyPct = Number(currentKantorConfig?.company_coverage_percent ?? 0)
+    if (companyPct + newTotal > 100) {
+      showMsg('error', `% Kantor (${companyPct}%) + total % karyawan baru (${newTotal.toFixed(1)}%) = ${(companyPct + newTotal).toFixed(1)}% — melebihi 100%. Sesuaikan persentasenya.`)
+      setShareSubmitting(false)
+      return
+    }
     const { error } = await supabase.from('loss_employee_shares').insert(inserts)
     if (error) showMsg('error', 'Gagal: ' + error.message)
     else { showMsg('success', `${inserts.length} persentase karyawan berhasil disimpan.`); setShareForm({}); fetchAll() }

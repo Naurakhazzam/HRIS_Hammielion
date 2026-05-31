@@ -59,6 +59,26 @@ type CurrentUser = {
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
+/** Satu fungsi terpusat untuk hitung gaji bersih.
+ *  Semua tempat yang update net_total harus pakai ini. */
+function calcNet(p: {
+  gross_total: number | string
+  late_deduction: number | string
+  kasbon_deduction: number | string
+  loyalitas_deduction?: number | string | null
+  inventory_loss_deduction?: number | string | null
+  cashier_loss_deduction?: number | string | null
+}): number {
+  return (
+    Number(p.gross_total)
+    - Number(p.late_deduction)
+    - Number(p.kasbon_deduction)
+    - Number(p.loyalitas_deduction ?? 0)
+    - Number(p.inventory_loss_deduction ?? 0)
+    - Number(p.cashier_loss_deduction ?? 0)
+  )
+}
+
 const MONTHS = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
@@ -395,7 +415,7 @@ export default function PenggajianBulananPage() {
         const kpiBonus     = kpiMap[emp.id] ?? 0
         const loyalitasDed = Number((emp as any).loyalitas_per_month ?? 0)
         const gross        = base + pos + meal + otTotal + kpiBonus
-        const net          = gross - latDed - loyalitasDed
+        const net          = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: 0, loyalitas_deduction: loyalitasDed, inventory_loss_deduction: 0, cashier_loss_deduction: 0 })
 
         inserts.push({
           employee_id:          emp.id,
@@ -452,8 +472,8 @@ export default function PenggajianBulananPage() {
     }
     setKasbonSaving(prev => ({ ...prev, [p.id]: true }))
 
-    // Recalculate net_total
-    const newNet = Number(p.gross_total) - Number(p.late_deduction) - newKasbon
+    // Recalculate net_total — pakai calcNet agar semua potongan ikut terhitung
+    const newNet = calcNet({ ...p, kasbon_deduction: newKasbon })
 
     const { error } = await supabase
       .from('payrolls')
@@ -662,12 +682,15 @@ export default function PenggajianBulananPage() {
       if (latestMap[s.employee_id] === undefined) latestMap[s.employee_id] = Number(s.share_percent)
     })
     const totalAssigned = Object.values(latestMap).reduce((a, b) => a + b, 0)
-    const unassignedPct = Math.max(0, 100 - companyPct - totalAssigned)
-    const companyTotalCover = totalLoss * ((companyPct + unassignedPct) / 100)
-    const employeeTotalShare = totalLoss * (totalAssigned / 100)
-    const employeeDeduction = employeeTotalShare * (employeeSharePct / totalAssigned || 0)
+    // Hard cap: total % kantor + % karyawan tidak boleh > 100
+    const effectiveCompanyPct  = Math.min(companyPct, 100)
+    const effectiveTotalAssigned = Math.min(totalAssigned, Math.max(0, 100 - effectiveCompanyPct))
+    const unassignedPct = Math.max(0, 100 - effectiveCompanyPct - effectiveTotalAssigned)
+    const companyTotalCover = totalLoss * ((effectiveCompanyPct + unassignedPct) / 100)
+    const employeeTotalShare = totalLoss * (effectiveTotalAssigned / 100)
+    const employeeDeduction = employeeTotalShare * (employeeSharePct / (effectiveTotalAssigned || 1))
 
-    setLossDetail({ totalLoss, companyPct, employeeSharePct, unassignedPct, companyTotalCover, employeeDeduction: Math.round(employeeDeduction) })
+    setLossDetail({ totalLoss, companyPct: effectiveCompanyPct, employeeSharePct, unassignedPct, companyTotalCover, employeeDeduction: Math.round(employeeDeduction) })
     setLoadingLoss(false)
   }
 
@@ -729,7 +752,7 @@ export default function PenggajianBulananPage() {
     // Update payroll: conditional_bonus + recalc gross & net
     const p = bonusModal
     const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + totalBonus
-    const newNet = newGross - Number(p.late_deduction) - Number(p.kasbon_deduction) - Number(p.loyalitas_deduction ?? 0) - Number(p.inventory_loss_deduction ?? 0) - Number(p.cashier_loss_deduction ?? 0)
+    const newNet = calcNet({ ...p, gross_total: newGross })
 
     const { error: updateErr } = await supabase
       .from('payrolls')

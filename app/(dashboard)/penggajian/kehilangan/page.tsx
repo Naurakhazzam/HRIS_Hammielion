@@ -340,10 +340,13 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     // Kalkulasi kehilangan barang
     const totalLoss = lossData?.total_loss_amount ?? 0
     const totalKasir = (entriesData || []).reduce((s: number, e: any) => s + Number(e.amount), 0)
-    const companyCoverLoss = totalLoss * (companyPct / 100)
-    const employeeTotalLoss = totalLoss - companyCoverLoss
     const totalAssigned = Object.values(latestShares).reduce((s: number, sh: any) => s + Number(sh.share_percent), 0)
-    const unassignedPct = Math.max(0, 100 - totalAssigned)
+    // Hard cap: total % kantor + % karyawan tidak boleh > 100
+    const effectiveCompanyPct = Math.min(companyPct, 100)
+    const effectiveTotalAssigned = Math.min(totalAssigned, Math.max(0, 100 - effectiveCompanyPct))
+    const companyCoverLoss = totalLoss * (effectiveCompanyPct / 100)
+    const employeeTotalLoss = totalLoss - companyCoverLoss
+    const unassignedPct = Math.max(0, 100 - effectiveCompanyPct - effectiveTotalAssigned)
     const companyExtraCover = employeeTotalLoss * (unassignedPct / 100)
     const actualEmployeeLoss = employeeTotalLoss - companyExtraCover
 
