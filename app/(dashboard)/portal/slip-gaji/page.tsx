@@ -338,7 +338,7 @@ export default function PortalSlipGajiPage() {
                     </tr>
                     {[
                       ['Kasbon',              selectedPayroll.kasbon_deduction],
-                      ['Tunjangan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
+                      ['Tabungan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
                       ['Kerugian Kasir',      selectedPayroll.cashier_loss_deduction ?? 0],
                     ].map(([label, val]) => (
                       <tr key={String(label)}>

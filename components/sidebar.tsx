@@ -28,7 +28,7 @@ const adminNavItems = [
       { name: 'Gaji Staff', href: '/penggajian/bulanan' },
       { name: 'Gaji Driver', href: '/penggajian/driver' },
       { name: 'Borongan (Rekap)', href: '/penggajian/borongan' },
-      { name: 'Tunjangan Loyalitas', href: '/penggajian/loyalitas' },
+      { name: 'Tabungan Loyalitas', href: '/penggajian/loyalitas' },
       { name: 'Bonus Kinerja', href: '/penggajian/bonus' },
       { name: 'Kehilangan & Kasir', href: '/penggajian/kehilangan' },
     ]
