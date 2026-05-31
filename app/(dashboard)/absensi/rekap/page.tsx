@@ -158,8 +158,9 @@ export default function RekapAbsensiPage() {
     const end   = new Date(y,  m-1,  25)
     const dates: string[] = []
     const cur = new Date(start)
+    const pad = (n: number) => String(n).padStart(2, '0')
     while (cur <= end) {
-      dates.push(cur.toISOString().split('T')[0])
+      dates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`)
       cur.setDate(cur.getDate()+1)
     }
     return dates
