@@ -215,7 +215,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Tunj. Makan (Rp)</label>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Tunj. Tetap (Rp)</label>
               <input 
                 type="number" 
                 min="0"

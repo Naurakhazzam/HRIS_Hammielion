@@ -1257,7 +1257,7 @@ export default function PenggajianBulananPage() {
                   {[
                     ['Gaji Pokok',           selectedPayroll.base_salary],
                     ['Tunjangan Jabatan',    selectedPayroll.position_allowance],
-                    ['Tunjangan Makan',      selectedPayroll.meal_allowance],
+                    ['Tunjangan Tetap',      selectedPayroll.meal_allowance],
                     ['Upah Lembur',          selectedPayroll.overtime_total],
                     ['Bonus KPI',            selectedPayroll.kpi_bonus],
                     ['Bonus Kondisional',    (selectedPayroll as any).conditional_bonus ?? 0],
