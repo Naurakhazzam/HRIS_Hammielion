@@ -137,17 +137,8 @@ export default function RekapAbsensiPage() {
   const totalHadir  = attendances.filter(a=>a.status==='present').length
   const totalAlpha  = attendances.filter(a=>a.status==='absent').length
   const totalSakit  = attendances.filter(a=>a.status==='sick').length
-  const totalIzinDB = attendances.filter(a=>a.status==='permission').length
+  const totalIzinDB  = attendances.filter(a=>a.status==='permission').length
   const totalLiburDB = attendances.filter(a=>a.status==='leave').length
-
-  // Hitung hari kosong (auto-libur) jika filter karyawan aktif
-  const emptyDays = filterEmployee
-    ? generatePeriodDates().filter(d => !(attendanceByDate[d]?.length > 0)).length
-    : 0
-  const autoLibur = Math.min(emptyDays, 4)
-  const autoIzin  = Math.max(emptyDays - 4, 0)
-  const totalLibur = totalLiburDB + autoLibur
-  const totalIzin  = totalIzinDB + autoIzin
   const formEmps = formBranchId ? employees.filter(e=>e.branch_id===formBranchId) : employees
 
   const getPeriodLabel = () => {
@@ -181,6 +172,15 @@ export default function RekapAbsensiPage() {
     map[key].push(att)
     return map
   }, {} as Record<string, Attendance[]>)
+
+  // Hitung hari kosong (auto-libur) jika filter karyawan aktif
+  const emptyDays  = filterEmployee
+    ? generatePeriodDates().filter(d => !(attendanceByDate[d]?.length > 0)).length
+    : 0
+  const autoLibur  = Math.min(emptyDays, 4)
+  const autoIzin   = Math.max(emptyDays - 4, 0)
+  const totalLibur = totalLiburDB + autoLibur
+  const totalIzin  = totalIzinDB + autoIzin
 
   return (
     <div>
