@@ -368,13 +368,14 @@ export default function PenggajianBulananPage() {
 
   async function buildSlipPreview(empId: string, absentDays: number, kasbonDed: number) {
     setBuildingPreview(true)
+    try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
     const [scRes, attRes, kpiRes, klRes, empRes, invRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
-      supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).single(),
+      supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
       supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, branch_id, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('payrolls').select('inventory_loss_deduction, cashier_loss_deduction').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).maybeSingle(),
     ])
@@ -383,7 +384,10 @@ export default function PenggajianBulananPage() {
     const emp  = empRes.data as any
     const atts = attRes.data || []
 
-    if (!sc || !emp) { setBuildingPreview(false); return null }
+    if (scRes.error) { showMessage('error', 'Gagal ambil komponen gaji: ' + scRes.error.message); setBuildingPreview(false); return null }
+    if (empRes.error) { showMessage('error', 'Gagal ambil data karyawan: ' + empRes.error.message); setBuildingPreview(false); return null }
+    if (!sc) { showMessage('error', 'Komponen gaji belum diisi untuk karyawan ini. Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false); return null }
+    if (!emp) { showMessage('error', 'Data karyawan tidak ditemukan.'); setBuildingPreview(false); return null }
 
     const base     = Number(sc.base_salary ?? 0)
     const pos      = Number(sc.position_allowance ?? 0)
@@ -420,6 +424,11 @@ export default function PenggajianBulananPage() {
     setSlipPreview(preview)
     setBuildingPreview(false)
     return preview
+    } catch (err: any) {
+      showMessage('error', 'Terjadi kesalahan: ' + (err.message || 'Unknown error'))
+      setBuildingPreview(false)
+      return null
+    }
   }
 
   async function handleFinalizeSlip() {
