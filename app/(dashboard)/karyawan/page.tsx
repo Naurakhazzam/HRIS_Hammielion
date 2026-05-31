@@ -253,7 +253,7 @@ export default function KaryawanPage() {
   }
 
   const filteredPositionsFor = (deptId: string) => positions.filter(p => p.department_id === deptId)
-  const translateType = (t: string) => ({ permanent: 'Karyawan Tetap', driver: 'Driver', freelance: 'Freelance' }[t] || t)
+  const translateType = (t: string) => ({ permanent: 'Karyawan Tetap', driver: 'Driver', freelance: 'Freelance', training: 'Training', contract: 'Kontrak' }[t] || t)
   const translateMarital = (v: string) => MARITAL_OPTIONS.find(x => x.value === v)?.label || v
   const translateGender = (v: string) => GENDER_OPTIONS.find(x => x.value === v)?.label || v
 
@@ -308,6 +308,8 @@ export default function KaryawanPage() {
                 <option value="permanent">Karyawan Tetap</option>
                 <option value="driver">Sopir (Driver)</option>
                 <option value="freelance">Borongan / Freelance</option>
+                <option value="training">Training</option>
+                <option value="contract">Kontrak</option>
               </select>
             </FormField>
             <FormField label="Cabang" required>
