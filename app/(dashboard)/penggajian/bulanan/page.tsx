@@ -405,14 +405,12 @@ export default function PenggajianBulananPage() {
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, klRes, empRes, deductRes] = await Promise.all([
+    const [scRes, attRes, kpiRes, klRes, empRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
-      supabase.from('attendances').select('overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
+      supabase.from('attendances').select('date, status, overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
       supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
-      // Hitung potongan tidak hadir via DB function (4 hari gratis, sakit bertingkat, alpha 1.5x)
-      supabase.rpc('calculate_attendance_deduction', { p_employee_id: empId, p_period_month: filterMonth, p_period_year: filterYear }),
     ])
 
     const sc   = scRes.data?.[0]
@@ -465,24 +463,55 @@ export default function PenggajianBulananPage() {
     const loyalitas = Number((emp as any).loyalitas_per_month ?? 0)
     const saldo    = Number(klRes.data?.current_balance ?? 0)
 
-    // Potongan tidak hadir dari DB function (4 hari gratis, sakit bertingkat, alpha 1.5x)
-    const deductRow = (deductRes.data as any)?.[0] ?? null
-    const absentDed = Number(deductRow?.total_deduction ?? 0)
-    const absentDays = Number(deductRow?.non_hadir_days ?? 0)
-    const absentRatePerDay = Number(deductRow?.daily_rate ?? Math.round((base + pos + meal) / 26))
-    const absentBreakdown = deductRow ? {
-      dailyRate:      Number(deductRow.daily_rate),
-      nonHadirDays:   Number(deductRow.non_hadir_days),
-      freeDays:       Number(deductRow.free_days_used),
-      deductedDays:   Number(deductRow.deducted_days),
-      alphaDays:      Number(deductRow.alpha_days),
-      izinDays:       Number(deductRow.izin_days),
-      liburExtraDays: Number(deductRow.libur_extra_days),
-      sickDays:       Number(deductRow.sick_days),
-      sick1Free:      Number(deductRow.sick_day_1_free),
-      sick23Half:     Number(deductRow.sick_day_2_3_half),
-      sick4Full:      Number(deductRow.sick_day_4plus_full),
-    } : null
+    // ── Hitung potongan tidak hadir (frontend, rumus baku) ──────────────────
+    // Daily rate = total semua komponen ÷ 26
+    const dailyRate = Math.round((base + pos + meal) / 26)
+
+    // Pisahkan status dari data attendance
+    const recordedDates = new Set(atts.map((a: any) => a.date))
+    const izinRecs  = atts.filter((a: any) => a.status === 'permission')
+    const sickRecs  = atts.filter((a: any) => a.status === 'sick')
+    const alphaRecs = atts.filter((a: any) => a.status === 'absent')
+
+    // Hari kosong (tidak ada record) → auto-libur (≤4 gratis, sisanya izin)
+    const allPeriodDates: string[] = []
+    const cur = new Date(firstDay + 'T00:00:00')
+    const endD = new Date(lastDay + 'T00:00:00')
+    while (cur <= endD) { allPeriodDates.push(cur.toISOString().split('T')[0]); cur.setDate(cur.getDate()+1) }
+    const emptyDays   = allPeriodDates.filter(d => !recordedDates.has(d)).length
+    const autoIzin    = Math.max(emptyDays - 4, 0)  // kosong >4 jadi izin
+
+    // Izin: 1× per hari
+    const izinCount = izinRecs.length + autoIzin
+    const izinDed   = izinCount * dailyRate
+
+    // Alpha: 1.5× per hari
+    const alphaCount = alphaRecs.length
+    const alphaDed   = Math.round(alphaCount * dailyRate * 1.5)
+
+    // Sakit: hari ke-1 gratis, hari ke-2&3 = 0.5×, hari ke-4+ = 1×
+    const sickCount   = sickRecs.length
+    const sick1Free   = Math.min(sickCount, 1)
+    const sick23Half  = Math.max(0, Math.min(sickCount - 1, 2))
+    const sick4Full   = Math.max(0, sickCount - 3)
+    const sickDed     = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
+
+    const absentDed        = izinDed + alphaDed + sickDed
+    const absentDays       = izinRecs.length + alphaCount + sickCount
+    const absentRatePerDay = dailyRate
+    const absentBreakdown  = {
+      dailyRate,
+      nonHadirDays:   absentDays,
+      freeDays:       sick1Free,
+      deductedDays:   izinCount + alphaCount + sick23Half + sick4Full,
+      alphaDays:      alphaCount,
+      izinDays:       izinCount,
+      liburExtraDays: autoIzin,
+      sickDays:       sickCount,
+      sick1Free,
+      sick23Half,
+      sick4Full,
+    }
 
     const gross = base + pos + meal + otTotal + kpi
     const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
@@ -1873,14 +1902,18 @@ export default function PenggajianBulananPage() {
                       <span className="text-red-500 font-medium">-{formatRupiah(Number(v))}</span>
                     </div>
                   ))}
-                  {slipPreview.absentBreakdown && slipPreview.absentBreakdown.nonHadirDays > 0 && (
+                  {slipPreview.absentBreakdown && (slipPreview.absentBreakdown.nonHadirDays > 0 || slipPreview.absentBreakdown.liburExtraDays > 0) && (
                     <div className="px-4 py-2 border-t border-slate-100 text-xs text-slate-400 space-y-0.5">
-                      <div>└ Gaji harian: {formatRupiah(slipPreview.absentBreakdown.dailyRate)} · Total tidak hadir: {slipPreview.absentBreakdown.nonHadirDays} hari</div>
-                      <div>└ 4 hari libur gratis, {slipPreview.absentBreakdown.deductedDays} hari kena potongan</div>
-                      {slipPreview.absentBreakdown.alphaDays > 0 && <div className="text-red-400">└ Alpha: {slipPreview.absentBreakdown.alphaDays} hari × 1.5× = {formatRupiah(slipPreview.absentBreakdown.alphaDays * slipPreview.absentBreakdown.dailyRate * 1.5)}</div>}
-                      {slipPreview.absentBreakdown.izinDays > 0 && <div>└ Izin: {slipPreview.absentBreakdown.izinDays} hari × 1×</div>}
-                      {slipPreview.absentBreakdown.liburExtraDays > 0 && <div>└ Libur tambahan: {slipPreview.absentBreakdown.liburExtraDays} hari × 1×</div>}
-                      {slipPreview.absentBreakdown.sickDays > 0 && <div>└ Sakit: {slipPreview.absentBreakdown.sick1Free}h gratis · {slipPreview.absentBreakdown.sick23Half}h ½× · {slipPreview.absentBreakdown.sick4Full}h penuh</div>}
+                      <div>└ Gaji harian (total komponen ÷ 26): <span className="text-slate-600 font-medium">{formatRupiah(slipPreview.absentBreakdown.dailyRate)}</span></div>
+                      {slipPreview.absentBreakdown.izinDays > 0 && <div>└ Izin: <span className="text-orange-500">{slipPreview.absentBreakdown.izinDays} hari × 1× = {formatRupiah(slipPreview.absentBreakdown.izinDays * slipPreview.absentBreakdown.dailyRate)}</span></div>}
+                      {slipPreview.absentBreakdown.alphaDays > 0 && <div className="text-red-400">└ Alpha: {slipPreview.absentBreakdown.alphaDays} hari × 1.5× = {formatRupiah(Math.round(slipPreview.absentBreakdown.alphaDays * slipPreview.absentBreakdown.dailyRate * 1.5))}</div>}
+                      {slipPreview.absentBreakdown.sickDays > 0 && (
+                        <div>└ Sakit: {slipPreview.absentBreakdown.sickDays} hari
+                          {slipPreview.absentBreakdown.sick1Free > 0 && <span> · hari ke-1 gratis</span>}
+                          {slipPreview.absentBreakdown.sick23Half > 0 && <span> · hari ke-{1+slipPreview.absentBreakdown.sick1Free}–{1+slipPreview.absentBreakdown.sick1Free+slipPreview.absentBreakdown.sick23Half-1} = {formatRupiah(Math.round(slipPreview.absentBreakdown.sick23Half * slipPreview.absentBreakdown.dailyRate * 0.5))}</span>}
+                          {slipPreview.absentBreakdown.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(slipPreview.absentBreakdown.sick4Full * slipPreview.absentBreakdown.dailyRate)}</span>}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
