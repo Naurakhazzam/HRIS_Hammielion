@@ -342,7 +342,7 @@ export default function RekapAbsensiPage() {
                             <button
                               onClick={() => {
                                 setAbsenModal(true)
-                                setAbsenForm({ employee_id: emp.id, date: dateStr, status: 'leave', notes: '' })
+                                setAbsenForm({ employee_id: emp.id, date: dateStr, status: 'leave', notes: '', isTraining: false })
                               }}
                               className="px-2.5 py-1 text-xs font-medium bg-slate-100 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-200 transition"
                             >
