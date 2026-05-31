@@ -345,7 +345,7 @@ export default function RekapAbsensiPage() {
     : employees
 
   return (
-    <div>
+    <>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Rekap Absensi</h1>
@@ -620,7 +620,7 @@ export default function RekapAbsensiPage() {
         </div>
       </div>
     </div>
-
+    {/* Modals */}
     {/* Modal Sesuaikan Keterlambatan */}
     {editModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
@@ -736,5 +736,6 @@ export default function RekapAbsensiPage() {
         </div>
       </div>
     )}
+  </>
   )
 }
