@@ -95,23 +95,37 @@ export default function CutiIzinPage() {
     setTimeout(() => setMessage(null), 5000)
   }
 
-  async function updateStatus(id: string, newStatus: string) {
+  async function updateStatus(id: string, newStatus: 'approved' | 'rejected') {
     if (!myEmployeeId) return
 
-    const { error } = await supabase
-      .from('leave_requests')
-      .update({
-        status: newStatus,
-        approved_by: myEmployeeId,
-        approved_at: new Date().toISOString()
+    if (newStatus === 'approved') {
+      // Pakai RPC agar attendance otomatis ter-insert/update
+      const { error } = await supabase.rpc('approve_leave_request', {
+        p_leave_request_id: id,
+        p_approved_by: myEmployeeId,
       })
-      .eq('id', id)
-
-    if (error) {
-      showMessage('error', `Gagal mengubah status: ${error.message}`)
+      if (error) {
+        showMessage('error', `Gagal menyetujui: ${error.message}`)
+      } else {
+        showMessage('success', 'Pengajuan disetujui. Absensi karyawan otomatis diperbarui.')
+        fetchRequests()
+      }
     } else {
-      showMessage('success', `Pengajuan berhasil di-${newStatus}.`)
-      fetchRequests()
+      // Tolak: cukup update status, tidak perlu ubah attendance
+      const { error } = await supabase
+        .from('leave_requests')
+        .update({
+          status: 'rejected',
+          approved_by: myEmployeeId,
+          approved_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+      if (error) {
+        showMessage('error', `Gagal menolak: ${error.message}`)
+      } else {
+        showMessage('success', 'Pengajuan ditolak.')
+        fetchRequests()
+      }
     }
   }
 
@@ -215,12 +229,12 @@ export default function CutiIzinPage() {
                       <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-xs font-semibold">{req.total_days} Hari</span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${
-                        req.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        req.status === 'approved' ? 'bg-green-100 text-green-800' :
                         req.status === 'rejected' ? 'bg-red-100 text-red-800' :
                         'bg-yellow-100 text-yellow-800'
                       }`}>
-                        {req.status}
+                        {req.status === 'approved' ? 'Disetujui' : req.status === 'rejected' ? 'Ditolak' : 'Menunggu'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">

@@ -136,6 +136,30 @@ export default function RekapAbsensiPage() {
     return py+'-'+pad(pm)+'-26 s/d '+y+'-'+pad(m)+'-25'
   }
 
+  // Generate semua tanggal dalam periode (26 bulan lalu s/d 25 bulan ini)
+  const generatePeriodDates = (): string[] => {
+    if (!filterMonth) return []
+    const p=filterMonth.split('-'); const y=parseInt(p[0]); const m=parseInt(p[1])
+    const pm=m===1?12:m-1; const py=m===1?y-1:y
+    const start = new Date(py, pm-1, 26)
+    const end   = new Date(y,  m-1,  25)
+    const dates: string[] = []
+    const cur = new Date(start)
+    while (cur <= end) {
+      dates.push(cur.toISOString().split('T')[0])
+      cur.setDate(cur.getDate()+1)
+    }
+    return dates
+  }
+
+  // Buat map date → attendance untuk lookup cepat
+  const attendanceByDate = attendances.reduce((map, att) => {
+    const key = att.date
+    if (!map[key]) map[key] = []
+    map[key].push(att)
+    return map
+  }, {} as Record<string, Attendance[]>)
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
@@ -268,9 +292,85 @@ export default function RekapAbsensiPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
+              ) : filterEmployee ? (
+                // Mode per karyawan: tampilkan SEMUA tanggal dalam periode
+                generatePeriodDates().map(dateStr => {
+                  const dayAtts = attendanceByDate[dateStr] || []
+                  const dateObj  = new Date(dateStr + 'T00:00:00')
+                  const dateLabel = dateObj.toLocaleDateString('id-ID', { weekday:'short', day:'2-digit', month:'short' })
+
+                  if (dayAtts.length === 0) {
+                    // Tanggal tanpa data — tampil sebagai baris kosong
+                    const emp = employees.find(e => e.id === filterEmployee)
+                    const sched = emp ? getScheduleForDept(emp.department_id) : null
+                    return (
+                      <tr key={dateStr} className="hover:bg-slate-50 transition opacity-50">
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-500 whitespace-nowrap">{dateLabel}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm font-medium text-slate-500">{emp?.full_name ?? '—'}</div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {sched ? (
+                            <div>
+                              <div className="text-xs font-semibold text-blue-400">{sched.name}</div>
+                              <div className="text-xs text-slate-300">{fmtTime(sched.check_in_time)} – {fmtTime(sched.check_out_time)}</div>
+                            </div>
+                          ) : <span className="text-slate-200 text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
+                        <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
+                        <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
+                        <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
+                        <td className="px-4 py-3 text-center"><span className="bg-slate-100 text-slate-400 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium">Tidak Ada Data</span></td>
+                        <td className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
+                      </tr>
+                    )
+                  }
+
+                  // Tanggal dengan data — render tiap record normal
+                  return dayAtts.map(att => {
+                    const deptId = (att.employees as any)?.department_id
+                    const sched  = getScheduleForDept(deptId)
+                    return (
+                      <tr key={att.id} className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">{dateLabel}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm font-medium text-slate-800">{att.employees?.full_name}</div>
+                          <div className="text-xs text-slate-500">{att.employees?.branches?.name} · {att.employees?.departments?.name}</div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {sched ? (
+                            <div>
+                              <div className="text-xs font-semibold text-blue-700">{sched.name}</div>
+                              <div className="text-xs text-slate-400">{fmtTime(sched.check_in_time)} – {fmtTime(sched.check_out_time)}</div>
+                            </div>
+                          ) : <span className="text-slate-300 text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">{fmtTs(att.check_in)}</td>
+                        <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">{fmtTs(att.check_out)}</td>
+                        <td className="px-4 py-3 text-center">
+                          {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {att.overtime_hours > 0 ? <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-xs font-semibold">{att.overtime_hours} jam</span> : <span className="text-slate-300 text-xs">-</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLOR[att.status]??'bg-purple-100 text-purple-800'}`}>{STATUS_LABEL[att.status]??att.status}</span>
+                          {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {att.status === 'present' && att.late_minutes > 0 && (
+                            <button onClick={()=>{setEditModal(att);setEditLateMins(att.late_minutes);setEditNotes('')}} className="px-2.5 py-1 text-xs font-medium bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition">Sesuaikan</button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })
+                })
               ) : attendances.length === 0 ? (
                 <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data absensi.</td></tr>
               ) : (
+                // Mode semua karyawan: tampilkan hanya yang ada data
                 attendances.map(att => {
                   const deptId = (att.employees as any)?.department_id
                   const sched = getScheduleForDept(deptId)
