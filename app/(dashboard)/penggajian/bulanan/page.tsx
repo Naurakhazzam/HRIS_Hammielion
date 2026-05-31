@@ -335,10 +335,12 @@ export default function PenggajianBulananPage() {
 
   function getFirstLastDay(m: number, y: number) {
     // Periode 26 bulan lalu – 25 bulan ini
-    const start = new Date(y, m - 2, 26)
-    const end   = new Date(y, m - 1, 25)
-    const firstDay = start.toISOString().split('T')[0]
-    const lastDay  = end.toISOString().split('T')[0]
+    // Gunakan format manual agar tidak kena timezone offset (toISOString() convert ke UTC)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const startM = m === 1 ? 12 : m - 1
+    const startY = m === 1 ? y - 1 : y
+    const firstDay = `${startY}-${pad(startM)}-26`
+    const lastDay  = `${y}-${pad(m)}-25`
     return { firstDay, lastDay }
   }
 
