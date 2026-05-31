@@ -597,7 +597,7 @@ export default function RekapAbsensiPage() {
                         att.status === 'leave'      ? 'bg-slate-100 text-slate-600' :
                         'bg-purple-100 text-purple-800'
                       }`}>
-                        {{ present:'Hadir', absent:'Alpha', sick:'Sakit', permission:'Izin', leave:'Libur' }[att.status] ?? att.status}
+                        {({'present':'Hadir', 'absent':'Alpha', 'sick':'Sakit', 'permission':'Izin', 'leave':'Libur'} as Record<string,string>)[att.status] ?? att.status}
                       </span>
                       {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
                     </td>
