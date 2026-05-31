@@ -183,6 +183,7 @@ export default function PenggajianBulananPage() {
     absentDays: number; absentDed: number; absentRatePerDay: number
     absentBreakdown: { dailyRate: number; nonHadirDays: number; freeDays: number; deductedDays: number; alphaDays: number; izinDays: number; liburExtraDays: number; sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number } | null
     invLoss: number; cashierLoss: number
+    loyAutoRelease: number; loyBalSaldo: number; loyDurasi: number
     gross: number; net: number
   }
   const [createModal, setCreateModal]       = useState(false)
@@ -412,12 +413,13 @@ export default function PenggajianBulananPage() {
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, klRes, empRes] = await Promise.all([
+    const [scRes, attRes, kpiRes, klRes, empRes, loyBalRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status, overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
-      supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
     ])
 
     const sc   = scRes.data?.[0]
@@ -468,7 +470,20 @@ export default function PenggajianBulananPage() {
     const latDed   = latMins * latRate
     const kpi      = Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
     const loyalitas = Number((emp as any).loyalitas_per_month ?? 0)
+    const loyDurasi = Number((emp as any).loyalitas_duration_months ?? 0)
     const saldo    = Number(klRes.data?.current_balance ?? 0)
+
+    // ── Cek auto-cairkan tabungan loyalitas ──────────────────────────────────
+    const loyBal = loyBalRes.data as any
+    const loyBalSaldo = Number(loyBal?.total_withheld ?? 0)
+    let loyAutoRelease = 0  // bonus masuk ke pendapatan jika bulan pencairan
+    if (loyBal && loyDurasi > 0 && loyBal.start_month && loyBal.start_year) {
+      const monthsElapsed = (filterYear - loyBal.start_year) * 12 + (filterMonth - loyBal.start_month) + 1
+      // +1 karena bulan ini adalah bulan ke-N setelah dipotong
+      if (monthsElapsed >= loyDurasi) {
+        loyAutoRelease = loyBalSaldo + loyalitas  // saldo lama + potongan bulan ini
+      }
+    }
 
     // ── Hitung potongan tidak hadir (frontend, rumus baku) ──────────────────
     // Daily rate = total semua komponen ÷ 26
@@ -524,8 +539,8 @@ export default function PenggajianBulananPage() {
       sick4Full,
     }
 
-    const gross = base + pos + meal + otTotal + kpi
-    const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
+    const gross = base + pos + meal + otTotal + kpi + loyAutoRelease
+    const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyAutoRelease > 0 ? 0 : loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
 
     const preview: SlipPreview = {
       employeeId: empId, employeeName: emp.full_name, employeeCode: emp.employee_code,
@@ -535,6 +550,7 @@ export default function PenggajianBulananPage() {
       kasbonSaldo: saldo, kasbonDed,
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
       invLoss, cashierLoss: cashLoss,
+      loyAutoRelease, loyBalSaldo, loyDurasi,
       gross, net,
     }
     setSlipPreview(preview)
@@ -566,7 +582,9 @@ export default function PenggajianBulananPage() {
       base_salary: p.base, position_allowance: p.pos, meal_allowance: p.meal,
       overtime_total: p.otTotal, kpi_bonus: p.kpiBonus,
       late_deduction: p.latDed, kasbon_deduction: p.kasbonDed,
-      loyalitas_deduction: p.loyalitasDed, absent_days: p.absentDays, absent_deduction: p.absentDed,
+      loyalitas_deduction: p.loyAutoRelease > 0 ? 0 : p.loyalitasDed,
+      loyalitas_auto_release: p.loyAutoRelease,
+      absent_days: p.absentDays, absent_deduction: p.absentDed,
       inventory_loss_deduction: p.invLoss, cashier_loss_deduction: p.cashierLoss,
       gross_total: p.gross, net_total: p.net, status: 'draft', approved_by: null,
     })
@@ -665,36 +683,30 @@ export default function PenggajianBulananPage() {
             .eq('id', kl.id)
         }
       }
-      // Tunjangan Loyalitas — tambah ke saldo
-      const loyalitasDed = Number((p as any).loyalitas_deduction ?? 0)
-      if (loyalitasDed > 0) {
-        // Cek apakah sudah ada balance record
-        const { data: existBal } = await supabase
-          .from('loyalitas_balances')
-          .select('id, total_withheld')
-          .eq('employee_id', p.employee_id)
-          .single()
-        if (existBal) {
-          // Update total
-          await supabase.from('loyalitas_balances')
-            .update({ total_withheld: Number(existBal.total_withheld) + loyalitasDed, updated_at: new Date().toISOString() })
-            .eq('id', existBal.id)
-        } else {
-          // Insert baru
-          await supabase.from('loyalitas_balances').insert({
-            employee_id: p.employee_id,
-            total_withheld: loyalitasDed,
-            status: 'active'
-          })
+      // Tabungan Loyalitas
+      const loyalitasDed    = Number((p as any).loyalitas_deduction ?? 0)
+      const loyalitasRelease = Number((p as any).loyalitas_auto_release ?? 0)
+
+      if (loyalitasRelease > 0) {
+        // Bulan pencairan otomatis — release balance lama, buat siklus baru
+        const { data: oldBal } = await supabase.from('loyalitas_balances').select('id').eq('employee_id', p.employee_id).eq('status', 'active').maybeSingle()
+        if (oldBal) {
+          await supabase.from('loyalitas_balances').update({ status: 'released', released_at: new Date().toISOString(), notes: `Auto-cair bulan ${p.period_month}/${p.period_year}`, updated_at: new Date().toISOString() }).eq('id', oldBal.id)
         }
-        // Catat transaksi
-        await supabase.from('loyalitas_transactions').insert({
-          employee_id: p.employee_id,
-          payroll_id: p.id,
-          type: 'deduction',
-          amount: loyalitasDed,
-          notes: `Potongan bulan ${p.period_month}/${p.period_year}`
-        })
+        await supabase.from('loyalitas_transactions').insert({ employee_id: p.employee_id, payroll_id: p.id, type: 'auto_release', amount: loyalitasRelease, notes: `Pencairan otomatis bulan ${p.period_month}/${p.period_year}` })
+        // Mulai siklus baru
+        await supabase.from('loyalitas_balances').insert({ employee_id: p.employee_id, total_withheld: 0, status: 'active', start_month: p.period_month, start_year: p.period_year, cycle_number: (oldBal ? 2 : 1) })
+      } else if (loyalitasDed > 0) {
+        // Bulan normal — tambah ke saldo
+        const { data: existBal } = await supabase.from('loyalitas_balances').select('id, total_withheld, start_month, start_year').eq('employee_id', p.employee_id).eq('status', 'active').maybeSingle()
+        if (existBal) {
+          const updates: any = { total_withheld: Number(existBal.total_withheld) + loyalitasDed, updated_at: new Date().toISOString() }
+          if (!existBal.start_month) { updates.start_month = p.period_month; updates.start_year = p.period_year }
+          await supabase.from('loyalitas_balances').update(updates).eq('id', existBal.id)
+        } else {
+          await supabase.from('loyalitas_balances').insert({ employee_id: p.employee_id, total_withheld: loyalitasDed, status: 'active', start_month: p.period_month, start_year: p.period_year, cycle_number: 1 })
+        }
+        await supabase.from('loyalitas_transactions').insert({ employee_id: p.employee_id, payroll_id: p.id, type: 'deduction', amount: loyalitasDed, notes: `Tabung bulan ${p.period_month}/${p.period_year}` })
       }
     }
 
@@ -1069,7 +1081,7 @@ export default function PenggajianBulananPage() {
       <tr class="section-label ded"><td colspan="2">Potongan</td></tr>
       <tr><td>Potongan Keterlambatan${lateDetailHtml}</td><td>${lateDed>0?'-'+fmtR(lateDed):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Potongan Kasbon</td><td class="${Number(p.kasbon_deduction)>0?'ded-val':'zero'}">${Number(p.kasbon_deduction)>0?'-'+fmtR(Number(p.kasbon_deduction)):'—'}</td></tr>
-      <tr><td>Tunjangan Loyalitas</td><td class="${Number(p.loyalitas_deduction??0)>0?'ded-val':'zero'}">${Number(p.loyalitas_deduction??0)>0?'-'+fmtR(Number(p.loyalitas_deduction??0)):'—'}</td></tr>
+      <tr><td>Tabungan Loyalitas</td><td class="${Number(p.loyalitas_deduction??0)>0?'ded-val':'zero'}">${Number(p.loyalitas_deduction??0)>0?'-'+fmtR(Number(p.loyalitas_deduction??0)):'—'}</td></tr>
       <tr><td>Kerugian Kasir</td><td class="${Number(p.cashier_loss_deduction??0)>0?'ded-val':'zero'}">${Number(p.cashier_loss_deduction??0)>0?'-'+fmtR(Number(p.cashier_loss_deduction??0)):'—'}</td></tr>
       <tr><td>Kehilangan Barang${lossDetailHtml}</td><td>${invLoss>0?'-'+fmtR(invLoss):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Tidak Hadir (${p.absent_days??0} hari)</td><td class="${Number(p.absent_deduction??0)>0?'ded-val':'zero'}">${Number(p.absent_deduction??0)>0?'-'+fmtR(Number(p.absent_deduction??0)):'—'}</td></tr>
@@ -1673,7 +1685,7 @@ export default function PenggajianBulananPage() {
                   </tr>
                   {/* Potongan lainnya */}
                   {[
-                    ['Tunjangan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
+                    ['Tabungan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
                     ['Kerugian Kasir',      selectedPayroll.cashier_loss_deduction ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
@@ -1956,6 +1968,7 @@ export default function PenggajianBulananPage() {
                     ['Tunjangan Tetap', slipPreview.meal],
                     ['Upah Lembur', slipPreview.otTotal],
                     ['Bonus KPI', slipPreview.kpiBonus],
+                    ...(slipPreview.loyAutoRelease > 0 ? [[`✅ Cair Tabungan Loyalitas (${slipPreview.loyDurasi} bln)`, slipPreview.loyAutoRelease]] : []),
                   ].map(([l, v]) => Number(v) > 0 && (
                     <div key={String(l)} className="flex justify-between px-4 py-2 border-t border-slate-100">
                       <span className="text-slate-600">{l}</span>
@@ -1970,7 +1983,7 @@ export default function PenggajianBulananPage() {
                   {[
                     ['Keterlambatan', slipPreview.latDed],
                     ['Kasbon', slipPreview.kasbonDed],
-                    ['Tunjangan Loyalitas', slipPreview.loyalitasDed],
+                    ...(slipPreview.loyAutoRelease === 0 ? [[`Tabungan Loyalitas (saldo: ${formatRupiah(slipPreview.loyBalSaldo + slipPreview.loyalitasDed)})`, slipPreview.loyalitasDed]] : []),
                     ['Kehilangan Barang', slipPreview.invLoss],
                     ['Kerugian Kasir', slipPreview.cashierLoss],
                     [`Tidak Hadir (${slipPreview.absentDays} hari)`, slipPreview.absentDed],
