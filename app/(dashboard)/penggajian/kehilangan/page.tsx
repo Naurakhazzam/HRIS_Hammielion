@@ -295,12 +295,27 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
   const [preview, setPreview] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
+  const [history, setHistory] = useState<any[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
 
   useEffect(() => {
     supabase.from('branches').select('id,name').eq('is_active',true).order('name').then(({data}) => {
       if (data) { setBranches(data); if (data.length > 0) setSelectedBranch(data[0].id) }
     })
+    fetchHistory()
   }, [])
+
+  async function fetchHistory() {
+    setLoadingHistory(true)
+    const { data } = await supabase
+      .from('loss_monthly_inputs')
+      .select('*, branches(name)')
+      .order('period_year', { ascending: false })
+      .order('period_month', { ascending: false })
+      .limit(24)
+    setHistory(data || [])
+    setLoadingHistory(false)
+  }
 
   async function handlePreview() {
     if (!selectedBranch) return
@@ -315,7 +330,11 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     const companyPct = configData?.[0]?.company_coverage_percent ?? 0
 
     // 3. Ambil % karyawan aktif di cabang
-    const { data: sharesData } = await supabase.from('loss_employee_shares').select('*, employees(id, full_name, employee_code, positions(name))').eq('branch_id', selectedBranch).eq('is_active', true)
+    const { data: sharesData } = await supabase
+      .from('loss_employee_shares')
+      .select('employee_id, share_percent, created_at, is_active, employees!loss_employee_shares_employee_id_fkey(id, full_name, employee_code, positions(name))')
+      .eq('branch_id', selectedBranch)
+      .eq('is_active', true)
 
     // Ambil share terbaru per employee
     const latestShares: Record<string, any> = {}
@@ -506,6 +525,42 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
           </div>
         </>
       )}
+
+      {/* History Kehilangan Per Toko */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-6">
+        <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+          <span className="text-sm font-semibold text-slate-700">📊 Riwayat Kehilangan Barang Per Toko</span>
+          <button onClick={fetchHistory} className="text-xs text-blue-600 hover:underline">🔄 Refresh</button>
+        </div>
+        {loadingHistory ? (
+          <p className="px-5 py-4 text-sm text-slate-400">Memuat...</p>
+        ) : history.length === 0 ? (
+          <p className="px-5 py-4 text-sm text-slate-400 italic">Belum ada data kehilangan.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-white">
+                  <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Periode</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right">Total Kehilangan</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Catatan</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {history.map(h => (
+                  <tr key={h.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 font-medium text-slate-800">{(h.branches as any)?.name ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-slate-600">{MONTHS[h.period_month - 1]} {h.period_year}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-red-600">{fmtRp(h.total_loss_amount)}</td>
+                    <td className="px-4 py-2.5 text-slate-400 text-xs">{h.notes ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
