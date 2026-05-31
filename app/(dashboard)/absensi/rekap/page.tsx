@@ -82,15 +82,16 @@ export default function RekapAbsensiPage() {
       .order('date', { ascending: false })
       .order('employees(full_name)')
 
-    // Filter By Month (Y-m)
+    // Filter By Period — cut-off sistem: 26 bulan lalu s/d 25 bulan ini
+    // Contoh: filter "2026-05" → ambil data 26 Apr – 25 Mei 2026
     if (filterMonth) {
-      const startOfMonth = `${filterMonth}-01`
-      // Get last day of month
-      const [year, month] = filterMonth.split('-')
-      const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate()
-      const endOfMonth = `${filterMonth}-${lastDay}`
-      
-      query = query.gte('date', startOfMonth).lte('date', endOfMonth)
+      const [year, month] = filterMonth.split('-').map(Number)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const prevMonth = month === 1 ? 12 : month - 1
+      const prevYear  = month === 1 ? year - 1 : year
+      const firstDay  = `${prevYear}-${pad(prevMonth)}-26`
+      const lastDay   = `${year}-${pad(month)}-25`
+      query = query.gte('date', firstDay).lte('date', lastDay)
     }
 
     if (filterBranch) query = query.eq('employees.branch_id', filterBranch)
@@ -362,10 +363,18 @@ export default function RekapAbsensiPage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         {/* Filters */}
         <div className="p-4 border-b border-slate-200 bg-slate-50 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-slate-500 flex-shrink-0 w-12">Bulan:</label>
-            <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}
-              className="bg-white border border-slate-300 text-sm rounded-lg focus:ring-blue-500 outline-none block w-full p-2" />
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-slate-500 flex-shrink-0 w-12">Periode:</label>
+              <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}
+                className="bg-white border border-slate-300 text-sm rounded-lg focus:ring-blue-500 outline-none block w-full p-2" />
+            </div>
+            {filterMonth && (() => {
+              const [y, m] = filterMonth.split('-').map(Number)
+              const pad = (n: number) => String(n).padStart(2,'0')
+              const pm = m===1?12:m-1; const py = m===1?y-1:y
+              return <p className="text-xs text-slate-400 pl-14">📅 {py}-{pad(pm)}-26 s/d {y}-{pad(m)}-25</p>
+            })()}
           </div>
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium text-slate-500 flex-shrink-0 w-12">Karyawan:</label>
