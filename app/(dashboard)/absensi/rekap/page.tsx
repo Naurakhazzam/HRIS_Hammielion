@@ -322,6 +322,11 @@ export default function RekapAbsensiPage() {
     setEditSaving(false)
   }
 
+  // Label status — didefinisikan di luar JSX agar tidak konflik dengan TypeScript generic
+  const STATUS_LABEL: {[k: string]: string} = {
+    present: 'Hadir', absent: 'Alpha', sick: 'Sakit', permission: 'Izin', leave: 'Libur'
+  }
+
   // Summary kalkulasi dari data yang sedang ditampilkan
   const totalTelat   = attendances.reduce((s, a) => s + (a.late_minutes ?? 0), 0)
   const totalLembur  = attendances.reduce((s, a) => s + Number(a.overtime_hours ?? 0), 0)
@@ -597,7 +602,7 @@ export default function RekapAbsensiPage() {
                         att.status === 'leave'      ? 'bg-slate-100 text-slate-600' :
                         'bg-purple-100 text-purple-800'
                       }`}>
-                        {({'present':'Hadir', 'absent':'Alpha', 'sick':'Sakit', 'permission':'Izin', 'leave':'Libur'} as Record<string,string>)[att.status] ?? att.status}
+                        {STATUS_LABEL[att.status] ?? att.status}
                       </span>
                       {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
                     </td>
@@ -736,6 +741,6 @@ export default function RekapAbsensiPage() {
         </div>
       </div>
     )}
-  </>
+    </>
   )
 }
