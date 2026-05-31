@@ -39,6 +39,17 @@ export default function RekapAbsensiPage() {
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+
+  // Edit keterlambatan
+  const [editModal, setEditModal] = useState<Attendance | null>(null)
+  const [editLateMins, setEditLateMins] = useState(0)
+  const [editNotes, setEditNotes] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+
+  // Modal tambah keterangan tidak hadir
+  const [absenModal, setAbsenModal] = useState(false)
+  const [absenForm, setAbsenForm] = useState({ employee_id: '', date: '', status: 'absent', notes: '' })
+  const [absenSaving, setAbsenSaving] = useState(false)
   
   // Form Data
   const [formBranchId, setFormBranchId] = useState('')
@@ -268,6 +279,58 @@ export default function RekapAbsensiPage() {
     setSubmitting(false)
   }
 
+  async function handleSaveAbsen(e: React.FormEvent) {
+    e.preventDefault()
+    if (!absenForm.employee_id || !absenForm.date) { showMessage('error', 'Lengkapi data karyawan dan tanggal.'); return }
+    setAbsenSaving(true)
+    const { error } = await supabase.from('attendances').upsert({
+      employee_id: absenForm.employee_id,
+      date: absenForm.date,
+      check_in: null,
+      check_out: null,
+      late_minutes: 0,
+      overtime_hours: 0,
+      status: absenForm.status,
+      notes: absenForm.notes || null,
+    }, { onConflict: 'employee_id,date' })
+    if (error) {
+      showMessage('error', 'Gagal menyimpan: ' + error.message)
+    } else {
+      showMessage('success', 'Keterangan tidak hadir berhasil disimpan.')
+      setAbsenModal(false)
+      fetchAttendances()
+    }
+    setAbsenSaving(false)
+  }
+
+  async function handleEditLate(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editModal) return
+    if (!editNotes.trim()) { showMessage('error', 'Wajib isi alasan penyesuaian.'); return }
+    setEditSaving(true)
+    const { error } = await supabase
+      .from('attendances')
+      .update({ late_minutes: editLateMins, notes: editNotes })
+      .eq('id', editModal.id)
+    if (error) {
+      showMessage('error', 'Gagal menyimpan: ' + error.message)
+    } else {
+      showMessage('success', 'Keterlambatan berhasil disesuaikan.')
+      setEditModal(null)
+      fetchAttendances()
+    }
+    setEditSaving(false)
+  }
+
+  // Summary kalkulasi dari data yang sedang ditampilkan
+  const totalTelat   = attendances.reduce((s, a) => s + (a.late_minutes ?? 0), 0)
+  const totalLembur  = attendances.reduce((s, a) => s + Number(a.overtime_hours ?? 0), 0)
+  const totalHadir   = attendances.filter(a => a.status === 'present').length
+  const totalAlpha   = attendances.filter(a => a.status === 'absent').length
+  const totalSakit   = attendances.filter(a => a.status === 'sick').length
+  const totalIzin    = attendances.filter(a => a.status === 'permission').length
+  const totalLibur   = attendances.filter(a => a.status === 'leave').length
+
   // Format Helpers
   const formatTimeStr = (isoString: string | null) => {
     if (!isoString) return '-'
@@ -288,12 +351,20 @@ export default function RekapAbsensiPage() {
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Rekap Absensi</h1>
           <p className="text-sm text-slate-500">Pantau kehadiran harian dan hitung keterlambatan/lembur.</p>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-sm"
-        >
-          {showForm ? 'Batal Input' : '+ Input Manual'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setAbsenModal(true); setAbsenForm({ employee_id: filterEmployee || '', date: new Date().toISOString().split('T')[0], status: 'absent', notes: '' }) }}
+            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-sm"
+          >
+            📋 Keterangan Tidak Hadir
+          </button>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-sm"
+          >
+            {showForm ? 'Batal Input' : '+ Input Hadir Manual'}
+          </button>
+        </div>
       </div>
 
       {message && (
@@ -373,6 +444,53 @@ export default function RekapAbsensiPage() {
         </div>
       )}
 
+      {/* Summary Cards */}
+      {!loading && attendances.length > 0 && (
+        <div className="space-y-3 mb-6">
+          {/* Baris 1: Kehadiran */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="bg-white rounded-xl border border-green-200 shadow-sm p-3">
+              <p className="text-xs font-medium text-green-600 uppercase mb-1">✅ Hadir</p>
+              <p className="text-2xl font-bold text-green-700">{totalHadir} <span className="text-xs font-normal text-green-500">hari</span></p>
+            </div>
+            <div className="bg-red-50 rounded-xl border border-red-200 shadow-sm p-3">
+              <p className="text-xs font-medium text-red-600 uppercase mb-1">⛔ Alpha</p>
+              <p className="text-2xl font-bold text-red-700">{totalAlpha} <span className="text-xs font-normal text-red-500">hari</span></p>
+              <p className="text-xs text-red-400">→ dipotong</p>
+            </div>
+            <div className="bg-blue-50 rounded-xl border border-blue-200 shadow-sm p-3">
+              <p className="text-xs font-medium text-blue-600 uppercase mb-1">🤒 Sakit</p>
+              <p className="text-2xl font-bold text-blue-700">{totalSakit} <span className="text-xs font-normal text-blue-500">hari</span></p>
+            </div>
+            <div className="bg-yellow-50 rounded-xl border border-yellow-200 shadow-sm p-3">
+              <p className="text-xs font-medium text-yellow-600 uppercase mb-1">📝 Izin</p>
+              <p className="text-2xl font-bold text-yellow-700">{totalIzin} <span className="text-xs font-normal text-yellow-500">hari</span></p>
+            </div>
+            <div className="bg-slate-50 rounded-xl border border-slate-200 shadow-sm p-3">
+              <p className="text-xs font-medium text-slate-500 uppercase mb-1">🏖️ Libur</p>
+              <p className="text-2xl font-bold text-slate-600">{totalLibur} <span className="text-xs font-normal text-slate-400">hari</span></p>
+            </div>
+          </div>
+          {/* Baris 2: Telat & Lembur */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-orange-50 rounded-xl border border-orange-200 shadow-sm p-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-orange-600 uppercase mb-1">⏰ Total Keterlambatan</p>
+                <p className="text-xl font-bold text-orange-700">{totalTelat} menit</p>
+              </div>
+              <p className="text-sm text-orange-500">{Math.floor(totalTelat/60)}j {totalTelat%60}m</p>
+            </div>
+            <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-amber-600 uppercase mb-1">🌙 Total Lembur</p>
+                <p className="text-xl font-bold text-amber-700">{totalLembur} jam</p>
+              </div>
+              <p className="text-sm text-amber-500">{totalLembur * 60} menit</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filter & Tabel Data */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         {/* Filters */}
@@ -426,6 +544,7 @@ export default function RekapAbsensiPage() {
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Terlambat</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Lembur</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -470,13 +589,27 @@ export default function RekapAbsensiPage() {
                       ) : <span className="text-slate-400 text-xs">-</span>}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${
-                        att.status === 'present' ? 'bg-green-100 text-green-800' : 
-                        att.status === 'absent' ? 'bg-red-100 text-red-800' :
-                        'bg-yellow-100 text-yellow-800'
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        att.status === 'present'    ? 'bg-green-100 text-green-800' :
+                        att.status === 'absent'     ? 'bg-red-100 text-red-800' :
+                        att.status === 'sick'       ? 'bg-blue-100 text-blue-800' :
+                        att.status === 'permission' ? 'bg-yellow-100 text-yellow-800' :
+                        att.status === 'leave'      ? 'bg-slate-100 text-slate-600' :
+                        'bg-purple-100 text-purple-800'
                       }`}>
-                        {att.status}
+                        {{ present:'Hadir', absent:'Alpha', sick:'Sakit', permission:'Izin', leave:'Libur' }[att.status] ?? att.status}
                       </span>
+                      {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {att.status === 'present' && att.late_minutes > 0 && (
+                        <button
+                          onClick={() => { setEditModal(att); setEditLateMins(att.late_minutes); setEditNotes('') }}
+                          className="px-2.5 py-1 text-xs font-medium bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition"
+                        >
+                          Sesuaikan
+                        </button>
+                      )}
                     </td>
                   </tr>
                   )
@@ -487,5 +620,121 @@ export default function RekapAbsensiPage() {
         </div>
       </div>
     </div>
+
+    {/* Modal Sesuaikan Keterlambatan */}
+    {editModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+        onClick={e => { if (e.target === e.currentTarget) setEditModal(null) }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+          <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+            <div>
+              <h2 className="text-base font-bold text-slate-700">Sesuaikan Keterlambatan</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {editModal.employees?.full_name} — {new Date(editModal.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+              </p>
+            </div>
+            <button onClick={() => setEditModal(null)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+          </div>
+          <form onSubmit={handleEditLate} className="px-6 py-5 space-y-4">
+            <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-600">
+              <span>Tercatat masuk: </span>
+              <strong>{formatTimeStr(editModal.check_in)}</strong>
+              <span className="mx-2">·</span>
+              <span>Telat tersimpan: </span>
+              <strong className="text-red-600">{editModal.late_minutes} menit</strong>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Menit Telat Setelah Penyesuaian <span className="text-red-500">*</span>
+              </label>
+              <input type="number" min="0" required value={editLateMins}
+                onChange={e => setEditLateMins(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              <p className="text-xs text-slate-400 mt-1">Isi 0 jika ingin menghapus keterlambatan sepenuhnya.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Alasan Penyesuaian <span className="text-red-500">*</span>
+              </label>
+              <input type="text" required value={editNotes}
+                onChange={e => setEditNotes(e.target.value)}
+                placeholder="Contoh: Izin terlambat karena keperluan keluarga"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button type="button" onClick={() => setEditModal(null)}
+                className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+              <button type="submit" disabled={editSaving}
+                className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
+                {editSaving ? 'Menyimpan...' : 'Simpan Penyesuaian'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
+
+    {/* Modal Keterangan Tidak Hadir */}
+    {absenModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+        onClick={e => { if (e.target === e.currentTarget) setAbsenModal(false) }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+          <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+            <div>
+              <h2 className="text-base font-bold text-slate-700">Tambah Keterangan Tidak Hadir</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Catat alasan ketidakhadiran karyawan</p>
+            </div>
+            <button onClick={() => setAbsenModal(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+          </div>
+          <form onSubmit={handleSaveAbsen} className="px-6 py-5 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Karyawan <span className="text-red-500">*</span></label>
+              <select required value={absenForm.employee_id} onChange={e => setAbsenForm({...absenForm, employee_id: e.target.value})}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">-- Pilih Karyawan --</option>
+                {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Tanggal <span className="text-red-500">*</span></label>
+              <input type="date" required value={absenForm.date} onChange={e => setAbsenForm({...absenForm, date: e.target.value})}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Keterangan <span className="text-red-500">*</span></label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { val: 'absent',     label: '⛔ Alpha',   cls: 'border-red-300 text-red-700 bg-red-50' },
+                  { val: 'sick',       label: '🤒 Sakit',   cls: 'border-blue-300 text-blue-700 bg-blue-50' },
+                  { val: 'permission', label: '📝 Izin',    cls: 'border-yellow-300 text-yellow-700 bg-yellow-50' },
+                  { val: 'leave',      label: '🏖️ Libur',   cls: 'border-slate-300 text-slate-700 bg-slate-50' },
+                ].map(opt => (
+                  <button key={opt.val} type="button"
+                    onClick={() => setAbsenForm({...absenForm, status: opt.val})}
+                    className={`py-2.5 text-sm font-medium rounded-lg border-2 transition ${absenForm.status === opt.val ? opt.cls + ' ring-2 ring-offset-1 ring-blue-400' : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50'}`}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-red-500 mt-1.5">⛔ Alpha → dipotong dari gaji | Lainnya → tidak dipotong</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Catatan (opsional)</label>
+              <input type="text" value={absenForm.notes} onChange={e => setAbsenForm({...absenForm, notes: e.target.value})}
+                placeholder="Contoh: Sakit demam, ada surat dokter"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button type="button" onClick={() => setAbsenModal(false)}
+                className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+              <button type="submit" disabled={absenSaving || !absenForm.employee_id || !absenForm.date}
+                className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
+                {absenSaving ? 'Menyimpan...' : 'Simpan'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
   )
 }

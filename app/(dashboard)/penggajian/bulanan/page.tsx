@@ -373,13 +373,15 @@ export default function PenggajianBulananPage() {
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, klRes, empRes, invRes] = await Promise.all([
+    const [scRes, attRes, kpiRes, klRes, empRes, invRes, alphaRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
       supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, branch_id, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('payrolls').select('inventory_loss_deduction, cashier_loss_deduction').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).maybeSingle(),
+      // Auto-count hari alpha dari rekap absensi
+      supabase.from('attendances').select('date', { count: 'exact', head: true }).eq('employee_id', empId).eq('status', 'absent').gte('date', firstDay).lte('date', lastDay),
     ])
 
     const sc   = scRes.data?.[0]
@@ -390,6 +392,12 @@ export default function PenggajianBulananPage() {
     if (empRes.error) { showMessage('error', 'Gagal ambil data karyawan: ' + empRes.error.message); setBuildingPreview(false); return null }
     if (!sc) { showMessage('error', 'Komponen gaji belum diisi untuk karyawan ini. Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false); return null }
     if (!emp) { showMessage('error', 'Data karyawan tidak ditemukan.'); setBuildingPreview(false); return null }
+
+    // Auto-count hari alpha dari rekap absensi, override input manual jika ada data
+    const autoAlphaDays = alphaRes.count ?? 0
+    if (autoAlphaDays > 0 && absentDays === 0) {
+      absentDays = autoAlphaDays
+    }
 
     const base     = Number(sc.base_salary ?? 0)
     const pos      = Number(sc.position_allowance ?? 0)
@@ -1501,14 +1509,20 @@ export default function PenggajianBulananPage() {
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Checklist Validasi</p>
 
                     {/* Hari tidak hadir */}
-                    <div className="flex items-center justify-between p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <div>
-                        <p className="text-sm font-medium text-slate-700">⚠️ Hari Tidak Hadir (Alpha)</p>
-                        <p className="text-xs text-slate-500">Potong = (Gaji Pokok + Tunjangan) ÷ 26 × hari</p>
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-slate-700">⚠️ Hari Tidak Hadir (Alpha)</p>
+                          <p className="text-xs text-slate-500">Potong = (Gaji Pokok + Tunjangan) ÷ 26 × hari</p>
+                        </div>
+                        <input type="number" min="0" max="26" value={createAbsent}
+                          onChange={e => setCreateAbsent(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-16 px-2 py-1.5 border border-amber-300 rounded text-sm text-center font-bold focus:ring-2 focus:ring-amber-400 outline-none" />
                       </div>
-                      <input type="number" min="0" max="26" value={createAbsent}
-                        onChange={e => setCreateAbsent(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-16 px-2 py-1.5 border border-amber-300 rounded text-sm text-center font-bold focus:ring-2 focus:ring-amber-400 outline-none" />
+                      <p className="text-xs text-amber-700">
+                        📋 Data rekap absensi: akan otomatis terbaca saat klik Preview.
+                        Anda bisa override angka di atas jika perlu.
+                      </p>
                     </div>
 
                     {/* Kasbon */}
