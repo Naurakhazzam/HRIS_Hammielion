@@ -241,9 +241,19 @@ export default function PenggajianBulananPage() {
   // ─── Part 2: Generate Slip Gaji ────────────────────────────────────────────
 
   function getFirstLastDay(m: number, y: number) {
-    const firstDay = `${y}-${String(m).padStart(2, '0')}-01`
-    const lastDay  = new Date(y, m, 0).toISOString().split('T')[0]
+    // Periode 26 bulan lalu – 25 bulan ini
+    const start = new Date(y, m - 2, 26)
+    const end   = new Date(y, m - 1, 25)
+    const firstDay = start.toISOString().split('T')[0]
+    const lastDay  = end.toISOString().split('T')[0]
     return { firstDay, lastDay }
+  }
+
+  // Pembulatan lembur per hari: < 60 menit = 0, lalu floor per jam
+  function roundOvertimeHours(rawHours: number): number {
+    const minutes = rawHours * 60
+    if (minutes < 60) return 0
+    return Math.floor(minutes / 60) // kembalikan dalam jam bulat
   }
 
   async function handleGenerate() {
@@ -314,8 +324,9 @@ export default function PenggajianBulananPage() {
       const attMap: Record<string, { ot: number; lat: number }> = {}
       ;(atts || []).forEach(a => {
         if (!attMap[a.employee_id]) attMap[a.employee_id] = { ot: 0, lat: 0 }
-        attMap[a.employee_id].ot  += Number(a.overtime_hours ?? 0)
-        attMap[a.employee_id].lat += Number(a.late_minutes   ?? 0)
+        // Pembulatan lembur per hari sebelum diakumulasi
+        attMap[a.employee_id].ot  += roundOvertimeHours(Number(a.overtime_hours ?? 0))
+        attMap[a.employee_id].lat += Number(a.late_minutes ?? 0)
       })
 
       // 5. Batch fetch kpi_evaluations untuk periode

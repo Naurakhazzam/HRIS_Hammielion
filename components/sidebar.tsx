@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
-import { useState } from 'react'
-
-const navItems = [
+// Menu untuk HR, Owner, Finance, Supervisor
+const adminNavItems = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
   { name: 'Karyawan', href: '/karyawan', icon: '👥' },
   {
@@ -61,14 +62,50 @@ const navItems = [
   { name: 'Manajemen User', href: '/users', icon: '🔑' },
 ]
 
+// Menu untuk Karyawan (employee/supervisor)
+const employeeNavItems = [
+  { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
+  {
+    name: 'Portal Saya',
+    href: '/portal',
+    icon: '👤',
+    submenu: [
+      { name: 'Slip Gaji', href: '/portal/slip-gaji' },
+      { name: 'Rekap Absensi', href: '/portal/absensi' },
+    ]
+  },
+  { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
+  { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
+]
+
 export default function Sidebar() {
   const pathname = usePathname()
-  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({
-    'Absensi': pathname.startsWith('/absensi'),
+  const supabase = createClient()
+  const [userRole, setUserRole] = useState<string>('hr')
+  const [loadingRole, setLoadingRole] = useState(true)
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('users').select('role').eq('id', user.id).single().then(({ data }) => {
+        if (data) setUserRole(data.role)
+        setLoadingRole(false)
+      })
+    })
+  }, [])
+
+  const isEmployee = ['employee', 'supervisor'].includes(userRole)
+  const navItems = isEmployee ? employeeNavItems : adminNavItems
+
+  const defaultOpen: Record<string, boolean> = {
+    'Absensi':    pathname.startsWith('/absensi'),
     'Penggajian': pathname.startsWith('/penggajian'),
-    'KPI': pathname.startsWith('/kpi'),
-    'Setup': pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif'),
-  })
+    'KPI':        pathname.startsWith('/kpi'),
+    'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
+    'Portal Saya': pathname.startsWith('/portal'),
+  }
+
+  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(defaultOpen)
 
   const toggleMenu = (name: string) => {
     setOpenMenus(prev => ({ ...prev, [name]: !prev[name] }))
@@ -79,13 +116,13 @@ export default function Sidebar() {
       <div className="py-4">
         <ul className="space-y-1 px-3">
           {navItems.map((item) => {
-            const isActive = (item.href === '/absensi' || item.href === '/penggajian' || item.href === '/kpi')
-              ? pathname.startsWith(item.href) 
-              : pathname.startsWith(item.href) && !item.submenu
+            const isActive = ('submenu' in item && item.submenu)
+              ? pathname.startsWith(item.href) && item.href !== '/portal'
+              : pathname.startsWith(item.href)
 
             return (
               <li key={item.name}>
-                {item.submenu ? (
+                {'submenu' in item && item.submenu ? (
                   <div>
                     <button
                       onClick={() => toggleMenu(item.name)}
