@@ -23,6 +23,8 @@ type Payroll = {
   conditional_bonus: number
   inventory_loss_deduction: number
   cashier_loss_deduction: number
+  absent_days: number
+  absent_deduction: number
   gross_total: number
   net_total: number
   status: 'draft' | 'pending_approval' | 'approved' | 'paid'
@@ -68,6 +70,7 @@ function calcNet(p: {
   loyalitas_deduction?: number | string | null
   inventory_loss_deduction?: number | string | null
   cashier_loss_deduction?: number | string | null
+  absent_deduction?: number | string | null
 }): number {
   return (
     Number(p.gross_total)
@@ -76,6 +79,7 @@ function calcNet(p: {
     - Number(p.loyalitas_deduction ?? 0)
     - Number(p.inventory_loss_deduction ?? 0)
     - Number(p.cashier_loss_deduction ?? 0)
+    - Number(p.absent_deduction ?? 0)
   )
 }
 
@@ -131,7 +135,7 @@ export default function PenggajianBulananPage() {
 
   // ── State: UI ──
   const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
+  const [generating] = useState(false) // kept for compatibility
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // ── State: kasbon inline edit (Part 3) ──
@@ -158,6 +162,27 @@ export default function PenggajianBulananPage() {
   }
   const [lossDetail, setLossDetail] = useState<LossDetail | null>(null)
   const [loadingLoss, setLoadingLoss] = useState(false)
+
+  // ── State: buat slip per karyawan (stepper) ──
+  type SlipPreview = {
+    employeeId: string; employeeName: string; employeeCode: string
+    positionName: string; branchName: string
+    base: number; pos: number; meal: number; otTotal: number; kpiBonus: number
+    loyalitasDed: number; latDed: number; latMinutes: number; latRate: number
+    kasbonSaldo: number; kasbonDed: number
+    absentDays: number; absentDed: number; absentRatePerDay: number
+    invLoss: number; cashierLoss: number
+    gross: number; net: number
+  }
+  const [createModal, setCreateModal]       = useState(false)
+  const [createStep, setCreateStep]         = useState<1|2|3>(1)
+  const [availableEmps, setAvailableEmps]   = useState<{id:string;full_name:string;employee_code:string;positions:{name:string}|null;branches:{name:string}|null}[]>([])
+  const [selectedEmpId, setSelectedEmpId]   = useState('')
+  const [createAbsent, setCreateAbsent]     = useState(0)
+  const [createKasbon, setCreateKasbon]     = useState(0)
+  const [slipPreview, setSlipPreview]       = useState<SlipPreview | null>(null)
+  const [buildingPreview, setBuildingPreview] = useState(false)
+  const [finalizing, setFinalizing]         = useState(false)
 
   // ── State: modal bonus kondisional ──
   const [bonusModal, setBonusModal] = useState<Payroll | null>(null)
@@ -210,6 +235,7 @@ export default function PenggajianBulananPage() {
         overtime_total, kpi_bonus, late_deduction,
         kasbon_deduction, loyalitas_deduction, conditional_bonus,
         inventory_loss_deduction, cashier_loss_deduction,
+        absent_days, absent_deduction,
         gross_total, net_total,
         status, approved_by, created_at,
         employee:employees!payrolls_employee_id_fkey(
@@ -272,18 +298,29 @@ export default function PenggajianBulananPage() {
     setLoading(false)
   }
 
-  async function handleDeletePayroll(payrollId: string, employeeName: string) {
-    if (!confirm(`Hapus slip gaji "${employeeName}"? Data akan dihapus dan bisa di-generate ulang.`)) return
+  async function handleDeletePayroll(payrollId: string, employeeName: string, employeeId: string, kasbonDed: number) {
+    if (!confirm(`Hapus slip gaji "${employeeName}"?\n\nData slip akan dihapus permanen. Jika ada potongan kasbon, saldo kasbon akan dikembalikan otomatis.`)) return
     setSubmitting(payrollId)
-    const { error } = await supabase
-      .from('payrolls')
-      .delete()
-      .eq('id', payrollId)
+
+    // Kasbon reversal: kembalikan saldo jika ada potongan kasbon
+    if (kasbonDed > 0) {
+      const { data: kl } = await supabase
+        .from('kasbon_limits')
+        .select('id, current_balance')
+        .eq('employee_id', employeeId)
+        .single()
+      if (kl) {
+        await supabase.from('kasbon_limits')
+          .update({ current_balance: Number(kl.current_balance) + kasbonDed, updated_at: new Date().toISOString() })
+          .eq('id', kl.id)
+      }
+    }
+
+    const { error } = await supabase.from('payrolls').delete().eq('id', payrollId)
     if (error) {
-      console.error('Delete error:', JSON.stringify(error, null, 2))
       showMessage('error', 'Gagal menghapus slip: ' + error.message)
     } else {
-      showMessage('success', `Slip gaji ${employeeName} berhasil dihapus.`)
+      showMessage('success', `Slip gaji ${employeeName} berhasil dihapus.${kasbonDed > 0 ? ` Saldo kasbon ${formatRupiah(kasbonDed)} dikembalikan.` : ''}`)
       fetchPayrolls()
     }
     setSubmitting(null)
@@ -459,6 +496,113 @@ export default function PenggajianBulananPage() {
     } finally {
       setGenerating(false)
     }
+  }
+
+  // ─── Buat Slip Per Karyawan ────────────────────────────────────────────────────
+
+  async function openCreateModal() {
+    setCreateStep(1); setSelectedEmpId(''); setCreateAbsent(0); setCreateKasbon(0); setSlipPreview(null)
+    // Ambil karyawan permanent aktif yang belum punya slip bulan ini
+    const { data: emps } = await supabase
+      .from('employees')
+      .select('id, full_name, employee_code, positions(name), branches(name)')
+      .eq('employee_type', 'permanent').eq('is_active', true)
+    const { data: existing } = await supabase
+      .from('payrolls').select('employee_id')
+      .eq('period_month', filterMonth).eq('period_year', filterYear)
+    const existSet = new Set((existing || []).map((p: any) => p.employee_id))
+    setAvailableEmps(((emps || []) as any[]).filter(e => !existSet.has(e.id)))
+    setCreateModal(true)
+  }
+
+  async function buildSlipPreview(empId: string, absentDays: number, kasbonDed: number) {
+    setBuildingPreview(true)
+    const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
+
+    const [scRes, attRes, kpiRes, klRes, empRes, invRes] = await Promise.all([
+      supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
+      supabase.from('attendances').select('overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
+      supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
+      supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).single(),
+      supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, branch_id, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('payrolls').select('inventory_loss_deduction, cashier_loss_deduction').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).maybeSingle(),
+    ])
+
+    const sc   = scRes.data?.[0]
+    const emp  = empRes.data as any
+    const atts = attRes.data || []
+
+    if (!sc || !emp) { setBuildingPreview(false); return null }
+
+    const base     = Number(sc.base_salary ?? 0)
+    const pos      = Number(sc.position_allowance ?? 0)
+    const meal     = Number(sc.meal_allowance ?? 0)
+    const otRate   = Number(sc.overtime_rate_per_hour ?? 0)
+    const latRate  = Number(sc.late_penalty_per_minute ?? 0)
+    const otHours  = atts.reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
+    const latMins  = atts.reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
+    const otTotal  = otHours * otRate
+    const latDed   = latMins * latRate
+    const kpi      = Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
+    const loyalitas = Number((emp as any).loyalitas_per_month ?? 0)
+    const saldo    = Number(klRes.data?.current_balance ?? 0)
+    const invLoss  = Number(invRes.data?.inventory_loss_deduction ?? 0)
+    const cashLoss = Number(invRes.data?.cashier_loss_deduction ?? 0)
+
+    // Potongan tidak hadir: (base + pos + meal) ÷ 26 × absentDays
+    const absentRatePerDay = Math.round((base + pos + meal) / 26)
+    const absentDed = absentRatePerDay * absentDays
+
+    const gross = base + pos + meal + otTotal + kpi
+    const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
+
+    const preview: SlipPreview = {
+      employeeId: empId, employeeName: emp.full_name, employeeCode: emp.employee_code,
+      positionName: (emp.positions as any)?.name ?? '—', branchName: (emp.branches as any)?.name ?? '—',
+      base, pos, meal, otTotal, kpiBonus: kpi,
+      loyalitasDed: loyalitas, latDed, latMinutes: latMins, latRate,
+      kasbonSaldo: saldo, kasbonDed,
+      absentDays, absentDed, absentRatePerDay,
+      invLoss, cashierLoss: cashLoss,
+      gross, net,
+    }
+    setSlipPreview(preview)
+    setBuildingPreview(false)
+    return preview
+  }
+
+  async function handleFinalizeSlip() {
+    if (!slipPreview) return
+    setFinalizing(true)
+    const p = slipPreview
+
+    // Update kasbon saldo jika ada potongan
+    if (p.kasbonDed > 0) {
+      const { data: kl } = await supabase.from('kasbon_limits').select('id, current_balance').eq('employee_id', p.employeeId).single()
+      if (kl) {
+        const newBal = Math.max(0, Number(kl.current_balance) - p.kasbonDed)
+        await supabase.from('kasbon_limits').update({ current_balance: newBal, updated_at: new Date().toISOString() }).eq('id', kl.id)
+      }
+    }
+
+    const { error } = await supabase.from('payrolls').insert({
+      employee_id: p.employeeId, period_month: filterMonth, period_year: filterYear,
+      base_salary: p.base, position_allowance: p.pos, meal_allowance: p.meal,
+      overtime_total: p.otTotal, kpi_bonus: p.kpiBonus,
+      late_deduction: p.latDed, kasbon_deduction: p.kasbonDed,
+      loyalitas_deduction: p.loyalitasDed, absent_days: p.absentDays, absent_deduction: p.absentDed,
+      inventory_loss_deduction: p.invLoss, cashier_loss_deduction: p.cashierLoss,
+      gross_total: p.gross, net_total: p.net, status: 'draft', approved_by: null,
+    })
+
+    if (error) {
+      showMessage('error', 'Gagal simpan slip: ' + error.message)
+    } else {
+      showMessage('success', `Slip gaji ${p.employeeName} berhasil dibuat.`)
+      setCreateModal(false)
+      fetchPayrolls()
+    }
+    setFinalizing(false)
   }
 
   // ─── Part 3: Edit Kasbon Deduction ──────────────────────────────────────────────────
@@ -802,21 +946,13 @@ export default function PenggajianBulananPage() {
           </button>
         </div>
 
-        {/* Tombol Generate — Part 2 aktif */}
+        {/* Tombol Buat Slip Per Karyawan */}
         <button
-          onClick={handleGenerate}
-          disabled={generating || loading}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={openCreateModal}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50"
         >
-          {generating ? (
-            <>
-              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-              Generating...
-            </>
-          ) : '✨ Generate Slip Bulan Ini'}
+          ✨ Buat Slip Karyawan
         </button>
       </div>
 
@@ -1119,7 +1255,7 @@ export default function PenggajianBulananPage() {
 
                           {p.status === 'draft' && (
                             <button
-                              onClick={() => handleDeletePayroll(p.id, p.employee?.full_name ?? '')}
+                              onClick={() => handleDeletePayroll(p.id, p.employee?.full_name ?? '', p.employee_id, Number(p.kasbon_deduction))}
                               disabled={submitting === p.id}
                               className="px-2.5 py-1.5 text-xs font-medium bg-white border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition disabled:opacity-50"
                             >
@@ -1318,7 +1454,8 @@ export default function PenggajianBulananPage() {
                   {/* Potongan lainnya */}
                   {[
                     ['Tunjangan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
-                    ['Kerugian Kasir',     selectedPayroll.cashier_loss_deduction ?? 0],
+                    ['Kerugian Kasir',      selectedPayroll.cashier_loss_deduction ?? 0],
+                    [`Tidak Hadir (${selectedPayroll.absent_days ?? 0} hari)`, selectedPayroll.absent_deduction ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>
@@ -1449,6 +1586,180 @@ export default function PenggajianBulananPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Modal Buat Slip Per Karyawan ─── */}
+    {createModal && (
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto"
+        onClick={e => { if (e.target === e.currentTarget) setCreateModal(false) }}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-4">
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+            <div>
+              <h2 className="text-base font-bold text-slate-700">Buat Slip Gaji</h2>
+              <p className="text-xs text-slate-500 mt-0.5">{getPeriodLabel(filterMonth, filterYear)}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              {/* Step indicator */}
+              <div className="flex items-center gap-1 text-xs text-slate-400">
+                {[1,2,3].map(s => (
+                  <span key={s} className={`w-6 h-6 rounded-full flex items-center justify-center font-semibold text-xs transition ${createStep === s ? 'bg-blue-600 text-white' : createStep > s ? 'bg-green-500 text-white' : 'bg-slate-100 text-slate-400'}`}>{createStep > s ? '✓' : s}</span>
+                ))}
+              </div>
+              <button onClick={() => setCreateModal(false)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg">✕</button>
+            </div>
+          </div>
+
+          <div className="px-6 py-5 space-y-4">
+
+            {/* ── Step 1: Pilih Karyawan + Validasi ── */}
+            {createStep === 1 && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Pilih Karyawan <span className="text-red-500">*</span></label>
+                  {availableEmps.length === 0 ? (
+                    <p className="text-sm text-slate-500 italic">Semua karyawan tetap sudah punya slip untuk periode ini.</p>
+                  ) : (
+                    <select value={selectedEmpId} onChange={e => setSelectedEmpId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">-- Pilih karyawan --</option>
+                      {availableEmps.map(e => (
+                        <option key={e.id} value={e.id}>{e.full_name} ({e.employee_code}) — {(e.positions as any)?.name ?? '—'}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {selectedEmpId && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Checklist Validasi</p>
+
+                    {/* Hari tidak hadir */}
+                    <div className="flex items-center justify-between p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div>
+                        <p className="text-sm font-medium text-slate-700">⚠️ Hari Tidak Hadir (Alpha)</p>
+                        <p className="text-xs text-slate-500">Potong = (Gaji Pokok + Tunjangan) ÷ 26 × hari</p>
+                      </div>
+                      <input type="number" min="0" max="26" value={createAbsent}
+                        onChange={e => setCreateAbsent(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-16 px-2 py-1.5 border border-amber-300 rounded text-sm text-center font-bold focus:ring-2 focus:ring-amber-400 outline-none" />
+                    </div>
+
+                    {/* Kasbon */}
+                    <div className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                      <div>
+                        <p className="text-sm font-medium text-slate-700">⚠️ Potongan Kasbon Bulan Ini</p>
+                        <p className="text-xs text-slate-500">Cek saldo kasbon karyawan sebelum mengisi</p>
+                      </div>
+                      <input type="number" min="0" step="50000" value={createKasbon}
+                        onChange={e => setCreateKasbon(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-28 px-2 py-1.5 border border-orange-300 rounded text-sm text-right focus:ring-2 focus:ring-orange-400 outline-none" />
+                    </div>
+
+                    <p className="text-xs text-slate-400">KPI, lembur, keterlambatan, kehilangan barang akan diambil otomatis dari data yang sudah ada.</p>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button onClick={() => setCreateModal(false)} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+                  <button disabled={!selectedEmpId || buildingPreview}
+                    onClick={async () => {
+                      const preview = await buildSlipPreview(selectedEmpId, createAbsent, createKasbon)
+                      if (preview) setCreateStep(2)
+                    }}
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                    {buildingPreview ? 'Memuat...' : 'Preview Slip →'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ── Step 2: Preview Slip ── */}
+            {createStep === 2 && slipPreview && (
+              <>
+                <div className="text-center pb-3 border-b border-slate-100">
+                  <p className="font-bold text-slate-800">{slipPreview.employeeName}</p>
+                  <p className="text-xs text-slate-500">{slipPreview.positionName} · {slipPreview.branchName}</p>
+                </div>
+
+                <div className="rounded-xl overflow-hidden border border-slate-200 text-sm">
+                  <div className="bg-emerald-50 px-4 py-1.5 text-xs font-bold text-emerald-700 uppercase">Pendapatan</div>
+                  {[
+                    ['Gaji Pokok', slipPreview.base],
+                    ['Tunjangan Jabatan', slipPreview.pos],
+                    ['Tunjangan Tetap', slipPreview.meal],
+                    ['Upah Lembur', slipPreview.otTotal],
+                    ['Bonus KPI', slipPreview.kpiBonus],
+                  ].map(([l, v]) => Number(v) > 0 && (
+                    <div key={String(l)} className="flex justify-between px-4 py-2 border-t border-slate-100">
+                      <span className="text-slate-600">{l}</span>
+                      <span className="font-medium">{formatRupiah(Number(v))}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between px-4 py-2 border-t border-slate-200 bg-slate-50 font-semibold">
+                    <span>Total Bruto</span><span>{formatRupiah(slipPreview.gross)}</span>
+                  </div>
+
+                  <div className="bg-red-50 px-4 py-1.5 text-xs font-bold text-red-600 uppercase">Potongan</div>
+                  {[
+                    ['Keterlambatan', slipPreview.latDed],
+                    ['Kasbon', slipPreview.kasbonDed],
+                    ['Tunjangan Loyalitas', slipPreview.loyalitasDed],
+                    ['Kehilangan Barang', slipPreview.invLoss],
+                    ['Kerugian Kasir', slipPreview.cashierLoss],
+                    [`Tidak Hadir (${slipPreview.absentDays} hari)`, slipPreview.absentDed],
+                  ].map(([l, v]) => Number(v) > 0 && (
+                    <div key={String(l)} className="flex justify-between px-4 py-2 border-t border-slate-100">
+                      <span className="text-slate-600">{l}</span>
+                      <span className="text-red-500 font-medium">-{formatRupiah(Number(v))}</span>
+                    </div>
+                  ))}
+                  {slipPreview.absentDays > 0 && (
+                    <div className="px-4 py-1.5 text-xs text-slate-400 border-t border-slate-100">
+                      └ {formatRupiah(slipPreview.absentRatePerDay)}/hari × {slipPreview.absentDays} hari
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between bg-blue-600 text-white rounded-xl px-5 py-3">
+                  <span className="font-bold">Gaji Bersih</span>
+                  <span className="font-bold text-lg">{formatRupiah(slipPreview.net)}</span>
+                </div>
+
+                <div className="flex justify-between gap-3 pt-1">
+                  <button onClick={() => setCreateStep(1)} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">← Kembali</button>
+                  <button onClick={() => setCreateStep(3)} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">Lanjut Finalisasi →</button>
+                </div>
+              </>
+            )}
+
+            {/* ── Step 3: Konfirmasi Finalisasi ── */}
+            {createStep === 3 && slipPreview && (
+              <>
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm space-y-2">
+                  <p className="font-semibold text-blue-800">Konfirmasi Finalisasi Slip</p>
+                  <p className="text-blue-700">Karyawan: <strong>{slipPreview.employeeName}</strong></p>
+                  <p className="text-blue-700">Periode: <strong>{getPeriodLabel(filterMonth, filterYear)}</strong></p>
+                  <p className="text-blue-700">Gaji Bersih: <strong>{formatRupiah(slipPreview.net)}</strong></p>
+                  {slipPreview.kasbonDed > 0 && (
+                    <p className="text-amber-700 text-xs">⚠️ Saldo kasbon akan berkurang {formatRupiah(slipPreview.kasbonDed)} otomatis.</p>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 text-center">Slip disimpan dengan status <strong>Draft</strong>. Masih bisa dihapus jika ada kesalahan.</p>
+                <div className="flex justify-between gap-3">
+                  <button onClick={() => setCreateStep(2)} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">← Kembali</button>
+                  <button onClick={handleFinalizeSlip} disabled={finalizing}
+                    className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                    {finalizing ? 'Menyimpan...' : '✓ Finalisasi Slip'}
+                  </button>
+                </div>
+              </>
+            )}
+
           </div>
         </div>
       </div>
