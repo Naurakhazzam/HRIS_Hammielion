@@ -270,7 +270,7 @@ export default function PenggajianBulananPage() {
         gross_total, net_total,
         status, approved_by, created_at,
         employee:employees!payrolls_employee_id_fkey(
-          full_name, employee_type, branch_id,
+          full_name, employee_type, branch_id, join_date,
           branches(name),
           positions(name)
         ),
@@ -964,6 +964,19 @@ export default function PenggajianBulananPage() {
     <div class="row"><span class="lbl">Jabatan</span><span class="val">: ${p.employee?.positions?.name ?? '—'}</span></div>
     <div class="row"><span class="lbl">Cabang</span><span class="val">: ${p.employee?.branches?.name ?? '—'}</span></div>
     <div class="row"><span class="lbl">Periode</span><span class="val">: ${getPeriodLabel(p.period_month, p.period_year)}</span></div>
+    ${(() => {
+      const jd = (p.employee as any)?.join_date
+      if (!jd) return ''
+      const join = new Date(jd)
+      const now  = new Date()
+      let y = now.getFullYear() - join.getFullYear()
+      let mo = now.getMonth() - join.getMonth()
+      if (mo < 0) { y--; mo += 12 }
+      const lama = y === 0 ? `${mo} bulan` : mo > 0 ? `${y} tahun ${mo} bulan` : `${y} tahun`
+      const joinLabel = join.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
+      return `<div class="row"><span class="lbl">Tgl Bergabung</span><span class="val">: ${joinLabel}</span></div>
+              <div class="row"><span class="lbl">Lama Bekerja</span><span class="val">: ${lama}</span></div>`
+    })()}
   </div>
   <table>
     <thead><tr><th>Komponen</th><th>Jumlah</th></tr></thead>
@@ -1439,17 +1452,33 @@ export default function PenggajianBulananPage() {
 
             {/* Info Karyawan */}
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-              {[
-                ['Nama',     selectedPayroll.employee?.full_name ?? '—'],
-                ['Jabatan',  selectedPayroll.employee?.positions?.name ?? '—'],
-                ['Cabang',   selectedPayroll.employee?.branches?.name  ?? '—'],
-                ['Periode',  getPeriodLabel(selectedPayroll.period_month, selectedPayroll.period_year)],
-              ].map(([label, val]) => (
-                <div key={label} className="flex gap-2">
-                  <span className="text-slate-500 w-20 shrink-0">{label}</span>
-                  <span className="font-medium text-slate-800">: {val}</span>
-                </div>
-              ))}
+              {(() => {
+                const joinDate = (selectedPayroll.employee as any)?.join_date
+                const joinLabel = joinDate ? new Date(joinDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : '—'
+                const lamaKerja = (() => {
+                  if (!joinDate) return '—'
+                  const join = new Date(joinDate)
+                  const now  = new Date()
+                  let years  = now.getFullYear() - join.getFullYear()
+                  let months = now.getMonth() - join.getMonth()
+                  if (months < 0) { years--; months += 12 }
+                  if (years === 0) return `${months} bulan`
+                  return months > 0 ? `${years} tahun ${months} bulan` : `${years} tahun`
+                })()
+                return [
+                  ['Nama',              selectedPayroll.employee?.full_name ?? '—'],
+                  ['Jabatan',           selectedPayroll.employee?.positions?.name ?? '—'],
+                  ['Cabang',            selectedPayroll.employee?.branches?.name  ?? '—'],
+                  ['Periode',           getPeriodLabel(selectedPayroll.period_month, selectedPayroll.period_year)],
+                  ['Tgl Bergabung',     joinLabel],
+                  ['Lama Bekerja',      lamaKerja],
+                ].map(([label, val]) => (
+                  <div key={label} className="flex gap-2">
+                    <span className="text-slate-500 w-28 shrink-0">{label}</span>
+                    <span className="font-medium text-slate-800">: {val}</span>
+                  </div>
+                ))
+              })()}
             </div>
 
             {/* Tabel Komponen */}
