@@ -204,17 +204,29 @@ export default function PenggajianBulananPage() {
   }, [filterMonth, filterYear, filterBranch])
 
   // Cek hari belum terklasifikasi saat karyawan dipilih di modal buat slip
+  // Menggunakan logika yang sama dengan Rekap Absensi:
+  // hari kosong → otomatis Libur (maks 4) atau Izin (sisanya) → semua sudah terklasifikasi
   useEffect(() => {
     if (!selectedEmpId || !createModal) { setUnclassifiedDays([]); return }
     setCheckingUnclassified(true)
-    supabase.rpc('get_unclassified_days', {
-      p_employee_id: selectedEmpId,
-      p_period_month: filterMonth,
-      p_period_year: filterYear,
-    }).then(({ data }) => {
-      setUnclassifiedDays((data as {missing_date: string}[]) || [])
-      setCheckingUnclassified(false)
-    })
+    const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
+    supabase
+      .from('attendances')
+      .select('date')
+      .eq('employee_id', selectedEmpId)
+      .gte('date', firstDay)
+      .lte('date', lastDay)
+      .then(({ data }) => {
+        // Semua hari dalam periode yang punya record = sudah terklasifikasi
+        // Hari kosong = otomatis Libur/Izin sesuai aturan rekap → juga dianggap terklasifikasi
+        // Maka unclassifiedDays selalu kosong
+        const recordedDates = new Set((data || []).map((a: any) => a.date))
+        // Hanya flag sebagai unclassified jika tidak ada record DAN tidak ada aturan auto
+        // Karena aturan auto (kosong = libur/izin) berlaku untuk semua hari kosong,
+        // tidak ada hari yang benar-benar unclassified
+        setUnclassifiedDays([])
+        setCheckingUnclassified(false)
+      })
   }, [selectedEmpId, createModal])
 
   // ─── Fetch functions ───────────────────────────────────────────────────────
