@@ -53,6 +53,9 @@ export default function PortalSlipGajiPage() {
   const [myName, setMyName] = useState('')
   const [selectedPayroll, setSelectedPayroll] = useState<Payroll | null>(null)
   const [filterYear, setFilterYear] = useState(new Date().getFullYear())
+  const [lateDetails, setLateDetails] = useState<{ date: string; late_minutes: number; deduction: number }[]>([])
+  const [lateRate, setLateRate] = useState(0)
+  const [loadingLate, setLoadingLate] = useState(false)
 
   useEffect(() => { init() }, [])
   useEffect(() => { if (myEmployeeId) fetchPayrolls() }, [myEmployeeId, filterYear])
@@ -72,6 +75,43 @@ export default function PortalSlipGajiPage() {
 
     setMyEmployeeId(userData.employee_id)
     setMyName((userData as any).employees?.full_name || '')
+  }
+
+  async function fetchLateDetails(p: Payroll) {
+    setLoadingLate(true)
+    setLateDetails([])
+    const start = new Date(p.period_year, p.period_month - 2, 26)
+    const end   = new Date(p.period_year, p.period_month - 1, 25)
+    const firstDay = start.toISOString().split('T')[0]
+    const lastDay  = end.toISOString().split('T')[0]
+
+    const { data: salComp } = await supabase
+      .from('salary_components')
+      .select('late_penalty_per_minute')
+      .eq('employee_id', myEmployeeId)
+      .lte('effective_date', firstDay)
+      .order('effective_date', { ascending: false })
+      .limit(1)
+      .single()
+
+    const rate = Number(salComp?.late_penalty_per_minute ?? 0)
+    setLateRate(rate)
+
+    const { data: atts } = await supabase
+      .from('attendances')
+      .select('date, late_minutes')
+      .eq('employee_id', myEmployeeId)
+      .gte('date', firstDay)
+      .lte('date', lastDay)
+      .gt('late_minutes', 0)
+      .order('date')
+
+    setLateDetails((atts || []).map(a => ({
+      date: a.date,
+      late_minutes: Number(a.late_minutes),
+      deduction: Number(a.late_minutes) * rate
+    })))
+    setLoadingLate(false)
   }
 
   async function fetchPayrolls() {
@@ -130,7 +170,7 @@ export default function PortalSlipGajiPage() {
             const cfg = STATUS_CONFIG[p.status] ?? STATUS_CONFIG.draft
             return (
               <div key={p.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 hover:shadow-md transition cursor-pointer"
-                onClick={() => setSelectedPayroll(p)}>
+                onClick={() => { setSelectedPayroll(p); fetchLateDetails(p) }}>
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-bold text-slate-800">{MONTHS[p.period_month - 1]} {p.period_year}</h3>
@@ -229,8 +269,32 @@ export default function PortalSlipGajiPage() {
                     <tr className="bg-red-50/50">
                       <td colSpan={2} className="px-4 py-1.5 text-xs font-bold text-red-600 uppercase">Potongan</td>
                     </tr>
+                    {/* Keterlambatan + detail */}
+                    <tr>
+                      <td className="px-4 py-2.5 text-slate-700">
+                        <div>Keterlambatan</div>
+                        {loadingLate && <div className="text-xs text-slate-400 mt-0.5">Memuat detail...</div>}
+                        {!loadingLate && lateDetails.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {lateDetails.map(d => (
+                              <div key={d.date} className="text-xs text-slate-400 flex gap-2">
+                                <span>└</span>
+                                <span>{new Date(d.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span>
+                                <span>{d.late_minutes} mnt</span>
+                                {lateRate > 0 && <span>= <span className="text-red-400">{fmtRp(d.deduction)}</span></span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {!loadingLate && lateDetails.length === 0 && Number(selectedPayroll.late_deduction) > 0 && (
+                          <div className="text-xs text-slate-400 mt-0.5">└ Tidak ada hari keterlambatan tercatat</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">
+                        {Number(selectedPayroll.late_deduction) > 0 ? `-${fmtRp(Number(selectedPayroll.late_deduction))}` : <span className="text-slate-300">—</span>}
+                      </td>
+                    </tr>
                     {[
-                      ['Keterlambatan',       selectedPayroll.late_deduction],
                       ['Kasbon',              selectedPayroll.kasbon_deduction],
                       ['Tunjangan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
                       ['Kehilangan Barang',   selectedPayroll.inventory_loss_deduction ?? 0],

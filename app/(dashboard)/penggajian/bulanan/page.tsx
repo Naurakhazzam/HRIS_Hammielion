@@ -119,6 +119,9 @@ export default function PenggajianBulananPage() {
 
   // ── State: modal detail slip (Part 5) ──
   const [selectedPayroll, setSelectedPayroll] = useState<Payroll | null>(null)
+  const [lateDetails, setLateDetails] = useState<{ date: string; late_minutes: number; deduction: number }[]>([])
+  const [lateRate, setLateRate] = useState(0)
+  const [loadingLate, setLoadingLate] = useState(false)
 
   // ── State: modal bonus kondisional ──
   const [bonusModal, setBonusModal] = useState<Payroll | null>(null)
@@ -526,6 +529,51 @@ export default function PenggajianBulananPage() {
     await fetchPayrolls()
   }
 
+  // ─── Fetch Detail Keterlambatan ────────────────────────────────────────────
+  async function fetchLateDetails(p: Payroll) {
+    setLoadingLate(true)
+    setLateDetails([])
+    setLateRate(0)
+
+    // Periode 26 bulan lalu - 25 bulan ini
+    const start = new Date(p.period_year, p.period_month - 2, 26)
+    const end   = new Date(p.period_year, p.period_month - 1, 25)
+    const firstDay = start.toISOString().split('T')[0]
+    const lastDay  = end.toISOString().split('T')[0]
+
+    // Ambil tarif potongan per menit dari salary_components
+    const { data: salComp } = await supabase
+      .from('salary_components')
+      .select('late_penalty_per_minute')
+      .eq('employee_id', p.employee_id)
+      .lte('effective_date', firstDay)
+      .order('effective_date', { ascending: false })
+      .limit(1)
+      .single()
+
+    const rate = Number(salComp?.late_penalty_per_minute ?? 0)
+    setLateRate(rate)
+
+    // Ambil hari-hari yang terlambat
+    const { data: atts } = await supabase
+      .from('attendances')
+      .select('date, late_minutes')
+      .eq('employee_id', p.employee_id)
+      .gte('date', firstDay)
+      .lte('date', lastDay)
+      .gt('late_minutes', 0)
+      .order('date')
+
+    const details = (atts || []).map(a => ({
+      date: a.date,
+      late_minutes: Number(a.late_minutes),
+      deduction: Number(a.late_minutes) * rate
+    }))
+
+    setLateDetails(details)
+    setLoadingLate(false)
+  }
+
   // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
 
   async function openBonusModal(p: Payroll) {
@@ -922,7 +970,7 @@ export default function PenggajianBulananPage() {
                       <td className="px-4 py-3 text-center whitespace-nowrap print-hide">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={() => setSelectedPayroll(p)}
+                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p) }}
                             className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 hover:border-slate-400 transition"
                           >
                             Lihat
@@ -1093,8 +1141,33 @@ export default function PenggajianBulananPage() {
                   <tr className="bg-red-50/50">
                     <td colSpan={2} className="px-4 py-1.5 text-xs font-bold text-red-600 uppercase tracking-wide">Potongan</td>
                   </tr>
+                  {/* Keterlambatan dengan detail */}
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 text-slate-700">
+                      <div>Potongan Keterlambatan</div>
+                      {loadingLate && <div className="text-xs text-slate-400 mt-0.5">Memuat detail...</div>}
+                      {!loadingLate && lateDetails.length > 0 && (
+                        <div className="mt-1 space-y-0.5">
+                          {lateDetails.map(d => (
+                            <div key={d.date} className="text-xs text-slate-400 flex gap-2">
+                              <span>└</span>
+                              <span>{new Date(d.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span>
+                              <span>{d.late_minutes} mnt</span>
+                              {lateRate > 0 && <span>× {formatRupiah(lateRate)}/mnt = <span className="text-red-400">{formatRupiah(d.deduction)}</span></span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {!loadingLate && lateDetails.length === 0 && Number(selectedPayroll.late_deduction) > 0 && (
+                        <div className="text-xs text-slate-400 mt-0.5">└ Tidak ada rincian tersimpan</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">
+                      {Number(selectedPayroll.late_deduction) > 0 ? `-${formatRupiah(Number(selectedPayroll.late_deduction))}` : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
+                  {/* Potongan lainnya */}
                   {[
-                    ['Potongan Keterlambatan',  selectedPayroll.late_deduction],
                     ['Potongan Kasbon',         selectedPayroll.kasbon_deduction],
                     ['Tunjangan Loyalitas',     (selectedPayroll as any).loyalitas_deduction ?? 0],
                     ['Kehilangan Barang',       (selectedPayroll as any).inventory_loss_deduction ?? 0],
