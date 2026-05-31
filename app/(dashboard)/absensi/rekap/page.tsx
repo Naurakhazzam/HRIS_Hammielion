@@ -31,6 +31,7 @@ export default function RekapAbsensiPage() {
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().substring(0, 7)) // YYYY-MM
   const [filterBranch, setFilterBranch] = useState('')
   const [filterDept, setFilterDept] = useState('')
+  const [filterEmployee, setFilterEmployee] = useState('')
 
   // Form State
   const [showForm, setShowForm] = useState(false)
@@ -56,7 +57,7 @@ export default function RekapAbsensiPage() {
 
   useEffect(() => {
     fetchAttendances()
-  }, [filterMonth, filterBranch, filterDept])
+  }, [filterMonth, filterBranch, filterDept, filterEmployee])
 
   async function fetchReferenceData() {
     const [bRes, dRes, eRes] = await Promise.all([
@@ -94,6 +95,7 @@ export default function RekapAbsensiPage() {
 
     if (filterBranch) query = query.eq('employees.branch_id', filterBranch)
     if (filterDept) query = query.eq('employees.department_id', filterDept)
+    if (filterEmployee) query = query.eq('employee_id', filterEmployee)
 
     const { data, error } = await query
 
@@ -359,21 +361,28 @@ export default function RekapAbsensiPage() {
       {/* Filter & Tabel Data */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         {/* Filters */}
-        <div className="p-4 border-b border-slate-200 bg-slate-50 grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="p-4 border-b border-slate-200 bg-slate-50 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-slate-500 flex-shrink-0">Bulan:</label>
-            <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} 
+            <label className="text-xs font-medium text-slate-500 flex-shrink-0 w-12">Bulan:</label>
+            <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}
               className="bg-white border border-slate-300 text-sm rounded-lg focus:ring-blue-500 outline-none block w-full p-2" />
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-slate-500 flex-shrink-0">Cabang:</label>
+            <label className="text-xs font-medium text-slate-500 flex-shrink-0 w-12">Karyawan:</label>
+            <select value={filterEmployee} onChange={(e) => setFilterEmployee(e.target.value)} className="bg-white border border-slate-300 text-sm rounded-lg focus:ring-blue-500 outline-none block w-full p-2">
+              <option value="">Semua Karyawan</option>
+              {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-slate-500 flex-shrink-0 w-12">Cabang:</label>
             <select value={filterBranch} onChange={(e) => setFilterBranch(e.target.value)} className="bg-white border border-slate-300 text-sm rounded-lg focus:ring-blue-500 outline-none block w-full p-2">
               <option value="">Semua Cabang</option>
               {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-slate-500 flex-shrink-0">Dept:</label>
+            <label className="text-xs font-medium text-slate-500 flex-shrink-0 w-12">Dept:</label>
             <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)} className="bg-white border border-slate-300 text-sm rounded-lg focus:ring-blue-500 outline-none block w-full p-2">
               <option value="">Semua Departemen</option>
               {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
