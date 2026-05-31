@@ -162,6 +162,10 @@ export default function PenggajianBulananPage() {
   const [lossDetail, setLossDetail] = useState<LossDetail | null>(null)
   const [loadingLoss, setLoadingLoss] = useState(false)
 
+  // ── State: detail lembur per hari ──
+  const [otDetails, setOtDetails] = useState<{ date: string; hours: number; earning: number }[]>([])
+  const [loadingOt, setLoadingOt] = useState(false)
+
   // ── State: buat slip per karyawan (stepper) ──
   type SlipPreview = {
     employeeId: string; employeeName: string; employeeCode: string
@@ -770,6 +774,31 @@ export default function PenggajianBulananPage() {
     setLoadingLoss(false)
   }
 
+  // ─── Fetch Detail Lembur ──────────────────────────────────────────────────
+  async function fetchOtDetails(p: Payroll) {
+    setLoadingOt(true)
+    setOtDetails([])
+    const start = new Date(p.period_year, p.period_month - 2, 26)
+    const end   = new Date(p.period_year, p.period_month - 1, 25)
+    const firstDay = start.toISOString().split('T')[0]
+    const lastDay  = end.toISOString().split('T')[0]
+
+    const { data: sc } = await supabase.from('salary_components').select('overtime_rate_per_hour').eq('employee_id', p.employee_id).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1)
+    const otRate = Number(sc?.[0]?.overtime_rate_per_hour ?? 0)
+
+    const { data: atts } = await supabase.from('attendances').select('date, overtime_hours').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay).gt('overtime_hours', 0).order('date')
+
+    const details = (atts || []).map(a => {
+      const rawHours = Number(a.overtime_hours)
+      const mins = rawHours * 60
+      const roundedHours = mins < 60 ? 0 : Math.floor(mins / 60)
+      return { date: a.date, hours: roundedHours, raw: rawHours, earning: roundedHours * otRate }
+    }).filter(d => d.hours > 0)
+
+    setOtDetails(details)
+    setLoadingOt(false)
+  }
+
   // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
 
   async function openBonusModal(p: Payroll) {
@@ -860,23 +889,35 @@ export default function PenggajianBulananPage() {
   function printSlip(p: typeof selectedPayroll) {
     if (!p) return
     const fmtR = (n: number) => n.toLocaleString('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 })
+    const fmtDate = (d: string) => new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
     const statusLabel = STATUS_CONFIG[p.status]?.label ?? p.status
-    const rows: [string, number, boolean][] = [
-      ['Gaji Pokok',          Number(p.base_salary), false],
-      ['Tunjangan Jabatan',   Number(p.position_allowance), false],
-      ['Tunjangan Tetap',     Number(p.meal_allowance), false],
-      ['Upah Lembur',         Number(p.overtime_total), false],
-      ['Bonus KPI',           Number(p.kpi_bonus), false],
-      ['Bonus Kondisional',   Number((p as any).conditional_bonus ?? 0), false],
-      ['Potongan Keterlambatan', Number(p.late_deduction), true],
-      ['Potongan Kasbon',     Number(p.kasbon_deduction), true],
-      ['Tunjangan Loyalitas', Number(p.loyalitas_deduction ?? 0), true],
-      ['Kerugian Kasir',      Number(p.cashier_loss_deduction ?? 0), true],
-      ['Kehilangan Barang',   Number(p.inventory_loss_deduction ?? 0), true],
-      [`Tidak Hadir (${p.absent_days ?? 0} hari)`, Number(p.absent_deduction ?? 0), true],
-    ]
-    const incomeRows = rows.filter(r => !r[2])
-    const dedRows    = rows.filter(r => r[2])
+
+    // Detail lembur
+    const otTotal = Number(p.overtime_total)
+    const otRate  = otDetails.length > 0 && otDetails[0].hours > 0 ? Math.round(otDetails[0].earning / otDetails[0].hours) : 0
+    const otDetailHtml = otDetails.length > 0
+      ? `<div class="detail-block">
+          ${otDetails.map(d => `<div class="detail-row"><span>${fmtDate(d.date)}</span><span>${d.hours} jam × ${fmtR(otRate)}/jam = <span class="earn">${fmtR(d.earning)}</span></span></div>`).join('')}
+          <div class="detail-total">Total: ${otDetails.reduce((s,d)=>s+d.hours,0)} jam</div>
+         </div>` : ''
+
+    // Detail keterlambatan
+    const lateDed = Number(p.late_deduction)
+    const lateDetailHtml = lateDetails.length > 0
+      ? `<div class="detail-block">
+          ${lateDetails.map(d => `<div class="detail-row"><span>${fmtDate(d.date)}</span><span>${d.late_minutes} mnt × ${fmtR(lateRate)}/mnt = <span class="ded-detail">${fmtR(d.deduction)}</span></span></div>`).join('')}
+          <div class="detail-total">Total: ${lateDetails.reduce((s,d)=>s+d.late_minutes,0)} menit</div>
+         </div>` : ''
+
+    // Detail kehilangan barang
+    const invLoss = Number(p.inventory_loss_deduction ?? 0)
+    const lossDetailHtml = lossDetail && lossDetail.totalLoss > 0
+      ? `<div class="detail-block">
+          <div class="detail-row"><span>Total kehilangan cabang</span><span>${fmtR(lossDetail.totalLoss)}</span></div>
+          <div class="detail-row"><span>Kantor menanggung (${lossDetail.companyPct + lossDetail.unassignedPct}%)</span><span class="earn">${fmtR(lossDetail.companyTotalCover)}</span></div>
+          <div class="detail-row"><span>Tanggungan Anda (${lossDetail.employeeSharePct}%)</span><span class="ded-detail">${fmtR(lossDetail.employeeDeduction)}</span></div>
+         </div>` : ''
+
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Slip Gaji - ${p.employee?.full_name}</title>
 <style>
@@ -894,7 +935,7 @@ export default function PenggajianBulananPage() {
   table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11.5px; }
   th { background: #f8fafc; padding: 7px 12px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #64748b; border-bottom: 1px solid #e2e8f0; }
   th:last-child { text-align: right; }
-  td { padding: 7px 12px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+  td { padding: 7px 12px; border-bottom: 1px solid #f1f5f9; color: #334155; vertical-align: top; }
   td:last-child { text-align: right; font-weight: 600; }
   .section-label td { background: #f0fdf4; color: #16a34a; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 5px 12px; }
   .section-label.ded td { background: #fff5f5; color: #dc2626; }
@@ -905,6 +946,11 @@ export default function PenggajianBulananPage() {
   .bersih-row .label { font-size: 13px; font-weight: 700; }
   .bersih-row .val { font-size: 18px; font-weight: 800; }
   .footer { margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 10px; }
+  .detail-block { margin-top: 4px; padding: 4px 0 2px 10px; border-left: 2px solid #e2e8f0; }
+  .detail-row { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; padding: 1px 0; }
+  .detail-total { font-size: 10px; font-weight: 700; color: #475569; margin-top: 3px; border-top: 1px solid #f1f5f9; padding-top: 2px; }
+  .earn { color: #16a34a; }
+  .ded-detail { color: #dc2626; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style></head><body>
 <div class="wrap">
@@ -923,9 +969,19 @@ export default function PenggajianBulananPage() {
     <thead><tr><th>Komponen</th><th>Jumlah</th></tr></thead>
     <tbody>
       <tr class="section-label"><td colspan="2">Pendapatan</td></tr>
-      ${incomeRows.map(([lbl, val]) => `<tr><td>${lbl}</td><td class="${val > 0 ? '' : 'zero'}">${val > 0 ? fmtR(val) : '—'}</td></tr>`).join('')}
+      <tr><td>Gaji Pokok</td><td>${Number(p.base_salary)>0?fmtR(Number(p.base_salary)):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Tunjangan Jabatan</td><td>${Number(p.position_allowance)>0?fmtR(Number(p.position_allowance)):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Tunjangan Tetap</td><td>${Number(p.meal_allowance)>0?fmtR(Number(p.meal_allowance)):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Upah Lembur${otDetailHtml}</td><td>${otTotal>0?fmtR(otTotal):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Bonus KPI</td><td>${Number(p.kpi_bonus)>0?fmtR(Number(p.kpi_bonus)):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Bonus Kondisional</td><td>${Number((p as any).conditional_bonus??0)>0?fmtR(Number((p as any).conditional_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr class="section-label ded"><td colspan="2">Potongan</td></tr>
-      ${dedRows.map(([lbl, val]) => `<tr><td>${lbl}</td><td class="${val > 0 ? 'ded-val' : 'zero'}">${val > 0 ? '-' + fmtR(val) : '—'}</td></tr>`).join('')}
+      <tr><td>Potongan Keterlambatan${lateDetailHtml}</td><td>${lateDed>0?'-'+fmtR(lateDed):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Potongan Kasbon</td><td class="${Number(p.kasbon_deduction)>0?'ded-val':'zero'}">${Number(p.kasbon_deduction)>0?'-'+fmtR(Number(p.kasbon_deduction)):'—'}</td></tr>
+      <tr><td>Tunjangan Loyalitas</td><td class="${Number(p.loyalitas_deduction??0)>0?'ded-val':'zero'}">${Number(p.loyalitas_deduction??0)>0?'-'+fmtR(Number(p.loyalitas_deduction??0)):'—'}</td></tr>
+      <tr><td>Kerugian Kasir</td><td class="${Number(p.cashier_loss_deduction??0)>0?'ded-val':'zero'}">${Number(p.cashier_loss_deduction??0)>0?'-'+fmtR(Number(p.cashier_loss_deduction??0)):'—'}</td></tr>
+      <tr><td>Kehilangan Barang${lossDetailHtml}</td><td>${invLoss>0?'-'+fmtR(invLoss):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Tidak Hadir (${p.absent_days??0} hari)</td><td class="${Number(p.absent_deduction??0)>0?'ded-val':'zero'}">${Number(p.absent_deduction??0)>0?'-'+fmtR(Number(p.absent_deduction??0)):'—'}</td></tr>
       <tr class="bruto-row"><td>Total Bruto</td><td>${fmtR(Number(p.gross_total))}</td></tr>
     </tbody>
   </table>
@@ -1259,7 +1315,7 @@ export default function PenggajianBulananPage() {
                       <td className="px-4 py-3 text-center whitespace-nowrap print-hide">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p); fetchLossDetail(p) }}
+                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p); fetchLossDetail(p); fetchOtDetails(p) }}
                             className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 hover:border-slate-400 transition"
                           >
                             Lihat
@@ -1414,7 +1470,40 @@ export default function PenggajianBulananPage() {
                     ['Gaji Pokok',           selectedPayroll.base_salary],
                     ['Tunjangan Jabatan',    selectedPayroll.position_allowance],
                     ['Tunjangan Tetap',      selectedPayroll.meal_allowance],
-                    ['Upah Lembur',          selectedPayroll.overtime_total],
+                  ].map(([label, val]) => (
+                    <tr key={String(label)} className="hover:bg-slate-50">
+                      <td className="px-4 py-2.5 text-slate-700">{label}</td>
+                      <td className="px-4 py-2.5 text-right font-medium text-slate-800">
+                        {Number(val) > 0 ? formatRupiah(Number(val)) : <span className="text-slate-300">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                  {/* Upah Lembur dengan detail per hari */}
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 text-slate-700">
+                      <div>Upah Lembur</div>
+                      {loadingOt && <div className="text-xs text-slate-400 mt-0.5">Memuat detail...</div>}
+                      {!loadingOt && otDetails.length > 0 && (
+                        <div className="mt-1 space-y-0.5">
+                          {otDetails.map(d => (
+                            <div key={d.date} className="text-xs text-slate-400 flex gap-2">
+                              <span>└</span>
+                              <span>{new Date(d.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span>
+                              <span>{d.hours} jam × {formatRupiah((d.earning / d.hours) || 0)}/jam = <span className="text-emerald-500">{formatRupiah(d.earning)}</span></span>
+                            </div>
+                          ))}
+                          <div className="text-xs text-slate-500 font-semibold flex gap-2 mt-1 pt-1 border-t border-slate-100">
+                            <span>└</span>
+                            <span>Total: {otDetails.reduce((s, d) => s + d.hours, 0)} jam</span>
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium text-slate-800 align-top">
+                      {Number(selectedPayroll.overtime_total) > 0 ? formatRupiah(Number(selectedPayroll.overtime_total)) : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
+                  {[
                     ['Bonus KPI',            selectedPayroll.kpi_bonus],
                     ['Bonus Kondisional',    (selectedPayroll as any).conditional_bonus ?? 0],
                   ].map(([label, val]) => (
