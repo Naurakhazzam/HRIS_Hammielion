@@ -166,6 +166,13 @@ export default function PenggajianBulananPage() {
   const [otDetails, setOtDetails] = useState<{ date: string; hours: number; earning: number }[]>([])
   const [loadingOt, setLoadingOt] = useState(false)
 
+  // ── State: breakdown potongan tidak hadir di modal detail ──
+  type AbsentBreakdownDetail = {
+    dailyRate: number; izinDays: number; alphaDays: number
+    sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number; autoIzin: number
+  }
+  const [absentBreakdownDetail, setAbsentBreakdownDetail] = useState<AbsentBreakdownDetail | null>(null)
+
   // ── State: buat slip per karyawan (stepper) ──
   type SlipPreview = {
     employeeId: string; employeeName: string; employeeCode: string
@@ -501,7 +508,7 @@ export default function PenggajianBulananPage() {
     const sickDed     = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
 
     const absentDed        = izinDed + alphaDed + sickDed
-    const absentDays       = izinRecs.length + alphaCount + sickCount
+    const absentDays       = izinCount + alphaCount + sickCount  // include autoIzin
     const absentRatePerDay = dailyRate
     const absentBreakdown  = {
       dailyRate,
@@ -702,11 +709,12 @@ export default function PenggajianBulananPage() {
     setLateDetails([])
     setLateRate(0)
 
-    // Periode 26 bulan lalu - 25 bulan ini
-    const start = new Date(p.period_year, p.period_month - 2, 26)
-    const end   = new Date(p.period_year, p.period_month - 1, 25)
-    const firstDay = start.toISOString().split('T')[0]
-    const lastDay  = end.toISOString().split('T')[0]
+    // Periode 26 bulan lalu - 25 bulan ini (pakai format lokal, bukan toISOString)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const sm = p.period_month === 1 ? 12 : p.period_month - 1
+    const sy = p.period_month === 1 ? p.period_year - 1 : p.period_year
+    const firstDay = `${sy}-${pad(sm)}-26`
+    const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
 
     // Ambil tarif potongan per menit dari salary_components
     const { data: salComp } = await supabase
@@ -811,10 +819,11 @@ export default function PenggajianBulananPage() {
   async function fetchOtDetails(p: Payroll) {
     setLoadingOt(true)
     setOtDetails([])
-    const start = new Date(p.period_year, p.period_month - 2, 26)
-    const end   = new Date(p.period_year, p.period_month - 1, 25)
-    const firstDay = start.toISOString().split('T')[0]
-    const lastDay  = end.toISOString().split('T')[0]
+    const pad2 = (n: number) => String(n).padStart(2, '0')
+    const sm2 = p.period_month === 1 ? 12 : p.period_month - 1
+    const sy2 = p.period_month === 1 ? p.period_year - 1 : p.period_year
+    const firstDay = `${sy2}-${pad2(sm2)}-26`
+    const lastDay  = `${p.period_year}-${pad2(p.period_month)}-25`
 
     const { data: sc } = await supabase.from('salary_components').select('overtime_rate_per_hour').eq('employee_id', p.employee_id).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1)
     const otRate = Number(sc?.[0]?.overtime_rate_per_hour ?? 0)
@@ -830,6 +839,42 @@ export default function PenggajianBulananPage() {
 
     setOtDetails(details)
     setLoadingOt(false)
+  }
+
+  // ─── Fetch Breakdown Potongan Tidak Hadir (modal detail) ─────────────────
+  async function fetchAbsentBreakdown(p: Payroll) {
+    setAbsentBreakdownDetail(null)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const sm = p.period_month === 1 ? 12 : p.period_month - 1
+    const sy = p.period_month === 1 ? p.period_year - 1 : p.period_year
+    const firstDay = `${sy}-${pad(sm)}-26`
+    const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
+
+    const [scRes, attRes] = await Promise.all([
+      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance').eq('employee_id', p.employee_id).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
+      supabase.from('attendances').select('date, status').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
+    ])
+
+    const sc = scRes.data?.[0]
+    const atts = attRes.data || []
+    const dailyRate = sc ? Math.round((Number(sc.base_salary)+Number(sc.position_allowance)+Number(sc.meal_allowance))/26) : 0
+
+    const recordedDates = new Set(atts.map((a: any) => a.date))
+    const allDates: string[] = []
+    const cur = new Date(firstDay + 'T12:00:00')
+    const endD = new Date(lastDay + 'T12:00:00')
+    while (cur <= endD) { allDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`); cur.setDate(cur.getDate()+1) }
+
+    const emptyDays  = allDates.filter(d => !recordedDates.has(d)).length
+    const autoIzin   = Math.max(emptyDays - 4, 0)
+    const izinDays   = atts.filter((a: any) => a.status === 'permission').length
+    const alphaDays  = atts.filter((a: any) => a.status === 'absent').length
+    const sickDays   = atts.filter((a: any) => a.status === 'sick').length
+    const sick1Free  = Math.min(sickDays, 1)
+    const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
+    const sick4Full  = Math.max(0, sickDays - 3)
+
+    setAbsentBreakdownDetail({ dailyRate, izinDays: izinDays + autoIzin, alphaDays, sickDays, sick1Free, sick23Half, sick4Full, autoIzin })
   }
 
   // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
@@ -1361,7 +1406,7 @@ export default function PenggajianBulananPage() {
                       <td className="px-4 py-3 text-center whitespace-nowrap print-hide">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p); fetchLossDetail(p); fetchOtDetails(p) }}
+                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p); fetchLossDetail(p); fetchOtDetails(p); fetchAbsentBreakdown(p) }}
                             className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 hover:border-slate-400 transition"
                           >
                             Lihat
@@ -1630,7 +1675,6 @@ export default function PenggajianBulananPage() {
                   {[
                     ['Tunjangan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],
                     ['Kerugian Kasir',      selectedPayroll.cashier_loss_deduction ?? 0],
-                    [`Tidak Hadir (${selectedPayroll.absent_days ?? 0} hari)`, selectedPayroll.absent_deduction ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>
@@ -1639,6 +1683,36 @@ export default function PenggajianBulananPage() {
                       </td>
                     </tr>
                   ))}
+                  {/* Tidak Hadir dengan breakdown */}
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 text-slate-700 align-top">
+                      <div>Tidak Hadir ({selectedPayroll.absent_days ?? 0} hari)</div>
+                      {absentBreakdownDetail && (
+                        <div className="mt-1 space-y-0.5">
+                          <div className="text-xs text-slate-400">└ Gaji harian (total komponen ÷ 26): <span className="font-medium text-slate-600">{formatRupiah(absentBreakdownDetail.dailyRate)}</span></div>
+                          {absentBreakdownDetail.izinDays > 0 && (
+                            <div className="text-xs text-orange-500">
+                              └ Izin{absentBreakdownDetail.autoIzin > 0 ? ` (${absentBreakdownDetail.izinDays - absentBreakdownDetail.autoIzin} eksplisit + ${absentBreakdownDetail.autoIzin} hari kosong)` : ''}: {absentBreakdownDetail.izinDays} hari × 1× = {formatRupiah(absentBreakdownDetail.izinDays * absentBreakdownDetail.dailyRate)}
+                            </div>
+                          )}
+                          {absentBreakdownDetail.alphaDays > 0 && (
+                            <div className="text-xs text-red-400">└ Alpha: {absentBreakdownDetail.alphaDays} hari × 1.5× = {formatRupiah(Math.round(absentBreakdownDetail.alphaDays * absentBreakdownDetail.dailyRate * 1.5))}</div>
+                          )}
+                          {absentBreakdownDetail.sickDays > 0 && (
+                            <div className="text-xs text-blue-400">
+                              └ Sakit: {absentBreakdownDetail.sickDays} hari
+                              {absentBreakdownDetail.sick1Free > 0 && <span> · hari ke-1 gratis</span>}
+                              {absentBreakdownDetail.sick23Half > 0 && <span> · hari ke-{1+absentBreakdownDetail.sick1Free}–{1+absentBreakdownDetail.sick1Free+absentBreakdownDetail.sick23Half-1} = {formatRupiah(Math.round(absentBreakdownDetail.sick23Half * absentBreakdownDetail.dailyRate * 0.5))}</span>}
+                              {absentBreakdownDetail.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(absentBreakdownDetail.sick4Full * absentBreakdownDetail.dailyRate)}</span>}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">
+                      {Number(selectedPayroll.absent_deduction ?? 0) > 0 ? `-${formatRupiah(Number(selectedPayroll.absent_deduction))}` : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
                   {/* Kehilangan Barang dengan detail */}
                   <tr className="hover:bg-slate-50">
                     <td className="px-4 py-2.5 text-slate-700">
