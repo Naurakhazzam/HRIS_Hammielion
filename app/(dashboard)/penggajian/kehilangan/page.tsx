@@ -545,6 +545,7 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
                   <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Periode</th>
                   <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right">Total Kehilangan</th>
                   <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Catatan</th>
+                  <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -554,6 +555,18 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
                     <td className="px-4 py-2.5 text-slate-600">{MONTHS[h.period_month - 1]} {h.period_year}</td>
                     <td className="px-4 py-2.5 text-right font-semibold text-red-600">{fmtRp(h.total_loss_amount)}</td>
                     <td className="px-4 py-2.5 text-slate-400 text-xs">{h.notes ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Hapus data kehilangan ${(h.branches as any)?.name} ${MONTHS[h.period_month-1]} ${h.period_year}?`)) return
+                          await supabase.from('loss_monthly_inputs').delete().eq('id', h.id)
+                          fetchHistory()
+                        }}
+                        className="px-2.5 py-1 text-xs font-medium bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded-lg transition"
+                      >
+                        Hapus
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
