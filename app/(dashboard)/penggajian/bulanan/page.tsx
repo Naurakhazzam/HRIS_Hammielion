@@ -401,13 +401,12 @@ export default function PenggajianBulananPage() {
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, klRes, empRes, invRes, deductRes] = await Promise.all([
+    const [scRes, attRes, kpiRes, klRes, empRes, deductRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
-      supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, branch_id, positions(name), branches(name)').eq('id', empId).single(),
-      supabase.from('payrolls').select('inventory_loss_deduction, cashier_loss_deduction').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).maybeSingle(),
+      supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
       // Hitung potongan tidak hadir via DB function (4 hari gratis, sakit bertingkat, alpha 1.5x)
       supabase.rpc('calculate_attendance_deduction', { p_employee_id: empId, p_period_month: filterMonth, p_period_year: filterYear }),
     ])
@@ -421,6 +420,34 @@ export default function PenggajianBulananPage() {
     if (!sc) { showMessage('error', 'Komponen gaji belum diisi untuk karyawan ini. Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false); return null }
     if (!emp) { showMessage('error', 'Data karyawan tidak ditemukan.'); setBuildingPreview(false); return null }
 
+    // ── Hitung kehilangan barang & kerugian kasir dari sumber asli ──
+    const branchId = emp.branch_id
+    const positionId = emp.position_id
+
+    const [lossRes, shareRes, cashierEntryRes, cashierConfigRes] = await Promise.all([
+      supabase.from('loss_monthly_inputs').select('total_loss_amount').eq('branch_id', branchId).eq('period_month', filterMonth).eq('period_year', filterYear).maybeSingle(),
+      supabase.from('loss_employee_shares').select('employee_id, share_percent').eq('branch_id', branchId).eq('employee_id', empId).eq('is_active', true).order('created_at', { ascending: false }).limit(1),
+      supabase.from('cashier_loss_entries').select('amount').eq('branch_id', branchId).eq('period_month', filterMonth).eq('period_year', filterYear),
+      supabase.from('cashier_loss_configs').select('position_id').eq('branch_id', branchId).eq('is_active', true),
+    ])
+    const [lossConfigRes, kasirCountRes] = await Promise.all([
+      supabase.from('branch_loss_configs').select('company_coverage_percent').eq('branch_id', branchId).order('created_at', { ascending: false }).limit(1),
+      supabase.from('employees').select('id', { count: 'exact', head: true }).eq('branch_id', branchId).eq('is_active', true).in('position_id', (cashierConfigRes.data || []).map((c: any) => c.position_id)),
+    ])
+
+    const totalLoss        = Number(lossRes.data?.total_loss_amount ?? 0)
+    const companyPct       = Number(lossConfigRes.data?.[0]?.company_coverage_percent ?? 0)
+    const sharePct         = Number(shareRes.data?.[0]?.share_percent ?? 0)
+    const companyCover     = totalLoss * (companyPct / 100)
+    const employeeTotalLoss = totalLoss - companyCover
+    const invLoss          = Math.round((sharePct / 100) * employeeTotalLoss)
+
+    const kasirPositionIds = (cashierConfigRes.data || []).map((c: any) => c.position_id)
+    const isKasir          = kasirPositionIds.includes(positionId)
+    const totalKasir       = (cashierEntryRes.data || []).reduce((s: number, e: any) => s + Number(e.amount), 0)
+    const kasirCount       = kasirCountRes.count ?? 1
+    const cashLoss         = isKasir && kasirCount > 0 ? Math.round(totalKasir / kasirCount) : 0
+
     const base     = Number(sc.base_salary ?? 0)
     const pos      = Number(sc.position_allowance ?? 0)
     const meal     = Number(sc.meal_allowance ?? 0)
@@ -433,8 +460,6 @@ export default function PenggajianBulananPage() {
     const kpi      = Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
     const loyalitas = Number((emp as any).loyalitas_per_month ?? 0)
     const saldo    = Number(klRes.data?.current_balance ?? 0)
-    const invLoss  = Number(invRes.data?.inventory_loss_deduction ?? 0)
-    const cashLoss = Number(invRes.data?.cashier_loss_deduction ?? 0)
 
     // Potongan tidak hadir dari DB function (4 hari gratis, sakit bertingkat, alpha 1.5x)
     const deductRow = (deductRes.data as any)?.[0] ?? null
@@ -830,6 +855,94 @@ export default function PenggajianBulananPage() {
 
   // ─── Generate tahun pilihan (3 tahun ke belakang) ─────────────────────────
   const yearOptions = Array.from({ length: 4 }, (_, i) => today.getFullYear() - i)
+
+  // ─── Print Slip ke jendela baru ───────────────────────────────────────────
+  function printSlip(p: typeof selectedPayroll) {
+    if (!p) return
+    const fmtR = (n: number) => n.toLocaleString('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 })
+    const statusLabel = STATUS_CONFIG[p.status]?.label ?? p.status
+    const rows: [string, number, boolean][] = [
+      ['Gaji Pokok',          Number(p.base_salary), false],
+      ['Tunjangan Jabatan',   Number(p.position_allowance), false],
+      ['Tunjangan Tetap',     Number(p.meal_allowance), false],
+      ['Upah Lembur',         Number(p.overtime_total), false],
+      ['Bonus KPI',           Number(p.kpi_bonus), false],
+      ['Bonus Kondisional',   Number((p as any).conditional_bonus ?? 0), false],
+      ['Potongan Keterlambatan', Number(p.late_deduction), true],
+      ['Potongan Kasbon',     Number(p.kasbon_deduction), true],
+      ['Tunjangan Loyalitas', Number(p.loyalitas_deduction ?? 0), true],
+      ['Kerugian Kasir',      Number(p.cashier_loss_deduction ?? 0), true],
+      ['Kehilangan Barang',   Number(p.inventory_loss_deduction ?? 0), true],
+      [`Tidak Hadir (${p.absent_days ?? 0} hari)`, Number(p.absent_deduction ?? 0), true],
+    ]
+    const incomeRows = rows.filter(r => !r[2])
+    const dedRows    = rows.filter(r => r[2])
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Slip Gaji - ${p.employee?.full_name}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #1e293b; background: white; }
+  .wrap { width: 680px; margin: 0 auto; padding: 32px 40px; }
+  .kop { text-align: center; border-bottom: 2px solid #1e293b; padding-bottom: 14px; margin-bottom: 18px; }
+  .kop h1 { font-size: 18px; font-weight: 800; letter-spacing: 1px; }
+  .kop p { font-size: 11px; color: #64748b; margin-top: 2px; }
+  .status-badge { display: inline-block; margin-top: 6px; padding: 2px 12px; border-radius: 99px; font-size: 10px; font-weight: 700; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; margin-bottom: 20px; font-size: 11.5px; }
+  .info-grid .row { display: flex; gap: 6px; }
+  .info-grid .lbl { color: #64748b; width: 70px; flex-shrink: 0; }
+  .info-grid .val { font-weight: 600; color: #1e293b; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11.5px; }
+  th { background: #f8fafc; padding: 7px 12px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #64748b; border-bottom: 1px solid #e2e8f0; }
+  th:last-child { text-align: right; }
+  td { padding: 7px 12px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+  td:last-child { text-align: right; font-weight: 600; }
+  .section-label td { background: #f0fdf4; color: #16a34a; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 5px 12px; }
+  .section-label.ded td { background: #fff5f5; color: #dc2626; }
+  .zero { color: #cbd5e1 !important; font-weight: 400 !important; }
+  .ded-val { color: #dc2626 !important; }
+  .bruto-row td { background: #f8fafc; font-weight: 700; font-size: 12px; border-top: 2px solid #e2e8f0; }
+  .bersih-row { background: #1d4ed8; color: white; border-radius: 10px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+  .bersih-row .label { font-size: 13px; font-weight: 700; }
+  .bersih-row .val { font-size: 18px; font-weight: 800; }
+  .footer { margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 10px; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style></head><body>
+<div class="wrap">
+  <div class="kop">
+    <h1>HAMMIELION MANAGEMENT</h1>
+    <p>Slip Gaji Karyawan Tetap</p>
+    <span class="status-badge">${statusLabel}</span>
+  </div>
+  <div class="info-grid">
+    <div class="row"><span class="lbl">Nama</span><span class="val">: ${p.employee?.full_name ?? '—'}</span></div>
+    <div class="row"><span class="lbl">Jabatan</span><span class="val">: ${p.employee?.positions?.name ?? '—'}</span></div>
+    <div class="row"><span class="lbl">Cabang</span><span class="val">: ${p.employee?.branches?.name ?? '—'}</span></div>
+    <div class="row"><span class="lbl">Periode</span><span class="val">: ${getPeriodLabel(p.period_month, p.period_year)}</span></div>
+  </div>
+  <table>
+    <thead><tr><th>Komponen</th><th>Jumlah</th></tr></thead>
+    <tbody>
+      <tr class="section-label"><td colspan="2">Pendapatan</td></tr>
+      ${incomeRows.map(([lbl, val]) => `<tr><td>${lbl}</td><td class="${val > 0 ? '' : 'zero'}">${val > 0 ? fmtR(val) : '—'}</td></tr>`).join('')}
+      <tr class="section-label ded"><td colspan="2">Potongan</td></tr>
+      ${dedRows.map(([lbl, val]) => `<tr><td>${lbl}</td><td class="${val > 0 ? 'ded-val' : 'zero'}">${val > 0 ? '-' + fmtR(val) : '—'}</td></tr>`).join('')}
+      <tr class="bruto-row"><td>Total Bruto</td><td>${fmtR(Number(p.gross_total))}</td></tr>
+    </tbody>
+  </table>
+  <div class="bersih-row">
+    <span class="label">Gaji Bersih</span>
+    <span class="val">${fmtR(Number(p.net_total))}</span>
+  </div>
+  <div class="footer">
+    <span>Digenerate: ${new Date(p.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
+    ${p.approved_by && (p as any).approver?.full_name ? `<span>Disetujui: <strong>${(p as any).approver.full_name}</strong></span>` : ''}
+  </div>
+</div>
+<script>window.onload = () => { window.print(); window.onafterprint = () => window.close(); }</script>
+</body></html>`
+    const win = window.open('', '_blank', 'width=780,height=900')
+    if (win) { win.document.write(html); win.document.close() }
+  }
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -1240,7 +1353,7 @@ export default function PenggajianBulananPage() {
             <h2 className="text-base font-bold text-slate-700">Detail Slip Gaji</h2>
             <div className="flex gap-2">
               <button
-                onClick={() => window.print()}
+                onClick={() => printSlip(selectedPayroll)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium rounded-lg transition"
               >
                 🖨️ Cetak
@@ -1332,6 +1445,10 @@ export default function PenggajianBulananPage() {
                               {lateRate > 0 && <span>× {formatRupiah(lateRate)}/mnt = <span className="text-red-400">{formatRupiah(d.deduction)}</span></span>}
                             </div>
                           ))}
+                          <div className="text-xs text-slate-500 font-semibold flex gap-2 mt-1 pt-1 border-t border-slate-100">
+                            <span>└</span>
+                            <span>Total: {lateDetails.reduce((s, d) => s + d.late_minutes, 0)} menit</span>
+                          </div>
                         </div>
                       )}
                       {!loadingLate && lateDetails.length === 0 && Number(selectedPayroll.late_deduction) > 0 && (
@@ -1690,23 +1807,14 @@ export default function PenggajianBulananPage() {
       </div>
     )}
 
-    {/* Print styles — sembunyikan elemen lain saat print */}
+    {/* Print styles — hanya untuk rekap tabel */}
     <style>{`
       @media print {
         nav, aside { display: none !important; }
         main { padding: 0 !important; overflow: visible !important; }
         .max-w-6xl { max-width: none !important; }
         .print-hide { display: none !important; }
-        #slip-print-area {
-          position: fixed !important;
-          inset: 0 !important;
-          z-index: 9999 !important;
-          background: white !important;
-          overflow: auto !important;
-        }
-        #rekap-print-area {
-          display: block !important;
-        }
+        #rekap-print-area { display: block !important; }
       }
     `}</style>
     </>
