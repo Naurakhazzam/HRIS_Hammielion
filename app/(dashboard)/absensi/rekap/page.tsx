@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
 type Employee = { id: string; full_name: string; branch_id: string; department_id: string }
+type WorkSchedule = { id: string; name: string; check_in_time: string; check_out_time: string; applies_to_dept: string }
 type Attendance = {
   id: string
   date: string
@@ -16,7 +17,7 @@ type Attendance = {
   overtime_hours: number
   status: string
   notes: string | null
-  employees: { full_name: string; branches: { name: string }; departments: { name: string } }
+  employees: { full_name: string; branch_id: string; department_id: string; branches: { name: string }; departments: { name: string } }
 }
 
 export default function RekapAbsensiPage() {
@@ -24,6 +25,7 @@ export default function RekapAbsensiPage() {
   const [branches, setBranches] = useState<Branch[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [schedules, setSchedules] = useState<WorkSchedule[]>([])
   
   const [loading, setLoading] = useState(true)
   
@@ -60,15 +62,27 @@ export default function RekapAbsensiPage() {
   }, [filterMonth, filterBranch, filterDept, filterEmployee])
 
   async function fetchReferenceData() {
-    const [bRes, dRes, eRes] = await Promise.all([
+    const [bRes, dRes, eRes, sRes] = await Promise.all([
       supabase.from('branches').select('id, name').order('name'),
       supabase.from('departments').select('id, name').order('name'),
-      supabase.from('employees').select('id, full_name, branch_id, department_id').eq('is_active', true).order('full_name')
+      supabase.from('employees').select('id, full_name, branch_id, department_id').eq('is_active', true).order('full_name'),
+      supabase.from('work_schedules').select('id, name, check_in_time, check_out_time, applies_to_dept')
     ])
-    
     if (bRes.data) setBranches(bRes.data)
     if (dRes.data) setDepartments(dRes.data)
     if (eRes.data) setEmployees(eRes.data)
+    if (sRes.data) setSchedules(sRes.data)
+  }
+
+  // Cari jadwal berdasarkan department_id karyawan
+  function getScheduleForDept(deptId: string): WorkSchedule | null {
+    return schedules.find(s => s.applies_to_dept === deptId) ?? null
+  }
+
+  // Format jam: "07:00:00" → "07:00"
+  function fmtTime(t: string | null | undefined): string {
+    if (!t) return '—'
+    return t.substring(0, 5)
   }
 
   async function fetchAttendances() {
@@ -79,7 +93,7 @@ export default function RekapAbsensiPage() {
         id, date, check_in, check_out, late_minutes, overtime_hours, status, notes,
         employees!inner(full_name, branch_id, department_id, branches(name), departments(name))
       `)
-      .order('date', { ascending: false })
+      .order('date', { ascending: true })
       .order('employees(full_name)')
 
     // Filter By Period — cut-off sistem: 26 bulan lalu s/d 25 bulan ini
@@ -406,6 +420,7 @@ export default function RekapAbsensiPage() {
               <tr className="bg-white border-b border-slate-200">
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Karyawan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Jadwal</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Masuk</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Pulang</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Terlambat</th>
@@ -416,21 +431,31 @@ export default function RekapAbsensiPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat rekap absensi...</td>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat rekap absensi...</td>
                 </tr>
               ) : attendances.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data absensi untuk filter ini.</td>
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data absensi untuk filter ini.</td>
                 </tr>
               ) : (
-                attendances.map((att) => (
+                attendances.map((att) => {
+                  const sched = getScheduleForDept((att.employees as any)?.department_id)
+                  return (
                   <tr key={att.id} className="hover:bg-slate-50 transition">
-                    <td className="px-4 py-3 text-sm font-semibold text-slate-800">
-                      {new Date(att.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}
+                    <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">
+                      {new Date(att.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short' })}
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-sm font-medium text-slate-800">{att.employees?.full_name}</div>
                       <div className="text-xs text-slate-500">{att.employees?.branches?.name} &bull; {att.employees?.departments?.name}</div>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {sched ? (
+                        <div>
+                          <div className="text-xs font-semibold text-blue-700">{sched.name}</div>
+                          <div className="text-xs text-slate-400">{fmtTime(sched.check_in_time)} – {fmtTime(sched.check_out_time)}</div>
+                        </div>
+                      ) : <span className="text-slate-300 text-xs">—</span>}
                     </td>
                     <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">{formatTimeStr(att.check_in)}</td>
                     <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">{formatTimeStr(att.check_out)}</td>
@@ -454,7 +479,8 @@ export default function RekapAbsensiPage() {
                       </span>
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>
