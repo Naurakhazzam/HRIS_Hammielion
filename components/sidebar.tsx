@@ -42,6 +42,7 @@ const adminNavItems = [
       { name: 'Setup Kriteria', href: '/kpi/setup' },
     ]
   },
+  { name: 'Ranking Disiplin', href: '/ranking', icon: '🏆' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
   { name: 'Laporan', href: '/laporan', icon: '📄' },
   {
