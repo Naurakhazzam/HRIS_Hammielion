@@ -170,6 +170,7 @@ export default function PenggajianBulananPage() {
     loyalitasDed: number; latDed: number; latMinutes: number; latRate: number
     kasbonSaldo: number; kasbonDed: number
     absentDays: number; absentDed: number; absentRatePerDay: number
+    absentBreakdown: { dailyRate: number; nonHadirDays: number; freeDays: number; deductedDays: number; alphaDays: number; izinDays: number; liburExtraDays: number; sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number } | null
     invLoss: number; cashierLoss: number
     gross: number; net: number
   }
@@ -177,7 +178,8 @@ export default function PenggajianBulananPage() {
   const [createStep, setCreateStep]         = useState<1|2|3>(1)
   const [availableEmps, setAvailableEmps]   = useState<{id:string;full_name:string;employee_code:string;positions:{name:string}|null;branches:{name:string}|null}[]>([])
   const [selectedEmpId, setSelectedEmpId]   = useState('')
-  const [createAbsent, setCreateAbsent]     = useState(0)
+  const [unclassifiedDays, setUnclassifiedDays] = useState<{missing_date: string}[]>([])
+  const [checkingUnclassified, setCheckingUnclassified] = useState(false)
   const [createKasbon, setCreateKasbon]     = useState(0)
   const [slipPreview, setSlipPreview]       = useState<SlipPreview | null>(null)
   const [buildingPreview, setBuildingPreview] = useState(false)
@@ -200,6 +202,20 @@ export default function PenggajianBulananPage() {
   useEffect(() => {
     fetchPayrolls()
   }, [filterMonth, filterYear, filterBranch])
+
+  // Cek hari belum terklasifikasi saat karyawan dipilih di modal buat slip
+  useEffect(() => {
+    if (!selectedEmpId || !createModal) { setUnclassifiedDays([]); return }
+    setCheckingUnclassified(true)
+    supabase.rpc('get_unclassified_days', {
+      p_employee_id: selectedEmpId,
+      p_period_month: filterMonth,
+      p_period_year: filterYear,
+    }).then(({ data }) => {
+      setUnclassifiedDays((data as {missing_date: string}[]) || [])
+      setCheckingUnclassified(false)
+    })
+  }, [selectedEmpId, createModal])
 
   // ─── Fetch functions ───────────────────────────────────────────────────────
 
@@ -354,7 +370,7 @@ export default function PenggajianBulananPage() {
   // ─── Buat Slip Per Karyawan ────────────────────────────────────────────────────
 
   async function openCreateModal() {
-    setCreateStep(1); setSelectedEmpId(''); setCreateAbsent(0); setCreateKasbon(0); setSlipPreview(null)
+    setCreateStep(1); setSelectedEmpId(''); setUnclassifiedDays([]); setCreateKasbon(0); setSlipPreview(null)
     // Ambil karyawan permanent aktif yang belum punya slip bulan ini
     const { data: emps } = await supabase
       .from('employees')
@@ -368,20 +384,20 @@ export default function PenggajianBulananPage() {
     setCreateModal(true)
   }
 
-  async function buildSlipPreview(empId: string, absentDays: number, kasbonDed: number) {
+  async function buildSlipPreview(empId: string, kasbonDed: number) {
     setBuildingPreview(true)
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, klRes, empRes, invRes, alphaRes] = await Promise.all([
+    const [scRes, attRes, kpiRes, klRes, empRes, invRes, deductRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
       supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, branch_id, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('payrolls').select('inventory_loss_deduction, cashier_loss_deduction').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).maybeSingle(),
-      // Auto-count hari alpha dari rekap absensi
-      supabase.from('attendances').select('date', { count: 'exact', head: true }).eq('employee_id', empId).eq('status', 'absent').gte('date', firstDay).lte('date', lastDay),
+      // Hitung potongan tidak hadir via DB function (4 hari gratis, sakit bertingkat, alpha 1.5x)
+      supabase.rpc('calculate_attendance_deduction', { p_employee_id: empId, p_period_month: filterMonth, p_period_year: filterYear }),
     ])
 
     const sc   = scRes.data?.[0]
@@ -392,12 +408,6 @@ export default function PenggajianBulananPage() {
     if (empRes.error) { showMessage('error', 'Gagal ambil data karyawan: ' + empRes.error.message); setBuildingPreview(false); return null }
     if (!sc) { showMessage('error', 'Komponen gaji belum diisi untuk karyawan ini. Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false); return null }
     if (!emp) { showMessage('error', 'Data karyawan tidak ditemukan.'); setBuildingPreview(false); return null }
-
-    // Auto-count hari alpha dari rekap absensi, override input manual jika ada data
-    const autoAlphaDays = alphaRes.count ?? 0
-    if (autoAlphaDays > 0 && absentDays === 0) {
-      absentDays = autoAlphaDays
-    }
 
     const base     = Number(sc.base_salary ?? 0)
     const pos      = Number(sc.position_allowance ?? 0)
@@ -414,9 +424,24 @@ export default function PenggajianBulananPage() {
     const invLoss  = Number(invRes.data?.inventory_loss_deduction ?? 0)
     const cashLoss = Number(invRes.data?.cashier_loss_deduction ?? 0)
 
-    // Potongan tidak hadir: (base + pos + meal) ÷ 26 × absentDays
-    const absentRatePerDay = Math.round((base + pos + meal) / 26)
-    const absentDed = absentRatePerDay * absentDays
+    // Potongan tidak hadir dari DB function (4 hari gratis, sakit bertingkat, alpha 1.5x)
+    const deductRow = (deductRes.data as any)?.[0] ?? null
+    const absentDed = Number(deductRow?.total_deduction ?? 0)
+    const absentDays = Number(deductRow?.non_hadir_days ?? 0)
+    const absentRatePerDay = Number(deductRow?.daily_rate ?? Math.round((base + pos + meal) / 26))
+    const absentBreakdown = deductRow ? {
+      dailyRate:      Number(deductRow.daily_rate),
+      nonHadirDays:   Number(deductRow.non_hadir_days),
+      freeDays:       Number(deductRow.free_days_used),
+      deductedDays:   Number(deductRow.deducted_days),
+      alphaDays:      Number(deductRow.alpha_days),
+      izinDays:       Number(deductRow.izin_days),
+      liburExtraDays: Number(deductRow.libur_extra_days),
+      sickDays:       Number(deductRow.sick_days),
+      sick1Free:      Number(deductRow.sick_day_1_free),
+      sick23Half:     Number(deductRow.sick_day_2_3_half),
+      sick4Full:      Number(deductRow.sick_day_4plus_full),
+    } : null
 
     const gross = base + pos + meal + otTotal + kpi
     const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
@@ -427,7 +452,7 @@ export default function PenggajianBulananPage() {
       base, pos, meal, otTotal, kpiBonus: kpi,
       loyalitasDed: loyalitas, latDed, latMinutes: latMins, latRate,
       kasbonSaldo: saldo, kasbonDed,
-      absentDays, absentDed, absentRatePerDay,
+      absentDays, absentDed, absentRatePerDay, absentBreakdown,
       invLoss, cashierLoss: cashLoss,
       gross, net,
     }
@@ -1508,22 +1533,29 @@ export default function PenggajianBulananPage() {
                   <div className="space-y-3">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Checklist Validasi</p>
 
-                    {/* Hari tidak hadir */}
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-slate-700">⚠️ Hari Tidak Hadir (Alpha)</p>
-                          <p className="text-xs text-slate-500">Potong = (Gaji Pokok + Tunjangan) ÷ 26 × hari</p>
-                        </div>
-                        <input type="number" min="0" max="26" value={createAbsent}
-                          onChange={e => setCreateAbsent(Math.max(0, parseInt(e.target.value) || 0))}
-                          className="w-16 px-2 py-1.5 border border-amber-300 rounded text-sm text-center font-bold focus:ring-2 focus:ring-amber-400 outline-none" />
+                    {/* Cek hari belum terklasifikasi */}
+                    {checkingUnclassified ? (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-400 text-center">
+                        Memeriksa rekap absensi...
                       </div>
-                      <p className="text-xs text-amber-700">
-                        📋 Data rekap absensi: akan otomatis terbaca saat klik Preview.
-                        Anda bisa override angka di atas jika perlu.
-                      </p>
-                    </div>
+                    ) : unclassifiedDays.length > 0 ? (
+                      <div className="p-3 bg-red-50 border border-red-300 rounded-lg space-y-2">
+                        <p className="text-sm font-semibold text-red-700">🚫 Ada {unclassifiedDays.length} hari belum diklasifikasi</p>
+                        <p className="text-xs text-red-600">Slip tidak bisa dibuat. Isi dulu keterangan hari-hari berikut di menu <strong>Rekap Absensi</strong>:</p>
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {unclassifiedDays.map(d => (
+                            <span key={d.missing_date} className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">
+                              {new Date(d.missing_date + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                        <p className="text-sm font-medium text-green-700">✅ Semua hari sudah terklasifikasi</p>
+                        <p className="text-xs text-green-600 mt-0.5">Potongan tidak hadir akan dihitung otomatis (4 hari gratis, sakit bertingkat, alpha 1.5×).</p>
+                      </div>
+                    )}
 
                     {/* Kasbon */}
                     <div className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-lg">
@@ -1542,9 +1574,9 @@ export default function PenggajianBulananPage() {
 
                 <div className="flex justify-end gap-3 pt-2">
                   <button onClick={() => setCreateModal(false)} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
-                  <button disabled={!selectedEmpId || buildingPreview}
+                  <button disabled={!selectedEmpId || buildingPreview || checkingUnclassified || unclassifiedDays.length > 0}
                     onClick={async () => {
-                      const preview = await buildSlipPreview(selectedEmpId, createAbsent, createKasbon)
+                      const preview = await buildSlipPreview(selectedEmpId, createKasbon)
                       if (preview) setCreateStep(2)
                     }}
                     className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
@@ -1594,9 +1626,14 @@ export default function PenggajianBulananPage() {
                       <span className="text-red-500 font-medium">-{formatRupiah(Number(v))}</span>
                     </div>
                   ))}
-                  {slipPreview.absentDays > 0 && (
-                    <div className="px-4 py-1.5 text-xs text-slate-400 border-t border-slate-100">
-                      └ {formatRupiah(slipPreview.absentRatePerDay)}/hari × {slipPreview.absentDays} hari
+                  {slipPreview.absentBreakdown && slipPreview.absentBreakdown.nonHadirDays > 0 && (
+                    <div className="px-4 py-2 border-t border-slate-100 text-xs text-slate-400 space-y-0.5">
+                      <div>└ Gaji harian: {formatRupiah(slipPreview.absentBreakdown.dailyRate)} · Total tidak hadir: {slipPreview.absentBreakdown.nonHadirDays} hari</div>
+                      <div>└ 4 hari libur gratis, {slipPreview.absentBreakdown.deductedDays} hari kena potongan</div>
+                      {slipPreview.absentBreakdown.alphaDays > 0 && <div className="text-red-400">└ Alpha: {slipPreview.absentBreakdown.alphaDays} hari × 1.5× = {formatRupiah(slipPreview.absentBreakdown.alphaDays * slipPreview.absentBreakdown.dailyRate * 1.5)}</div>}
+                      {slipPreview.absentBreakdown.izinDays > 0 && <div>└ Izin: {slipPreview.absentBreakdown.izinDays} hari × 1×</div>}
+                      {slipPreview.absentBreakdown.liburExtraDays > 0 && <div>└ Libur tambahan: {slipPreview.absentBreakdown.liburExtraDays} hari × 1×</div>}
+                      {slipPreview.absentBreakdown.sickDays > 0 && <div>└ Sakit: {slipPreview.absentBreakdown.sick1Free}h gratis · {slipPreview.absentBreakdown.sick23Half}h ½× · {slipPreview.absentBreakdown.sick4Full}h penuh</div>}
                     </div>
                   )}
                 </div>
