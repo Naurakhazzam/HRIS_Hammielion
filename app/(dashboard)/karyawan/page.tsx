@@ -563,7 +563,7 @@ export default function KaryawanPage() {
       {/* Modal Detail */}
       {detailEmployee && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-start justify-center p-4 overflow-y-auto"
-          onClick={e => { if (e.target === e.currentTarget) setDetailEmployee(null) }}>
+>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4">
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
               <h2 className="text-base font-bold text-slate-700">Detail Karyawan</h2>
@@ -636,7 +636,7 @@ export default function KaryawanPage() {
       {/* Modal Edit */}
       {editEmployee && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-start justify-center p-4 overflow-y-auto"
-          onClick={e => { if (e.target === e.currentTarget) setEditEmployee(null) }}>
+>
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-4xl my-4">
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
               <h2 className="text-lg font-semibold text-slate-800">Edit Karyawan — {editEmployee.full_name}</h2>

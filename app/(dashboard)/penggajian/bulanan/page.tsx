@@ -1562,7 +1562,6 @@ export default function PenggajianBulananPage() {
     {selectedPayroll && (
       <div
         className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto"
-        onClick={e => { if (e.target === e.currentTarget) setSelectedPayroll(null) }}
       >
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4" id="slip-print-area">
 
@@ -1843,7 +1842,7 @@ export default function PenggajianBulananPage() {
     {/* ─── Modal Bonus Kondisional ─── */}
     {bonusModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-        onClick={e => { if (e.target === e.currentTarget) setBonusModal(null) }}>
+>
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
           <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
             <div>
@@ -1914,7 +1913,7 @@ export default function PenggajianBulananPage() {
     {/* ─── Modal Buat Slip Per Karyawan ─── */}
     {createModal && (
       <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto"
-        onClick={e => { if (e.target === e.currentTarget) setCreateModal(false) }}>
+>
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-4">
 
           {/* Header */}

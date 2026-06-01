@@ -242,7 +242,7 @@ export default function PortalSlipGajiPage() {
       {/* Modal Detail Slip */}
       {selectedPayroll && (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto"
-          onClick={e => { if (e.target === e.currentTarget) setSelectedPayroll(null) }}>
+>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4">
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
               <h2 className="text-base font-bold text-slate-700">Detail Slip Gaji</h2>

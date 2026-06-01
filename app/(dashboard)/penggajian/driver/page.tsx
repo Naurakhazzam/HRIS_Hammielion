@@ -597,7 +597,6 @@ export default function PenggajianDriverPage() {
     {/* Modal Detail Driver */}
     {detailDriver && (
       <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto"
-        onClick={e => { if (e.target === e.currentTarget) setDetailDriver(null) }}
       >
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4" id="detail-driver-print-area">
           <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200 modal-hide-on-print">

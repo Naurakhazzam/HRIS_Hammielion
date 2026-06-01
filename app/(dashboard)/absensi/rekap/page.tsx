@@ -595,7 +595,7 @@ export default function RekapAbsensiPage() {
       </div>
 
       {editModal && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-black/50 overflow-y-auto" onClick={e=>{if(e.target===e.currentTarget)setEditModal(null)}}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-black/50 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6">
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
               <div>
@@ -678,7 +678,7 @@ export default function RekapAbsensiPage() {
       )}
 
       {absenModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={e=>{if(e.target===e.currentTarget)setAbsenModal(false)}}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
               <div>
