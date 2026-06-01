@@ -1084,7 +1084,7 @@ export default function PenggajianBulananPage() {
          </div>` : ''
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Slip Gaji - ${p.employee?.full_name}</title>
+<title>Slip Gaji_${p.employee?.full_name}_${MONTHS[p.period_month - 1]} ${p.period_year}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; font-size: 12px; color: #1e293b; background: white; }
