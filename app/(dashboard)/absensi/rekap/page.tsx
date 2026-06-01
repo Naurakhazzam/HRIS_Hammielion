@@ -153,7 +153,11 @@ export default function RekapAbsensiPage() {
   }
 
   function openEditModal(att: Attendance) {
-    const toTime = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''
+    const toTime = (iso: string | null) => {
+      if (!iso) return ''
+      const d = new Date(iso)
+      return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+    }
     setEditModal(att)
     setEditForm({
       check_in: toTime(att.check_in),
@@ -171,22 +175,34 @@ export default function RekapAbsensiPage() {
     setEditLogs([])
     const { data } = await supabase
       .from('attendance_edit_logs')
-      .select(`*, editor:edited_by_user_id(employee_id)`)
+      .select('*')
       .eq('attendance_id', attendanceId)
       .order('created_at', { ascending: false })
 
     if (data && data.length > 0) {
-      // Ambil nama editor dari employees
-      const empIds = data.map((d: any) => d.editor?.employee_id).filter(Boolean)
+      // Ambil user_id → employee_id dari tabel users
+      const userIds = [...new Set(data.map((d: any) => d.edited_by_user_id))]
+      const { data: users } = await supabase
+        .from('users')
+        .select('id, employee_id')
+        .in('id', userIds)
+
+      const empIds = (users || []).map((u: any) => u.employee_id).filter(Boolean)
       const { data: emps } = await supabase.from('employees').select('id, full_name').in('id', empIds)
+
       const empMap: Record<string, string> = {}
       ;(emps || []).forEach((e: any) => { empMap[e.id] = e.full_name })
 
+      const userEmpMap: Record<string, string> = {}
+      ;(users || []).forEach((u: any) => { userEmpMap[u.id] = empMap[u.employee_id] ?? 'Unknown' })
+
       const logs: EditLog[] = data.map((d: any) => ({
         ...d,
-        editor: { full_name: empMap[d.editor?.employee_id] ?? 'Unknown' }
+        editor: { full_name: userEmpMap[d.edited_by_user_id] ?? 'Unknown' }
       }))
       setEditLogs(logs)
+    } else {
+      setEditLogs([])
     }
     setLoadingLogs(false)
   }
