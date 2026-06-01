@@ -53,6 +53,7 @@ type PayrollRow = {
     full_name: string
     employee_code: string
     branch_id: string
+    join_date: string | null
     branches: { name: string } | null
     positions: { name: string } | null
   } | null
@@ -123,7 +124,7 @@ export default function LaporanPage() {
         inventory_loss_deduction, cashier_loss_deduction, loyalitas_deduction,
         gross_total, net_total, status,
         employee:employees!payrolls_employee_id_fkey(
-          full_name, employee_code, branch_id,
+          full_name, employee_code, branch_id, join_date,
           branches(name), positions(name)
         )
       `)
@@ -153,10 +154,10 @@ export default function LaporanPage() {
     })
     setBonusMap(bMap)
 
-    // 3. Absensi summary
+    // 3. Absensi summary — fetch dengan notes untuk exclude "Belum Masuk (Training)"
     const { data: attData } = await supabase
       .from('attendances')
-      .select('employee_id, status, date')
+      .select('employee_id, status, date, notes')
       .in('employee_id', empIds)
       .gte('date', firstDay)
       .lte('date', lastDay)
@@ -164,15 +165,19 @@ export default function LaporanPage() {
     const aMap: Record<string, AttendanceSummary> = {}
     empIds.forEach(id => { aMap[id] = { employee_id: id, hadir: 0, tidak_hadir: 0, libur: 0, sakit: 0, izin: 0 } })
 
-    // Hitung semua tanggal dalam periode untuk auto-libur
-    const { firstDay: fd, lastDay: ld } = getPeriodDates(filterMonth, filterYear)
-    const periodDates: Set<string> = new Set()
-    const cur = new Date(fd + 'T00:00:00')
-    const endDate = new Date(ld + 'T00:00:00')
+    // Buat daftar semua tanggal dalam periode (format lokal, bukan toISOString agar tidak geser timezone)
+    const pad2 = (n: number) => String(n).padStart(2, '0')
+    const allPeriodDates: string[] = []
+    const cur = new Date(firstDay + 'T12:00:00')  // jam 12 siang → aman dari timezone shift
+    const endDate = new Date(lastDay + 'T12:00:00')
     while (cur <= endDate) {
-      periodDates.add(cur.toISOString().split('T')[0])
+      allPeriodDates.push(`${cur.getFullYear()}-${pad2(cur.getMonth()+1)}-${pad2(cur.getDate())}`)
       cur.setDate(cur.getDate() + 1)
     }
+
+    // Map join_date per employee dari data payroll
+    const joinDateMap: Record<string, string | null> = {}
+    rows.forEach(p => { joinDateMap[p.employee_id] = (p.employee as any)?.join_date ?? null })
 
     // Kumpulkan tanggal per karyawan yang punya record
     const recordedDates: Record<string, Set<string>> = {}
@@ -190,9 +195,14 @@ export default function LaporanPage() {
       else if (a.status === 'permission') aMap[a.employee_id].izin++
     })
 
-    // Auto-libur: hari dalam periode yang tidak punya record (sama dengan rekap, maks 4 libur, sisanya izin)
+    // Auto-libur per karyawan: hari kosong (tanpa record) dalam periode
+    // Exclude hari sebelum join_date — sama persis dengan logika rekap absensi
     empIds.forEach(id => {
-      const emptyCount = [...periodDates].filter(d => !recordedDates[id]?.has(d)).length
+      const joinDate = joinDateMap[id]
+      const emptyCount = allPeriodDates.filter(d => {
+        if (joinDate && d < joinDate) return false  // sebelum bergabung — abaikan
+        return !recordedDates[id]?.has(d)
+      }).length
       const autoLibur = Math.min(emptyCount, 4)
       const autoIzin  = Math.max(emptyCount - 4, 0)
       aMap[id].libur += autoLibur

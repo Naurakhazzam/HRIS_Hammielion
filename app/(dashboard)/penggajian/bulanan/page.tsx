@@ -440,10 +440,10 @@ export default function PenggajianBulananPage() {
 
     const [scRes, attRes, kpiRes, klRes, empRes, loyBalRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1),
-      supabase.from('attendances').select('date, status, overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
+      supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
-      supabase.from('employees').select('full_name, employee_code, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('employees').select('full_name, employee_code, join_date, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
     ])
 
