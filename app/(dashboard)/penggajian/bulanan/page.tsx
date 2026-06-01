@@ -578,9 +578,20 @@ export default function PenggajianBulananPage() {
       sick4Full,
     }
 
-    // Bonus kondisional — hitung dari state checklist di step 1
-    const conditionalBonus = createBonusCriteria
-      .filter(c => createBonusChecked[c.id])
+    // Bonus kondisional — fetch langsung dari DB (hindari race condition dengan state)
+    const { data: freshCriteria } = await supabase
+      .from('employee_bonus_criteria')
+      .select('*')
+      .eq('employee_id', empId)
+      .eq('is_active', true)
+    const latestCriteria = (freshCriteria as BonusCriteria[]) || []
+    // Sync state UI agar tampilan checklist ikut update
+    setCreateBonusCriteria(latestCriteria)
+    const latestChecked: Record<string, boolean> = {}
+    latestCriteria.forEach(c => { latestChecked[c.id] = createBonusChecked[c.id] ?? true })
+    setCreateBonusChecked(latestChecked)
+    const conditionalBonus = latestCriteria
+      .filter(c => latestChecked[c.id])
       .reduce((s, c) => s + Number(c.nominal_amount), 0)
 
     const gross = base + pos + meal + otTotal + kpi + loyAutoRelease + conditionalBonus
