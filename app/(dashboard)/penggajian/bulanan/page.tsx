@@ -255,12 +255,13 @@ export default function PenggajianBulananPage() {
       .eq('employee_id', selectedEmpId)
       .eq('is_active', true)
       .order('created_at')
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) { console.error('Gagal fetch bonus criteria:', error); return }
         const criteria = (data as BonusCriteria[]) || []
         setCreateBonusCriteria(criteria)
-        // Cek apakah sudah ada assessment bulan ini (edit slip case)
+        // Default: semua kriteria aktif langsung dicentang
         const initChecked: Record<string, boolean> = {}
-        criteria.forEach(c => { initChecked[c.id] = false })
+        criteria.forEach(c => { initChecked[c.id] = true })
         setCreateBonusChecked(initChecked)
       })
   }, [selectedEmpId, createModal])
