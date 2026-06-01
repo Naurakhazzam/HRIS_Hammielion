@@ -462,7 +462,7 @@ export default function PenggajianBulananPage() {
     const [lossRes, shareRes, cashierEntryRes, cashierConfigRes] = await Promise.all([
       supabase.from('loss_monthly_inputs').select('total_loss_amount').eq('branch_id', branchId).eq('period_month', filterMonth).eq('period_year', filterYear).maybeSingle(),
       supabase.from('loss_employee_shares').select('employee_id, share_percent').eq('branch_id', branchId).eq('employee_id', empId).eq('is_active', true).order('created_at', { ascending: false }).limit(1),
-      supabase.from('cashier_loss_entries').select('amount').eq('branch_id', branchId).eq('period_month', filterMonth).eq('period_year', filterYear),
+      supabase.from('cashier_loss_entries').select('amount, employee_id').eq('branch_id', branchId).eq('period_month', filterMonth).eq('period_year', filterYear),
       supabase.from('cashier_loss_configs').select('position_id').eq('branch_id', branchId).eq('is_active', true),
     ])
     const [lossConfigRes, kasirCountRes] = await Promise.all([
@@ -476,11 +476,16 @@ export default function PenggajianBulananPage() {
     // share_percent adalah % dari TOTAL kehilangan, bukan dari sisa setelah kantor
     const invLoss          = Math.round((sharePct / 100) * totalLoss)
 
-    const kasirPositionIds = (cashierConfigRes.data || []).map((c: any) => c.position_id)
-    const isKasir          = kasirPositionIds.includes(positionId)
-    const totalKasir       = (cashierEntryRes.data || []).reduce((s: number, e: any) => s + Number(e.amount), 0)
-    const kasirCount       = kasirCountRes.count ?? 1
-    const cashLoss         = isKasir && kasirCount > 0 ? Math.round(totalKasir / kasirCount) : 0
+    const kasirPositionIds  = (cashierConfigRes.data || []).map((c: any) => c.position_id)
+    const isKasir           = kasirPositionIds.includes(positionId)
+    const allCashierEntries = cashierEntryRes.data || []
+    // Assigned langsung ke karyawan ini
+    const kasirAssigned     = allCashierEntries.filter((e: any) => e.employee_id === empId).reduce((s: number, e: any) => s + Number(e.amount), 0)
+    // Unassigned → dibagi rata ke semua kasir aktif
+    const kasirUnassigned   = allCashierEntries.filter((e: any) => !e.employee_id).reduce((s: number, e: any) => s + Number(e.amount), 0)
+    const kasirCount        = kasirCountRes.count ?? 1
+    const kasirSplit        = isKasir && kasirCount > 0 ? kasirUnassigned / kasirCount : 0
+    const cashLoss          = Math.round(kasirAssigned + kasirSplit)
 
     const base     = Number(sc.base_salary ?? 0)
     const pos      = Number(sc.position_allowance ?? 0)

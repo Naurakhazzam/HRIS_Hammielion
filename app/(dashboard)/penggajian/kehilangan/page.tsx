@@ -12,7 +12,7 @@ type BranchLossConfig = { id: string; branch_id: string; company_coverage_percen
 type LossEmployeeShare = { id: string; employee_id: string; branch_id: string; share_percent: number; effective_date: string; is_active: boolean; notes: string | null; created_at: string; employees?: { full_name: string; employee_code: string; positions?: { name: string } | null } }
 type LossMonthlyInput = { id: string; branch_id: string; period_month: number; period_year: number; total_loss_amount: number; notes: string | null }
 type CashierLossConfig = { id: string; branch_id: string; position_id: string; is_active: boolean; positions?: { name: string } }
-type CashierLossEntry = { id: string; branch_id: string; entry_date: string; amount: number; period_month: number; period_year: number; notes: string | null }
+type CashierLossEntry = { id: string; branch_id: string; entry_date: string; amount: number; period_month: number; period_year: number; notes: string | null; employee_id: string | null; employees?: { full_name: string; employee_code: string } | null }
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
@@ -72,10 +72,11 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
 
   // Kasir entries
   const [entries, setEntries] = useState<CashierLossEntry[]>([])
-  const [entryForm, setEntryForm] = useState({ date: today.toISOString().split('T')[0], amount: '', notes: '' })
+  const [kasirEmployees, setKasirEmployees] = useState<Employee[]>([])
+  const [entryForm, setEntryForm] = useState({ date: today.toISOString().split('T')[0], amount: '', notes: '', employee_id: '' })
   const [entrySaving, setEntrySaving] = useState(false)
   const [editEntry, setEditEntry] = useState<CashierLossEntry | null>(null)
-  const [editForm, setEditForm] = useState({ date: '', amount: '', notes: '' })
+  const [editForm, setEditForm] = useState({ date: '', amount: '', notes: '', employee_id: '' })
 
   useEffect(() => { fetchBranches() }, [])
   useEffect(() => { if (selectedBranch) fetchData() }, [selectedBranch, filterMonth, filterYear])
@@ -87,13 +88,30 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
 
   async function fetchData() {
     setLoading(true)
-    const [lRes, eRes] = await Promise.all([
+    const [lRes, eRes, ccRes] = await Promise.all([
       supabase.from('loss_monthly_inputs').select('*').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).single(),
-      supabase.from('cashier_loss_entries').select('*').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).order('entry_date')
+      supabase.from('cashier_loss_entries').select('*, employees(full_name, employee_code)').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).order('entry_date'),
+      supabase.from('cashier_loss_configs').select('position_id').eq('branch_id', selectedBranch).eq('is_active', true),
     ])
     if (lRes.data) { setLossInput(lRes.data); setLossForm({ amount: String(lRes.data.total_loss_amount), notes: lRes.data.notes || '' }) }
     else { setLossInput(null); setLossForm({ amount: '', notes: '' }) }
     setEntries(eRes.data || [])
+
+    // Ambil karyawan aktif dengan jabatan kasir di cabang ini
+    const kasirPositionIds = (ccRes.data || []).map((c: any) => c.position_id)
+    if (kasirPositionIds.length > 0) {
+      const { data: empData } = await supabase
+        .from('employees')
+        .select('id, full_name, employee_code, branch_id, position_id, positions(name)')
+        .eq('branch_id', selectedBranch)
+        .eq('is_active', true)
+        .in('position_id', kasirPositionIds)
+        .order('full_name')
+      setKasirEmployees((empData || []) as unknown as Employee[])
+    } else {
+      setKasirEmployees([])
+    }
+
     setLoading(false)
   }
 
@@ -118,10 +136,11 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     setEntrySaving(true)
     const { error } = await supabase.from('cashier_loss_entries').insert({
       branch_id: selectedBranch, entry_date: entryForm.date, amount: amt,
-      period_month: filterMonth, period_year: filterYear, notes: entryForm.notes || null
+      period_month: filterMonth, period_year: filterYear, notes: entryForm.notes || null,
+      employee_id: entryForm.employee_id || null
     })
     if (error) showMsg('error', 'Gagal: ' + error.message)
-    else { showMsg('success', 'Entry minus kas berhasil ditambahkan.'); setEntryForm({ date: today.toISOString().split('T')[0], amount: '', notes: '' }); fetchData() }
+    else { showMsg('success', 'Entry minus kas berhasil ditambahkan.'); setEntryForm({ date: today.toISOString().split('T')[0], amount: '', notes: '', employee_id: '' }); fetchData() }
     setEntrySaving(false)
   }
 
@@ -130,7 +149,10 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     if (!editEntry) return
     const amt = parseFloat(editForm.amount)
     if (isNaN(amt) || amt <= 0) { showMsg('error', 'Nominal tidak valid.'); return }
-    const { error } = await supabase.from('cashier_loss_entries').update({ entry_date: editForm.date, amount: amt, notes: editForm.notes || null, updated_at: new Date().toISOString() }).eq('id', editEntry.id)
+    const { error } = await supabase.from('cashier_loss_entries').update({
+      entry_date: editForm.date, amount: amt, notes: editForm.notes || null,
+      employee_id: editForm.employee_id || null, updated_at: new Date().toISOString()
+    }).eq('id', editEntry.id)
     if (error) showMsg('error', 'Gagal: ' + error.message)
     else { showMsg('success', 'Entry berhasil diupdate.'); setEditEntry(null); fetchData() }
   }
@@ -208,16 +230,22 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
 
           {/* Daftar entries */}
           {entries.length > 0 && (
-            <div className="mb-4 space-y-2 max-h-48 overflow-y-auto">
+            <div className="mb-4 space-y-2 max-h-56 overflow-y-auto">
               {entries.map(ent => (
                 <div key={ent.id} className="flex items-center justify-between p-2.5 bg-red-50 rounded-lg border border-red-100 text-sm">
-                  <div>
-                    <span className="font-medium text-slate-700">{new Date(ent.entry_date).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}</span>
-                    {ent.notes && <span className="text-xs text-slate-500 ml-2">— {ent.notes}</span>}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-slate-700">{new Date(ent.entry_date).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}</span>
+                      {ent.employees
+                        ? <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">{ent.employees.full_name}</span>
+                        : <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">Bagi rata</span>
+                      }
+                    </div>
+                    {ent.notes && <p className="text-xs text-slate-400 mt-0.5 truncate">{ent.notes}</p>}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 ml-2 shrink-0">
                     <span className="font-bold text-red-600">-{fmtRp(ent.amount)}</span>
-                    <button onClick={() => { setEditEntry(ent); setEditForm({ date: ent.entry_date, amount: String(ent.amount), notes: ent.notes || '' }) }}
+                    <button onClick={() => { setEditEntry(ent); setEditForm({ date: ent.entry_date, amount: String(ent.amount), notes: ent.notes || '', employee_id: ent.employee_id || '' }) }}
                       className="px-2 py-0.5 text-xs border border-blue-200 text-blue-600 hover:bg-blue-50 rounded transition">Edit</button>
                     <button onClick={() => handleDeleteEntry(ent.id)}
                       className="px-2 py-0.5 text-xs border border-red-200 text-red-600 hover:bg-red-50 rounded transition">Hapus</button>
@@ -241,6 +269,16 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
                 <input type="number" required min="1" value={entryForm.amount} onChange={e => setEntryForm({...entryForm, amount: e.target.value})}
                   placeholder="50000" className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
               </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Assign ke Karyawan <span className="text-slate-400">(kosongkan = bagi rata)</span></label>
+              <select value={entryForm.employee_id} onChange={e => setEntryForm({...entryForm, employee_id: e.target.value})}
+                className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none">
+                <option value="">— Bagi rata ke semua kasir —</option>
+                {kasirEmployees.map(emp => (
+                  <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.employee_code})</option>
+                ))}
+              </select>
             </div>
             <input type="text" value={entryForm.notes} onChange={e => setEntryForm({...entryForm, notes: e.target.value})}
               placeholder="Catatan (opsional)" className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
@@ -266,6 +304,16 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
                 <label className="block text-xs font-medium text-slate-600 mb-1">Nominal (Rp)</label>
                 <input type="number" required min="1" value={editForm.amount} onChange={e => setEditForm({...editForm, amount: e.target.value})}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Assign ke Karyawan <span className="text-slate-400">(kosongkan = bagi rata)</span></label>
+                <select value={editForm.employee_id} onChange={e => setEditForm({...editForm, employee_id: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                  <option value="">— Bagi rata ke semua kasir —</option>
+                  {kasirEmployees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.employee_code})</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Catatan</label>
@@ -344,7 +392,7 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
       }
     })
 
-    // 4. Ambil kasir entries
+    // 4. Ambil kasir entries (beserta employee_id jika ada)
     const { data: entriesData } = await supabase.from('cashier_loss_entries').select('*').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).order('entry_date')
 
     // 5. Ambil kasir configs (jabatan terdampak)
@@ -358,20 +406,38 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
 
     // Kalkulasi kehilangan barang
     const totalLoss = lossData?.total_loss_amount ?? 0
-    const totalKasir = (entriesData || []).reduce((s: number, e: any) => s + Number(e.amount), 0)
+    const allEntries: any[] = entriesData || []
+
+    // Pisahkan entries: assigned (ke karyawan tertentu) vs unassigned (bagi rata)
+    const assignedEntries = allEntries.filter((e: any) => e.employee_id)
+    const unassignedEntries = allEntries.filter((e: any) => !e.employee_id)
+
+    // Total kas per kelompok
+    const totalKasirAssigned = assignedEntries.reduce((s: number, e: any) => s + Number(e.amount), 0)
+    const totalKasirUnassigned = unassignedEntries.reduce((s: number, e: any) => s + Number(e.amount), 0)
+    const totalKasirAll = totalKasirAssigned + totalKasirUnassigned
+
+    // Map: employee_id → total assigned langsung
+    const assignedByEmp: Record<string, number> = {}
+    assignedEntries.forEach((e: any) => {
+      assignedByEmp[e.employee_id] = (assignedByEmp[e.employee_id] ?? 0) + Number(e.amount)
+    })
+
     const totalAssigned = Object.values(latestShares).reduce((s: number, sh: any) => s + Number(sh.share_percent), 0)
-    // Hard cap: total % kantor + % karyawan tidak boleh > 100
     const effectiveCompanyPct = Math.min(companyPct, 100)
     const effectiveTotalAssigned = Math.min(totalAssigned, Math.max(0, 100 - effectiveCompanyPct))
-    const companyCoverLoss = totalLoss * (effectiveCompanyPct / 100)
-    const employeeTotalLoss = totalLoss - companyCoverLoss
     const unassignedPct = Math.max(0, 100 - effectiveCompanyPct - effectiveTotalAssigned)
-    const companyExtraCover = employeeTotalLoss * (unassignedPct / 100)
-    const actualEmployeeLoss = employeeTotalLoss - companyExtraCover
+    const companyExtraCoverLoss = totalLoss * (unassignedPct / 100)
+    const companyCoverLoss = totalLoss * (effectiveCompanyPct / 100)
 
     // Preview per karyawan
-    const empIds = [...new Set([...Object.keys(latestShares), ...(kasirEmps || []).map((e: any) => e.id)])]
+    const empIds = [...new Set([
+      ...Object.keys(latestShares),
+      ...(kasirEmps || []).map((e: any) => e.id),
+      ...Object.keys(assignedByEmp)
+    ])]
     const results: any[] = []
+    const kasirCount = (kasirEmps || []).length
 
     for (const empId of empIds) {
       const share = latestShares[empId]
@@ -382,10 +448,16 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
       const { data: empCheck } = await supabase.from('employees').select('id,is_active,branch_id').eq('id', empId).single()
       if (!empCheck?.is_active || empCheck.branch_id !== selectedBranch) continue
 
-      const invLoss = share ? (Number(share.share_percent) / 100) * actualEmployeeLoss : 0
+      // Kehilangan barang: share_percent × total (langsung dari total, bukan dari sisa)
+      const invLoss = share ? (Number(share.share_percent) / 100) * totalLoss : 0
+
+      // Minus kas kasir:
+      // 1. Potongan langsung (assigned) ke karyawan ini
+      const kasirAssignedLoss = assignedByEmp[empId] ?? 0
+      // 2. Bagian dari unassigned entries (dibagi rata ke semua kasir)
       const isKasir = kasirPositionIds.includes(emp.position_id || emp.positions?.id)
-      const kasirCount = (kasirEmps || []).length
-      const kasirLoss = isKasir && kasirCount > 0 ? totalKasir / kasirCount : 0
+      const kasirSplitLoss = isKasir && kasirCount > 0 ? totalKasirUnassigned / kasirCount : 0
+      const kasirLoss = kasirAssignedLoss + kasirSplitLoss
 
       results.push({
         empId,
@@ -395,14 +467,18 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
         sharePct: share ? Number(share.share_percent) : 0,
         invLoss: Math.round(invLoss),
         kasirLoss: Math.round(kasirLoss),
+        kasirAssignedLoss: Math.round(kasirAssignedLoss),
+        kasirSplitLoss: Math.round(kasirSplitLoss),
         isKasir,
         kasirCount,
-        totalKasirMonthly: totalKasir,
+        totalKasirMonthly: totalKasirAll,
+        totalKasirAssigned,
+        totalKasirUnassigned,
         totalLoss,
         companyPct,
-        companyCover: Math.round(companyCoverLoss + companyExtraCover),
+        companyCover: Math.round(companyCoverLoss + companyExtraCoverLoss),
         unassignedPct,
-        entries: entriesData || []
+        entries: allEntries
       })
     }
 
@@ -507,9 +583,14 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
                 {preview[0].totalKasirMonthly > 0 && (
                   <>
                     <p className="mt-2">💵 Total minus kas: <strong>{fmtRp(preview[0].totalKasirMonthly)}</strong></p>
-                    <p>Dibagi rata {preview[0].kasirCount} kasir = <strong>{fmtRp(preview[0].totalKasirMonthly / preview[0].kasirCount)}</strong>/orang</p>
+                    {preview[0].totalKasirAssigned > 0 && (
+                      <p className="ml-2">↳ Assigned langsung: <strong className="text-orange-600">{fmtRp(preview[0].totalKasirAssigned)}</strong> (ke karyawan spesifik)</p>
+                    )}
+                    {preview[0].totalKasirUnassigned > 0 && (
+                      <p className="ml-2">↳ Bagi rata: <strong>{fmtRp(preview[0].totalKasirUnassigned)}</strong> ÷ {preview[0].kasirCount} kasir = <strong>{fmtRp(preview[0].totalKasirUnassigned / Math.max(preview[0].kasirCount,1))}</strong>/orang</p>
+                    )}
                     {preview[0].entries.length > 0 && (
-                      <p>Rincian: {preview[0].entries.map((e: any) => `${new Date(e.entry_date).toLocaleDateString('id-ID',{day:'2-digit',month:'short'})} -${fmtRp(e.amount)}`).join(' | ')}</p>
+                      <p className="text-slate-400">Rincian: {preview[0].entries.map((e: any) => `${new Date(e.entry_date).toLocaleDateString('id-ID',{day:'2-digit',month:'short'})} -${fmtRp(e.amount)}${e.employee_id ? ' [assigned]' : ''}`).join(' | ')}</p>
                     )}
                   </>
                 )}
