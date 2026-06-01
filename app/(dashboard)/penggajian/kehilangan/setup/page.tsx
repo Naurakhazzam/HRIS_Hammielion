@@ -255,15 +255,35 @@ export default function SetupKehilanganPage() {
               <h3 className="font-semibold text-slate-800">% Tanggung Jawab Karyawan — {branches.find(b => b.id === selectedBranch)?.name}</h3>
               <p className="text-xs text-slate-500 mt-0.5">Setiap simpan akan menambah history baru per karyawan.</p>
             </div>
-            <div className={`text-sm font-semibold px-3 py-1 rounded-full ${totalSharePercent > 100 ? 'bg-red-100 text-red-700' : totalSharePercent === 100 ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
-              Total: {totalSharePercent.toFixed(1)}%
+            <div className={`text-sm font-semibold px-3 py-1 rounded-full ${
+              totalSharePercent > 100 ? 'bg-red-100 text-red-700'
+              : (Number(currentKantorConfig?.company_coverage_percent ?? 0) + totalSharePercent) >= 100 ? 'bg-green-100 text-green-700'
+              : 'bg-slate-100 text-slate-600'
+            }`}>
+              Karyawan: {totalSharePercent.toFixed(1)}% · Kantor: {Number(currentKantorConfig?.company_coverage_percent ?? 0).toFixed(1)}%
             </div>
           </div>
-          {totalSharePercent < 100 && totalSharePercent > 0 && (
-            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
-              ⚠️ Sisa {(100 - totalSharePercent).toFixed(1)}% tidak di-assign → otomatis ke kantor, ditampilkan transparan di slip gaji.
-            </div>
-          )}
+          {(() => {
+            const companyPct = Number(currentKantorConfig?.company_coverage_percent ?? 0)
+            const grandTotal = companyPct + totalSharePercent
+            const sisa = 100 - grandTotal
+            if (grandTotal > 100) return (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                ⛔ Total melebihi 100%! % Kantor ({companyPct}%) + % Karyawan ({totalSharePercent.toFixed(1)}%) = {grandTotal.toFixed(1)}%. Harap sesuaikan.
+              </div>
+            )
+            if (grandTotal === 100) return (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700">
+                ✅ Total coverage 100% — % kantor + % karyawan sudah tepat.
+              </div>
+            )
+            if (sisa > 0 && grandTotal > 0) return (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+                ⚠️ Sisa {sisa.toFixed(1)}% belum di-assign (kantor {companyPct}% + karyawan {totalSharePercent.toFixed(1)}% = {grandTotal.toFixed(1)}%). Sisa akan menjadi tanggungan tidak tercatat.
+              </div>
+            )
+            return null
+          })()}
           {branchEmployees.length === 0 ? (
             <p className="text-sm text-slate-500 italic">Tidak ada karyawan tetap aktif di cabang ini.</p>
           ) : (
