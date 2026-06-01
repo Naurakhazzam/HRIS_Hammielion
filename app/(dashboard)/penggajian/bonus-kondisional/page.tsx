@@ -52,7 +52,7 @@ export default function BonusKondisionalPage() {
       .from('employees')
       .select('id, employee_code, full_name, employee_type, branches(name), positions(name)')
       .eq('is_active', true)
-      .eq('employee_type', 'permanent')
+      .in('employee_type', ['permanent', 'training'])
       .order('full_name')
 
     if (empData) setEmployees(empData as unknown as Employee[])

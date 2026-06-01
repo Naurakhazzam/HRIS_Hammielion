@@ -125,7 +125,7 @@ export default function KPIPage() {
     let empQ = supabase
       .from('employees')
       .select('id, full_name, position_id, branch_id, branches(name), positions(name)')
-      .eq('employee_type', 'permanent')
+      .in('employee_type', ['permanent', 'training'])
       .eq('is_active', true)
       .order('full_name')
 
@@ -183,7 +183,7 @@ export default function KPIPage() {
     let empQ = supabase
       .from('employees')
       .select('id, full_name, position_id, branch_id, kpi_bonus_max, branches(name), positions(name)')
-      .eq('employee_type', 'permanent')
+      .in('employee_type', ['permanent', 'training'])
       .eq('is_active', true)
       .order('full_name')
 
