@@ -538,7 +538,7 @@ export default function RekapAbsensiPage() {
                           {att.notes && att.notes !== 'Belum Masuk (Training)' && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {['hr','owner'].includes(myRole) && (
+                          {['hr','owner','finance'].includes(myRole) && (
                             <button onClick={() => openEditModal(att)} className="px-2.5 py-1 text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 transition">Edit</button>
                           )}
                         </td>
@@ -581,7 +581,7 @@ export default function RekapAbsensiPage() {
                         {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {['hr','owner'].includes(myRole) && (
+                        {['hr','owner','finance'].includes(myRole) && (
                           <button onClick={() => openEditModal(att)} className="px-2.5 py-1 text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 transition">Edit</button>
                         )}
                       </td>
