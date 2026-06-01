@@ -26,6 +26,17 @@ function getStatusDisplay(att: { status: string; notes: string | null }) {
   return { label: STATUS_LABEL[att.status] ?? att.status, color: STATUS_COLOR[att.status] ?? 'bg-purple-100 text-purple-800' }
 }
 
+type EditLog = {
+  id: string
+  created_at: string
+  reason: string
+  old_check_in: string | null; old_check_out: string | null
+  old_status: string; old_late_minutes: number; old_overtime_hours: number
+  new_check_in: string | null; new_check_out: string | null
+  new_status: string; new_late_minutes: number; new_overtime_hours: number
+  editor: { full_name: string } | null
+}
+
 export default function RekapAbsensiPage() {
   const supabase = createClient()
   const [attendances, setAttendances] = useState<Attendance[]>([])
@@ -41,18 +52,38 @@ export default function RekapAbsensiPage() {
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  // ── Role user ──
+  const [myRole, setMyRole] = useState('')
+  const [myUserId, setMyUserId] = useState('')
+
+  // ── Modal Edit universal (menggantikan editModal lama) ──
   const [editModal, setEditModal] = useState<Attendance | null>(null)
-  const [editLateMins, setEditLateMins] = useState(0)
-  const [editNotes, setEditNotes] = useState('')
+  const [editForm, setEditForm] = useState({
+    check_in: '', check_out: '', status: 'present',
+    late_minutes: 0, overtime_hours: 0, reason: ''
+  })
   const [editSaving, setEditSaving] = useState(false)
+  const [editLogs, setEditLogs] = useState<EditLog[]>([])
+  const [loadingLogs, setLoadingLogs] = useState(false)
+
   const [absenModal, setAbsenModal] = useState(false)
   const [absenForm, setAbsenForm] = useState({ employee_id: '', date: '', status: 'absent', notes: '', isTraining: false })
   const [absenSaving, setAbsenSaving] = useState(false)
   const [formBranchId, setFormBranchId] = useState('')
   const [formData, setFormData] = useState({ employee_id:'', date:new Date().toISOString().split('T')[0], check_in:'', check_out:'', status:'present', notes:'' })
 
-  useEffect(() => { fetchReferenceData() }, [])
+  useEffect(() => { fetchReferenceData(); fetchMyRole() }, [])
   useEffect(() => { fetchAttendances() }, [filterMonth, filterBranch, filterDept, filterEmployee])
+
+  async function fetchMyRole() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      setMyUserId(user.id)
+      const { data } = await supabase.from('users').select('role').eq('id', user.id).single()
+      if (data) setMyRole(data.role)
+    }
+  }
 
   async function fetchReferenceData() {
     const [bRes,dRes,eRes,sRes] = await Promise.all([
@@ -121,14 +152,85 @@ export default function RekapAbsensiPage() {
     setAbsenSaving(false)
   }
 
-  async function handleEditLate(e: React.FormEvent) {
+  function openEditModal(att: Attendance) {
+    const toTime = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''
+    setEditModal(att)
+    setEditForm({
+      check_in: toTime(att.check_in),
+      check_out: toTime(att.check_out),
+      status: att.status,
+      late_minutes: att.late_minutes,
+      overtime_hours: Number(att.overtime_hours),
+      reason: ''
+    })
+    fetchEditLogs(att.id)
+  }
+
+  async function fetchEditLogs(attendanceId: string) {
+    setLoadingLogs(true)
+    setEditLogs([])
+    const { data } = await supabase
+      .from('attendance_edit_logs')
+      .select(`*, editor:edited_by_user_id(employee_id)`)
+      .eq('attendance_id', attendanceId)
+      .order('created_at', { ascending: false })
+
+    if (data && data.length > 0) {
+      // Ambil nama editor dari employees
+      const empIds = data.map((d: any) => d.editor?.employee_id).filter(Boolean)
+      const { data: emps } = await supabase.from('employees').select('id, full_name').in('id', empIds)
+      const empMap: Record<string, string> = {}
+      ;(emps || []).forEach((e: any) => { empMap[e.id] = e.full_name })
+
+      const logs: EditLog[] = data.map((d: any) => ({
+        ...d,
+        editor: { full_name: empMap[d.editor?.employee_id] ?? 'Unknown' }
+      }))
+      setEditLogs(logs)
+    }
+    setLoadingLogs(false)
+  }
+
+  async function handleEditSave(e: React.FormEvent) {
     e.preventDefault()
     if (!editModal) return
-    if (!editNotes.trim()) { showMsg('error','Wajib isi alasan.'); return }
+    if (!editForm.reason.trim()) { showMsg('error', 'Wajib isi alasan perubahan.'); return }
     setEditSaving(true)
-    const { error } = await supabase.from('attendances').update({ late_minutes:editLateMins, notes:editNotes }).eq('id',editModal.id)
-    if (error) showMsg('error','Gagal: '+error.message)
-    else { showMsg('success','Keterlambatan disesuaikan.'); setEditModal(null); fetchAttendances() }
+
+    const newCi = editForm.check_in ? new Date(editModal.date + 'T' + editForm.check_in + ':00').toISOString() : null
+    const newCo = editForm.check_out ? new Date(editModal.date + 'T' + editForm.check_out + ':00').toISOString() : null
+
+    // Update attendance
+    const { error } = await supabase.from('attendances').update({
+      check_in: newCi,
+      check_out: newCo,
+      status: editForm.status,
+      late_minutes: editForm.late_minutes,
+      overtime_hours: editForm.overtime_hours,
+    }).eq('id', editModal.id)
+
+    if (error) { showMsg('error', 'Gagal: ' + error.message); setEditSaving(false); return }
+
+    // Simpan log
+    await supabase.from('attendance_edit_logs').insert({
+      attendance_id: editModal.id,
+      edited_by_user_id: myUserId,
+      old_check_in: editModal.check_in,
+      old_check_out: editModal.check_out,
+      old_status: editModal.status,
+      old_late_minutes: editModal.late_minutes,
+      old_overtime_hours: editModal.overtime_hours,
+      new_check_in: newCi,
+      new_check_out: newCo,
+      new_status: editForm.status,
+      new_late_minutes: editForm.late_minutes,
+      new_overtime_hours: editForm.overtime_hours,
+      reason: editForm.reason.trim(),
+    })
+
+    showMsg('success', 'Absensi berhasil diperbarui.')
+    setEditModal(null)
+    fetchAttendances()
     setEditSaving(false)
   }
 
@@ -396,8 +498,8 @@ export default function RekapAbsensiPage() {
                           {att.notes && att.notes !== 'Belum Masuk (Training)' && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {att.status === 'present' && att.late_minutes > 0 && (
-                            <button onClick={()=>{setEditModal(att);setEditLateMins(att.late_minutes);setEditNotes('')}} className="px-2.5 py-1 text-xs font-medium bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition">Sesuaikan</button>
+                          {['hr','owner'].includes(myRole) && (
+                            <button onClick={() => openEditModal(att)} className="px-2.5 py-1 text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 transition">Edit</button>
                           )}
                         </td>
                       </tr>
@@ -439,8 +541,8 @@ export default function RekapAbsensiPage() {
                         {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {att.status === 'present' && att.late_minutes > 0 && (
-                          <button onClick={()=>{setEditModal(att);setEditLateMins(att.late_minutes);setEditNotes('')}} className="px-2.5 py-1 text-xs font-medium bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition">Sesuaikan</button>
+                        {['hr','owner'].includes(myRole) && (
+                          <button onClick={() => openEditModal(att)} className="px-2.5 py-1 text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 transition">Edit</button>
                         )}
                       </td>
                     </tr>
@@ -453,30 +555,84 @@ export default function RekapAbsensiPage() {
       </div>
 
       {editModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={e=>{if(e.target===e.currentTarget)setEditModal(null)}}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-black/50 overflow-y-auto" onClick={e=>{if(e.target===e.currentTarget)setEditModal(null)}}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-6">
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
               <div>
-                <h2 className="text-base font-bold text-slate-700">Sesuaikan Keterlambatan</h2>
+                <h2 className="text-base font-bold text-slate-700">✏️ Edit Absensi</h2>
                 <p className="text-xs text-slate-500 mt-0.5">{editModal.employees?.full_name} — {new Date(editModal.date+'T00:00:00').toLocaleDateString('id-ID',{day:'2-digit',month:'long',year:'numeric'})}</p>
               </div>
-              <button onClick={()=>setEditModal(null)} className="text-slate-400 hover:text-slate-600">x</button>
+              <button onClick={()=>setEditModal(null)} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
             </div>
-            <form onSubmit={handleEditLate} className="px-6 py-5 space-y-4">
-              <div className="p-3 bg-slate-50 rounded-lg text-sm text-slate-600">Masuk: <strong>{fmtTs(editModal.check_in)}</strong> · Telat: <strong className="text-red-600">{editModal.late_minutes} menit</strong></div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Menit Telat Baru *</label>
-                <input type="number" min="0" required value={editLateMins} onChange={e=>setEditLateMins(Math.max(0,parseInt(e.target.value)||0))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            <form onSubmit={handleEditSave} className="px-6 py-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Jam Masuk</label>
+                  <input type="time" value={editForm.check_in} onChange={e=>setEditForm({...editForm,check_in:e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Jam Pulang</label>
+                  <input type="time" value={editForm.check_out} onChange={e=>setEditForm({...editForm,check_out:e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Alasan *</label>
-                <input type="text" required value={editNotes} onChange={e=>setEditNotes(e.target.value)} placeholder="Contoh: Izin karena keperluan keluarga" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
+                <select value={editForm.status} onChange={e=>setEditForm({...editForm,status:e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                  <option value="present">Hadir</option>
+                  <option value="permission">Izin</option>
+                  <option value="sick">Sakit</option>
+                  <option value="absent">Alpha</option>
+                  <option value="leave">Libur</option>
+                </select>
               </div>
-              <div className="flex gap-3 pt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Menit Telat</label>
+                  <input type="number" min="0" value={editForm.late_minutes} onChange={e=>setEditForm({...editForm,late_minutes:Math.max(0,parseInt(e.target.value)||0)})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Lembur (jam)</label>
+                  <input type="number" min="0" step="0.5" value={editForm.overtime_hours} onChange={e=>setEditForm({...editForm,overtime_hours:Math.max(0,parseFloat(e.target.value)||0)})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Alasan Perubahan <span className="text-red-500">*</span></label>
+                <input type="text" required value={editForm.reason} onChange={e=>setEditForm({...editForm,reason:e.target.value})} placeholder="Contoh: Koreksi jam masuk, mesin absen error" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div className="flex gap-3 pt-1">
                 <button type="button" onClick={()=>setEditModal(null)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
-                <button type="submit" disabled={editSaving} className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">{editSaving?'Menyimpan...':'Simpan'}</button>
+                <button type="submit" disabled={editSaving} className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">{editSaving?'Menyimpan...':'Simpan Perubahan'}</button>
               </div>
             </form>
+
+            {/* Histori Edit */}
+            <div className="border-t border-slate-200 px-6 py-4">
+              <p className="text-xs font-semibold text-slate-500 uppercase mb-3">Riwayat Perubahan</p>
+              {loadingLogs ? (
+                <p className="text-xs text-slate-400">Memuat histori...</p>
+              ) : editLogs.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">Belum pernah diedit.</p>
+              ) : (
+                <div className="space-y-3 max-h-48 overflow-y-auto">
+                  {editLogs.map(log => (
+                    <div key={log.id} className="text-xs bg-slate-50 rounded-lg p-3 border border-slate-100">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="font-semibold text-slate-700">{log.editor?.full_name ?? '—'}</span>
+                        <span className="text-slate-400">{new Date(log.created_at).toLocaleString('id-ID',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>
+                      </div>
+                      <div className="text-slate-500 italic mb-1">"{log.reason}"</div>
+                      <div className="space-y-0.5 text-slate-500">
+                        {log.old_status !== log.new_status && <div>Status: <span className="line-through text-red-400">{STATUS_LABEL[log.old_status]}</span> → <span className="text-green-600">{STATUS_LABEL[log.new_status]}</span></div>}
+                        {log.old_late_minutes !== log.new_late_minutes && <div>Telat: <span className="line-through text-red-400">{log.old_late_minutes} mnt</span> → <span className="text-green-600">{log.new_late_minutes} mnt</span></div>}
+                        {log.old_overtime_hours !== log.new_overtime_hours && <div>Lembur: <span className="line-through text-red-400">{log.old_overtime_hours} jam</span> → <span className="text-green-600">{log.new_overtime_hours} jam</span></div>}
+                        {log.old_check_in !== log.new_check_in && <div>Masuk: <span className="line-through text-red-400">{log.old_check_in ? new Date(log.old_check_in).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : '—'}</span> → <span className="text-green-600">{log.new_check_in ? new Date(log.new_check_in).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : '—'}</span></div>}
+                        {log.old_check_out !== log.new_check_out && <div>Pulang: <span className="line-through text-red-400">{log.old_check_out ? new Date(log.old_check_out).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : '—'}</span> → <span className="text-green-600">{log.new_check_out ? new Date(log.new_check_out).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : '—'}</span></div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
