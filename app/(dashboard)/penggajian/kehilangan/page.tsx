@@ -127,9 +127,13 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     const amt = parseFloat(entryForm.amount)
     if (isNaN(amt) || amt <= 0) { showMsg('error', 'Nominal harus lebih dari 0.'); return }
     setEntrySaving(true)
+    // period_month & period_year otomatis dari entry_date, bukan dari filter
+    const entryDateObj = new Date(entryForm.date)
+    const entryPeriodMonth = entryDateObj.getMonth() + 1
+    const entryPeriodYear = entryDateObj.getFullYear()
     const { error } = await supabase.from('cashier_loss_entries').insert({
       branch_id: selectedBranch, entry_date: entryForm.date, amount: amt,
-      period_month: filterMonth, period_year: filterYear, notes: entryForm.notes || null,
+      period_month: entryPeriodMonth, period_year: entryPeriodYear, notes: entryForm.notes || null,
       employee_id: entryForm.employee_id || null
     })
     if (error) showMsg('error', 'Gagal: ' + error.message)
@@ -142,9 +146,14 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     if (!editEntry) return
     const amt = parseFloat(editForm.amount)
     if (isNaN(amt) || amt <= 0) { showMsg('error', 'Nominal tidak valid.'); return }
+    // period ikut entry_date jika berubah
+    const editDateObj = new Date(editForm.date)
     const { error } = await supabase.from('cashier_loss_entries').update({
       entry_date: editForm.date, amount: amt, notes: editForm.notes || null,
-      employee_id: editForm.employee_id || null, updated_at: new Date().toISOString()
+      employee_id: editForm.employee_id || null,
+      period_month: editDateObj.getMonth() + 1,
+      period_year: editDateObj.getFullYear(),
+      updated_at: new Date().toISOString()
     }).eq('id', editEntry.id)
     if (error) showMsg('error', 'Gagal: ' + error.message)
     else { showMsg('success', 'Entry berhasil diupdate.'); setEditEntry(null); fetchData() }

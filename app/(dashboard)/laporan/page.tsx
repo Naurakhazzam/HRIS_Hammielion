@@ -68,8 +68,10 @@ type BonusAssessment = {
 type AttendanceSummary = {
   employee_id: string
   hadir: number
-  tidak_hadir: number
-  libur: number
+  tidak_hadir: number  // alpha (absent, exclude Training)
+  libur: number        // leave
+  sakit: number        // sick
+  izin: number         // permission
 }
 
 type LossData = {
@@ -160,13 +162,43 @@ export default function LaporanPage() {
       .lte('date', lastDay)
 
     const aMap: Record<string, AttendanceSummary> = {}
-    empIds.forEach(id => { aMap[id] = { employee_id: id, hadir: 0, tidak_hadir: 0, libur: 0 } })
+    empIds.forEach(id => { aMap[id] = { employee_id: id, hadir: 0, tidak_hadir: 0, libur: 0, sakit: 0, izin: 0 } })
+
+    // Hitung semua tanggal dalam periode untuk auto-libur
+    const { firstDay: fd, lastDay: ld } = getPeriodDates(filterMonth, filterYear)
+    const periodDates: Set<string> = new Set()
+    const cur = new Date(fd + 'T00:00:00')
+    const endDate = new Date(ld + 'T00:00:00')
+    while (cur <= endDate) {
+      periodDates.add(cur.toISOString().split('T')[0])
+      cur.setDate(cur.getDate() + 1)
+    }
+
+    // Kumpulkan tanggal per karyawan yang punya record
+    const recordedDates: Record<string, Set<string>> = {}
+    empIds.forEach(id => { recordedDates[id] = new Set() })
+
     ;(attData || []).forEach((a: any) => {
       if (!aMap[a.employee_id]) return
+      recordedDates[a.employee_id]?.add(a.date)
+      // Exclude "Belum Masuk (Training)" dari hitungan absen (sama dengan rekap)
+      if (a.status === 'absent' && a.notes === 'Belum Masuk (Training)') return
       if (a.status === 'present') aMap[a.employee_id].hadir++
       else if (a.status === 'absent') aMap[a.employee_id].tidak_hadir++
-      else if (['leave','sick','permission'].includes(a.status)) aMap[a.employee_id].libur++
+      else if (a.status === 'leave') aMap[a.employee_id].libur++
+      else if (a.status === 'sick') aMap[a.employee_id].sakit++
+      else if (a.status === 'permission') aMap[a.employee_id].izin++
     })
+
+    // Auto-libur: hari dalam periode yang tidak punya record (sama dengan rekap, maks 4 libur, sisanya izin)
+    empIds.forEach(id => {
+      const emptyCount = [...periodDates].filter(d => !recordedDates[id]?.has(d)).length
+      const autoLibur = Math.min(emptyCount, 4)
+      const autoIzin  = Math.max(emptyCount - 4, 0)
+      aMap[id].libur += autoLibur
+      aMap[id].izin  += autoIzin
+    })
+
     setAttendanceMap(aMap)
 
     // 4. Kehilangan per cabang
@@ -369,8 +401,10 @@ export default function LaporanPage() {
                       <th className="px-3 py-2.5 text-left">Karyawan</th>
                       {groupBy === 'all' && <th className="px-3 py-2.5 text-left">Cabang</th>}
                       <th className="px-3 py-2.5 text-center">Hadir</th>
-                      <th className="px-3 py-2.5 text-center">Absen</th>
+                      <th className="px-3 py-2.5 text-center">Alpha</th>
                       <th className="px-3 py-2.5 text-center">Libur</th>
+                      <th className="px-3 py-2.5 text-center">Sakit</th>
+                      <th className="px-3 py-2.5 text-center">Izin</th>
                       <th className="px-3 py-2.5 text-right">Gaji Pokok</th>
                       <th className="px-3 py-2.5 text-right">Tunjangan</th>
                       <th className="px-3 py-2.5 text-right">Lembur</th>
@@ -381,7 +415,7 @@ export default function LaporanPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {group.rows.map((p,ri) => {
-                      const att = attendanceMap[p.employee_id] || { hadir: 0, tidak_hadir: 0, libur: 0 }
+                      const att = attendanceMap[p.employee_id] || { hadir: 0, tidak_hadir: 0, libur: 0, sakit: 0, izin: 0 }
                       const bonuses = bonusMap[p.id] || []
                       const tunjangan = Number(p.position_allowance) + Number(p.meal_allowance)
                       return (
@@ -392,8 +426,10 @@ export default function LaporanPage() {
                           </td>
                           {groupBy === 'all' && <td className="px-3 py-2 text-slate-600 col-cabang">{(p.employee?.branches as any)?.name ?? '—'}</td>}
                           <td className="px-3 py-2.5 text-center font-bold text-green-700">{att.hadir}</td>
-                          <td className="px-3 py-2.5 text-center font-bold text-red-600">{att.tidak_hadir || p.absent_days || 0}</td>
+                          <td className="px-3 py-2.5 text-center font-bold text-red-600">{att.tidak_hadir}</td>
                           <td className="px-3 py-2.5 text-center text-slate-500">{att.libur}</td>
+                          <td className="px-3 py-2.5 text-center text-blue-500">{att.sakit || 0}</td>
+                          <td className="px-3 py-2.5 text-center text-yellow-600">{att.izin || 0}</td>
                           <td className="px-3 py-2.5 text-right text-slate-700"><Amt v={Number(p.base_salary)} /></td>
                           <td className="px-3 py-2.5 text-right text-slate-700"><Amt v={tunjangan} /></td>
                           <td className="px-3 py-2.5 text-right text-slate-600"><Amt v={Number(p.overtime_total)} /></td>
@@ -417,7 +453,7 @@ export default function LaporanPage() {
                     <tr>
                       <td colSpan={groupBy === 'all' ? 2 : 1} className="px-3 py-2 font-bold text-xs uppercase text-slate-700">Subtotal</td>
                       <td className="px-3 py-2 text-center font-bold text-green-700">{group.rows.reduce((s,p)=>s+(attendanceMap[p.employee_id]?.hadir||0),0)}</td>
-                      <td colSpan={6} className="px-3 py-2"></td>
+                      <td colSpan={8} className="px-3 py-2"></td>
                       <td className="px-3 py-2 text-right font-bold text-green-700"><Amt v={group.rows.reduce((s,p)=>s+Number(p.gross_total),0)} className="text-green-700" /></td>
                     </tr>
                   </tfoot>

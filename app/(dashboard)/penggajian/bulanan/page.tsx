@@ -325,8 +325,8 @@ export default function PenggajianBulananPage() {
     // Cast
     let result = (data as unknown as Payroll[]) || []
 
-    // Filter: hanya karyawan permanent
-    result = result.filter(p => p.employee?.employee_type === 'permanent')
+    // Filter: karyawan permanent + training
+    result = result.filter(p => ['permanent', 'training'].includes(p.employee?.employee_type ?? ''))
 
     // Filter cabang (client-side karena relasi nested)
     if (filterBranch) {
@@ -420,11 +420,11 @@ export default function PenggajianBulananPage() {
 
   async function openCreateModal() {
     setCreateStep(1); setSelectedEmpId(''); setUnclassifiedDays([]); setCreateKasbon(0); setSlipPreview(null)
-    // Ambil karyawan permanent aktif yang belum punya slip bulan ini
+    // Ambil karyawan permanent + training aktif yang belum punya slip bulan ini
     const { data: emps } = await supabase
       .from('employees')
       .select('id, full_name, employee_code, positions(name), branches(name)')
-      .eq('employee_type', 'permanent').eq('is_active', true)
+      .in('employee_type', ['permanent', 'training']).eq('is_active', true)
     const { data: existing } = await supabase
       .from('payrolls').select('employee_id')
       .eq('period_month', filterMonth).eq('period_year', filterYear)
