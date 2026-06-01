@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
-type Employee = { id: string; full_name: string; branch_id: string; department_id: string }
+type Employee = { id: string; full_name: string; branch_id: string; department_id: string; join_date: string | null }
 type WorkSchedule = { id: string; name: string; check_in_time: string; check_out_time: string; applies_to_dept: string }
 type Attendance = {
   id: string; date: string; check_in: string | null; check_out: string | null
@@ -68,7 +68,7 @@ export default function RekapAbsensiPage() {
   const [loadingLogs, setLoadingLogs] = useState(false)
 
   const [absenModal, setAbsenModal] = useState(false)
-  const [absenForm, setAbsenForm] = useState({ employee_id: '', date: '', status: 'absent', notes: '', isTraining: false })
+  const [absenForm, setAbsenForm] = useState({ employee_id: '', date: '', status: 'absent', notes: '' })
   const [absenSaving, setAbsenSaving] = useState(false)
   const [formBranchId, setFormBranchId] = useState('')
   const [formData, setFormData] = useState({ employee_id:'', date:new Date().toISOString().split('T')[0], check_in:'', check_out:'', status:'present', notes:'' })
@@ -89,7 +89,7 @@ export default function RekapAbsensiPage() {
     const [bRes,dRes,eRes,sRes] = await Promise.all([
       supabase.from('branches').select('id,name').order('name'),
       supabase.from('departments').select('id,name').order('name'),
-      supabase.from('employees').select('id,full_name,branch_id,department_id').eq('is_active',true).order('full_name'),
+      supabase.from('employees').select('id,full_name,branch_id,department_id,join_date').eq('is_active',true).order('full_name'),
       supabase.from('work_schedules').select('id,name,check_in_time,check_out_time,applies_to_dept'),
     ])
     if (bRes.data) setBranches(bRes.data)
@@ -140,11 +140,8 @@ export default function RekapAbsensiPage() {
     e.preventDefault()
     if (!absenForm.employee_id||!absenForm.date) { showMsg('error','Lengkapi data.'); return }
     setAbsenSaving(true)
-    // "Belum Masuk (Training)" disimpan sebagai absent dengan notes khusus
-    const finalStatus = absenForm.isTraining ? 'absent' : absenForm.status
-    const finalNotes  = absenForm.isTraining ? 'Belum Masuk (Training)' : (absenForm.notes || null)
     const { error } = await supabase.from('attendances').upsert(
-      { employee_id:absenForm.employee_id, date:absenForm.date, check_in:null, check_out:null, late_minutes:0, overtime_hours:0, status:finalStatus, notes:finalNotes },
+      { employee_id:absenForm.employee_id, date:absenForm.date, check_in:null, check_out:null, late_minutes:0, overtime_hours:0, status:absenForm.status, notes:absenForm.notes||null },
       { onConflict:'employee_id,date' }
     )
     if (error) showMsg('error','Gagal: '+error.message)
@@ -250,13 +247,21 @@ export default function RekapAbsensiPage() {
     setEditSaving(false)
   }
 
-  const totalTelat  = attendances.reduce((s,a)=>s+(a.late_minutes??0),0)
-  const totalLembur = attendances.reduce((s,a)=>s+Number(a.overtime_hours??0),0)
-  const totalHadir  = attendances.filter(a=>a.status==='present').length
-  const totalAlpha  = attendances.filter(a=>a.status==='absent').length
-  const totalSakit  = attendances.filter(a=>a.status==='sick').length
-  const totalIzinDB  = attendances.filter(a=>a.status==='permission').length
-  const totalLiburDB = attendances.filter(a=>a.status==='leave').length
+  // Exclude record "Belum Masuk (Training)" lama & tanggal sebelum join_date dari semua hitungan
+  const selectedEmpJoinDate = filterEmployee ? (employees.find(e => e.id === filterEmployee)?.join_date ?? null) : null
+  const validAtts = attendances.filter(a => {
+    if (a.status === 'absent' && a.notes === 'Belum Masuk (Training)') return false
+    if (selectedEmpJoinDate && a.date < selectedEmpJoinDate) return false
+    return true
+  })
+
+  const totalTelat  = validAtts.reduce((s,a)=>s+(a.late_minutes??0),0)
+  const totalLembur = validAtts.reduce((s,a)=>s+Number(a.overtime_hours??0),0)
+  const totalHadir  = validAtts.filter(a=>a.status==='present').length
+  const totalAlpha  = validAtts.filter(a=>a.status==='absent').length
+  const totalSakit  = validAtts.filter(a=>a.status==='sick').length
+  const totalIzinDB  = validAtts.filter(a=>a.status==='permission').length
+  const totalLiburDB = validAtts.filter(a=>a.status==='leave').length
   const formEmps = formBranchId ? employees.filter(e=>e.branch_id===formBranchId) : employees
 
   const getPeriodLabel = () => {
@@ -294,7 +299,10 @@ export default function RekapAbsensiPage() {
 
   // Hitung hari kosong (auto-libur) jika filter karyawan aktif
   const emptyDays  = filterEmployee
-    ? generatePeriodDates().filter(d => !(attendanceByDate[d]?.length > 0)).length
+    ? generatePeriodDates().filter(d => {
+        if (selectedEmpJoinDate && d < selectedEmpJoinDate) return false  // sebelum bergabung
+        return !(attendanceByDate[d]?.length > 0)
+      }).length
     : 0
   const autoLibur  = Math.min(emptyDays, 4)
   const autoIzin   = Math.max(emptyDays - 4, 0)
@@ -309,7 +317,7 @@ export default function RekapAbsensiPage() {
           <p className="text-sm text-slate-500">Pantau kehadiran harian dan hitung keterlambatan/lembur.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={()=>{setAbsenModal(true);setAbsenForm({employee_id:filterEmployee||'',date:new Date().toISOString().split('T')[0],status:'absent',notes:'',isTraining:false})}} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">Keterangan Tidak Hadir</button>
+          <button onClick={()=>{setAbsenModal(true);setAbsenForm({employee_id:filterEmployee||'',date:new Date().toISOString().split('T')[0],status:'absent',notes:''})}} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">Keterangan Tidak Hadir</button>
           <button onClick={()=>setShowForm(!showForm)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">{showForm?'Batal':'+ Input Hadir Manual'}</button>
         </div>
       </div>
@@ -439,10 +447,26 @@ export default function RekapAbsensiPage() {
                   const dayAtts = attendanceByDate[dateStr] || []
                   const dateObj  = new Date(dateStr + 'T00:00:00')
                   const dateLabel = dateObj.toLocaleDateString('id-ID', { weekday:'short', day:'2-digit', month:'short' })
+                  const emp = employees.find(e => e.id === filterEmployee)
+
+                  // Tanggal sebelum join_date → tampilkan "Belum Bergabung", abaikan dari semua hitungan
+                  if (emp?.join_date && dateStr < emp.join_date) {
+                    return (
+                      <tr key={dateStr} className="bg-slate-50/20">
+                        <td className="px-4 py-3 text-sm text-slate-300 whitespace-nowrap">{dateLabel}</td>
+                        <td className="px-4 py-3"><div className="text-sm text-slate-300">{emp?.full_name}</div></td>
+                        <td colSpan={6} className="px-4 py-3 text-center">
+                          <span className="text-xs text-slate-300 italic">—</span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-400">Belum Bergabung</span>
+                        </td>
+                      </tr>
+                    )
+                  }
 
                   if (dayAtts.length === 0) {
                     // Tanggal tanpa data — default tampil sebagai Libur
-                    const emp = employees.find(e => e.id === filterEmployee)
                     const sched = emp ? getScheduleForDept(emp.department_id) : null
                     return (
                       <tr key={dateStr} className="hover:bg-slate-50 transition bg-slate-50/40">
@@ -470,7 +494,7 @@ export default function RekapAbsensiPage() {
                             <button
                               onClick={() => {
                                 setAbsenModal(true)
-                                setAbsenForm({ employee_id: emp.id, date: dateStr, status: 'leave', notes: '', isTraining: false })
+                                setAbsenForm({ employee_id: emp.id, date: dateStr, status: 'leave', notes: '' })
                               }}
                               className="px-2.5 py-1 text-xs font-medium bg-slate-100 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-200 transition"
                             >
@@ -685,17 +709,11 @@ export default function RekapAbsensiPage() {
                     { val:'permission', label:'Izin',       active:'border-yellow-400 bg-yellow-50 text-yellow-700' },
                   ].map(({val,label,active})=>(
                     <button key={val} type="button"
-                      onClick={()=>setAbsenForm({...absenForm, status:val, isTraining:false})}
-                      className={'py-2.5 text-sm font-medium rounded-lg border-2 transition '+(!absenForm.isTraining && absenForm.status===val ? active : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50')}>
+                      onClick={()=>setAbsenForm({...absenForm, status:val})}
+                      className={'py-2.5 text-sm font-medium rounded-lg border-2 transition '+(absenForm.status===val ? active : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50')}>
                       {label}
                     </button>
                   ))}
-                  {/* Baris penuh: Belum Masuk (Training) */}
-                  <button type="button"
-                    onClick={()=>setAbsenForm({...absenForm, status:'absent', isTraining:true})}
-                    className={'col-span-2 py-2.5 text-sm font-medium rounded-lg border-2 transition '+(absenForm.isTraining ? 'border-purple-400 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50')}>
-                    Belum Masuk <span className="text-xs font-normal">(Training)</span>
-                  </button>
                 </div>
               </div>
               <div>
