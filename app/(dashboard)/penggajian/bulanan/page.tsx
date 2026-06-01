@@ -473,9 +473,8 @@ export default function PenggajianBulananPage() {
     const totalLoss        = Number(lossRes.data?.total_loss_amount ?? 0)
     const companyPct       = Number(lossConfigRes.data?.[0]?.company_coverage_percent ?? 0)
     const sharePct         = Number(shareRes.data?.[0]?.share_percent ?? 0)
-    const companyCover     = totalLoss * (companyPct / 100)
-    const employeeTotalLoss = totalLoss - companyCover
-    const invLoss          = Math.round((sharePct / 100) * employeeTotalLoss)
+    // share_percent adalah % dari TOTAL kehilangan, bukan dari sisa setelah kantor
+    const invLoss          = Math.round((sharePct / 100) * totalLoss)
 
     const kasirPositionIds = (cashierConfigRes.data || []).map((c: any) => c.position_id)
     const isKasir          = kasirPositionIds.includes(positionId)
