@@ -488,6 +488,7 @@ export default function PenggajianBulananPage() {
     const meal     = Number(sc.meal_allowance ?? 0)
     const otRate   = Number(sc.overtime_rate_per_hour ?? 0)
     const latRate  = Number(sc.late_penalty_per_minute ?? 0)
+    const joinDateVal = (emp as any).join_date ?? null
     const otHours  = (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
     const latMins  = (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
     const otTotal  = otHours * otRate
@@ -514,7 +515,6 @@ export default function PenggajianBulananPage() {
     const dailyRate = Math.round((base + pos + meal) / 26)
 
     // Pisahkan status dari data attendance
-    const joinDateVal = (emp as any).join_date ?? null
     // Exclude hari sebelum bergabung dan record "Belum Masuk (Training)" lama
     const validAtts = atts.filter((a: any) => {
       if (joinDateVal && a.date < joinDateVal) return false
@@ -535,9 +535,8 @@ export default function PenggajianBulananPage() {
       allPeriodDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`)
       cur.setDate(cur.getDate()+1)
     }
-    const joinDate    = (emp as any).join_date ?? null
     const emptyDays   = allPeriodDates.filter(d => {
-      if (joinDate && d < joinDate) return false  // sebelum bergabung — diabaikan
+      if (joinDateVal && d < joinDateVal) return false  // sebelum bergabung — diabaikan
       return !recordedDates.has(d)
     }).length
     const autoIzin    = Math.max(emptyDays - 4, 0)  // kosong >4 jadi izin
