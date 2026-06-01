@@ -88,29 +88,22 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
 
   async function fetchData() {
     setLoading(true)
-    const [lRes, eRes, ccRes] = await Promise.all([
+    const [lRes, eRes] = await Promise.all([
       supabase.from('loss_monthly_inputs').select('*').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).single(),
       supabase.from('cashier_loss_entries').select('*, employees(full_name, employee_code)').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).order('entry_date'),
-      supabase.from('cashier_loss_configs').select('position_id').eq('branch_id', selectedBranch).eq('is_active', true),
     ])
     if (lRes.data) { setLossInput(lRes.data); setLossForm({ amount: String(lRes.data.total_loss_amount), notes: lRes.data.notes || '' }) }
     else { setLossInput(null); setLossForm({ amount: '', notes: '' }) }
     setEntries(eRes.data || [])
 
-    // Ambil karyawan aktif dengan jabatan kasir di cabang ini
-    const kasirPositionIds = (ccRes.data || []).map((c: any) => c.position_id)
-    if (kasirPositionIds.length > 0) {
-      const { data: empData } = await supabase
-        .from('employees')
-        .select('id, full_name, employee_code, branch_id, position_id, positions(name)')
-        .eq('branch_id', selectedBranch)
-        .eq('is_active', true)
-        .in('position_id', kasirPositionIds)
-        .order('full_name')
-      setKasirEmployees((empData || []) as unknown as Employee[])
-    } else {
-      setKasirEmployees([])
-    }
+    // Ambil SEMUA karyawan aktif di cabang (bisa di-assign ke siapa saja)
+    const { data: empData } = await supabase
+      .from('employees')
+      .select('id, full_name, employee_code, branch_id, position_id, positions(name)')
+      .eq('branch_id', selectedBranch)
+      .eq('is_active', true)
+      .order('full_name')
+    setKasirEmployees((empData || []) as unknown as Employee[])
 
     setLoading(false)
   }
@@ -271,7 +264,7 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
               </div>
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Assign ke Karyawan <span className="text-slate-400">(kosongkan = bagi rata)</span></label>
+              <label className="block text-xs text-slate-500 mb-1">Tanggung Jawab Karyawan <span className="text-slate-400">(kosongkan = bagi rata ke kasir)</span></label>
               <select value={entryForm.employee_id} onChange={e => setEntryForm({...entryForm, employee_id: e.target.value})}
                 className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm bg-white focus:ring-1 focus:ring-blue-500 outline-none">
                 <option value="">— Bagi rata ke semua kasir —</option>
