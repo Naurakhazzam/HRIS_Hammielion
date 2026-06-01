@@ -178,6 +178,7 @@ export default function PenggajianBulananPage() {
     employeeId: string; employeeName: string; employeeCode: string
     positionName: string; branchName: string
     base: number; pos: number; meal: number; otTotal: number; kpiBonus: number
+    conditionalBonus: number
     loyalitasDed: number; latDed: number; latMinutes: number; latRate: number
     kasbonSaldo: number; kasbonDed: number
     absentDays: number; absentDed: number; absentRatePerDay: number
@@ -196,6 +197,10 @@ export default function PenggajianBulananPage() {
   const [slipPreview, setSlipPreview]       = useState<SlipPreview | null>(null)
   const [buildingPreview, setBuildingPreview] = useState(false)
   const [finalizing, setFinalizing]         = useState(false)
+
+  // ── State: bonus kondisional saat buat slip ──
+  const [createBonusCriteria, setCreateBonusCriteria]       = useState<BonusCriteria[]>([])
+  const [createBonusChecked, setCreateBonusChecked]         = useState<Record<string, boolean>>({})
 
   // ── State: modal bonus kondisional ──
   const [bonusModal, setBonusModal] = useState<Payroll | null>(null)
@@ -238,6 +243,25 @@ export default function PenggajianBulananPage() {
         // tidak ada hari yang benar-benar unclassified
         setUnclassifiedDays([])
         setCheckingUnclassified(false)
+      })
+  }, [selectedEmpId, createModal])
+
+  // Fetch kriteria bonus kondisional saat karyawan dipilih di modal buat slip
+  useEffect(() => {
+    if (!selectedEmpId || !createModal) { setCreateBonusCriteria([]); setCreateBonusChecked({}); return }
+    supabase
+      .from('employee_bonus_criteria')
+      .select('*')
+      .eq('employee_id', selectedEmpId)
+      .eq('is_active', true)
+      .order('created_at')
+      .then(({ data }) => {
+        const criteria = (data as BonusCriteria[]) || []
+        setCreateBonusCriteria(criteria)
+        // Cek apakah sudah ada assessment bulan ini (edit slip case)
+        const initChecked: Record<string, boolean> = {}
+        criteria.forEach(c => { initChecked[c.id] = false })
+        setCreateBonusChecked(initChecked)
       })
   }, [selectedEmpId, createModal])
 
@@ -539,7 +563,12 @@ export default function PenggajianBulananPage() {
       sick4Full,
     }
 
-    const gross = base + pos + meal + otTotal + kpi + loyAutoRelease
+    // Bonus kondisional — hitung dari state checklist di step 1
+    const conditionalBonus = createBonusCriteria
+      .filter(c => createBonusChecked[c.id])
+      .reduce((s, c) => s + Number(c.nominal_amount), 0)
+
+    const gross = base + pos + meal + otTotal + kpi + loyAutoRelease + conditionalBonus
     const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyAutoRelease > 0 ? 0 : loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
 
     const preview: SlipPreview = {
@@ -551,6 +580,7 @@ export default function PenggajianBulananPage() {
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
       invLoss, cashierLoss: cashLoss,
       loyAutoRelease, loyBalSaldo, loyDurasi,
+      conditionalBonus,
       gross, net,
     }
     setSlipPreview(preview)
@@ -577,23 +607,42 @@ export default function PenggajianBulananPage() {
       }
     }
 
-    const { error } = await supabase.from('payrolls').insert({
+    const { data: insertedPayroll, error } = await supabase.from('payrolls').insert({
       employee_id: p.employeeId, period_month: filterMonth, period_year: filterYear,
       base_salary: p.base, position_allowance: p.pos, meal_allowance: p.meal,
       overtime_total: p.otTotal, kpi_bonus: p.kpiBonus,
+      conditional_bonus: p.conditionalBonus,
       late_deduction: p.latDed, kasbon_deduction: p.kasbonDed,
       loyalitas_deduction: p.loyAutoRelease > 0 ? 0 : p.loyalitasDed,
       loyalitas_auto_release: p.loyAutoRelease,
       absent_days: p.absentDays, absent_deduction: p.absentDed,
       inventory_loss_deduction: p.invLoss, cashier_loss_deduction: p.cashierLoss,
       gross_total: p.gross, net_total: p.net, status: 'draft', approved_by: null,
-    })
+    }).select('id').single()
 
     if (error) {
       showMessage('error', 'Gagal simpan slip: ' + error.message)
     } else {
+      // Simpan assessments bonus kondisional jika ada
+      if (insertedPayroll && createBonusCriteria.length > 0) {
+        const currentUser = await supabase.auth.getUser()
+        const userId = currentUser.data.user?.id
+        const assessPayloads = createBonusCriteria.map(c => ({
+          payroll_id: insertedPayroll.id,
+          criteria_id: c.id,
+          employee_id: p.employeeId,
+          period_month: filterMonth,
+          period_year: filterYear,
+          is_achieved: createBonusChecked[c.id] ?? false,
+          assessed_by: userId || null,
+          notes: null,
+        }))
+        await supabase.from('payroll_bonus_assessments').upsert(assessPayloads, { onConflict: 'payroll_id,criteria_id' })
+      }
       showMessage('success', `Slip gaji ${p.employeeName} berhasil dibuat.`)
       setCreateModal(false)
+      setCreateBonusCriteria([])
+      setCreateBonusChecked({})
       fetchPayrolls()
     }
     setFinalizing(false)
@@ -1934,6 +1983,35 @@ export default function PenggajianBulananPage() {
                         className="w-28 px-2 py-1.5 border border-orange-300 rounded text-sm text-right focus:ring-2 focus:ring-orange-400 outline-none" />
                     </div>
 
+                    {/* Bonus Kondisional */}
+                    {createBonusCriteria.length > 0 && (
+                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                        <p className="text-sm font-semibold text-blue-700">🎯 Bonus Kondisional</p>
+                        <p className="text-xs text-blue-500">Centang kriteria yang terpenuhi bulan ini</p>
+                        <div className="space-y-2 mt-1">
+                          {createBonusCriteria.map(c => (
+                            <label key={c.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${createBonusChecked[c.id] ? 'bg-green-50 border-green-300' : 'bg-white border-slate-200 hover:border-blue-200'}`}>
+                              <div className="flex items-center gap-2">
+                                <input type="checkbox" checked={createBonusChecked[c.id] ?? false}
+                                  onChange={e => setCreateBonusChecked(prev => ({ ...prev, [c.id]: e.target.checked }))}
+                                  className="w-4 h-4 accent-green-500" />
+                                <span className="text-sm text-slate-700">{c.criteria_name}</span>
+                              </div>
+                              <span className={`text-sm font-semibold ${createBonusChecked[c.id] ? 'text-green-600' : 'text-slate-400'}`}>
+                                {createBonusChecked[c.id] ? '+' : ''}{formatRupiah(Number(c.nominal_amount))}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                        <div className="flex justify-between items-center pt-1 border-t border-blue-200">
+                          <span className="text-xs text-blue-600 font-medium">Total bonus kondisional:</span>
+                          <span className="text-sm font-bold text-green-600">
+                            {formatRupiah(createBonusCriteria.filter(c => createBonusChecked[c.id]).reduce((s, c) => s + Number(c.nominal_amount), 0))}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
                     <p className="text-xs text-slate-400">KPI, lembur, keterlambatan, kehilangan barang akan diambil otomatis dari data yang sudah ada.</p>
                   </div>
                 )}
@@ -1968,6 +2046,7 @@ export default function PenggajianBulananPage() {
                     ['Tunjangan Tetap', slipPreview.meal],
                     ['Upah Lembur', slipPreview.otTotal],
                     ['Bonus KPI', slipPreview.kpiBonus],
+                    ...(slipPreview.conditionalBonus > 0 ? [['Bonus Kondisional', slipPreview.conditionalBonus]] : []),
                     ...(slipPreview.loyAutoRelease > 0 ? [[`✅ Cair Tabungan Loyalitas (${slipPreview.loyDurasi} bln)`, slipPreview.loyAutoRelease]] : []),
                   ].map(([l, v]) => Number(v) > 0 && (
                     <div key={String(l)} className="flex justify-between px-4 py-2 border-t border-slate-100">
