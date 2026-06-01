@@ -46,7 +46,7 @@ export default function SetupKehilanganPage() {
       supabase.from('positions').select('id, name').order('name'),
       supabase.from('employees').select('id, full_name, employee_code, branch_id, position_id, positions(name)').eq('is_active', true).eq('employee_type', 'permanent').order('full_name'),
       supabase.from('branch_loss_configs').select('*').order('created_at', { ascending: false }),
-      supabase.from('loss_employee_shares').select('*, employees(full_name, employee_code, positions(name))').eq('is_active', true).order('created_at', { ascending: false }),
+      supabase.from('loss_employee_shares').select('*, employees(full_name, employee_code, positions(name))').order('created_at', { ascending: false }),
       supabase.from('cashier_loss_configs').select('*, positions(name)').order('created_at'),
     ])
     if (bRes.data) { setBranches(bRes.data); if (!selectedBranch && bRes.data.length > 0) setSelectedBranch(bRes.data[0].id) }
@@ -61,9 +61,15 @@ export default function SetupKehilanganPage() {
   const currentKantorConfig = configs.filter(c => c.branch_id === selectedBranch).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
   const kantorHistory = configs.filter(c => c.branch_id === selectedBranch).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   const branchEmployees = employees.filter(e => e.branch_id === selectedBranch)
-  const getLatestShare = (empId: string) => shares.filter(s => s.employee_id === empId && s.branch_id === selectedBranch).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+  // Ambil share aktif terbaru per karyawan (is_active = true, sort by created_at)
+  const getLatestShare = (empId: string) => shares
+    .filter(s => s.employee_id === empId && s.branch_id === selectedBranch && s.is_active)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
   const totalSharePercent = branchEmployees.reduce((sum, e) => { const s = getLatestShare(e.id); return sum + (s ? Number(s.share_percent) : 0) }, 0)
-  const employeeShareHistory = (empId: string) => shares.filter(s => s.employee_id === empId && s.branch_id === selectedBranch).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  // History: semua record (aktif maupun tidak), terbaru dulu
+  const employeeShareHistory = (empId: string) => shares
+    .filter(s => s.employee_id === empId && s.branch_id === selectedBranch)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
   async function handleSaveKantor(e: React.FormEvent) {
     e.preventDefault()
@@ -86,25 +92,48 @@ export default function SetupKehilanganPage() {
     setShareSubmitting(true)
     const today = new Date().toISOString().split('T')[0]
     const inserts: any[] = []
+    const empIdsToDeactivate: string[] = []
     let newTotal = 0
+
     for (const emp of branchEmployees) {
       const f = shareForm[emp.id]
-      if (!f?.percent) continue
+      // skip if user didn't touch this field
+      if (f?.percent === undefined || f.percent === '') continue
       const pct = parseFloat(f.percent)
       if (isNaN(pct) || pct < 0) continue
       newTotal += pct
+      empIdsToDeactivate.push(emp.id)
       inserts.push({ employee_id: emp.id, branch_id: selectedBranch, share_percent: pct, effective_date: today, notes: f.notes || null, is_active: true })
     }
+
     if (inserts.length === 0) { showMsg('error', 'Tidak ada persentase yang diisi.'); setShareSubmitting(false); return }
+
+    // Hitung total baru: gabung karyawan yang diupdate + karyawan yang tidak diubah
+    const unchangedTotal = branchEmployees
+      .filter(emp => !empIdsToDeactivate.includes(emp.id))
+      .reduce((sum, emp) => { const s = getLatestShare(emp.id); return sum + (s ? Number(s.share_percent) : 0) }, 0)
+    const grandTotal = newTotal + unchangedTotal
+
     const companyPct = Number(currentKantorConfig?.company_coverage_percent ?? 0)
-    if (companyPct + newTotal > 100) {
-      showMsg('error', `% Kantor (${companyPct}%) + total % karyawan baru (${newTotal.toFixed(1)}%) = ${(companyPct + newTotal).toFixed(1)}% — melebihi 100%. Sesuaikan persentasenya.`)
+    if (companyPct + grandTotal > 100) {
+      showMsg('error', `% Kantor (${companyPct}%) + total % karyawan (${grandTotal.toFixed(1)}%) = ${(companyPct + grandTotal).toFixed(1)}% — melebihi 100%. Sesuaikan persentasenya.`)
       setShareSubmitting(false)
       return
     }
+
+    // Deactivate record lama (jadi history), lalu insert baru
+    const { error: deactError } = await supabase
+      .from('loss_employee_shares')
+      .update({ is_active: false })
+      .eq('branch_id', selectedBranch)
+      .eq('is_active', true)
+      .in('employee_id', empIdsToDeactivate)
+
+    if (deactError) { showMsg('error', 'Gagal nonaktifkan record lama: ' + deactError.message); setShareSubmitting(false); return }
+
     const { error } = await supabase.from('loss_employee_shares').insert(inserts)
     if (error) showMsg('error', 'Gagal: ' + error.message)
-    else { showMsg('success', `${inserts.length} persentase karyawan berhasil disimpan.`); setShareForm({}); fetchAll() }
+    else { showMsg('success', `${inserts.length} % karyawan berhasil diperbarui (history tersimpan).`); setShareForm({}); fetchAll() }
     setShareSubmitting(false)
   }
 
@@ -247,23 +276,31 @@ export default function SetupKehilanganPage() {
                         <div className="flex-1">
                           <div className="font-medium text-slate-800 text-sm">{emp.full_name}</div>
                           <div className="text-xs text-slate-400">{emp.employee_code} · {emp.positions?.name}</div>
-                          {latest && <div className="text-xs text-blue-600 mt-0.5">Saat ini: {latest.share_percent}%</div>}
+                          <div className={`text-xs font-semibold mt-0.5 ${latest ? (Number(latest.share_percent) > 0 ? 'text-blue-600' : 'text-slate-400') : 'text-slate-400 italic'}`}>
+                            {latest ? `Saat ini: ${Number(latest.share_percent).toFixed(1)}%` : 'Belum dikonfigurasi'}
+                          </div>
                         </div>
                         <div className="flex gap-2 items-center">
-                          <input type="number" min="0" max="100" step="0.01" placeholder="%" value={f.percent}
-                            onChange={e => setShareForm(prev => ({ ...prev, [emp.id]: { ...f, percent: e.target.value } }))}
-                            className="w-20 px-2 py-1.5 border border-slate-300 rounded text-sm text-right focus:ring-1 focus:ring-blue-500 outline-none" />
+                          <input type="number" min="0" max="100" step="0.01" placeholder="% baru"
+                            value={shareForm[emp.id]?.percent ?? ''}
+                            onChange={e => setShareForm(prev => ({ ...prev, [emp.id]: { ...(prev[emp.id] || { notes: '' }), percent: e.target.value } }))}
+                            className="w-24 px-2 py-1.5 border border-slate-300 rounded text-sm text-right focus:ring-1 focus:ring-blue-500 outline-none" />
                           <span className="text-sm text-slate-500">%</span>
-                          <input type="text" placeholder="Catatan" value={f.notes}
-                            onChange={e => setShareForm(prev => ({ ...prev, [emp.id]: { ...f, notes: e.target.value } }))}
+                          <input type="text" placeholder="Catatan"
+                            value={shareForm[emp.id]?.notes ?? ''}
+                            onChange={e => setShareForm(prev => ({ ...prev, [emp.id]: { ...(prev[emp.id] || { percent: '' }), notes: e.target.value } }))}
                             className="w-32 px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
                         </div>
                       </div>
                       {history.length > 0 && (
-                        <div className="mt-2 text-xs text-slate-500">
-                          Histori: {history.slice(0, 3).map((h, i) => (
-                            <span key={h.id} className={i === 0 ? 'text-blue-600 font-medium' : ''}>
-                              {h.share_percent}% ({new Date(h.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}){i < Math.min(history.length, 3) - 1 ? ' → ' : ''}
+                        <div className="mt-2 text-xs text-slate-500 border-t border-slate-100 pt-2">
+                          <span className="font-medium text-slate-600">Histori: </span>
+                          {history.slice(0, 4).map((h, i) => (
+                            <span key={h.id} className={`inline-flex items-center gap-1 ${i === 0 && h.is_active ? 'text-blue-600 font-semibold' : 'text-slate-400 line-through-none'}`}>
+                              {Number(h.share_percent).toFixed(1)}%
+                              <span className="text-slate-300 text-[10px]">{new Date(h.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: '2-digit' })}</span>
+                              {!h.is_active && <span className="text-[10px] text-slate-300">(lama)</span>}
+                              {i < Math.min(history.length, 4) - 1 ? <span className="mx-1 text-slate-300">→</span> : null}
                             </span>
                           ))}
                         </div>
