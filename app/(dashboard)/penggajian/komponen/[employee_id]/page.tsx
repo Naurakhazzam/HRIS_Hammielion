@@ -118,17 +118,28 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
       return
     }
 
-    const { error } = await supabase
+    // Cek apakah sudah ada record untuk karyawan ini
+    const { data: existing } = await supabase
       .from('salary_components')
-      .insert({
-        employee_id: employee_id,
-        base_salary: baseSalaryNum,
-        position_allowance: parseFloat(formData.position_allowance) || 0,
-        meal_allowance: parseFloat(formData.meal_allowance) || 0,
-        overtime_rate_per_hour: parseFloat(formData.overtime_rate_per_hour) || 0,
-        late_penalty_per_minute: parseFloat(formData.late_penalty_per_minute) || 0,
-        effective_date: formattedDate
-      })
+      .select('id')
+      .eq('employee_id', employee_id)
+      .order('effective_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const payload = {
+      employee_id: employee_id,
+      base_salary: baseSalaryNum,
+      position_allowance: parseFloat(formData.position_allowance) || 0,
+      meal_allowance: parseFloat(formData.meal_allowance) || 0,
+      overtime_rate_per_hour: parseFloat(formData.overtime_rate_per_hour) || 0,
+      late_penalty_per_minute: parseFloat(formData.late_penalty_per_minute) || 0,
+      effective_date: formattedDate
+    }
+
+    const { error } = existing
+      ? await supabase.from('salary_components').update(payload).eq('id', existing.id)
+      : await supabase.from('salary_components').insert(payload)
 
     if (error) {
       console.error('Detail error:', JSON.stringify(error, null, 2))

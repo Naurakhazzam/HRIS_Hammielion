@@ -438,7 +438,7 @@ export default function PenggajianBulananPage() {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
     const [scRes, attRes, kpiRes, klRes, empRes, loyBalRes] = await Promise.all([
-      supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
+      supabase.from('salary_components').select('*').eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status, overtime_hours, late_minutes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
@@ -896,7 +896,7 @@ export default function PenggajianBulananPage() {
     const firstDay = `${sy2}-${pad2(sm2)}-26`
     const lastDay  = `${p.period_year}-${pad2(p.period_month)}-25`
 
-    const { data: sc } = await supabase.from('salary_components').select('overtime_rate_per_hour').eq('employee_id', p.employee_id).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1)
+    const { data: sc } = await supabase.from('salary_components').select('overtime_rate_per_hour').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1)
     const otRate = Number(sc?.[0]?.overtime_rate_per_hour ?? 0)
 
     const { data: atts } = await supabase.from('attendances').select('date, overtime_hours').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay).gt('overtime_hours', 0).order('date')
@@ -922,7 +922,7 @@ export default function PenggajianBulananPage() {
     const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
 
     const [scRes, attRes] = await Promise.all([
-      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance').eq('employee_id', p.employee_id).lte('effective_date', firstDay).order('effective_date', { ascending: false }).limit(1),
+      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
     ])
 
