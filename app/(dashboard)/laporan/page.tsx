@@ -5,6 +5,28 @@ import { createClient } from '@/lib/supabase/client'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
+// Format ringkas untuk print: tanpa "Rp", gunakan titik sebagai pemisah ribuan
+const fmtPrint = (v: number) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(v)
+
+// Komponen Amount: tampilkan format penuh di layar, format ringkas di print
+function Amt({ v, className }: { v: number; className?: string }) {
+  if (v === 0) return <span className="text-slate-300">—</span>
+  return (
+    <span className={className}>
+      <span className="screen-only">{fmtRp(v)}</span>
+      <span className="print-only">{fmtPrint(v)}</span>
+    </span>
+  )
+}
+function AmtNeg({ v, className }: { v: number; className?: string }) {
+  if (v === 0) return <span className="text-slate-300">—</span>
+  return (
+    <span className={className}>
+      <span className="screen-only">-{fmtRp(v)}</span>
+      <span className="print-only">-{fmtPrint(v)}</span>
+    </span>
+  )
+}
 
 type PayrollRow = {
   id: string
@@ -273,10 +295,22 @@ export default function LaporanPage() {
         <div className="space-y-8" id="laporan-content">
 
           {/* ── Print header ── */}
-          <div className="hidden print:block mb-6">
-            <h1 className="text-2xl font-bold text-slate-800">Laporan Penggajian Bulanan</h1>
-            <p className="text-sm text-slate-600 mt-1">Periode: {MONTHS[filterMonth-1]} {filterYear} &nbsp;|&nbsp; Dicetak: {new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'long',year:'numeric'})}</p>
-            <hr className="mt-3 border-slate-300" />
+          <div className="hidden print:block mb-5">
+            <div className="flex justify-between items-start">
+              <div>
+                <div className="print-title">LAPORAN PENGGAJIAN BULANAN</div>
+                <div className="print-subtitle">
+                  Periode: {MONTHS[filterMonth-1]} {filterYear} &nbsp;·&nbsp;
+                  Dicetak: {new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'long',year:'numeric'})} &nbsp;·&nbsp;
+                  Hammielion HRIS
+                </div>
+              </div>
+              <div className="text-right print-subtitle">
+                <div className="font-bold text-slate-700">{grandTotals.count} Karyawan</div>
+                <div>Total Bersih: <strong>{fmtRp(grandTotals.bersih)}</strong></div>
+              </div>
+            </div>
+            <hr style={{borderTop:'2px solid #1e293b', marginTop:'8px'}} />
           </div>
 
           {/* ── Ringkasan per cabang ── */}
@@ -286,11 +320,11 @@ export default function LaporanPage() {
               Ringkasan Per Cabang — {MONTHS[filterMonth-1]} {filterYear}
             </h2>
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-200">
+              <table className="w-full text-sm summary-table">
+                <thead className="bg-slate-800 text-white">
                   <tr>
                     {['Cabang','Karyawan','Total Bruto','Total Potongan','Total Gaji Bersih'].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">{h}</th>
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -299,19 +333,19 @@ export default function LaporanPage() {
                     <tr key={i} className="hover:bg-slate-50/50">
                       <td className="px-4 py-3 font-medium text-slate-800">{b.name}</td>
                       <td className="px-4 py-3 text-slate-600 text-center">{b.count}</td>
-                      <td className="px-4 py-3 text-slate-700">{fmtRp(b.totalBruto)}</td>
-                      <td className="px-4 py-3 text-red-600">-{fmtRp(b.totalPotongan)}</td>
-                      <td className="px-4 py-3 font-semibold text-green-700">{fmtRp(b.totalBersih)}</td>
+                      <td className="px-4 py-3 text-slate-700"><Amt v={b.totalBruto} /></td>
+                      <td className="px-4 py-3 text-red-600 font-medium"><AmtNeg v={b.totalPotongan} /></td>
+                      <td className="px-4 py-3 font-bold text-green-700"><Amt v={b.totalBersih} className="text-green-700" /></td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="bg-slate-800 text-white">
+                <tfoot className="dark">
                   <tr>
-                    <td className="px-4 py-3 font-bold text-sm">TOTAL</td>
-                    <td className="px-4 py-3 text-center font-bold">{grandTotals.count}</td>
-                    <td className="px-4 py-3 font-bold">{fmtRp(grandTotals.bruto)}</td>
-                    <td className="px-4 py-3 font-bold">-{fmtRp(grandTotals.potongan)}</td>
-                    <td className="px-4 py-3 font-bold text-green-300">{fmtRp(grandTotals.bersih)}</td>
+                    <td className="px-4 py-3 text-white font-bold text-sm">TOTAL</td>
+                    <td className="px-4 py-3 text-white text-center font-bold">{grandTotals.count}</td>
+                    <td className="px-4 py-3 text-white font-bold"><Amt v={grandTotals.bruto} /></td>
+                    <td className="px-4 py-3 text-white font-bold"><AmtNeg v={grandTotals.potongan} /></td>
+                    <td className="px-4 py-3 font-bold text-green-300"><Amt v={grandTotals.bersih} /></td>
                   </tr>
                 </tfoot>
               </table>
@@ -319,90 +353,116 @@ export default function LaporanPage() {
           </section>
 
           {/* ── Detail per karyawan ── */}
-          {branchGroups.map(group => (
-            <section key={group.id}>
+          {branchGroups.map((group, gi) => (
+            <section key={group.id} className={`allow-break ${gi > 0 ? 'page-break' : ''}`}>
               <h2 className="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
                 <span className="w-1 h-5 bg-emerald-500 rounded-full inline-block"></span>
                 Detail Karyawan {groupBy === 'branch' ? `— ${group.name}` : '— Semua Cabang'}
               </h2>
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200">
+
+              {/* Tabel 1: Absensi + Pendapatan */}
+              <p className="text-xs font-semibold text-slate-500 uppercase mb-1.5 tracking-wide">Absensi & Pendapatan</p>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto mb-4">
+                <table className="w-full text-xs detail-table">
+                  <thead className="bg-slate-800 text-white">
                     <tr>
-                      <th className="px-3 py-3 text-left font-semibold text-slate-500 uppercase whitespace-nowrap">Karyawan</th>
-                      {groupBy === 'all' && <th className="px-3 py-3 text-left font-semibold text-slate-500 uppercase">Cabang</th>}
-                      <th className="px-3 py-3 text-center font-semibold text-slate-500 uppercase">Hadir</th>
-                      <th className="px-3 py-3 text-center font-semibold text-slate-500 uppercase">Absen</th>
-                      <th className="px-3 py-3 text-center font-semibold text-slate-500 uppercase">Libur</th>
-                      <th className="px-3 py-3 text-right font-semibold text-slate-500 uppercase whitespace-nowrap">Gaji Pokok</th>
-                      <th className="px-3 py-3 text-right font-semibold text-slate-500 uppercase whitespace-nowrap">Tunjangan</th>
-                      <th className="px-3 py-3 text-right font-semibold text-slate-500 uppercase whitespace-nowrap">Lembur</th>
-                      <th className="px-3 py-3 text-right font-semibold text-slate-500 uppercase">KPI</th>
-                      <th className="px-3 py-3 text-right font-semibold text-slate-500 uppercase whitespace-nowrap">Bonus Kond.</th>
-                      <th className="px-3 py-3 text-right font-semibold text-green-600 uppercase">Bruto</th>
-                      <th className="px-3 py-3 text-right font-semibold text-red-500 uppercase whitespace-nowrap">-Terlambat</th>
-                      <th className="px-3 py-3 text-right font-semibold text-red-500 uppercase whitespace-nowrap">-Tdk Hadir</th>
-                      <th className="px-3 py-3 text-right font-semibold text-red-500 uppercase">-Kasbon</th>
-                      <th className="px-3 py-3 text-right font-semibold text-red-500 uppercase whitespace-nowrap">-Kehilangan</th>
-                      <th className="px-3 py-3 text-right font-semibold text-red-500 uppercase whitespace-nowrap">-Kasir</th>
-                      <th className="px-3 py-3 text-right font-semibold text-blue-600 uppercase whitespace-nowrap">Gaji Bersih</th>
-                      <th className="px-3 py-3 text-left font-semibold text-slate-500 uppercase whitespace-nowrap">Detail Bonus</th>
+                      <th className="px-3 py-2.5 text-left">Karyawan</th>
+                      {groupBy === 'all' && <th className="px-3 py-2.5 text-left">Cabang</th>}
+                      <th className="px-3 py-2.5 text-center">Hadir</th>
+                      <th className="px-3 py-2.5 text-center">Absen</th>
+                      <th className="px-3 py-2.5 text-center">Libur</th>
+                      <th className="px-3 py-2.5 text-right">Gaji Pokok</th>
+                      <th className="px-3 py-2.5 text-right">Tunjangan</th>
+                      <th className="px-3 py-2.5 text-right">Lembur</th>
+                      <th className="px-3 py-2.5 text-right">KPI</th>
+                      <th className="px-3 py-2.5 text-right">Bonus Kond.</th>
+                      <th className="px-3 py-2.5 text-right" style={{background:'#166534',color:'white'}}>Total Bruto</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {group.rows.map(p => {
+                    {group.rows.map((p,ri) => {
                       const att = attendanceMap[p.employee_id] || { hadir: 0, tidak_hadir: 0, libur: 0 }
                       const bonuses = bonusMap[p.id] || []
                       const tunjangan = Number(p.position_allowance) + Number(p.meal_allowance)
                       return (
-                        <tr key={p.id} className="hover:bg-blue-50/30">
-                          <td className="px-3 py-3">
-                            <div className="font-semibold text-slate-800 whitespace-nowrap">{p.employee?.full_name}</div>
-                            <div className="text-slate-400 text-[10px]">{p.employee?.employee_code} · {(p.employee?.positions as any)?.name}</div>
+                        <tr key={p.id} className={ri % 2 === 1 ? 'bg-slate-50/50' : 'bg-white'}>
+                          <td className="px-3 py-2.5 col-nama">
+                            <div className="font-semibold text-slate-800">{p.employee?.full_name}</div>
+                            <div className="text-slate-400 text-[9px]">{p.employee?.employee_code} · {(p.employee?.positions as any)?.name}</div>
                           </td>
-                          {groupBy === 'all' && <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{(p.employee?.branches as any)?.name ?? '—'}</td>}
-                          <td className="px-3 py-3 text-center font-medium text-green-700">{att.hadir}</td>
-                          <td className="px-3 py-3 text-center font-medium text-red-600">{att.tidak_hadir || p.absent_days || 0}</td>
-                          <td className="px-3 py-3 text-center text-slate-500">{att.libur}</td>
-                          <td className="px-3 py-3 text-right text-slate-700">{fmtRp(Number(p.base_salary))}</td>
-                          <td className="px-3 py-3 text-right text-slate-700">{fmtRp(tunjangan)}</td>
-                          <td className="px-3 py-3 text-right text-slate-600">{Number(p.overtime_total) > 0 ? fmtRp(Number(p.overtime_total)) : '—'}</td>
-                          <td className="px-3 py-3 text-right text-slate-600">{Number(p.kpi_bonus) > 0 ? fmtRp(Number(p.kpi_bonus)) : '—'}</td>
-                          <td className="px-3 py-3 text-right text-slate-600">{Number(p.conditional_bonus) > 0 ? fmtRp(Number(p.conditional_bonus)) : '—'}</td>
-                          <td className="px-3 py-3 text-right font-semibold text-green-700">{fmtRp(Number(p.gross_total))}</td>
-                          <td className="px-3 py-3 text-right text-red-600">{Number(p.late_deduction) > 0 ? `-${fmtRp(Number(p.late_deduction))}` : '—'}</td>
-                          <td className="px-3 py-3 text-right text-red-600">{Number(p.absent_deduction) > 0 ? `-${fmtRp(Number(p.absent_deduction))}` : '—'}</td>
-                          <td className="px-3 py-3 text-right text-red-600">{Number(p.kasbon_deduction) > 0 ? `-${fmtRp(Number(p.kasbon_deduction))}` : '—'}</td>
-                          <td className="px-3 py-3 text-right text-red-600">{Number(p.inventory_loss_deduction) > 0 ? `-${fmtRp(Number(p.inventory_loss_deduction))}` : '—'}</td>
-                          <td className="px-3 py-3 text-right text-red-600">{Number(p.cashier_loss_deduction) > 0 ? `-${fmtRp(Number(p.cashier_loss_deduction))}` : '—'}</td>
-                          <td className="px-3 py-3 text-right font-bold text-blue-700 whitespace-nowrap">{fmtRp(Number(p.net_total))}</td>
-                          <td className="px-3 py-3">
-                            {bonuses.length === 0 ? <span className="text-slate-300">—</span> : (
-                              <div className="space-y-0.5">
+                          {groupBy === 'all' && <td className="px-3 py-2 text-slate-600 col-cabang">{(p.employee?.branches as any)?.name ?? '—'}</td>}
+                          <td className="px-3 py-2.5 text-center font-bold text-green-700">{att.hadir}</td>
+                          <td className="px-3 py-2.5 text-center font-bold text-red-600">{att.tidak_hadir || p.absent_days || 0}</td>
+                          <td className="px-3 py-2.5 text-center text-slate-500">{att.libur}</td>
+                          <td className="px-3 py-2.5 text-right text-slate-700"><Amt v={Number(p.base_salary)} /></td>
+                          <td className="px-3 py-2.5 text-right text-slate-700"><Amt v={tunjangan} /></td>
+                          <td className="px-3 py-2.5 text-right text-slate-600"><Amt v={Number(p.overtime_total)} /></td>
+                          <td className="px-3 py-2.5 text-right text-slate-600"><Amt v={Number(p.kpi_bonus)} /></td>
+                          <td className="px-3 py-2.5 text-right text-slate-600">
+                            {Number(p.conditional_bonus) > 0 ? (
+                              <div>
+                                <Amt v={Number(p.conditional_bonus)} />
                                 {bonuses.map((b,i) => (
-                                  <div key={i} className="flex items-center gap-1 whitespace-nowrap">
-                                    <span className="text-green-600 font-medium">✓ {b.criteria?.criteria_name}</span>
-                                    <span className="text-slate-400">({fmtRp(Number(b.criteria?.nominal_amount))})</span>
-                                    {b.notes && <span className="text-slate-400 italic">— {b.notes}</span>}
-                                  </div>
+                                  <div key={i} className="text-[9px] text-green-600">✓ {b.criteria?.criteria_name}{b.notes ? ` — ${b.notes}` : ''}</div>
                                 ))}
                               </div>
-                            )}
+                            ) : <span className="text-slate-300">—</span>}
                           </td>
+                          <td className="px-3 py-2.5 text-right font-bold text-green-700"><Amt v={Number(p.gross_total)} className="text-green-700" /></td>
                         </tr>
                       )
                     })}
                   </tbody>
-                  <tfoot className="bg-slate-100 border-t-2 border-slate-300">
+                  <tfoot>
                     <tr>
-                      <td colSpan={groupBy === 'all' ? 2 : 1} className="px-3 py-2.5 font-bold text-slate-700 text-xs uppercase">Subtotal {group.name}</td>
+                      <td colSpan={groupBy === 'all' ? 2 : 1} className="px-3 py-2 font-bold text-xs uppercase text-slate-700">Subtotal</td>
                       <td className="px-3 py-2 text-center font-bold text-green-700">{group.rows.reduce((s,p)=>s+(attendanceMap[p.employee_id]?.hadir||0),0)}</td>
-                      <td colSpan={2} className="px-3 py-2"></td>
-                      <td colSpan={5} className="px-3 py-2"></td>
-                      <td className="px-3 py-2 text-right font-bold text-green-700">{fmtRp(group.rows.reduce((s,p)=>s+Number(p.gross_total),0))}</td>
-                      <td colSpan={5} className="px-3 py-2"></td>
-                      <td className="px-3 py-2 text-right font-bold text-blue-700">{fmtRp(group.rows.reduce((s,p)=>s+Number(p.net_total),0))}</td>
-                      <td></td>
+                      <td colSpan={6} className="px-3 py-2"></td>
+                      <td className="px-3 py-2 text-right font-bold text-green-700"><Amt v={group.rows.reduce((s,p)=>s+Number(p.gross_total),0)} className="text-green-700" /></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* Tabel 2: Potongan + Gaji Bersih */}
+              <p className="text-xs font-semibold text-slate-500 uppercase mb-1.5 tracking-wide">Potongan & Gaji Bersih</p>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+                <table className="w-full text-xs detail-table">
+                  <thead className="bg-slate-700 text-white">
+                    <tr>
+                      <th className="px-3 py-2.5 text-left">Karyawan</th>
+                      {groupBy === 'all' && <th className="px-3 py-2.5 text-left">Cabang</th>}
+                      <th className="px-3 py-2.5 text-right" style={{color:'#fca5a5'}}>- Terlambat</th>
+                      <th className="px-3 py-2.5 text-right" style={{color:'#fca5a5'}}>- Tdk Hadir</th>
+                      <th className="px-3 py-2.5 text-right" style={{color:'#fca5a5'}}>- Kasbon</th>
+                      <th className="px-3 py-2.5 text-right" style={{color:'#fca5a5'}}>- Kehilangan</th>
+                      <th className="px-3 py-2.5 text-right" style={{color:'#fca5a5'}}>- Kasir</th>
+                      <th className="px-3 py-2.5 text-right" style={{color:'#fca5a5'}}>- Loyalitas</th>
+                      <th className="px-3 py-2.5 text-right" style={{background:'#1e40af',color:'white'}}>Gaji Bersih</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {group.rows.map((p,ri) => (
+                      <tr key={p.id} className={ri % 2 === 1 ? 'bg-slate-50/50' : 'bg-white'}>
+                        <td className="px-3 py-2.5 col-nama">
+                          <div className="font-semibold text-slate-800">{p.employee?.full_name}</div>
+                          <div className="text-slate-400 text-[9px]">{p.employee?.employee_code}</div>
+                        </td>
+                        {groupBy === 'all' && <td className="px-3 py-2 text-slate-600 col-cabang">{(p.employee?.branches as any)?.name ?? '—'}</td>}
+                        <td className="px-3 py-2.5 text-right text-red-600"><AmtNeg v={Number(p.late_deduction)} /></td>
+                        <td className="px-3 py-2.5 text-right text-red-600"><AmtNeg v={Number(p.absent_deduction)} /></td>
+                        <td className="px-3 py-2.5 text-right text-red-600"><AmtNeg v={Number(p.kasbon_deduction)} /></td>
+                        <td className="px-3 py-2.5 text-right text-red-600"><AmtNeg v={Number(p.inventory_loss_deduction)} /></td>
+                        <td className="px-3 py-2.5 text-right text-red-600"><AmtNeg v={Number(p.cashier_loss_deduction)} /></td>
+                        <td className="px-3 py-2.5 text-right text-red-600"><AmtNeg v={Number(p.loyalitas_deduction)} /></td>
+                        <td className="px-3 py-2.5 text-right font-bold text-blue-700"><Amt v={Number(p.net_total)} className="text-blue-700" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={groupBy === 'all' ? 7 : 6} className="px-3 py-2 font-bold text-xs uppercase text-slate-700">Subtotal Gaji Bersih {group.name}</td>
+                      <td className="px-3 py-2 text-right font-bold text-blue-700"><Amt v={group.rows.reduce((s,p)=>s+Number(p.net_total),0)} className="text-blue-700" /></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -430,20 +490,20 @@ export default function LaporanPage() {
                     {lossData.map((l,i) => (
                       <tr key={i} className="hover:bg-slate-50/50">
                         <td className="px-4 py-3 font-medium text-slate-800">{l.branch_name}</td>
-                        <td className="px-4 py-3 font-semibold text-red-600">{fmtRp(l.total_loss)}</td>
+                        <td className="px-4 py-3 font-semibold text-red-600"><Amt v={l.total_loss} /></td>
                         <td className="px-4 py-3 text-slate-600">{l.company_pct}%</td>
-                        <td className="px-4 py-3 text-blue-600">{fmtRp(l.company_cover)}</td>
-                        <td className="px-4 py-3 text-red-600 font-medium">{fmtRp(l.employee_cover)}</td>
+                        <td className="px-4 py-3 text-blue-600"><Amt v={l.company_cover} /></td>
+                        <td className="px-4 py-3 text-red-600 font-medium"><Amt v={l.employee_cover} /></td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot className="bg-slate-100 border-t border-slate-300">
                     <tr>
                       <td className="px-4 py-2.5 font-bold text-slate-700 text-xs uppercase">Total</td>
-                      <td className="px-4 py-2.5 font-bold text-red-600">{fmtRp(lossData.reduce((s,l)=>s+l.total_loss,0))}</td>
+                      <td className="px-4 py-2.5 font-bold text-red-600"><Amt v={lossData.reduce((s,l)=>s+l.total_loss,0)} /></td>
                       <td></td>
-                      <td className="px-4 py-2.5 font-bold text-blue-600">{fmtRp(lossData.reduce((s,l)=>s+l.company_cover,0))}</td>
-                      <td className="px-4 py-2.5 font-bold text-red-600">{fmtRp(lossData.reduce((s,l)=>s+l.employee_cover,0))}</td>
+                      <td className="px-4 py-2.5 font-bold text-blue-600"><Amt v={lossData.reduce((s,l)=>s+l.company_cover,0)} /></td>
+                      <td className="px-4 py-2.5 font-bold text-red-600"><Amt v={lossData.reduce((s,l)=>s+l.employee_cover,0)} /></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -461,11 +521,88 @@ export default function LaporanPage() {
 
       {/* Print styles */}
       <style>{`
+        /* ── Screen: sembunyikan print-only ── */
+        .print-only { display: none; }
+        .screen-only { display: inline; }
+
         @media print {
+          /* ── Reset & page ── */
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
+          @page { size: A4 landscape; margin: 8mm 10mm; }
+
+          body { font-size: 9px; font-family: Arial, sans-serif; color: #1e293b; background: white !important; margin: 0; }
+
+          /* ── Visibilitas ── */
           .print-hide { display: none !important; }
-          body { font-size: 11px; }
-          table { font-size: 10px; }
-          @page { margin: 15mm; size: A4 landscape; }
+          .print-only { display: inline !important; }
+          .screen-only { display: none !important; }
+
+          /* ── Dekorasi layar ── */
+          .rounded-xl, .rounded-lg, .shadow-sm { border-radius: 0 !important; box-shadow: none !important; }
+          .overflow-x-auto { overflow: visible !important; }
+          .border { border: none !important; }
+
+          /* ── Section & page-break ── */
+          section { margin-bottom: 12px; }
+          section.allow-break { page-break-inside: auto; }
+          .page-break { page-break-before: always; }
+
+          /* ── Typography ── */
+          h2 { font-size: 10px !important; font-weight: 700; color: #0f172a; border-bottom: 1.5px solid #334155; padding-bottom: 3px; margin-bottom: 6px; display: flex; align-items: center; gap: 4px; }
+          h2 span.w-1 { display: none; }
+          .print-title { font-size: 14px; font-weight: 800; color: #0f172a; }
+          .print-subtitle { font-size: 9px; color: #475569; margin-top: 2px; }
+          p.text-xs { font-size: 8px !important; margin-bottom: 4px !important; }
+
+          /* ── Tables umum ── */
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th {
+            background: #1e293b !important; color: white !important;
+            padding: 4px 4px; text-align: left; font-size: 7px; font-weight: 700;
+            white-space: normal; word-break: break-word; line-height: 1.2;
+          }
+          th[class*="text-right"], th.text-right { text-align: right; }
+          th[class*="text-center"], th.text-center { text-align: center; }
+          td { padding: 2px 4px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; font-size: 8px; }
+          tr:nth-child(even) td { background: #f8fafc !important; }
+          tfoot td { background: #f1f5f9 !important; font-weight: 700; border-top: 1.5px solid #334155; font-size: 8px; }
+          tfoot.dark td { background: #1e293b !important; color: white !important; }
+
+          /* ── Warna ── */
+          .text-green-700, [class*="text-green-700"] { color: #15803d !important; }
+          .text-red-600,  [class*="text-red-600"]  { color: #dc2626 !important; }
+          .text-blue-700, [class*="text-blue-700"] { color: #1d4ed8 !important; }
+          .text-blue-600, [class*="text-blue-600"] { color: #2563eb !important; }
+          .text-slate-400 { color: #94a3b8 !important; }
+          .text-slate-300 { color: #cbd5e1 !important; }
+
+          /* ── Ringkasan cabang ── */
+          .summary-table { table-layout: auto; }
+          .summary-table th { font-size: 8px; padding: 5px 6px; }
+          .summary-table td { font-size: 9px; padding: 4px 6px; }
+
+          /* ── Detail karyawan — kolom lebar fixed ── */
+          .detail-table { table-layout: fixed; }
+          .detail-table th { font-size: 6.5px; padding: 3px 3px; }
+          .detail-table td { font-size: 7.5px; padding: 2px 3px; line-height: 1.3; }
+
+          /* Kolom nama karyawan: lebih lebar */
+          .detail-table .col-nama { width: 110px; }
+          .detail-table .col-cabang { width: 70px; }
+
+          /* Kolom angka: narrow */
+          .detail-table th:not(.col-nama):not(.col-cabang),
+          .detail-table td:not(.col-nama):not(.col-cabang) {
+            width: auto;
+            white-space: nowrap;
+            text-align: right;
+          }
+
+          /* Nama karyawan: wrap normal */
+          .detail-table .col-nama div { overflow: hidden; white-space: normal; word-break: break-word; }
+
+          /* ── Footer ── */
+          .print\\:block { display: block !important; }
         }
       `}</style>
     </div>
