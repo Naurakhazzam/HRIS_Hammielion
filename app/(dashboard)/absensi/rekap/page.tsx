@@ -256,7 +256,7 @@ export default function RekapAbsensiPage() {
   })
 
   const totalTelat  = validAtts.reduce((s,a)=>s+(a.late_minutes??0),0)
-  const totalLembur = validAtts.reduce((s,a)=>s+Number(a.overtime_hours??0),0)
+  const totalLembur = Math.round(validAtts.reduce((s,a)=>s+Number(a.overtime_hours??0),0) * 100) / 100
   const totalHadir  = validAtts.filter(a=>a.status==='present').length
   const totalAlpha  = validAtts.filter(a=>a.status==='absent').length
   const totalSakit  = validAtts.filter(a=>a.status==='sick').length
@@ -388,7 +388,7 @@ export default function RekapAbsensiPage() {
             </div>
             <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-3 flex items-center justify-between">
               <div><p className="text-xs font-medium text-amber-600 uppercase mb-1">Total Lembur</p><p className="text-xl font-bold text-amber-700">{totalLembur} jam</p></div>
-              <p className="text-sm text-amber-500">{totalLembur*60} menit</p>
+              <p className="text-sm text-amber-500">{Math.round(totalLembur*60)} menit</p>
             </div>
           </div>
         </div>
