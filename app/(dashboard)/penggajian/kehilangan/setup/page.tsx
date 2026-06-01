@@ -16,7 +16,8 @@ export default function SetupKehilanganPage() {
   const [positions, setPositions] = useState<Position[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [configs, setConfigs] = useState<BranchLossConfig[]>([])
-  const [shares, setShares] = useState<LossEmployeeShare[]>([])
+  const [shares, setShares] = useState<LossEmployeeShare[]>([])         // hanya is_active=true
+  const [sharesHistory, setSharesHistory] = useState<LossEmployeeShare[]>([]) // semua (untuk history)
   const [cashierConfigs, setCashierConfigs] = useState<CashierLossConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -41,12 +42,13 @@ export default function SetupKehilanganPage() {
 
   async function fetchAll() {
     setLoading(true)
-    const [bRes, pRes, eRes, cRes, sRes, ccRes] = await Promise.all([
+    const [bRes, pRes, eRes, cRes, sRes, sHistRes, ccRes] = await Promise.all([
       supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
       supabase.from('positions').select('id, name').order('name'),
       supabase.from('employees').select('id, full_name, employee_code, branch_id, position_id, positions(name)').eq('is_active', true).eq('employee_type', 'permanent').order('full_name'),
       supabase.from('branch_loss_configs').select('*').order('created_at', { ascending: false }),
-      supabase.from('loss_employee_shares').select('*, employees(full_name, employee_code, positions(name))').order('created_at', { ascending: false }),
+      supabase.from('loss_employee_shares').select('*').eq('is_active', true).order('created_at', { ascending: false }),
+      supabase.from('loss_employee_shares').select('*').order('created_at', { ascending: false }),
       supabase.from('cashier_loss_configs').select('*, positions(name)').order('created_at'),
     ])
     if (bRes.data) { setBranches(bRes.data); if (!selectedBranch && bRes.data.length > 0) setSelectedBranch(bRes.data[0].id) }
@@ -54,6 +56,7 @@ export default function SetupKehilanganPage() {
     if (eRes.data) setEmployees(eRes.data as unknown as Employee[])
     if (cRes.data) setConfigs(cRes.data)
     if (sRes.data) setShares(sRes.data as unknown as LossEmployeeShare[])
+    if (sHistRes.data) setSharesHistory(sHistRes.data as unknown as LossEmployeeShare[])
     if (ccRes.data) setCashierConfigs(ccRes.data as unknown as CashierLossConfig[])
     setLoading(false)
   }
@@ -61,13 +64,13 @@ export default function SetupKehilanganPage() {
   const currentKantorConfig = configs.filter(c => c.branch_id === selectedBranch).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
   const kantorHistory = configs.filter(c => c.branch_id === selectedBranch).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   const branchEmployees = employees.filter(e => e.branch_id === selectedBranch)
-  // Ambil share aktif terbaru per karyawan (is_active = true, sort by created_at)
+  // shares hanya berisi is_active=true → langsung ambil yang pertama (terbaru)
   const getLatestShare = (empId: string) => shares
-    .filter(s => s.employee_id === empId && s.branch_id === selectedBranch && s.is_active)
+    .filter(s => s.employee_id === empId && s.branch_id === selectedBranch)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
   const totalSharePercent = branchEmployees.reduce((sum, e) => { const s = getLatestShare(e.id); return sum + (s ? Number(s.share_percent) : 0) }, 0)
-  // History: semua record (aktif maupun tidak), terbaru dulu
-  const employeeShareHistory = (empId: string) => shares
+  // History: dari sharesHistory (semua record aktif+nonaktif), terbaru dulu
+  const employeeShareHistory = (empId: string) => sharesHistory
     .filter(s => s.employee_id === empId && s.branch_id === selectedBranch)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
