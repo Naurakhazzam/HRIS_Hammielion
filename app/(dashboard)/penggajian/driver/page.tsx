@@ -62,27 +62,28 @@ export default function PenggajianDriverPage() {
     const weeks = []
     const today = new Date()
     const currentDay = today.getDay()
-    const diffToMonday = currentDay === 0 ? -6 : 1 - currentDay
-    
-    let currentMonday = new Date(today)
-    currentMonday.setDate(today.getDate() + diffToMonday)
-    
+    // Periode: Jumat s/d Kamis. Cari Jumat terdekat ke belakang.
+    const diffToFriday = -((currentDay - 5 + 7) % 7)
+
+    let currentFriday = new Date(today)
+    currentFriday.setDate(today.getDate() + diffToFriday)
+
     for (let i = 0; i < 9; i++) {
-      const monday = new Date(currentMonday)
-      monday.setDate(currentMonday.getDate() - (i * 7))
-      
-      const sunday = new Date(monday)
-      sunday.setDate(monday.getDate() + 6)
-      
-      const startStr = monday.toISOString().split('T')[0]
-      const endStr = sunday.toISOString().split('T')[0]
-      
-      const startUI = monday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
-      const endUI = sunday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
-      
+      const friday = new Date(currentFriday)
+      friday.setDate(currentFriday.getDate() - (i * 7))
+
+      const thursday = new Date(friday)
+      thursday.setDate(friday.getDate() + 6)
+
+      const startStr = friday.toISOString().split('T')[0]
+      const endStr = thursday.toISOString().split('T')[0]
+
+      const startUI = friday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
+      const endUI = thursday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+
       weeks.push({
         value: `${startStr}|${endStr}`,
-        label: i === 0 ? `Minggu Ini (${startUI} - ${endUI})` : `${startUI} - ${endUI}`
+        label: i === 0 ? `Periode Ini (${startUI} - ${endUI})` : `${startUI} - ${endUI}`
       })
     }
     setWeekOptions(weeks)
@@ -172,14 +173,14 @@ export default function PenggajianDriverPage() {
     setTimeout(() => setMessage(null), 5000)
   }
 
-  // Helper to calculate week start (Monday)
+  // Helper to calculate week start (Jumat)
   function getWeekStart(dateStr: string) {
     const d = new Date(dateStr)
     const day = d.getDay()
-    const diff = day === 0 ? -6 : 1 - day
-    const monday = new Date(d)
-    monday.setDate(d.getDate() + diff)
-    return monday.toISOString().split('T')[0]
+    const diff = -((day - 5 + 7) % 7)
+    const friday = new Date(d)
+    friday.setDate(d.getDate() + diff)
+    return friday.toISOString().split('T')[0]
   }
 
   async function handleSubmit(e: React.FormEvent) {

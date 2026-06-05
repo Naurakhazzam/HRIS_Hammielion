@@ -443,7 +443,7 @@ export default function PenggajianBulananPage() {
       supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
-      supabase.from('employees').select('full_name, employee_code, join_date, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
     ])
 
@@ -488,12 +488,34 @@ export default function PenggajianBulananPage() {
     const kasirSplit        = isKasir && kasirCount > 0 ? kasirUnassigned / kasirCount : 0
     const cashLoss          = Math.round(kasirAssigned + kasirSplit)
 
-    const base     = Number(sc.base_salary ?? 0)
-    const pos      = Number(sc.position_allowance ?? 0)
-    const meal     = Number(sc.meal_allowance ?? 0)
+    const baseRaw  = Number(sc.base_salary ?? 0)
+    const posRaw   = Number(sc.position_allowance ?? 0)
+    const mealRaw  = Number(sc.meal_allowance ?? 0)
     const otRate   = Number(sc.overtime_rate_per_hour ?? 0)
     const latRate  = Number(sc.late_penalty_per_minute ?? 0)
     const joinDateVal = (emp as any).join_date ?? null
+
+    // ── Pro-rata: HANYA untuk karyawan training yang join di tengah periode ──
+    // Karyawan permanent selalu dapat gaji penuh
+    // Bonus (KPI, kondisional) TIDAK ikut diprorata
+    const isTraining = (emp as any).employee_type === 'training'
+    const totalPeriodDays = (() => {
+      const s = new Date(firstDay + 'T12:00:00')
+      const e = new Date(lastDay + 'T12:00:00')
+      return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
+    })()
+    const proRataFactor = (() => {
+      if (!isTraining) return 1                              // bukan training → selalu full
+      if (!joinDateVal || joinDateVal <= firstDay) return 1  // join sebelum/awal periode → full
+      if (joinDateVal > lastDay) return 0                    // join setelah periode → 0
+      const joinD  = new Date(joinDateVal + 'T12:00:00')
+      const endD   = new Date(lastDay + 'T12:00:00')
+      const activeDays = Math.round((endD.getTime() - joinD.getTime()) / 86400000) + 1
+      return activeDays / totalPeriodDays
+    })()
+    const base = Math.round(baseRaw * proRataFactor)
+    const pos  = Math.round(posRaw  * proRataFactor)
+    const meal = Math.round(mealRaw * proRataFactor)
     const otHours  = (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
     const latMins  = (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
     const otTotal  = otHours * otRate

@@ -325,7 +325,11 @@ export default function KaryawanPage() {
               </select>
             </FormField>
             <FormField label="Jabatan" required>
-              <select required value={f.position_id} onChange={e => setF({ ...f, position_id: e.target.value })} disabled={!f.department_id} className={selectClass + (!f.department_id ? ' disabled:bg-slate-100' : '')}>
+              <select required value={f.position_id} onChange={e => {
+                const selectedPos = positions.find(p => p.id === e.target.value)
+                const autoType = selectedPos?.name?.toLowerCase() === 'driver' ? 'driver' : f.employee_type
+                setF({ ...f, position_id: e.target.value, employee_type: autoType })
+              }} disabled={!f.department_id} className={selectClass + (!f.department_id ? ' disabled:bg-slate-100' : '')}>
                 <option value="">{f.department_id ? '-- Pilih Jabatan --' : 'Pilih Dept Dahulu'}</option>
                 {filteredPositionsFor(f.department_id).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
