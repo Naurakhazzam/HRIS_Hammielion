@@ -18,10 +18,13 @@ const STATUS_COLOR: { [k: string]: string } = {
   present:'bg-green-100 text-green-800', absent:'bg-red-100 text-red-800',
   sick:'bg-blue-100 text-blue-800', permission:'bg-yellow-100 text-yellow-800', leave:'bg-slate-100 text-slate-600'
 }
-// Baris dengan notes "Belum Masuk (Training)" ditampilkan khusus
+// Baris dengan notes "Belum Masuk (Training)" atau "Resign" ditampilkan khusus
 function getStatusDisplay(att: { status: string; notes: string | null }) {
   if (att.status === 'absent' && att.notes === 'Belum Masuk (Training)') {
     return { label: 'Belum Masuk (Training)', color: 'bg-purple-100 text-purple-700' }
+  }
+  if (att.status === 'permission' && att.notes === 'Resign') {
+    return { label: 'Resign', color: 'bg-rose-100 text-rose-700' }
   }
   return { label: STATUS_LABEL[att.status] ?? att.status, color: STATUS_COLOR[att.status] ?? 'bg-purple-100 text-purple-800' }
 }
@@ -71,10 +74,17 @@ export default function RekapAbsensiPage() {
   const [absenForm, setAbsenForm] = useState({ employee_id: '', date: '', status: 'absent', notes: '' })
   const [absenSaving, setAbsenSaving] = useState(false)
   const [formBranchId, setFormBranchId] = useState('')
+
+  // ── Multi-select & Bulk Edit ──
+  type BulkItem = { employeeId: string; date: string }
+  const [selectedRows, setSelectedRows] = useState<Map<string, BulkItem>>(new Map())
+  const [bulkModal, setBulkModal]       = useState(false)
+  const [bulkKet, setBulkKet]           = useState('leave')
+  const [bulkSaving, setBulkSaving]     = useState(false)
   const [formData, setFormData] = useState({ employee_id:'', date:new Date().toISOString().split('T')[0], check_in:'', check_out:'', status:'present', notes:'' })
 
   useEffect(() => { fetchReferenceData(); fetchMyRole() }, [])
-  useEffect(() => { fetchAttendances() }, [filterMonth, filterBranch, filterDept, filterEmployee])
+  useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
 
   async function fetchMyRole() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -121,6 +131,57 @@ export default function RekapAbsensiPage() {
   function showMsg(type: 'success'|'error', text: string) {
     setMessage({ type, text }); window.scrollTo({top:0,behavior:'smooth'}); setTimeout(()=>setMessage(null),5000)
   }
+
+  // ── Multi-select helpers ──────────────────────────────────────────────────
+  function toggleRow(key: string, item: BulkItem) {
+    setSelectedRows(prev => {
+      const next = new Map(prev)
+      if (next.has(key)) next.delete(key)
+      else next.set(key, item)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (!filterEmployee) return
+    const emp = employees.find(e => e.id === filterEmployee)
+    const allDates = generatePeriodDates().filter(d => !emp?.join_date || d >= emp.join_date)
+    if (selectedRows.size === allDates.length) {
+      setSelectedRows(new Map())
+    } else {
+      const next = new Map<string, BulkItem>()
+      allDates.forEach(d => next.set(`${filterEmployee}|${d}`, { employeeId: filterEmployee, date: d }))
+      setSelectedRows(next)
+    }
+  }
+
+  async function handleBulkSave() {
+    setBulkSaving(true)
+    const items = Array.from(selectedRows.values())
+    const upsertData = items.map(item => ({
+      employee_id:    item.employeeId,
+      date:           item.date,
+      check_in:       null,
+      check_out:      null,
+      late_minutes:   0,
+      overtime_hours: 0,
+      status:         bulkKet === 'resign' ? 'permission' : bulkKet,
+      notes:          bulkKet === 'resign' ? 'Resign' : null,
+    }))
+
+    // Batch per 50 baris
+    for (let i = 0; i < upsertData.length; i += 50) {
+      const chunk = upsertData.slice(i, i + 50)
+      const { error } = await supabase.from('attendances').upsert(chunk, { onConflict: 'employee_id,date' })
+      if (error) { showMsg('error', 'Gagal: ' + error.message); setBulkSaving(false); return }
+    }
+
+    showMsg('success', `${items.length} hari berhasil diupdate.`)
+    setSelectedRows(new Map())
+    setBulkModal(false)
+    fetchAttendances()
+    setBulkSaving(false)
+  }
   function getScheduleForDept(deptId: string): WorkSchedule|null { return schedules.find(s=>s.applies_to_dept===deptId)??null }
   function fmtTime(t: string|null|undefined): string { return t?t.substring(0,5):'—' }
   const fmtTs = (iso: string|null) => iso ? new Date(iso).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : '-'
@@ -140,8 +201,10 @@ export default function RekapAbsensiPage() {
     e.preventDefault()
     if (!absenForm.employee_id||!absenForm.date) { showMsg('error','Lengkapi data.'); return }
     setAbsenSaving(true)
+    const saveStatus = absenForm.status === 'resign' ? 'permission' : absenForm.status
+    const saveNotes  = absenForm.status === 'resign' ? 'Resign' : (absenForm.notes || null)
     const { error } = await supabase.from('attendances').upsert(
-      { employee_id:absenForm.employee_id, date:absenForm.date, check_in:null, check_out:null, late_minutes:0, overtime_hours:0, status:absenForm.status, notes:absenForm.notes||null },
+      { employee_id:absenForm.employee_id, date:absenForm.date, check_in:null, check_out:null, late_minutes:0, overtime_hours:0, status:saveStatus, notes:saveNotes },
       { onConflict:'employee_id,date' }
     )
     if (error) showMsg('error','Gagal: '+error.message)
@@ -427,6 +490,15 @@ export default function RekapAbsensiPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-white border-b border-slate-200">
+                <th className="px-3 py-3 text-center w-10">
+                  {filterEmployee ? (
+                    <input type="checkbox"
+                      checked={selectedRows.size > 0 && selectedRows.size === generatePeriodDates().filter(d => { const emp = employees.find(e=>e.id===filterEmployee); return !emp?.join_date || d >= emp.join_date }).length}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                    />
+                  ) : null}
+                </th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Karyawan</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Jadwal</th>
@@ -440,7 +512,7 @@ export default function RekapAbsensiPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
               ) : filterEmployee ? (
                 // Mode per karyawan: tampilkan SEMUA tanggal dalam periode
                 generatePeriodDates().map(dateStr => {
@@ -453,6 +525,7 @@ export default function RekapAbsensiPage() {
                   if (emp?.join_date && dateStr < emp.join_date) {
                     return (
                       <tr key={dateStr} className="bg-slate-50/20">
+                        <td className="px-3 py-3 text-center"></td>
                         <td className="px-4 py-3 text-sm text-slate-300 whitespace-nowrap">{dateLabel}</td>
                         <td className="px-4 py-3"><div className="text-sm text-slate-300">{emp?.full_name}</div></td>
                         <td colSpan={6} className="px-4 py-3 text-center">
@@ -468,8 +541,17 @@ export default function RekapAbsensiPage() {
                   if (dayAtts.length === 0) {
                     // Tanggal tanpa data — default tampil sebagai Libur
                     const sched = emp ? getScheduleForDept(emp.department_id) : null
+                    const emptyKey = `${filterEmployee}|${dateStr}`
                     return (
-                      <tr key={dateStr} className="hover:bg-slate-50 transition bg-slate-50/40">
+                      <tr key={dateStr} className={`hover:bg-slate-50 transition ${selectedRows.has(emptyKey) ? 'bg-blue-50/50' : 'bg-slate-50/40'}`}>
+                        <td className="px-3 py-3 text-center">
+                          {emp && ['hr','owner','finance'].includes(myRole) && (
+                            <input type="checkbox" checked={selectedRows.has(emptyKey)}
+                              onChange={() => toggleRow(emptyKey, { employeeId: filterEmployee, date: dateStr })}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                            />
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-sm font-semibold text-slate-500 whitespace-nowrap">{dateLabel}</td>
                         <td className="px-4 py-3">
                           <div className="text-sm font-medium text-slate-500">{emp?.full_name ?? '—'}</div>
@@ -510,8 +592,17 @@ export default function RekapAbsensiPage() {
                   return dayAtts.map(att => {
                     const deptId = (att.employees as any)?.department_id
                     const sched  = getScheduleForDept(deptId)
+                    const dataKey = `${filterEmployee}|${dateStr}`
                     return (
-                      <tr key={att.id} className="hover:bg-slate-50 transition">
+                      <tr key={att.id} className={`hover:bg-slate-50 transition ${selectedRows.has(dataKey) ? 'bg-blue-50/50' : ''}`}>
+                        <td className="px-3 py-3 text-center">
+                          {['hr','owner','finance'].includes(myRole) && (
+                            <input type="checkbox" checked={selectedRows.has(dataKey)}
+                              onChange={() => toggleRow(dataKey, { employeeId: filterEmployee, date: dateStr })}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                            />
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">{dateLabel}</td>
                         <td className="px-4 py-3">
                           <div className="text-sm font-medium text-slate-800">{att.employees?.full_name}</div>
@@ -547,14 +638,23 @@ export default function RekapAbsensiPage() {
                   })
                 })
               ) : attendances.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data absensi.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data absensi.</td></tr>
               ) : (
                 // Mode semua karyawan: tampilkan hanya yang ada data
                 attendances.map(att => {
                   const deptId = (att.employees as any)?.department_id
                   const sched = getScheduleForDept(deptId)
+                  const allKey = `${(att as any).employee_id}|${att.date}`
                   return (
-                    <tr key={att.id} className="hover:bg-slate-50 transition">
+                    <tr key={att.id} className={`hover:bg-slate-50 transition ${selectedRows.has(allKey) ? 'bg-blue-50/50' : ''}`}>
+                      <td className="px-3 py-3 text-center">
+                        {['hr','owner','finance'].includes(myRole) && (
+                          <input type="checkbox" checked={selectedRows.has(allKey)}
+                            onChange={() => toggleRow(allKey, { employeeId: (att as any).employee_id, date: att.date })}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                          />
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">{new Date(att.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'short',day:'2-digit',month:'short'})}</td>
                       <td className="px-4 py-3">
                         <div className="text-sm font-medium text-slate-800">{att.employees?.full_name}</div>
@@ -677,13 +777,67 @@ export default function RekapAbsensiPage() {
         </div>
       )}
 
+      {/* ── Floating action bar ─────────────────────────────────────────── */}
+      {selectedRows.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-slate-800 text-white rounded-2xl shadow-2xl px-5 py-3">
+          <span className="text-sm font-semibold text-white">{selectedRows.size} hari dipilih</span>
+          <button onClick={() => setSelectedRows(new Map())} className="text-xs text-slate-400 hover:text-white transition px-2">Batal pilih</button>
+          <button
+            onClick={() => setBulkModal(true)}
+            className="px-4 py-1.5 bg-blue-500 hover:bg-blue-600 rounded-lg text-sm font-semibold transition"
+          >
+            Terapkan Keterangan →
+          </button>
+        </div>
+      )}
+
+      {/* ── Bulk modal ──────────────────────────────────────────────────── */}
+      {bulkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+              <div>
+                <h2 className="text-base font-bold text-slate-700">Terapkan ke {selectedRows.size} Hari</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Pilih keterangan yang diterapkan ke semua hari terpilih.</p>
+              </div>
+              <button onClick={() => setBulkModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { val:'leave',      label:'Libur',      active:'border-slate-400 bg-slate-50 text-slate-700' },
+                  { val:'absent',     label:'Alpha',      active:'border-red-400 bg-red-50 text-red-700' },
+                  { val:'sick',       label:'Sakit',      active:'border-blue-400 bg-blue-50 text-blue-700' },
+                  { val:'permission', label:'Izin',       active:'border-yellow-400 bg-yellow-50 text-yellow-700' },
+                  { val:'resign',     label:'Resign',     active:'border-rose-500 bg-rose-50 text-rose-700' },
+                ].map(({ val, label, active }) => (
+                  <button key={val} type="button"
+                    onClick={() => setBulkKet(val)}
+                    className={`py-2.5 text-sm font-medium rounded-lg border-2 transition ${bulkKet === val ? active : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50'} ${val === 'resign' ? 'col-span-2' : ''}`}
+                  >
+                    {label}{val === 'resign' ? ' (dipotong seperti Izin)' : ''}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => setBulkModal(false)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+                <button onClick={handleBulkSave} disabled={bulkSaving}
+                  className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
+                  {bulkSaving ? 'Menyimpan...' : `Simpan ${selectedRows.size} Hari`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {absenModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
               <div>
                 <h2 className="text-base font-bold text-slate-700">Tambah Keterangan Tidak Hadir</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Alpha dipotong gaji. Sakit/Izin/Libur tidak dipotong.</p>
+                <p className="text-xs text-slate-500 mt-0.5">Alpha & Resign dipotong gaji. Sakit/Izin/Libur tidak dipotong.</p>
               </div>
               <button onClick={()=>setAbsenModal(false)} className="text-slate-400 hover:text-slate-600">x</button>
             </div>
@@ -703,14 +857,15 @@ export default function RekapAbsensiPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-2">Keterangan *</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { val:'leave',      label:'Libur',      active:'border-slate-400 bg-slate-50 text-slate-700' },
-                    { val:'absent',     label:'Alpha',      active:'border-red-400 bg-red-50 text-red-700' },
-                    { val:'sick',       label:'Sakit',      active:'border-blue-400 bg-blue-50 text-blue-700' },
-                    { val:'permission', label:'Izin',       active:'border-yellow-400 bg-yellow-50 text-yellow-700' },
-                  ].map(({val,label,active})=>(
+                    { val:'leave',      label:'Libur',      active:'border-slate-400 bg-slate-50 text-slate-700',   span: false },
+                    { val:'absent',     label:'Alpha',      active:'border-red-400 bg-red-50 text-red-700',         span: false },
+                    { val:'sick',       label:'Sakit',      active:'border-blue-400 bg-blue-50 text-blue-700',      span: false },
+                    { val:'permission', label:'Izin',       active:'border-yellow-400 bg-yellow-50 text-yellow-700', span: false },
+                    { val:'resign',     label:'Resign (dipotong seperti Izin)', active:'border-rose-500 bg-rose-50 text-rose-700', span: true },
+                  ].map(({val,label,active,span})=>(
                     <button key={val} type="button"
                       onClick={()=>setAbsenForm({...absenForm, status:val})}
-                      className={'py-2.5 text-sm font-medium rounded-lg border-2 transition '+(absenForm.status===val ? active : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50')}>
+                      className={`py-2.5 text-sm font-medium rounded-lg border-2 transition ${span ? 'col-span-2' : ''} ${absenForm.status===val ? active : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50'}`}>
                       {label}
                     </button>
                   ))}
