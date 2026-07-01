@@ -36,6 +36,7 @@ type Employee = {
   // Data Kepegawaian
   education: string | null
   photo_url: string | null
+  fingerprint_id: number | null
   branches: { id: string; name: string }
   departments: { id: string; name: string }
   positions: { id: string; name: string; department_id: string }
@@ -50,7 +51,7 @@ const emptyForm = {
   religion: '', marital_status: '', dependants: '0',
   bank_name: '', bank_account_number: '', bank_account_name: '',
   emergency_contact_name: '', emergency_contact_phone: '', emergency_contact_relation: '',
-  education: '', photo_url: ''
+  education: '', photo_url: '', fingerprint_id: ''
 }
 
 const GENDER_OPTIONS = [{ value: 'male', label: 'Laki-laki' }, { value: 'female', label: 'Perempuan' }]
@@ -175,6 +176,7 @@ export default function KaryawanPage() {
       emergency_contact_phone: f.emergency_contact_phone || null,
       emergency_contact_relation: f.emergency_contact_relation || null,
       education: f.education || null,
+      fingerprint_id: f.fingerprint_id !== '' ? parseInt(f.fingerprint_id) : null,
     }
   }
 
@@ -220,7 +222,8 @@ export default function KaryawanPage() {
       emergency_contact_name: emp.emergency_contact_name || '',
       emergency_contact_phone: emp.emergency_contact_phone || '',
       emergency_contact_relation: emp.emergency_contact_relation || '',
-      education: emp.education || '', photo_url: emp.photo_url || ''
+      education: emp.education || '', photo_url: emp.photo_url || '',
+      fingerprint_id: emp.fingerprint_id != null ? String(emp.fingerprint_id) : ''
     })
   }
 
@@ -345,6 +348,9 @@ export default function KaryawanPage() {
             </FormField>
             <FormField label="Nominal Bonus KPI Maks (Rp)">
               <input type="number" min="0" value={f.kpi_bonus_max} onChange={e => setF({ ...f, kpi_bonus_max: e.target.value })} className={inputClass} />
+            </FormField>
+            <FormField label="ID Fingerprint">
+              <input type="number" min="1" value={f.fingerprint_id} onChange={e => setF({ ...f, fingerprint_id: e.target.value })} placeholder="Nomor User ID di mesin absen" className={inputClass} />
             </FormField>
           </div>
         </div>
@@ -598,6 +604,7 @@ export default function KaryawanPage() {
                   ['Departemen', detailEmployee.departments?.name],
                   ['Tanggal Bergabung', detailEmployee.join_date ? new Date(detailEmployee.join_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : '-'],
                   ['Pendidikan', detailEmployee.education || '-'],
+                  ['ID Fingerprint', detailEmployee.fingerprint_id != null ? String(detailEmployee.fingerprint_id) : '— belum diset'],
                 ]},
                 { title: 'Data Pribadi', rows: [
                   ['NIK', detailEmployee.nik || '-'],
