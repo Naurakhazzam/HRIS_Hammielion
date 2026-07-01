@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
 type Employee = { id: string; full_name: string; branch_id: string; department_id: string; join_date: string | null }
-type WorkSchedule = { id: string; name: string; check_in_time: string; check_out_time: string; applies_to_dept: string }
+type WorkSchedule = { id: string; name: string; check_in_time: string; check_out_time: string; detect_until: string | null; applies_to_dept: string }
 type Attendance = {
   id: string; date: string; check_in: string | null; check_out: string | null
   late_minutes: number; overtime_hours: number; status: string; notes: string | null
@@ -100,7 +100,7 @@ export default function RekapAbsensiPage() {
       supabase.from('branches').select('id,name').order('name'),
       supabase.from('departments').select('id,name').order('name'),
       supabase.from('employees').select('id,full_name,branch_id,department_id,join_date').eq('is_active',true).order('full_name'),
-      supabase.from('work_schedules').select('id,name,check_in_time,check_out_time,applies_to_dept'),
+      supabase.from('work_schedules').select('id,name,check_in_time,check_out_time,detect_until,applies_to_dept'),
     ])
     if (bRes.data) setBranches(bRes.data)
     if (dRes.data) setDepartments(dRes.data)
@@ -182,15 +182,37 @@ export default function RekapAbsensiPage() {
     fetchAttendances()
     setBulkSaving(false)
   }
-  function getScheduleForDept(deptId: string): WorkSchedule|null { return schedules.find(s=>s.applies_to_dept===deptId)??null }
+  // Konversi UTC ISO string → jam WIB "HH:MM" (UTC+7)
+  function toWIBTime(iso: string | null): string | null {
+    if (!iso) return null
+    const wib = new Date(new Date(iso).getTime() + 7 * 60 * 60 * 1000)
+    return `${String(wib.getUTCHours()).padStart(2,'0')}:${String(wib.getUTCMinutes()).padStart(2,'0')}`
+  }
+  // Deteksi shift berdasarkan jam masuk WIB aktual + detect_until
+  function getScheduleForAtt(checkInIso: string | null, deptId: string): WorkSchedule | null {
+    const ds = schedules.filter(s => s.applies_to_dept === deptId)
+    if (ds.length === 0) return null
+    if (ds.length === 1) return ds[0]
+    const sorted = [...ds].sort((a, b) => {
+      if (!a.detect_until && !b.detect_until) return 0
+      if (!a.detect_until) return 1
+      if (!b.detect_until) return -1
+      return a.detect_until.localeCompare(b.detect_until)
+    })
+    if (!checkInIso) return sorted[0]
+    const ciWIB = toWIBTime(checkInIso)
+    return sorted.find(s => !s.detect_until || ciWIB! <= s.detect_until.substring(0,5)) ?? sorted[sorted.length - 1]
+  }
   function fmtTime(t: string|null|undefined): string { return t?t.substring(0,5):'—' }
-  const fmtTs = (iso: string|null) => iso ? new Date(iso).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : '-'
+  // Tampilkan waktu dalam WIB — eksplisit agar tidak bergantung timezone browser
+  const fmtTs = (iso: string|null) => iso ? new Date(iso).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Jakarta'}) : '-'
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSubmitting(true)
     if (!formData.employee_id) { showMsg('error','Pilih karyawan.'); setSubmitting(false); return }
-    const ci = formData.check_in ? new Date(formData.date+'T'+formData.check_in+':00').toISOString() : null
-    const co = formData.check_out ? new Date(formData.date+'T'+formData.check_out+':00').toISOString() : null
+    // Jam diinput WIB → simpan UTC dengan offset +07:00
+    const ci = formData.check_in ? new Date(formData.date+'T'+formData.check_in+':00+07:00').toISOString() : null
+    const co = formData.check_out ? new Date(formData.date+'T'+formData.check_out+':00+07:00').toISOString() : null
     const { error } = await supabase.from('attendances').insert([{ employee_id:formData.employee_id, date:formData.date, check_in:ci, check_out:co, late_minutes:0, overtime_hours:0, status:formData.status, notes:formData.notes||null }])
     if (error) showMsg('error', error.code==='23505'?'Data tanggal ini sudah ada.':'Gagal: '+error.message)
     else { showMsg('success','Absensi disimpan.'); setShowForm(false); setFormData({employee_id:'',date:new Date().toISOString().split('T')[0],check_in:'',check_out:'',status:'present',notes:''}); fetchAttendances() }
@@ -215,8 +237,9 @@ export default function RekapAbsensiPage() {
   function openEditModal(att: Attendance) {
     const toTime = (iso: string | null) => {
       if (!iso) return ''
-      const d = new Date(iso)
-      return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+      // UTC → WIB (UTC+7) eksplisit
+      const wib = new Date(new Date(iso).getTime() + 7 * 60 * 60 * 1000)
+      return `${String(wib.getUTCHours()).padStart(2,'0')}:${String(wib.getUTCMinutes()).padStart(2,'0')}`
     }
     setEditModal(att)
     setEditForm({
@@ -273,8 +296,9 @@ export default function RekapAbsensiPage() {
     if (!editForm.reason.trim()) { showMsg('error', 'Wajib isi alasan perubahan.'); return }
     setEditSaving(true)
 
-    const newCi = editForm.check_in ? new Date(editModal.date + 'T' + editForm.check_in + ':00').toISOString() : null
-    const newCo = editForm.check_out ? new Date(editModal.date + 'T' + editForm.check_out + ':00').toISOString() : null
+    // Jam diinput WIB → simpan UTC dengan offset +07:00
+    const newCi = editForm.check_in ? new Date(editModal.date + 'T' + editForm.check_in + ':00+07:00').toISOString() : null
+    const newCo = editForm.check_out ? new Date(editModal.date + 'T' + editForm.check_out + ':00+07:00').toISOString() : null
 
     // Update attendance
     const { error } = await supabase.from('attendances').update({
@@ -540,7 +564,7 @@ export default function RekapAbsensiPage() {
 
                   if (dayAtts.length === 0) {
                     // Tanggal tanpa data — default tampil sebagai Libur
-                    const sched = emp ? getScheduleForDept(emp.department_id) : null
+                    const sched = emp ? getScheduleForAtt(null, emp.department_id) : null
                     const emptyKey = `${filterEmployee}|${dateStr}`
                     return (
                       <tr key={dateStr} className={`hover:bg-slate-50 transition ${selectedRows.has(emptyKey) ? 'bg-blue-50/50' : 'bg-slate-50/40'}`}>
@@ -591,7 +615,7 @@ export default function RekapAbsensiPage() {
                   // Tanggal dengan data — render tiap record normal
                   return dayAtts.map(att => {
                     const deptId = (att.employees as any)?.department_id
-                    const sched  = getScheduleForDept(deptId)
+                    const sched  = getScheduleForAtt(att.check_in, deptId)
                     const dataKey = `${filterEmployee}|${dateStr}`
                     return (
                       <tr key={att.id} className={`hover:bg-slate-50 transition ${selectedRows.has(dataKey) ? 'bg-blue-50/50' : ''}`}>
@@ -643,7 +667,7 @@ export default function RekapAbsensiPage() {
                 // Mode semua karyawan: tampilkan hanya yang ada data
                 attendances.map(att => {
                   const deptId = (att.employees as any)?.department_id
-                  const sched = getScheduleForDept(deptId)
+                  const sched = getScheduleForAtt(att.check_in, deptId)
                   const allKey = `${(att as any).employee_id}|${att.date}`
                   return (
                     <tr key={att.id} className={`hover:bg-slate-50 transition ${selectedRows.has(allKey) ? 'bg-blue-50/50' : ''}`}>

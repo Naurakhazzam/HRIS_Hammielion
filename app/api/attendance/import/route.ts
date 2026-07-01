@@ -159,11 +159,11 @@ export async function POST(req: NextRequest) {
           lateMinutes = Math.max(0, diff)
         }
 
-        // Hitung lembur
+        // Hitung lembur — hanya dihitung jika sudah penuh 60 menit, dibulatkan ke bawah (jam penuh)
         let overtimeHours = 0
         if (sched?.allow_overtime && checkOutStr) {
           const diffMins = timeToMinutes(checkOutStr) - timeToMinutes(sched.check_out_time)
-          if (diffMins > 59) overtimeHours = Math.round((diffMins / 60) * 2) / 2
+          if (diffMins >= 60) overtimeHours = Math.floor(diffMins / 60)
         }
 
         records.push({
