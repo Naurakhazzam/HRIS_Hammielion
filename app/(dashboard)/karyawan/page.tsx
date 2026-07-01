@@ -64,6 +64,18 @@ const MARITAL_OPTIONS = [
 ]
 const EDUCATION_OPTIONS = ['SD', 'SMP', 'SMA/SMK', 'D1', 'D2', 'D3', 'S1', 'S2', 'S3']
 
+const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+const selectClass = inputClass + " bg-white"
+
+function FormField({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <label className="text-sm font-medium text-slate-700">{label} {required && <span className="text-red-500">*</span>}</label>
+      {children}
+    </div>
+  )
+}
+
 export default function KaryawanPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
@@ -259,17 +271,6 @@ export default function KaryawanPage() {
   const translateType = (t: string) => ({ permanent: 'Karyawan Tetap', driver: 'Driver', freelance: 'Freelance', training: 'Training', contract: 'Kontrak' }[t] || t)
   const translateMarital = (v: string) => MARITAL_OPTIONS.find(x => x.value === v)?.label || v
   const translateGender = (v: string) => GENDER_OPTIONS.find(x => x.value === v)?.label || v
-
-  // ── Komponen Form Field ──────────────────────────────────────────────────────
-  const FormField = ({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) => (
-    <div className="space-y-1">
-      <label className="text-sm font-medium text-slate-700">{label} {required && <span className="text-red-500">*</span>}</label>
-      {children}
-    </div>
-  )
-
-  const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-  const selectClass = inputClass + " bg-white"
 
   // ── Render Form ──────────────────────────────────────────────────────────────
   const renderForm = (f: typeof emptyForm, setF: (v: any) => void, isEdit = false) => {
