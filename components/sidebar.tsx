@@ -17,6 +17,7 @@ const adminNavItems = [
       { name: 'Jadwal Kerja', href: '/absensi/jadwal' },
       { name: 'Penugasan Shift', href: '/absensi/shift' },
       { name: 'Rekap Absensi', href: '/absensi/rekap' },
+      { name: 'Import Absensi', href: '/absensi/import' },
     ]
   },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
