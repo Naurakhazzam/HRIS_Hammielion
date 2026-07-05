@@ -39,8 +39,10 @@ const adminNavItems = [
     href: '/keuangan',
     icon: '💵',
     submenu: [
+      { name: 'Kas Masuk (Omzet)', href: '/keuangan/kas-masuk' },
+      { name: 'HPP Manual', href: '/keuangan/hpp' },
       { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
-      { name: 'Verifikasi Kas Keluar', href: '/keuangan/approval' },
+      { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
       { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
       { name: 'Kategori Kas Keluar', href: '/keuangan/kategori' },
       { name: 'Biaya Tetap Berkala', href: '/keuangan/biaya-tetap' },
@@ -95,6 +97,8 @@ const employeeNavItems = [
     href: '/keuangan',
     icon: '💵',
     submenu: [
+      { name: 'Kas Masuk (Omzet)', href: '/keuangan/kas-masuk' },
+      { name: 'HPP Manual', href: '/keuangan/hpp' },
       { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
       { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
     ]

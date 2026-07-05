@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/client'
 
 type PendingCashOut = {
   id: string
-  branch_id: string
   amount: number
   description: string | null
   transaction_date: string
@@ -13,8 +12,26 @@ type PendingCashOut = {
   fin_cash_out_categories: { label: string } | null
   input_user: { email: string } | null
 }
+type PendingCashIn = {
+  id: string
+  amount: number
+  payment_method: string
+  transaction_date: string
+  branches: { name: string } | null
+  input_user: { email: string } | null
+}
+type PendingHpp = {
+  id: string
+  hpp_amount: number
+  notes: string | null
+  entry_date: string
+  branches: { name: string } | null
+  input_user: { email: string } | null
+}
 
+type Tab = 'kas_keluar' | 'kas_masuk' | 'hpp'
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
+const PAYMENT_LABEL: Record<string, string> = { cash: 'Tunai', transfer: 'Transfer', campuran: 'Campuran' }
 
 export default function ApprovalKasKeluarPage() {
   const supabase = createClient()
@@ -23,7 +40,11 @@ export default function ApprovalKasKeluarPage() {
   const [myUserId, setMyUserId] = useState<string | null>(null)
   const [roleLoading, setRoleLoading] = useState(true)
 
-  const [entries, setEntries] = useState<PendingCashOut[]>([])
+  const [tab, setTab] = useState<Tab>('kas_keluar')
+  const [cashOut, setCashOut] = useState<PendingCashOut[]>([])
+  const [cashIn, setCashIn] = useState<PendingCashIn[]>([])
+  const [hpp, setHpp] = useState<PendingHpp[]>([])
+
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -31,19 +52,25 @@ export default function ApprovalKasKeluarPage() {
 
   const isAdmin = ADMIN_ROLES.includes(role)
 
-  const fetchEntries = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('fin_cash_out')
-      .select('id, branch_id, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email)')
-      .eq('status', 'pending')
-      .order('transaction_date', { ascending: false })
-
-    if (error) {
-      console.error('Detail error:', JSON.stringify(error, null, 2))
-    } else {
-      setEntries((data as unknown as PendingCashOut[]) || [])
-    }
+    const [coRes, ciRes, hpRes] = await Promise.all([
+      supabase.from('fin_cash_out')
+        .select('id, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email)')
+        .eq('status', 'pending').order('transaction_date', { ascending: false }),
+      supabase.from('fin_cash_in')
+        .select('id, amount, payment_method, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email)')
+        .eq('status', 'pending').order('transaction_date', { ascending: false }),
+      supabase.from('fin_hpp_entries')
+        .select('id, hpp_amount, notes, entry_date, branches(name), input_user:users!fin_hpp_entries_input_by_fkey(email)')
+        .eq('status', 'pending').order('entry_date', { ascending: false }),
+    ])
+    if (coRes.error) console.error('Detail error kas_keluar:', JSON.stringify(coRes.error, null, 2))
+    else setCashOut((coRes.data as unknown as PendingCashOut[]) || [])
+    if (ciRes.error) console.error('Detail error kas_masuk:', JSON.stringify(ciRes.error, null, 2))
+    else setCashIn((ciRes.data as unknown as PendingCashIn[]) || [])
+    if (hpRes.error) console.error('Detail error hpp:', JSON.stringify(hpRes.error, null, 2))
+    else setHpp((hpRes.data as unknown as PendingHpp[]) || [])
     setLoading(false)
   }, [supabase])
 
@@ -59,9 +86,8 @@ export default function ApprovalKasKeluarPage() {
     init()
   }, [supabase])
 
-  useEffect(() => {
-    if (isAdmin) fetchEntries()
-  }, [isAdmin, fetchEntries])
+  useEffect(() => { if (isAdmin) fetchAll() }, [isAdmin, fetchAll])
+  useEffect(() => { setSelectedIds([]) }, [tab])
 
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
@@ -69,45 +95,49 @@ export default function ApprovalKasKeluarPage() {
     setTimeout(() => setMessage(null), 5000)
   }
 
+  const TABLE_BY_TAB: Record<Tab, string> = { kas_keluar: 'fin_cash_out', kas_masuk: 'fin_cash_in', hpp: 'fin_hpp_entries' }
+  const LABEL_BY_TAB: Record<Tab, string> = { kas_keluar: 'Kas Keluar', kas_masuk: 'Kas Masuk', hpp: 'HPP' }
+
   async function processEntries(ids: string[], newStatus: 'approved' | 'rejected') {
     if (!myUserId || ids.length === 0) return
     const verb = newStatus === 'approved' ? 'menyetujui' : 'menolak'
-    if (!confirm(`Yakin ingin ${verb} ${ids.length} entri kas keluar?`)) return
+    if (!confirm(`Yakin ingin ${verb} ${ids.length} entri ${LABEL_BY_TAB[tab]}?`)) return
 
     setProcessing(true)
     const { error } = await supabase
-      .from('fin_cash_out')
+      .from(TABLE_BY_TAB[tab])
       .update({ status: newStatus, verified_by: myUserId, verified_at: new Date().toISOString() })
       .in('id', ids)
 
     if (error) {
       showMessage('error', 'Gagal memproses: ' + error.message)
     } else {
-      showMessage('success', `${ids.length} entri berhasil ${newStatus === 'approved' ? 'disetujui' : 'ditolak'}.`)
+      showMessage('success', `${ids.length} entri ${LABEL_BY_TAB[tab]} berhasil ${newStatus === 'approved' ? 'disetujui' : 'ditolak'}.`)
       setSelectedIds([])
-      fetchEntries()
+      fetchAll()
     }
     setProcessing(false)
-  }
-
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSelectedIds(e.target.checked ? entries.map(en => en.id) : [])
-  }
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
-  const totalPending = entries.reduce((acc, e) => acc + Number(e.amount), 0)
+  const currentList = tab === 'kas_keluar' ? cashOut : tab === 'kas_masuk' ? cashIn : hpp
+  const currentIds = currentList.map((en) => en.id)
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSelectedIds(e.target.checked ? currentIds : [])
+  }
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
 
   if (roleLoading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
 
   if (!isAdmin) {
     return (
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
-        <p className="text-slate-600">Anda tidak memiliki akses ke halaman verifikasi kas keluar.</p>
+        <p className="text-slate-600">Anda tidak memiliki akses ke halaman verifikasi.</p>
       </div>
     )
   }
@@ -115,8 +145,8 @@ export default function ApprovalKasKeluarPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">Verifikasi Kas Keluar</h1>
-        <p className="text-sm text-slate-500">Tinjau entri kas keluar manual dari semua cabang sebelum masuk laporan resmi.</p>
+        <h1 className="text-2xl font-bold text-slate-800 mb-1">Verifikasi Keuangan</h1>
+        <p className="text-sm text-slate-500">Tinjau entri manual dari semua cabang sebelum masuk laporan resmi.</p>
       </div>
 
       {message && (
@@ -125,15 +155,13 @@ export default function ApprovalKasKeluarPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-4">
-        <div>
-          <p className="text-xs text-slate-500 font-medium uppercase mb-1">Menunggu Verifikasi</p>
-          <p className="text-xl font-bold text-slate-800">{entries.length}</p>
-        </div>
-        <div>
-          <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Nominal</p>
-          <p className="text-xl font-bold text-yellow-700">{formatRupiah(totalPending)}</p>
-        </div>
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6">
+        {(['kas_keluar', 'kas_masuk', 'hpp'] as Tab[]).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab === t ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            {LABEL_BY_TAB[t]} ({t === 'kas_keluar' ? cashOut.length : t === 'kas_masuk' ? cashIn.length : hpp.length})
+          </button>
+        ))}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -159,12 +187,13 @@ export default function ApprovalKasKeluarPage() {
               <tr className="bg-white border-b border-slate-200">
                 <th className="px-4 py-3 w-10 text-center">
                   <input type="checkbox" onChange={handleSelectAll}
-                    checked={selectedIds.length > 0 && selectedIds.length === entries.length}
+                    checked={selectedIds.length > 0 && selectedIds.length === currentIds.length}
                     className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kategori</th>
+                {tab === 'kas_keluar' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kategori</th>}
+                {tab === 'kas_masuk' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Metode</th>}
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Jumlah</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Keterangan</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Input Oleh</th>
@@ -174,9 +203,9 @@ export default function ApprovalKasKeluarPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
-              ) : entries.length === 0 ? (
+              ) : currentList.length === 0 ? (
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada entri yang menunggu verifikasi.</td></tr>
-              ) : entries.map(en => (
+              ) : tab === 'kas_keluar' ? cashOut.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
@@ -190,10 +219,45 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-xs text-slate-500">{en.input_user?.email || '—'}</td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex gap-1 justify-center">
-                      <button onClick={() => processEntries([en.id], 'approved')} disabled={processing}
-                        className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
-                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing}
-                        className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
+                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                    </div>
+                  </td>
+                </tr>
+              )) : tab === 'kas_masuk' ? cashIn.map(en => (
+                <tr key={en.id} className="hover:bg-slate-50 transition">
+                  <td className="px-4 py-3 text-center">
+                    <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600">{new Date(en.transaction_date).toLocaleDateString('id-ID')}</td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{en.branches?.name}</td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{PAYMENT_LABEL[en.payment_method] || en.payment_method}</td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(en.amount)}</td>
+                  <td className="px-4 py-3 text-sm text-slate-500">—</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{en.input_user?.email || '—'}</td>
+                  <td className="px-4 py-3 text-center">
+                    <div className="flex gap-1 justify-center">
+                      <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
+                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                    </div>
+                  </td>
+                </tr>
+              )) : hpp.map(en => (
+                <tr key={en.id} className="hover:bg-slate-50 transition">
+                  <td className="px-4 py-3 text-center">
+                    <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600">{new Date(en.entry_date).toLocaleDateString('id-ID')}</td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{en.branches?.name}</td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(en.hpp_amount)}</td>
+                  <td className="px-4 py-3 text-sm text-slate-500">{en.notes || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{en.input_user?.email || '—'}</td>
+                  <td className="px-4 py-3 text-center">
+                    <div className="flex gap-1 justify-center">
+                      <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
+                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                     </div>
                   </td>
                 </tr>
