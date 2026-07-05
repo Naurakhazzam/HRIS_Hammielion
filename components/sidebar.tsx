@@ -5,8 +5,15 @@ import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
+type NavNode = {
+  name: string
+  href: string
+  icon?: string
+  submenu?: NavNode[]
+}
+
 // Menu untuk HR, Owner, Finance, Supervisor
-const adminNavItems = [
+const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
   { name: 'Karyawan', href: '/karyawan', icon: '👥' },
   {
@@ -39,13 +46,25 @@ const adminNavItems = [
     href: '/keuangan',
     icon: '💵',
     submenu: [
-      { name: 'Kas Masuk (Omzet)', href: '/keuangan/kas-masuk' },
-      { name: 'HPP Manual', href: '/keuangan/hpp' },
-      { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
+      {
+        name: 'Kas Masuk',
+        href: '/keuangan/kas-masuk',
+        submenu: [
+          { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
+          { name: 'HPP Manual', href: '/keuangan/hpp' },
+        ]
+      },
+      {
+        name: 'Kas Keluar',
+        href: '/keuangan/kas-keluar',
+        submenu: [
+          { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
+          { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
+          { name: 'Kategori Kas Keluar', href: '/keuangan/kategori' },
+          { name: 'Biaya Tetap Berkala', href: '/keuangan/biaya-tetap' },
+        ]
+      },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
-      { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
-      { name: 'Kategori Kas Keluar', href: '/keuangan/kategori' },
-      { name: 'Biaya Tetap Berkala', href: '/keuangan/biaya-tetap' },
     ]
   },
   {
@@ -79,7 +98,7 @@ const adminNavItems = [
 ]
 
 // Menu untuk Karyawan (employee/supervisor)
-const employeeNavItems = [
+const employeeNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
   {
     name: 'Portal Saya',
@@ -97,10 +116,22 @@ const employeeNavItems = [
     href: '/keuangan',
     icon: '💵',
     submenu: [
-      { name: 'Kas Masuk (Omzet)', href: '/keuangan/kas-masuk' },
-      { name: 'HPP Manual', href: '/keuangan/hpp' },
-      { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
-      { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
+      {
+        name: 'Kas Masuk',
+        href: '/keuangan/kas-masuk',
+        submenu: [
+          { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
+          { name: 'HPP Manual', href: '/keuangan/hpp' },
+        ]
+      },
+      {
+        name: 'Kas Keluar',
+        href: '/keuangan/kas-keluar',
+        submenu: [
+          { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
+          { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
+        ]
+      },
     ]
   },
 ]
@@ -128,6 +159,8 @@ export default function Sidebar() {
     'Absensi':    pathname.startsWith('/absensi'),
     'Penggajian': pathname.startsWith('/penggajian'),
     'Keuangan':   pathname.startsWith('/keuangan'),
+    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
+    'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'KPI':        pathname.startsWith('/kpi'),
     'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
     'Portal Saya': pathname.startsWith('/portal'),
@@ -173,20 +206,68 @@ export default function Sidebar() {
                     </button>
                     {openMenus[item.name] && (
                       <ul className="mt-1 ml-9 space-y-1">
-                        {item.submenu.map(sub => (
-                          <li key={sub.name}>
-                            <Link
-                              href={sub.href}
-                              className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
-                                pathname === sub.href
-                                  ? 'text-blue-700 font-medium bg-blue-50/50'
-                                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-                              }`}
-                            >
-                              {sub.name}
-                            </Link>
-                          </li>
-                        ))}
+                        {item.submenu.map(sub => {
+                          const subIsGroup = !!sub.submenu && sub.submenu.length > 0
+                          const subIsActive = subIsGroup
+                            ? sub.submenu!.some(leaf => pathname === leaf.href || pathname.startsWith(leaf.href + '/'))
+                            : pathname === sub.href
+
+                          if (!subIsGroup) {
+                            return (
+                              <li key={sub.name}>
+                                <Link
+                                  href={sub.href}
+                                  className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                                    subIsActive
+                                      ? 'text-blue-700 font-medium bg-blue-50/50'
+                                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {sub.name}
+                                </Link>
+                              </li>
+                            )
+                          }
+
+                          return (
+                            <li key={sub.name}>
+                              <button
+                                onClick={() => toggleMenu(sub.name)}
+                                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
+                                  subIsActive
+                                    ? 'text-blue-700 font-medium bg-blue-50/50'
+                                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                                }`}
+                              >
+                                {sub.name}
+                                <svg
+                                  className={`w-3.5 h-3.5 transition-transform ${openMenus[sub.name] ? 'rotate-180' : ''}`}
+                                  fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </button>
+                              {openMenus[sub.name] && (
+                                <ul className="mt-1 ml-4 space-y-1">
+                                  {sub.submenu!.map(leaf => (
+                                    <li key={leaf.name}>
+                                      <Link
+                                        href={leaf.href}
+                                        className={`block px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                                          pathname === leaf.href
+                                            ? 'text-blue-700 font-medium bg-blue-50/50'
+                                            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                                        }`}
+                                      >
+                                        {leaf.name}
+                                      </Link>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </li>
+                          )
+                        })}
                       </ul>
                     )}
                   </div>
