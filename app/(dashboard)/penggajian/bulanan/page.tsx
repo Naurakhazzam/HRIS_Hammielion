@@ -1353,7 +1353,7 @@ export default function PenggajianBulananPage() {
           <table className="w-full text-left border-collapse text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-white">
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">Karyawan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky left-0 z-20 bg-white shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">Periode</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap">Gaji Pokok</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap">Total Tunjangan</th>
@@ -1399,9 +1399,9 @@ export default function PenggajianBulananPage() {
                   const statusCfg = STATUS_CONFIG[p.status] ?? STATUS_CONFIG.draft
 
                   return (
-                    <tr key={p.id} className="hover:bg-slate-50/70 transition-colors">
+                    <tr key={p.id} className="group hover:bg-slate-50/70 transition-colors">
                       {/* Karyawan */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50/70 transition-colors shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">
                         <div className="font-medium text-slate-800 whitespace-nowrap">
                           {p.employee?.full_name ?? '—'}
                         </div>
