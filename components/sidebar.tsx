@@ -35,6 +35,18 @@ const adminNavItems = [
     ]
   },
   {
+    name: 'Keuangan',
+    href: '/keuangan',
+    icon: '💵',
+    submenu: [
+      { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
+      { name: 'Verifikasi Kas Keluar', href: '/keuangan/approval' },
+      { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
+      { name: 'Kategori Kas Keluar', href: '/keuangan/kategori' },
+      { name: 'Biaya Tetap Berkala', href: '/keuangan/biaya-tetap' },
+    ]
+  },
+  {
     name: 'KPI',
     href: '/kpi',
     icon: '📊',
@@ -78,6 +90,15 @@ const employeeNavItems = [
   },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
+  {
+    name: 'Keuangan',
+    href: '/keuangan',
+    icon: '💵',
+    submenu: [
+      { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
+      { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
+    ]
+  },
 ]
 
 export default function Sidebar() {
@@ -102,6 +123,7 @@ export default function Sidebar() {
   const defaultOpen: Record<string, boolean> = {
     'Absensi':    pathname.startsWith('/absensi'),
     'Penggajian': pathname.startsWith('/penggajian'),
+    'Keuangan':   pathname.startsWith('/keuangan'),
     'KPI':        pathname.startsWith('/kpi'),
     'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
     'Portal Saya': pathname.startsWith('/portal'),
