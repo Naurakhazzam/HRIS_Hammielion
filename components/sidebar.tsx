@@ -64,6 +64,14 @@ const adminNavItems: NavNode[] = [
           { name: 'Biaya Tetap Berkala', href: '/keuangan/biaya-tetap' },
         ]
       },
+      {
+        name: 'Modal & Aset',
+        href: '/keuangan/modal',
+        submenu: [
+          { name: 'Modal Cabang', href: '/keuangan/modal' },
+          { name: 'Aset & Kontrak Sewa', href: '/keuangan/aset' },
+        ]
+      },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
     ]
   },
@@ -132,6 +140,14 @@ const employeeNavItems: NavNode[] = [
           { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
         ]
       },
+      {
+        name: 'Modal & Aset',
+        href: '/keuangan/modal',
+        submenu: [
+          { name: 'Modal Cabang', href: '/keuangan/modal' },
+          { name: 'Aset & Kontrak Sewa', href: '/keuangan/aset' },
+        ]
+      },
     ]
   },
 ]
@@ -161,6 +177,7 @@ export default function Sidebar() {
     'Keuangan':   pathname.startsWith('/keuangan'),
     'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
     'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
+    'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
     'KPI':        pathname.startsWith('/kpi'),
     'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
     'Portal Saya': pathname.startsWith('/portal'),
