@@ -72,6 +72,7 @@ const adminNavItems: NavNode[] = [
           { name: 'Aset & Kontrak Sewa', href: '/keuangan/aset' },
         ]
       },
+      { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
     ]
   },
@@ -148,6 +149,7 @@ const employeeNavItems: NavNode[] = [
           { name: 'Aset & Kontrak Sewa', href: '/keuangan/aset' },
         ]
       },
+      { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
     ]
   },
 ]
