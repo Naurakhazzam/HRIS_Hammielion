@@ -53,7 +53,7 @@ const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni',
   'Juli','Agustus','September','Oktober','November','Desember']
 
 export default function KasbonPage() {
-  const [activeTab, setActiveTab] = useState<'pengajuan' | 'limit' | 'riwayat'>('pengajuan')
+  const [activeTab, setActiveTab] = useState<'pengajuan' | 'limit' | 'riwayat' | 'driver'>('pengajuan')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -77,11 +77,16 @@ export default function KasbonPage() {
         </div>
       )}
 
-      <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit">
-        {(['pengajuan', 'limit', 'riwayat'] as const).map(tab => (
+      <div className="flex flex-wrap gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit">
+        {([
+          ['pengajuan', 'Pengajuan'],
+          ['limit', 'Limit Karyawan'],
+          ['riwayat', 'Riwayat Potongan'],
+          ['driver', '🚛 Kasbon Driver'],
+        ] as const).map(([tab, label]) => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === tab ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            {tab === 'pengajuan' ? 'Pengajuan' : tab === 'limit' ? 'Limit Karyawan' : 'Riwayat Potongan'}
+            {label}
           </button>
         ))}
       </div>
@@ -89,6 +94,7 @@ export default function KasbonPage() {
       {activeTab === 'pengajuan' && <TabPengajuan showMessage={showMessage} />}
       {activeTab === 'limit' && <TabLimit showMessage={showMessage} />}
       {activeTab === 'riwayat' && <TabRiwayat showMessage={showMessage} />}
+      {activeTab === 'driver' && <TabKasbonDriver showMessage={showMessage} />}
     </div>
   )
 }
@@ -600,6 +606,306 @@ function TabRiwayat({ showMessage }: { showMessage: (t: 'success' | 'error', msg
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ─── TAB 4: KASBON DRIVER ─────────────────────────────────────────────────────
+type DriverKasbonRecord = {
+  id: string
+  driver_id: string
+  total_amount: number
+  remaining_amount: number
+  notes: string | null
+  status: 'active' | 'lunas'
+  created_at: string
+  employees?: { full_name: string; employee_code: string }
+}
+
+type DriverKasbonDeductionRecord = {
+  id: string
+  kasbon_id: string
+  driver_id: string
+  week_start_date: string
+  deduction_amount: number
+  remaining_after: number
+  created_at: string
+  driver_kasbon?: { notes: string | null; total_amount: number }
+  employees?: { full_name: string }
+}
+
+function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error', msg: string) => void }) {
+  const supabase = createClient()
+  const [kasbons, setKasbons] = useState<DriverKasbonRecord[]>([])
+  const [deductions, setDeductions] = useState<DriverKasbonDeductionRecord[]>([])
+  const [drivers, setDrivers] = useState<{ id: string; full_name: string; employee_code: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [activeSubTab, setActiveSubTab] = useState<'aktif' | 'tambah' | 'riwayat'>('aktif')
+  const [filterStatus, setFilterStatus] = useState<'active' | 'lunas' | 'all'>('active')
+
+  const [form, setForm] = useState({ driver_id: '', total_amount: '', notes: '' })
+
+  useEffect(() => { fetchAll() }, [])
+
+  async function fetchAll() {
+    setLoading(true)
+    const [{ data: kData }, { data: dData }, { data: dedData }] = await Promise.all([
+      supabase.from('driver_kasbon')
+        .select('*, employees(full_name, employee_code)')
+        .order('created_at', { ascending: false }),
+      supabase.from('employees')
+        .select('id, full_name, employee_code')
+        .eq('employee_type', 'driver')
+        .eq('is_active', true)
+        .order('full_name'),
+      supabase.from('driver_kasbon_deductions')
+        .select('*, driver_kasbon(notes, total_amount), employees(full_name)')
+        .order('week_start_date', { ascending: false })
+        .limit(100),
+    ])
+    setKasbons((kData || []) as DriverKasbonRecord[])
+    setDrivers(dData || [])
+    setDeductions((dedData || []) as DriverKasbonDeductionRecord[])
+    setLoading(false)
+  }
+
+  async function handleTambahKasbon(e: React.FormEvent) {
+    e.preventDefault()
+    const amt = parseFloat(form.total_amount)
+    if (!form.driver_id) { showMessage('error', 'Pilih driver terlebih dahulu.'); return }
+    if (isNaN(amt) || amt <= 0) { showMessage('error', 'Nominal kasbon tidak valid.'); return }
+    setSubmitting(true)
+
+    const { error } = await supabase.from('driver_kasbon').insert({
+      driver_id: form.driver_id,
+      total_amount: amt,
+      remaining_amount: amt,
+      notes: form.notes || null,
+      status: 'active',
+    })
+    if (error) showMessage('error', 'Gagal: ' + error.message)
+    else {
+      showMessage('success', 'Kasbon driver berhasil ditambahkan.')
+      setForm({ driver_id: '', total_amount: '', notes: '' })
+      fetchAll()
+      setActiveSubTab('aktif')
+    }
+    setSubmitting(false)
+  }
+
+  async function handleLunas(id: string) {
+    if (!confirm('Tandai kasbon ini sebagai LUNAS?')) return
+    const { error } = await supabase.from('driver_kasbon')
+      .update({ status: 'lunas', remaining_amount: 0, updated_at: new Date().toISOString() })
+      .eq('id', id)
+    if (error) showMessage('error', 'Gagal: ' + error.message)
+    else { showMessage('success', 'Kasbon ditandai lunas.'); fetchAll() }
+  }
+
+  async function handleHapus(id: string) {
+    if (!confirm('Hapus kasbon ini? Riwayat potongan terkait akan ikut terhapus.')) return
+    await supabase.from('driver_kasbon').delete().eq('id', id)
+    showMessage('success', 'Kasbon dihapus.')
+    fetchAll()
+  }
+
+  const filtered = filterStatus === 'all' ? kasbons : kasbons.filter(k => k.status === filterStatus)
+  const totalAktif = kasbons.filter(k => k.status === 'active').reduce((s, k) => s + Number(k.remaining_amount), 0)
+
+  return (
+    <div className="space-y-4">
+      {/* Sub-tab */}
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+        {([['aktif','📋 Daftar Kasbon'],['tambah','➕ Tambah Kasbon'],['riwayat','🕐 Riwayat Potongan']] as const).map(([t, l]) => (
+          <button key={t} onClick={() => setActiveSubTab(t)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeSubTab === t ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── DAFTAR KASBON ── */}
+      {activeSubTab === 'aktif' && (
+        <div className="space-y-4">
+          {/* Summary + Filter */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <p className="text-xs text-slate-500 uppercase font-medium mb-1">Total Kasbon Aktif</p>
+              <p className="text-xl font-bold text-orange-600">{fmtRp(totalAktif)}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <p className="text-xs text-slate-500 uppercase font-medium mb-1">Kasbon Aktif</p>
+              <p className="text-xl font-bold text-slate-800">{kasbons.filter(k => k.status === 'active').length}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <p className="text-xs text-slate-500 uppercase font-medium mb-1">Sudah Lunas</p>
+              <p className="text-xl font-bold text-green-600">{kasbons.filter(k => k.status === 'lunas').length}</p>
+            </div>
+          </div>
+
+          {/* Filter pills */}
+          <div className="flex gap-2">
+            {([['active','Aktif'],['lunas','Lunas'],['all','Semua']] as const).map(([v, l]) => (
+              <button key={v} onClick={() => setFilterStatus(v)}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${filterStatus === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            {loading ? (
+              <div className="p-10 text-center text-slate-500">Memuat data...</div>
+            ) : filtered.length === 0 ? (
+              <div className="p-10 text-center text-slate-500">Belum ada kasbon driver.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {['Driver','Kode','Kasbon Awal','Sisa Kasbon','Keterangan','Status','Aksi'].map(h => (
+                        <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filtered.map(k => (
+                      <tr key={k.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                          {(k.employees as any)?.full_name || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500 font-mono text-xs">
+                          {(k.employees as any)?.employee_code || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{fmtRp(k.total_amount)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`font-bold ${Number(k.remaining_amount) > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                            {fmtRp(k.remaining_amount)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500 text-xs max-w-[160px]">
+                          <span className="truncate block">{k.notes || '—'}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${k.status === 'active' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                            {k.status === 'active' ? 'Aktif' : 'Lunas'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex gap-2">
+                            {k.status === 'active' && (
+                              <button onClick={() => handleLunas(k.id)}
+                                className="px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition">
+                                Lunas
+                              </button>
+                            )}
+                            <button onClick={() => handleHapus(k.id)}
+                              className="px-3 py-1.5 text-xs font-medium bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg transition">
+                              Hapus
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── TAMBAH KASBON ── */}
+      {activeSubTab === 'tambah' && (
+        <div className="max-w-md">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Tambah Kasbon Driver</h3>
+            <form onSubmit={handleTambahKasbon} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Driver <span className="text-red-500">*</span></label>
+                <select required value={form.driver_id} onChange={e => setForm({...form, driver_id: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                  <option value="">-- Pilih Driver --</option>
+                  {drivers.map(d => (
+                    <option key={d.id} value={d.id}>{d.full_name} ({d.employee_code})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Kasbon (Rp) <span className="text-red-500">*</span></label>
+                <input required type="number" min="1" value={form.total_amount}
+                  onChange={e => setForm({...form, total_amount: e.target.value})}
+                  placeholder="Contoh: 500000"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Keterangan</label>
+                <input type="text" value={form.notes}
+                  onChange={e => setForm({...form, notes: e.target.value})}
+                  placeholder="Misal: uang muka, keperluan keluarga, dll."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-xs text-orange-700">
+                Kasbon akan langsung aktif. Potongan mingguan dapat dilakukan melalui halaman <strong>Penggajian Driver → Detail & Cetak Slip</strong>.
+              </div>
+              <button type="submit" disabled={submitting}
+                className="w-full py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                {submitting ? 'Menyimpan...' : '💾 Simpan Kasbon'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── RIWAYAT POTONGAN ── */}
+      {activeSubTab === 'riwayat' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-700">Riwayat Potongan Kasbon Driver</span>
+            <button onClick={fetchAll} className="text-xs text-blue-600 hover:underline">🔄 Refresh</button>
+          </div>
+          {loading ? (
+            <div className="p-10 text-center text-slate-500">Memuat data...</div>
+          ) : deductions.length === 0 ? (
+            <div className="p-10 text-center text-slate-500">Belum ada riwayat potongan.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    {['Driver','Keterangan Kasbon','Periode Minggu','Dipotong','Sisa Setelah'].map(h => (
+                      <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {deductions.map(d => {
+                    const dd = d as any
+                    const weekStart = new Date(d.week_start_date)
+                    const weekEnd = new Date(weekStart)
+                    weekEnd.setDate(weekStart.getDate() + 6)
+                    const periodeLabel = `${weekStart.toLocaleDateString('id-ID',{day:'2-digit',month:'short'})} – ${weekEnd.toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}`
+                    return (
+                      <tr key={d.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                          {dd.employees?.full_name || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">
+                          {dd.driver_kasbon?.notes || '(tanpa keterangan)'} · {fmtRp(dd.driver_kasbon?.total_amount || 0)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">{periodeLabel}</td>
+                        <td className="px-4 py-3 font-bold text-red-600">-{fmtRp(d.deduction_amount)}</td>
+                        <td className="px-4 py-3 text-orange-600 font-medium">{fmtRp(d.remaining_after)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
