@@ -741,8 +741,8 @@ export default function PenggajianDriverPage() {
                 </div>
                 <div className="px-4 py-4 space-y-4">
 
-                  {hasSavedDeductions ? (
-                    /* Tampilkan potongan yang sudah tersimpan */
+                  {/* ── Potongan yang sudah tersimpan (selalu tampil jika ada) ── */}
+                  {hasSavedDeductions && (
                     <div className="space-y-2">
                       {detailDriver.savedKasbonDeductions.map((d: any, i: number) => (
                         <div key={i} className="flex items-center justify-between p-2.5 bg-orange-50 rounded-lg border border-orange-100 text-sm">
@@ -772,89 +772,98 @@ export default function PenggajianDriverPage() {
                       ))}
                       <p className="text-xs text-slate-400 italic">Klik ✕ untuk membatalkan potongan yang sudah tersimpan.</p>
                     </div>
-                  ) : (
-                    /* Form input potongan baru */
-                    <div className="space-y-4">
-                      {/* Kasbon aktif */}
-                      {detailDriver.activeKasbons.length > 0 ? (
-                        <div className="space-y-2">
-                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kasbon Aktif</p>
-                          {detailDriver.activeKasbons.map((kasbon, i) => (
-                            <div key={kasbon.id} className="flex items-center gap-3 p-3 bg-orange-50 rounded-lg border border-orange-100">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium text-slate-700 truncate">{kasbon.notes || 'Kasbon'}</p>
-                                <p className="text-xs text-orange-600">Sisa: {formatRupiah(kasbon.remaining_amount)}</p>
-                              </div>
-                              <div className="shrink-0">
-                                <input
-                                  type="number" min="0" max={kasbon.remaining_amount}
-                                  placeholder="Potong Rp"
-                                  value={kasbonForms[i]?.amount || ''}
-                                  onChange={e => {
-                                    const updated = [...kasbonForms]
-                                    updated[i] = { ...updated[i], amount: e.target.value }
-                                    setKasbonForms(updated)
-                                  }}
-                                  className="w-32 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-orange-400"
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-400 italic bg-slate-50 rounded-lg p-3">
-                          Tidak ada kasbon aktif untuk driver ini. Input kasbon di tab Kasbon → Kasbon Driver.
-                        </p>
-                      )}
+                  )}
 
-                      {/* Denda */}
+                  {/* ── Divider jika ada potongan tersimpan ── */}
+                  {hasSavedDeductions && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <div className="flex-1 border-t border-dashed border-slate-300" />
+                      <span className="text-xs text-slate-400 font-medium px-1">Tambah Potongan Baru</span>
+                      <div className="flex-1 border-t border-dashed border-slate-300" />
+                    </div>
+                  )}
+
+                  {/* ── Form input potongan baru (selalu tampil) ── */}
+                  <div className="space-y-4">
+                    {/* Kasbon aktif */}
+                    {detailDriver.activeKasbons.length > 0 ? (
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Denda</p>
-                          <button
-                            onClick={() => setFineForms([...fineForms, { tempId: Date.now().toString(), amount: '', reason: '' }])}
-                            className="text-xs text-blue-600 hover:text-blue-700 font-medium">
-                            + Tambah Denda
-                          </button>
-                        </div>
-                        {fineForms.map((fine, i) => (
-                          <div key={fine.tempId} className="flex gap-2 items-center">
-                            <input
-                              type="text" placeholder="Alasan denda (mis: uang setoran, barang rusak...)"
-                              value={fine.reason}
-                              onChange={e => {
-                                const updated = [...fineForms]
-                                updated[i] = { ...updated[i], reason: e.target.value }
-                                setFineForms(updated)
-                              }}
-                              className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-xs outline-none focus:ring-1 focus:ring-red-400"
-                            />
-                            <input
-                              type="number" min="0" placeholder="Nominal"
-                              value={fine.amount}
-                              onChange={e => {
-                                const updated = [...fineForms]
-                                updated[i] = { ...updated[i], amount: e.target.value }
-                                setFineForms(updated)
-                              }}
-                              className="w-28 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-red-400"
-                            />
-                            {fineForms.length > 1 && (
-                              <button onClick={() => setFineForms(fineForms.filter((_, idx) => idx !== i))}
-                                className="text-red-400 hover:text-red-600 text-sm px-1 shrink-0">✕</button>
-                            )}
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kasbon Aktif</p>
+                        {detailDriver.activeKasbons.map((kasbon, i) => (
+                          <div key={kasbon.id} className="flex items-center gap-3 p-3 bg-orange-50 rounded-lg border border-orange-100">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-slate-700 truncate">{kasbon.notes || 'Kasbon'}</p>
+                              <p className="text-xs text-orange-600">Sisa: {formatRupiah(kasbon.remaining_amount)}</p>
+                            </div>
+                            <div className="shrink-0">
+                              <input
+                                type="number" min="0" max={kasbon.remaining_amount}
+                                placeholder="Potong Rp"
+                                value={kasbonForms[i]?.amount || ''}
+                                onChange={e => {
+                                  const updated = [...kasbonForms]
+                                  updated[i] = { ...updated[i], amount: e.target.value }
+                                  setKasbonForms(updated)
+                                }}
+                                className="w-32 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-orange-400"
+                              />
+                            </div>
                           </div>
                         ))}
                       </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic bg-slate-50 rounded-lg p-3">
+                        Tidak ada kasbon aktif untuk driver ini. Input kasbon di tab Kasbon → Kasbon Driver.
+                      </p>
+                    )}
 
-                      <button
-                        onClick={handleSavePotongan}
-                        disabled={savingPotongan}
-                        className="w-full py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
-                        {savingPotongan ? 'Menyimpan...' : '💾 Simpan Potongan'}
-                      </button>
+                    {/* Denda */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Denda</p>
+                        <button
+                          onClick={() => setFineForms([...fineForms, { tempId: Date.now().toString(), amount: '', reason: '' }])}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+                          + Tambah Denda
+                        </button>
+                      </div>
+                      {fineForms.map((fine, i) => (
+                        <div key={fine.tempId} className="flex gap-2 items-center">
+                          <input
+                            type="text" placeholder="Alasan denda (mis: uang setoran, barang rusak...)"
+                            value={fine.reason}
+                            onChange={e => {
+                              const updated = [...fineForms]
+                              updated[i] = { ...updated[i], reason: e.target.value }
+                              setFineForms(updated)
+                            }}
+                            className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-xs outline-none focus:ring-1 focus:ring-red-400"
+                          />
+                          <input
+                            type="number" min="0" placeholder="Nominal"
+                            value={fine.amount}
+                            onChange={e => {
+                              const updated = [...fineForms]
+                              updated[i] = { ...updated[i], amount: e.target.value }
+                              setFineForms(updated)
+                            }}
+                            className="w-28 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-red-400"
+                          />
+                          {fineForms.length > 1 && (
+                            <button onClick={() => setFineForms(fineForms.filter((_, idx) => idx !== i))}
+                              className="text-red-400 hover:text-red-600 text-sm px-1 shrink-0">✕</button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  )}
+
+                    <button
+                      onClick={handleSavePotongan}
+                      disabled={savingPotongan}
+                      className="w-full py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                      {savingPotongan ? 'Menyimpan...' : '💾 Simpan Potongan'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
