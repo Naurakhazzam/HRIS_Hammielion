@@ -652,7 +652,7 @@ function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error'
     setLoading(true)
     const [{ data: kData }, { data: dData }, { data: dedData }] = await Promise.all([
       supabase.from('driver_kasbon')
-        .select('*, employees(full_name, employee_code)')
+        .select('*, employees!driver_kasbon_driver_id_fkey(full_name, employee_code)')
         .order('created_at', { ascending: false }),
       supabase.from('employees')
         .select('id, full_name, employee_code')
