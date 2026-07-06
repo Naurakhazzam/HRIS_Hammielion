@@ -73,6 +73,7 @@ const adminNavItems: NavNode[] = [
         ]
       },
       { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
+      { name: 'Laporan Resmi', href: '/keuangan/laporan' },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
     ]
   },
@@ -150,6 +151,7 @@ const employeeNavItems: NavNode[] = [
         ]
       },
       { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
+      { name: 'Laporan Resmi', href: '/keuangan/laporan' },
     ]
   },
 ]
