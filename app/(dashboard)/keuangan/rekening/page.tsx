@@ -11,6 +11,8 @@ type BankAccount = {
   account_number: string | null
   account_holder_name: string | null
   account_type: string
+  opening_balance: number
+  opening_balance_date: string
   is_active: boolean
   created_at: string
   branches?: { name: string } | null
@@ -30,12 +32,15 @@ export default function RekeningPage() {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const [form, setForm] = useState({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank' })
+  const today = new Date().toISOString().split('T')[0]
+  const [form, setForm] = useState({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank', opening_balance: '0', opening_balance_date: today })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBankName, setEditBankName] = useState('')
   const [editAccountNumber, setEditAccountNumber] = useState('')
   const [editHolderName, setEditHolderName] = useState('')
   const [editBranchId, setEditBranchId] = useState('')
+  const [editOpeningBalance, setEditOpeningBalance] = useState('')
+  const [editOpeningBalanceDate, setEditOpeningBalanceDate] = useState('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
 
@@ -43,7 +48,7 @@ export default function RekeningPage() {
     setLoading(true)
     const { data, error } = await supabase
       .from('fin_bank_accounts')
-      .select('id, branch_id, bank_name, account_number, account_holder_name, account_type, is_active, created_at, branches(name)')
+      .select('id, branch_id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active, created_at, branches(name)')
       .order('account_type').order('created_at')
     if (error) console.error('Detail error:', JSON.stringify(error, null, 2))
     else setAccounts((data as unknown as BankAccount[]) || [])
@@ -83,6 +88,9 @@ export default function RekeningPage() {
       return
     }
 
+    const openingBalanceNum = parseFloat(form.opening_balance)
+    if (isNaN(openingBalanceNum) || openingBalanceNum < 0) { showMessage('error', 'Saldo awal tidak valid.'); return }
+
     setSubmitting(true)
     const { error } = await supabase.from('fin_bank_accounts').insert({
       branch_id: form.branch_id || null,
@@ -90,12 +98,14 @@ export default function RekeningPage() {
       account_number: form.account_type === 'bank' ? form.account_number.trim() : null,
       account_holder_name: form.account_holder_name.trim() || null,
       account_type: form.account_type,
+      opening_balance: openingBalanceNum,
+      opening_balance_date: form.opening_balance_date,
     })
     if (error) {
       showMessage('error', 'Gagal menambah: ' + error.message)
     } else {
       showMessage('success', `"${form.bank_name}" berhasil ditambahkan.`)
-      setForm({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank' })
+      setForm({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank', opening_balance: '0', opening_balance_date: today })
       fetchAccounts()
     }
     setSubmitting(false)
@@ -107,15 +117,21 @@ export default function RekeningPage() {
     setEditAccountNumber(a.account_number || '')
     setEditHolderName(a.account_holder_name || '')
     setEditBranchId(a.branch_id || '')
+    setEditOpeningBalance(String(a.opening_balance))
+    setEditOpeningBalanceDate(a.opening_balance_date)
   }
 
   async function saveEdit(id: string, accountType: string) {
+    const openingBalanceNum = parseFloat(editOpeningBalance)
+    if (isNaN(openingBalanceNum) || openingBalanceNum < 0) { showMessage('error', 'Saldo awal tidak valid.'); return }
     const { error } = await supabase.from('fin_bank_accounts')
       .update({
         bank_name: editBankName,
         account_number: accountType === 'bank' ? editAccountNumber : null,
         account_holder_name: editHolderName || null,
         branch_id: editBranchId || null,
+        opening_balance: openingBalanceNum,
+        opening_balance_date: editOpeningBalanceDate,
       })
       .eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
@@ -194,6 +210,19 @@ export default function RekeningPage() {
                 {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
+            <div className="pt-2 border-t border-slate-100">
+              <label className="block text-xs font-medium text-slate-700 mb-1">Saldo Awal (Rp) <span className="text-red-500">*</span></label>
+              <input type="number" required min="0" step="1" value={form.opening_balance}
+                onChange={e => setForm({ ...form, opening_balance: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Per Tanggal <span className="text-red-500">*</span></label>
+              <input type="date" required value={form.opening_balance_date}
+                onChange={e => setForm({ ...form, opening_balance_date: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              <p className="text-xs text-slate-400 mt-1">Saldo berjalan dihitung dari saldo awal ini + kas masuk − kas keluar (yang sudah disetujui) sejak tanggal ini.</p>
+            </div>
             <button type="submit" disabled={submitting}
               className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded shadow-sm transition disabled:opacity-50">
               {submitting ? 'Menyimpan...' : 'Tambah Rekening'}
@@ -211,15 +240,17 @@ export default function RekeningPage() {
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">No. Rekening</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Pemilik</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Saldo Awal</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Per Tanggal</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                 ) : accounts.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada rekening.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada rekening.</td></tr>
                 ) : accounts.map(a => (
                   <tr key={a.id} className="hover:bg-slate-50 transition">
                     <td className="px-4 py-3 text-xs">
@@ -262,6 +293,22 @@ export default function RekeningPage() {
                         </select>
                       ) : (
                         a.branches?.name || <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-right font-mono text-slate-600">
+                      {editingId === a.id ? (
+                        <input type="number" min="0" step="1" value={editOpeningBalance} onChange={e => setEditOpeningBalance(e.target.value)}
+                          className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
+                      ) : (
+                        new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(a.opening_balance)
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      {editingId === a.id ? (
+                        <input type="date" value={editOpeningBalanceDate} onChange={e => setEditOpeningBalanceDate(e.target.value)}
+                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs" />
+                      ) : (
+                        new Date(a.opening_balance_date).toLocaleDateString('id-ID')
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">

@@ -73,6 +73,7 @@ const adminNavItems: NavNode[] = [
         ]
       },
       { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
+      { name: 'Cash Flow per Rekening', href: '/keuangan/cashflow' },
       { name: 'Laporan Resmi', href: '/keuangan/laporan' },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
     ]
