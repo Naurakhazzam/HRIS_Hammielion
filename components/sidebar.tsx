@@ -52,7 +52,6 @@ const adminNavItems: NavNode[] = [
         submenu: [
           { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
           { name: 'HPP Manual', href: '/keuangan/hpp' },
-          { name: 'Setup Kas & Rekening', href: '/keuangan/rekening' },
         ]
       },
       {
@@ -103,6 +102,7 @@ const adminNavItems: NavNode[] = [
       { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
       { name: 'Pekerja Borongan', href: '/penggajian/borongan/pekerja' },
       { name: 'Tarif Borongan', href: '/penggajian/borongan/tarif' },
+      { name: 'Setup Kas & Rekening', href: '/keuangan/rekening' },
     ]
   },
   { name: 'Manajemen User', href: '/users', icon: '🔑' },
@@ -180,11 +180,11 @@ export default function Sidebar() {
     'Absensi':    pathname.startsWith('/absensi'),
     'Penggajian': pathname.startsWith('/penggajian'),
     'Keuangan':   pathname.startsWith('/keuangan'),
-    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp') || pathname.startsWith('/keuangan/rekening'),
+    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
     'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
     'KPI':        pathname.startsWith('/kpi'),
-    'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
+    'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional') || pathname.startsWith('/keuangan/rekening'),
     'Portal Saya': pathname.startsWith('/portal'),
   }
 
