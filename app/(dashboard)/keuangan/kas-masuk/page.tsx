@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 type Branch = { id: string; name: string }
+type BankAccount = { id: string; bank_name: string; account_number: string | null; account_holder_name: string | null; branch_id: string | null; account_type: string }
 type CashIn = {
   id: string
   branch_id: string
@@ -12,7 +13,9 @@ type CashIn = {
   payment_method: string
   description: string | null
   status: string
+  account_id: string | null
   branches?: { name: string } | null
+  fin_bank_accounts?: { bank_name: string; account_number: string | null; account_holder_name: string | null; account_type: string } | null
 }
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
@@ -27,16 +30,19 @@ export default function KasMasukPage() {
   const [myBranchName, setMyBranchName] = useState<string>('')
 
   const [branches, setBranches] = useState<Branch[]>([])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [rows, setRows] = useState<CashIn[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const [existingEntry, setExistingEntry] = useState<CashIn | null>(null)
+  const [editingRowId, setEditingRowId] = useState<string | null>(null)
+  const [editRowAccountId, setEditRowAccountId] = useState<string>('')
 
   const today = new Date().toISOString().split('T')[0]
   const [form, setForm] = useState({
-    branch_id: '', transaction_date: today, amount: '', payment_method: 'cash', description: '',
+    branch_id: '', transaction_date: today, amount: '', payment_method: 'cash', description: '', account_id: '',
   })
 
   const thisMonth = today.slice(0, 7)
@@ -54,7 +60,7 @@ export default function KasMasukPage() {
 
     let query = supabase
       .from('fin_cash_in')
-      .select('id, branch_id, transaction_date, amount, payment_method, description, status, branches(name)')
+      .select('id, branch_id, transaction_date, amount, payment_method, description, status, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
@@ -88,6 +94,12 @@ export default function KasMasukPage() {
       }
       const { data: bRes } = await supabase.from('branches').select('id, name').eq('is_active', true).order('name')
       if (bRes) setBranches(bRes)
+      const { data: baRes } = await supabase
+        .from('fin_bank_accounts')
+        .select('id, bank_name, account_number, account_holder_name, branch_id, account_type')
+        .eq('is_active', true)
+        .order('account_type').order('bank_name')
+      if (baRes) setBankAccounts(baRes)
       setLoading(false)
     }
     init()
@@ -101,13 +113,13 @@ export default function KasMasukPage() {
     if (!branchId || !form.transaction_date) { setExistingEntry(null); return }
     const { data } = await supabase
       .from('fin_cash_in')
-      .select('id, branch_id, transaction_date, amount, payment_method, description, status')
+      .select('id, branch_id, transaction_date, amount, payment_method, description, status, account_id')
       .eq('branch_id', branchId)
       .eq('transaction_date', form.transaction_date)
       .maybeSingle()
     setExistingEntry((data as unknown as CashIn) || null)
     if (data) {
-      setForm(f => ({ ...f, amount: String(data.amount), payment_method: data.payment_method, description: data.description || '' }))
+      setForm(f => ({ ...f, amount: String(data.amount), payment_method: data.payment_method, description: data.description || '', account_id: data.account_id || '' }))
     }
   }, [supabase, isSupervisor, myBranchId, form.branch_id, form.transaction_date])
 
@@ -127,6 +139,11 @@ export default function KasMasukPage() {
     const amountNum = parseFloat(form.amount)
     if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
 
+    if (!form.account_id) {
+      showMessage('error', 'Rekening/kas tujuan wajib dipilih.')
+      return
+    }
+
     if (existingEntry && existingEntry.status !== 'pending') {
       showMessage('error', `Entri tanggal ini sudah "${existingEntry.status === 'approved' ? 'disetujui' : 'ditolak'}", tidak bisa diubah dari sini. Hubungi finance pusat untuk revisi.`)
       return
@@ -135,7 +152,7 @@ export default function KasMasukPage() {
     setSubmitting(true)
     if (existingEntry) {
       const { error } = await supabase.from('fin_cash_in')
-        .update({ amount: amountNum, payment_method: form.payment_method, description: form.description || null })
+        .update({ amount: amountNum, payment_method: form.payment_method, description: form.description || null, account_id: form.account_id })
         .eq('id', existingEntry.id)
       if (error) showMessage('error', 'Gagal memperbarui: ' + error.message)
       else { showMessage('success', 'Omzet harian berhasil diperbarui.'); fetchRows(); checkExisting() }
@@ -143,6 +160,7 @@ export default function KasMasukPage() {
       const { error } = await supabase.from('fin_cash_in').insert({
         branch_id: branchId, transaction_date: form.transaction_date, amount: amountNum,
         payment_method: form.payment_method, description: form.description || null,
+        account_id: form.account_id,
         input_by: myUserId, status: 'pending',
       })
       if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
@@ -161,6 +179,18 @@ export default function KasMasukPage() {
   }
 
   const totalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount), 0)
+
+  function startEditRow(r: CashIn) {
+    setEditingRowId(r.id)
+    setEditRowAccountId(r.account_id || '')
+  }
+
+  async function saveEditRow(id: string) {
+    if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
+    const { error } = await supabase.from('fin_cash_in').update({ account_id: editRowAccountId }).eq('id', id)
+    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
+    else { showMessage('success', 'Rekening/kas entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
+  }
 
   if (loading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
 
@@ -215,12 +245,26 @@ export default function KasMasukPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Metode</label>
-              <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })}
+              <select value={form.payment_method}
+                onChange={e => setForm({ ...form, payment_method: e.target.value })}
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
                 <option value="cash">Tunai</option>
                 <option value="transfer">Transfer</option>
                 <option value="campuran">Campuran</option>
               </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Tujuan <span className="text-red-500">*</span></label>
+              <select required value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                <option value="">-- Pilih Rekening/Kas --</option>
+                {bankAccounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}${a.account_holder_name ? ` a.n. ${a.account_holder_name}` : ''}`}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">Rekening/kas manapun bisa dipilih, tidak harus milik cabang transaksi ini.</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Keterangan</label>
@@ -266,19 +310,50 @@ export default function KasMasukPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Jumlah</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Metode</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Rekening</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+                    {isAdmin && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {rows.length === 0 ? (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
+                    <tr><td colSpan={isAdmin ? 7 : 6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
                   ) : rows.map(r => (
                     <tr key={r.id} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name}</td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(r.amount)}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{PAYMENT_LABEL[r.payment_method] || r.payment_method}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {editingRowId === r.id ? (
+                          <select value={editRowAccountId} onChange={e => setEditRowAccountId(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs bg-white">
+                            <option value="">-- Pilih --</option>
+                            {bankAccounts.map(a => (
+                              <option key={a.id} value={a.id}>
+                                {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
+                              </option>
+                            ))}
+                          </select>
+                        ) : r.fin_bank_accounts ? (
+                          r.fin_bank_accounts.account_type === 'tunai'
+                            ? r.fin_bank_accounts.bank_name
+                            : `${r.fin_bank_accounts.bank_name} — ${r.fin_bank_accounts.account_number}`
+                        ) : <span className="text-red-500">Belum diisi</span>}
+                      </td>
                       <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
+                      {isAdmin && (
+                        <td className="px-4 py-3 text-center">
+                          {editingRowId === r.id ? (
+                            <div className="flex gap-1 justify-center">
+                              <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
+                              <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

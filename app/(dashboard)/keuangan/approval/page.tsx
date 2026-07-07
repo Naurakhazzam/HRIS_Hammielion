@@ -11,6 +11,7 @@ type PendingCashOut = {
   branches: { name: string } | null
   fin_cash_out_categories: { label: string } | null
   input_user: { email: string } | null
+  fin_bank_accounts: { bank_name: string; account_number: string | null; account_type: string } | null
 }
 type PendingCashIn = {
   id: string
@@ -19,6 +20,7 @@ type PendingCashIn = {
   transaction_date: string
   branches: { name: string } | null
   input_user: { email: string } | null
+  fin_bank_accounts: { bank_name: string; account_number: string | null; account_type: string } | null
 }
 type PendingHpp = {
   id: string
@@ -80,10 +82,10 @@ export default function ApprovalKasKeluarPage() {
     setLoading(true)
     const [coRes, ciRes, hpRes, baseRes, snapRes, assetRes, contractRes] = await Promise.all([
       supabase.from('fin_cash_out')
-        .select('id, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email)')
+        .select('id, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
         .eq('status', 'pending').order('transaction_date', { ascending: false }),
       supabase.from('fin_cash_in')
-        .select('id, amount, payment_method, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email)')
+        .select('id, amount, payment_method, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
         .eq('status', 'pending').order('transaction_date', { ascending: false }),
       supabase.from('fin_hpp_entries')
         .select('id, hpp_amount, notes, entry_date, branches(name), input_user:users!fin_hpp_entries_input_by_fkey(email)')
@@ -316,7 +318,14 @@ export default function ApprovalKasKeluarPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600">{new Date(en.transaction_date).toLocaleDateString('id-ID')}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">{en.branches?.name}</td>
-                  <td className="px-4 py-3 text-sm text-slate-700">{en.fin_cash_out_categories?.label}</td>
+                  <td className="px-4 py-3 text-sm text-slate-700">
+                    {en.fin_cash_out_categories?.label}
+                    {en.fin_bank_accounts && (
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {en.fin_bank_accounts.account_type === 'tunai' ? en.fin_bank_accounts.bank_name : `${en.fin_bank_accounts.bank_name} — ${en.fin_bank_accounts.account_number}`}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(en.amount)}</td>
                   <td className="px-4 py-3 text-sm text-slate-500">{en.description || '—'}</td>
                   <td className="px-4 py-3 text-xs text-slate-500">{en.input_user?.email || '—'}</td>
@@ -335,7 +344,14 @@ export default function ApprovalKasKeluarPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600">{new Date(en.transaction_date).toLocaleDateString('id-ID')}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">{en.branches?.name}</td>
-                  <td className="px-4 py-3 text-sm text-slate-700">{PAYMENT_LABEL[en.payment_method] || en.payment_method}</td>
+                  <td className="px-4 py-3 text-sm text-slate-700">
+                    {PAYMENT_LABEL[en.payment_method] || en.payment_method}
+                    {en.fin_bank_accounts && (
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {en.fin_bank_accounts.account_type === 'tunai' ? en.fin_bank_accounts.bank_name : `${en.fin_bank_accounts.bank_name} — ${en.fin_bank_accounts.account_number}`}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(en.amount)}</td>
                   <td className="px-4 py-3 text-sm text-slate-500">—</td>
                   <td className="px-4 py-3 text-xs text-slate-500">{en.input_user?.email || '—'}</td>

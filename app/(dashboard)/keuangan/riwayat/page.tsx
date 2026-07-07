@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 
 type Branch = { id: string; name: string }
 type Category = { code: string; label: string }
+type BankAccount = { id: string; bank_name: string; account_number: string | null; account_type: string }
 type CashOutRow = {
   id: string
   amount: number
@@ -12,8 +13,10 @@ type CashOutRow = {
   transaction_date: string
   status: string
   source_table: string | null
+  account_id: string | null
   branches: { name: string } | null
   fin_cash_out_categories: { label: string } | null
+  fin_bank_accounts: { bank_name: string; account_number: string | null; account_type: string } | null
 }
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
@@ -27,8 +30,11 @@ export default function RiwayatKasKeluarPage() {
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [rows, setRows] = useState<CashOutRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [editingRowId, setEditingRowId] = useState<string | null>(null)
+  const [editRowAccountId, setEditRowAccountId] = useState<string>('')
 
   const today = new Date()
   const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
@@ -48,7 +54,7 @@ export default function RiwayatKasKeluarPage() {
 
     let query = supabase
       .from('fin_cash_out')
-      .select('id, amount, description, transaction_date, status, source_table, branches(name), fin_cash_out_categories(label)')
+      .select('id, amount, description, transaction_date, status, source_table, account_id, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
@@ -82,12 +88,14 @@ export default function RiwayatKasKeluarPage() {
           }
         }
       }
-      const [bRes, cRes] = await Promise.all([
+      const [bRes, cRes, baRes] = await Promise.all([
         supabase.from('branches').select('id, name').order('name'),
         supabase.from('fin_cash_out_categories').select('code, label').order('label'),
+        supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name'),
       ])
       if (bRes.data) setBranches(bRes.data)
       if (cRes.data) setCategories(cRes.data)
+      if (baRes.data) setBankAccounts(baRes.data)
     }
     init()
   }, [supabase])
@@ -110,6 +118,17 @@ export default function RiwayatKasKeluarPage() {
   const totalAll = rows.reduce((acc, r) => acc + Number(r.amount), 0)
   const totalApproved = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount), 0)
   const countPending = rows.filter(r => r.status === 'pending').length
+
+  function startEditRow(r: CashOutRow) {
+    setEditingRowId(r.id)
+    setEditRowAccountId(r.account_id || '')
+  }
+
+  async function saveEditRow(id: string) {
+    if (!editRowAccountId) { return }
+    const { error } = await supabase.from('fin_cash_out').update({ account_id: editRowAccountId }).eq('id', id)
+    if (!error) { setEditingRowId(null); fetchRows() }
+  }
 
   return (
     <div>
@@ -185,15 +204,17 @@ export default function RiwayatKasKeluarPage() {
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kategori</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Jumlah</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Keterangan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Rekening/Kas</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Sumber</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+                {isAdmin && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada data untuk filter ini.</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada data untuk filter ini.</td></tr>
               ) : rows.map(r => (
                 <tr key={r.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
@@ -201,8 +222,35 @@ export default function RiwayatKasKeluarPage() {
                   <td className="px-4 py-3 text-sm text-slate-700">{r.fin_cash_out_categories?.label}</td>
                   <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(r.amount)}</td>
                   <td className="px-4 py-3 text-sm text-slate-500">{r.description || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">
+                    {editingRowId === r.id ? (
+                      <select value={editRowAccountId} onChange={e => setEditRowAccountId(e.target.value)}
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-xs bg-white">
+                        <option value="">-- Pilih --</option>
+                        {bankAccounts.map(a => (
+                          <option key={a.id} value={a.id}>
+                            {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
+                          </option>
+                        ))}
+                      </select>
+                    ) : r.fin_bank_accounts ? (
+                      r.fin_bank_accounts.account_type === 'tunai' ? r.fin_bank_accounts.bank_name : `${r.fin_bank_accounts.bank_name} — ${r.fin_bank_accounts.account_number}`
+                    ) : <span className="text-red-500">Belum diisi</span>}
+                  </td>
                   <td className="px-4 py-3 text-center text-xs text-slate-500">{r.source_table ? 'Otomatis' : 'Manual'}</td>
                   <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
+                  {isAdmin && (
+                    <td className="px-4 py-3 text-center">
+                      {editingRowId === r.id ? (
+                        <div className="flex gap-1 justify-center">
+                          <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
+                          <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

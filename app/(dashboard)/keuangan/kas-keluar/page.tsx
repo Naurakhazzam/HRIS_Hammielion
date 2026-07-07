@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 
 type Branch = { id: string; name: string }
 type Category = { code: string; label: string; affects_net_profit: boolean }
+type BankAccount = { id: string; bank_name: string; account_number: string | null; account_type: string }
 type MyCashOut = {
   id: string
   amount: number
@@ -13,6 +14,7 @@ type MyCashOut = {
   status: string
   branches: { name: string } | null
   fin_cash_out_categories: { label: string } | null
+  fin_bank_accounts: { bank_name: string; account_number: string | null; account_type: string } | null
 }
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
@@ -27,6 +29,7 @@ export default function InputKasKeluarPage() {
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [recent, setRecent] = useState<MyCashOut[]>([])
 
   const [loading, setLoading] = useState(true)
@@ -39,6 +42,7 @@ export default function InputKasKeluarPage() {
     amount: '',
     transaction_date: new Date().toISOString().split('T')[0],
     description: '',
+    account_id: '',
   })
 
   const isSupervisor = role === 'supervisor'
@@ -47,7 +51,7 @@ export default function InputKasKeluarPage() {
   const fetchRecent = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from('fin_cash_out')
-      .select('id, amount, description, transaction_date, status, branches(name), fin_cash_out_categories(label)')
+      .select('id, amount, description, transaction_date, status, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
       .eq('input_by', userId)
       .order('created_at', { ascending: false })
       .limit(10)
@@ -74,12 +78,14 @@ export default function InputKasKeluarPage() {
         }
       }
 
-      const [bRes, cRes] = await Promise.all([
+      const [bRes, cRes, baRes] = await Promise.all([
         supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
         supabase.from('fin_cash_out_categories').select('code, label, affects_net_profit').eq('is_active', true).order('label'),
+        supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name'),
       ])
       if (bRes.data) setBranches(bRes.data)
       if (cRes.data) setCategories(cRes.data)
+      if (baRes.data) setBankAccounts(baRes.data)
 
       await fetchRecent(user.id)
       setLoading(false)
@@ -100,6 +106,7 @@ export default function InputKasKeluarPage() {
     const branchId = isSupervisor ? myBranchId : formData.branch_id
     if (!branchId) { showMessage('error', 'Cabang wajib dipilih.'); return }
     if (!formData.category) { showMessage('error', 'Kategori wajib dipilih.'); return }
+    if (!formData.account_id) { showMessage('error', 'Rekening/kas sumber wajib dipilih.'); return }
     const amountNum = parseFloat(formData.amount)
     if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
 
@@ -110,6 +117,7 @@ export default function InputKasKeluarPage() {
       amount: amountNum,
       description: formData.description || null,
       transaction_date: formData.transaction_date,
+      account_id: formData.account_id,
       input_by: myUserId,
       status: 'pending',
     })
@@ -118,7 +126,7 @@ export default function InputKasKeluarPage() {
       showMessage('error', 'Gagal menyimpan: ' + error.message)
     } else {
       showMessage('success', 'Kas keluar berhasil dicatat, menunggu verifikasi tim finance pusat.')
-      setFormData(f => ({ ...f, amount: '', description: '' }))
+      setFormData(f => ({ ...f, amount: '', description: '', account_id: '' }))
       fetchRecent(myUserId)
     }
     setSubmitting(false)
@@ -197,6 +205,24 @@ export default function InputKasKeluarPage() {
             </div>
 
             <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
+              <select
+                required
+                value={formData.account_id}
+                onChange={e => setFormData({ ...formData, account_id: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+              >
+                <option value="">-- Pilih Rekening/Kas --</option>
+                {bankAccounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">Dari rekening/kas mana pengeluaran ini dibayarkan.</p>
+            </div>
+
+            <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Jumlah (Rp) <span className="text-red-500">*</span></label>
               <input
                 type="number" required min="1" step="1"
@@ -243,18 +269,22 @@ export default function InputKasKeluarPage() {
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kategori</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Jumlah</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Rekening/Kas</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {recent.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada input.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada input.</td></tr>
                 ) : recent.map(r => (
                   <tr key={r.id} className="hover:bg-slate-50 transition">
                     <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{r.fin_cash_out_categories?.label}</td>
                     <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(r.amount)}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      {r.fin_bank_accounts ? (r.fin_bank_accounts.account_type === 'tunai' ? r.fin_bank_accounts.bank_name : `${r.fin_bank_accounts.bank_name} — ${r.fin_bank_accounts.account_number}`) : '—'}
+                    </td>
                     <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
                   </tr>
                 ))}

@@ -52,6 +52,7 @@ const adminNavItems: NavNode[] = [
         submenu: [
           { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
           { name: 'HPP Manual', href: '/keuangan/hpp' },
+          { name: 'Setup Kas & Rekening', href: '/keuangan/rekening' },
         ]
       },
       {
@@ -179,7 +180,7 @@ export default function Sidebar() {
     'Absensi':    pathname.startsWith('/absensi'),
     'Penggajian': pathname.startsWith('/penggajian'),
     'Keuangan':   pathname.startsWith('/keuangan'),
-    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
+    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp') || pathname.startsWith('/keuangan/rekening'),
     'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
     'KPI':        pathname.startsWith('/kpi'),
