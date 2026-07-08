@@ -31,7 +31,9 @@ export default function HppPage() {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const [existingEntry, setExistingEntry] = useState<HppEntry | null>(null)
+  const [editingRowId, setEditingRowId] = useState<string | null>(null)
+  const [editRowAmount, setEditRowAmount] = useState<string>('')
+  const [editRowNotes, setEditRowNotes] = useState<string>('')
 
   const today = new Date().toISOString().split('T')[0]
   const [form, setForm] = useState({ branch_id: '', entry_date: today, hpp_amount: '', notes: '' })
@@ -99,21 +101,6 @@ export default function HppPage() {
 
   useEffect(() => { fetchRows() }, [fetchRows])
 
-  const checkExisting = useCallback(async () => {
-    const branchId = isSupervisor ? myBranchId : form.branch_id
-    if (!branchId || !form.entry_date) { setExistingEntry(null); return }
-    const { data } = await supabase
-      .from('fin_hpp_entries')
-      .select('id, branch_id, entry_date, hpp_amount, notes, status')
-      .eq('branch_id', branchId)
-      .eq('entry_date', form.entry_date)
-      .maybeSingle()
-    setExistingEntry((data as unknown as HppEntry) || null)
-    if (data) setForm(f => ({ ...f, hpp_amount: String(data.hpp_amount), notes: data.notes || '' }))
-  }, [supabase, isSupervisor, myBranchId, form.branch_id, form.entry_date])
-
-  useEffect(() => { checkExisting() }, [form.branch_id, form.entry_date, myBranchId]) // eslint-disable-line react-hooks/exhaustive-deps
-
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -128,27 +115,39 @@ export default function HppPage() {
     const hppNum = parseFloat(form.hpp_amount)
     if (isNaN(hppNum) || hppNum <= 0) { showMessage('error', 'Nilai HPP tidak valid.'); return }
 
-    if (existingEntry && existingEntry.status !== 'pending') {
-      showMessage('error', `Entri tanggal ini sudah "${existingEntry.status === 'approved' ? 'disetujui' : 'ditolak'}", tidak bisa diubah dari sini. Hubungi finance pusat untuk revisi.`)
-      return
-    }
-
     setSubmitting(true)
-    if (existingEntry) {
-      const { error } = await supabase.from('fin_hpp_entries')
-        .update({ hpp_amount: hppNum, notes: form.notes || null })
-        .eq('id', existingEntry.id)
-      if (error) showMessage('error', 'Gagal memperbarui: ' + error.message)
-      else { showMessage('success', 'HPP harian berhasil diperbarui.'); fetchRows(); checkExisting() }
-    } else {
-      const { error } = await supabase.from('fin_hpp_entries').insert({
-        branch_id: branchId, entry_date: form.entry_date, hpp_amount: hppNum,
-        notes: form.notes || null, input_by: myUserId, status: 'pending',
-      })
-      if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-      else { showMessage('success', 'HPP harian berhasil dicatat, menunggu verifikasi.'); fetchRows(); checkExisting() }
+    const { error } = await supabase.from('fin_hpp_entries').insert({
+      branch_id: branchId, entry_date: form.entry_date, hpp_amount: hppNum,
+      notes: form.notes || null, input_by: myUserId, status: 'pending',
+    })
+    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
+    else {
+      showMessage('success', 'HPP harian berhasil dicatat, menunggu verifikasi.')
+      setForm(f => ({ ...f, hpp_amount: '', notes: '' }))
+      fetchRows()
     }
     setSubmitting(false)
+  }
+
+  function canEditRow(r: HppEntry) {
+    if (r.status !== 'pending') return false
+    if (isAdmin) return true
+    if (isSupervisor) return r.branch_id === myBranchId
+    return false
+  }
+
+  function startEditRow(r: HppEntry) {
+    setEditingRowId(r.id)
+    setEditRowAmount(String(r.hpp_amount))
+    setEditRowNotes(r.notes || '')
+  }
+
+  async function saveEditRow(id: string) {
+    const hppNum = parseFloat(editRowAmount)
+    if (isNaN(hppNum) || hppNum <= 0) { showMessage('error', 'Nilai HPP tidak valid.'); return }
+    const { error } = await supabase.from('fin_hpp_entries').update({ hpp_amount: hppNum, notes: editRowNotes || null }).eq('id', id)
+    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
+    else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
   }
 
   const formatRupiah = (angka: number) =>
@@ -170,7 +169,7 @@ export default function HppPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">HPP Manual (Harga Pokok Penjualan)</h1>
-        <p className="text-sm text-slate-500">Input HPP agregat per cabang per hari, sumber dari sistem HPP eksternal. Menunggu verifikasi tim finance pusat sebelum masuk laporan resmi.</p>
+        <p className="text-sm text-slate-500">Input HPP per cabang, sumber dari sistem HPP eksternal. Bisa lebih dari satu entri per cabang per hari. Menunggu verifikasi tim finance pusat sebelum masuk laporan resmi.</p>
       </div>
 
       {message && (
@@ -182,14 +181,6 @@ export default function HppPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
           <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Input HPP Harian</h2>
-
-          {existingEntry && (
-            <div className={`mb-4 p-3 rounded-lg text-xs border ${existingEntry.status === 'pending' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-              {existingEntry.status === 'pending'
-                ? 'Sudah ada entri untuk tanggal ini (menunggu). Menyimpan lagi akan memperbarui entri tersebut.'
-                : `Entri tanggal ini sudah "${existingEntry.status === 'approved' ? 'disetujui' : 'ditolak'}" — tidak bisa diubah dari sini.`}
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -220,9 +211,9 @@ export default function HppPage() {
               <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Opsional"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
-            <button type="submit" disabled={submitting || (!!existingEntry && existingEntry.status !== 'pending')}
+            <button type="submit" disabled={submitting}
               className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded shadow-sm transition disabled:opacity-50">
-              {submitting ? 'Menyimpan...' : existingEntry ? 'Perbarui Entri' : 'Simpan (Menunggu Verifikasi)'}
+              {submitting ? 'Menyimpan...' : 'Simpan (Menunggu Verifikasi)'}
             </button>
           </form>
         </div>
@@ -270,18 +261,41 @@ export default function HppPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">HPP</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Catatan</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {rows.length === 0 ? (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
                   ) : rows.map(r => (
                     <tr key={r.id} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.entry_date).toLocaleDateString('id-ID')}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name}</td>
-                      <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(r.hpp_amount)}</td>
-                      <td className="px-4 py-3 text-sm text-slate-500">{r.notes || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
+                        {editingRowId === r.id ? (
+                          <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                            className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
+                        ) : formatRupiah(r.hpp_amount)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-500">
+                        {editingRowId === r.id ? (
+                          <input value={editRowNotes} onChange={e => setEditRowNotes(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm" />
+                        ) : (r.notes || '—')}
+                      </td>
                       <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
+                      <td className="px-4 py-3 text-center">
+                        {editingRowId === r.id ? (
+                          <div className="flex gap-1 justify-center">
+                            <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
+                            <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
+                          </div>
+                        ) : canEditRow(r) ? (
+                          <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
+                        ) : (
+                          <span className="text-xs text-slate-300">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

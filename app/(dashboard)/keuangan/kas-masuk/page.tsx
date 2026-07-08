@@ -36,9 +36,11 @@ export default function KasMasukPage() {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const [existingEntry, setExistingEntry] = useState<CashIn | null>(null)
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [editRowAccountId, setEditRowAccountId] = useState<string>('')
+  const [editRowAmount, setEditRowAmount] = useState<string>('')
+  const [editRowPaymentMethod, setEditRowPaymentMethod] = useState<string>('cash')
+  const [editRowDescription, setEditRowDescription] = useState<string>('')
 
   const today = new Date().toISOString().split('T')[0]
   const [form, setForm] = useState({
@@ -107,24 +109,6 @@ export default function KasMasukPage() {
 
   useEffect(() => { fetchRows() }, [fetchRows])
 
-  // Cek apakah sudah ada entri untuk cabang + tanggal yang dipilih di form
-  const checkExisting = useCallback(async () => {
-    const branchId = isSupervisor ? myBranchId : form.branch_id
-    if (!branchId || !form.transaction_date) { setExistingEntry(null); return }
-    const { data } = await supabase
-      .from('fin_cash_in')
-      .select('id, branch_id, transaction_date, amount, payment_method, description, status, account_id')
-      .eq('branch_id', branchId)
-      .eq('transaction_date', form.transaction_date)
-      .maybeSingle()
-    setExistingEntry((data as unknown as CashIn) || null)
-    if (data) {
-      setForm(f => ({ ...f, amount: String(data.amount), payment_method: data.payment_method, description: data.description || '', account_id: data.account_id || '' }))
-    }
-  }, [supabase, isSupervisor, myBranchId, form.branch_id, form.transaction_date])
-
-  useEffect(() => { checkExisting() }, [form.branch_id, form.transaction_date, myBranchId]) // eslint-disable-line react-hooks/exhaustive-deps
-
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -144,27 +128,18 @@ export default function KasMasukPage() {
       return
     }
 
-    if (existingEntry && existingEntry.status !== 'pending') {
-      showMessage('error', `Entri tanggal ini sudah "${existingEntry.status === 'approved' ? 'disetujui' : 'ditolak'}", tidak bisa diubah dari sini. Hubungi finance pusat untuk revisi.`)
-      return
-    }
-
     setSubmitting(true)
-    if (existingEntry) {
-      const { error } = await supabase.from('fin_cash_in')
-        .update({ amount: amountNum, payment_method: form.payment_method, description: form.description || null, account_id: form.account_id })
-        .eq('id', existingEntry.id)
-      if (error) showMessage('error', 'Gagal memperbarui: ' + error.message)
-      else { showMessage('success', 'Omzet harian berhasil diperbarui.'); fetchRows(); checkExisting() }
-    } else {
-      const { error } = await supabase.from('fin_cash_in').insert({
-        branch_id: branchId, transaction_date: form.transaction_date, amount: amountNum,
-        payment_method: form.payment_method, description: form.description || null,
-        account_id: form.account_id,
-        input_by: myUserId, status: 'pending',
-      })
-      if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-      else { showMessage('success', 'Omzet harian berhasil dicatat, menunggu verifikasi.'); fetchRows(); checkExisting() }
+    const { error } = await supabase.from('fin_cash_in').insert({
+      branch_id: branchId, transaction_date: form.transaction_date, amount: amountNum,
+      payment_method: form.payment_method, description: form.description || null,
+      account_id: form.account_id,
+      input_by: myUserId, status: 'pending',
+    })
+    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
+    else {
+      showMessage('success', 'Omzet harian berhasil dicatat, menunggu verifikasi.')
+      setForm(f => ({ ...f, amount: '', description: '', account_id: '' }))
+      fetchRows()
     }
     setSubmitting(false)
   }
@@ -180,16 +155,30 @@ export default function KasMasukPage() {
 
   const totalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount), 0)
 
+  function canEditRow(r: CashIn) {
+    if (r.status !== 'pending') return false
+    if (isAdmin) return true
+    if (isSupervisor) return r.branch_id === myBranchId
+    return false
+  }
+
   function startEditRow(r: CashIn) {
     setEditingRowId(r.id)
     setEditRowAccountId(r.account_id || '')
+    setEditRowAmount(String(r.amount))
+    setEditRowPaymentMethod(r.payment_method)
+    setEditRowDescription(r.description || '')
   }
 
   async function saveEditRow(id: string) {
+    const amountNum = parseFloat(editRowAmount)
+    if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
     if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
-    const { error } = await supabase.from('fin_cash_in').update({ account_id: editRowAccountId }).eq('id', id)
+    const { error } = await supabase.from('fin_cash_in')
+      .update({ amount: amountNum, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId })
+      .eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-    else { showMessage('success', 'Rekening/kas entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
+    else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
   }
 
   if (loading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
@@ -198,7 +187,7 @@ export default function KasMasukPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Kas Masuk (Omzet Harian)</h1>
-        <p className="text-sm text-slate-500">Input omzet penjualan penuh per cabang, satu angka agregat per hari. Menunggu verifikasi tim finance pusat sebelum masuk laporan resmi.</p>
+        <p className="text-sm text-slate-500">Input omzet penjualan per cabang. Bisa lebih dari satu entri per cabang per hari (mis. tunai dan transfer dicatat terpisah). Menunggu verifikasi tim finance pusat sebelum masuk laporan resmi.</p>
       </div>
 
       {message && (
@@ -210,14 +199,6 @@ export default function KasMasukPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
           <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Input Omzet Harian</h2>
-
-          {existingEntry && (
-            <div className={`mb-4 p-3 rounded-lg text-xs border ${existingEntry.status === 'pending' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-              {existingEntry.status === 'pending'
-                ? 'Sudah ada entri untuk tanggal ini (menunggu). Menyimpan lagi akan memperbarui entri tersebut.'
-                : `Entri tanggal ini sudah "${existingEntry.status === 'approved' ? 'disetujui' : 'ditolak'}" — tidak bisa diubah dari sini.`}
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -271,9 +252,9 @@ export default function KasMasukPage() {
               <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Opsional"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
-            <button type="submit" disabled={submitting || (!!existingEntry && existingEntry.status !== 'pending')}
+            <button type="submit" disabled={submitting}
               className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded shadow-sm transition disabled:opacity-50">
-              {submitting ? 'Menyimpan...' : existingEntry ? 'Perbarui Entri' : 'Simpan (Menunggu Verifikasi)'}
+              {submitting ? 'Menyimpan...' : 'Simpan (Menunggu Verifikasi)'}
             </button>
           </form>
         </div>
@@ -312,18 +293,32 @@ export default function KasMasukPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Metode</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Rekening</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
-                    {isAdmin && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>}
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {rows.length === 0 ? (
-                    <tr><td colSpan={isAdmin ? 7 : 6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
                   ) : rows.map(r => (
                     <tr key={r.id} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name}</td>
-                      <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(r.amount)}</td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{PAYMENT_LABEL[r.payment_method] || r.payment_method}</td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
+                        {editingRowId === r.id ? (
+                          <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                            className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
+                        ) : formatRupiah(r.amount)}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {editingRowId === r.id ? (
+                          <select value={editRowPaymentMethod} onChange={e => setEditRowPaymentMethod(e.target.value)}
+                            className="px-2 py-1 border border-slate-300 rounded text-xs bg-white">
+                            <option value="cash">Tunai</option>
+                            <option value="transfer">Transfer</option>
+                            <option value="campuran">Campuran</option>
+                          </select>
+                        ) : PAYMENT_LABEL[r.payment_method] || r.payment_method}
+                      </td>
                       <td className="px-4 py-3 text-xs text-slate-500">
                         {editingRowId === r.id ? (
                           <select value={editRowAccountId} onChange={e => setEditRowAccountId(e.target.value)}
@@ -342,18 +337,18 @@ export default function KasMasukPage() {
                         ) : <span className="text-red-500">Belum diisi</span>}
                       </td>
                       <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
-                      {isAdmin && (
-                        <td className="px-4 py-3 text-center">
-                          {editingRowId === r.id ? (
-                            <div className="flex gap-1 justify-center">
-                              <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
-                              <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
-                            </div>
-                          ) : (
-                            <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
-                          )}
-                        </td>
-                      )}
+                      <td className="px-4 py-3 text-center">
+                        {editingRowId === r.id ? (
+                          <div className="flex gap-1 justify-center">
+                            <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
+                            <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
+                          </div>
+                        ) : canEditRow(r) ? (
+                          <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
+                        ) : (
+                          <span className="text-xs text-slate-300">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
