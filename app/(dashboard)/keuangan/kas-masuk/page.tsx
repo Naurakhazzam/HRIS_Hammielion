@@ -41,6 +41,8 @@ export default function KasMasukPage() {
   const [editRowAmount, setEditRowAmount] = useState<string>('')
   const [editRowPaymentMethod, setEditRowPaymentMethod] = useState<string>('cash')
   const [editRowDescription, setEditRowDescription] = useState<string>('')
+  const [editRowDate, setEditRowDate] = useState<string>('')
+  const [editRowBranchId, setEditRowBranchId] = useState<string>('')
 
   const today = new Date().toISOString().split('T')[0]
   const [form, setForm] = useState({
@@ -168,14 +170,17 @@ export default function KasMasukPage() {
     setEditRowAmount(String(r.amount))
     setEditRowPaymentMethod(r.payment_method)
     setEditRowDescription(r.description || '')
+    setEditRowDate(r.transaction_date)
+    setEditRowBranchId(r.branch_id)
   }
 
   async function saveEditRow(id: string) {
     const amountNum = parseFloat(editRowAmount)
     if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
     if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
+    if (!editRowBranchId) { showMessage('error', 'Pilih cabang dulu.'); return }
     const { error } = await supabase.from('fin_cash_in')
-      .update({ amount: amountNum, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId })
+      .update({ branch_id: editRowBranchId, transaction_date: editRowDate, amount: amountNum, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId })
       .eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
     else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
@@ -292,17 +297,30 @@ export default function KasMasukPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Jumlah</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Metode</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Rekening</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Keterangan</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {rows.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
+                    <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
                   ) : rows.map(r => (
                     <tr key={r.id} className="hover:bg-slate-50 transition">
-                      <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600">
+                        {editingRowId === r.id ? (
+                          <input type="date" value={editRowDate} onChange={e => setEditRowDate(e.target.value)}
+                            className="px-2 py-1 border border-slate-300 rounded text-sm" />
+                        ) : new Date(r.transaction_date).toLocaleDateString('id-ID')}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {editingRowId === r.id && isAdmin ? (
+                          <select value={editRowBranchId} onChange={e => setEditRowBranchId(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
+                            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                          </select>
+                        ) : r.branches?.name}
+                      </td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                         {editingRowId === r.id ? (
                           <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
@@ -335,6 +353,12 @@ export default function KasMasukPage() {
                             ? r.fin_bank_accounts.bank_name
                             : `${r.fin_bank_accounts.bank_name} — ${r.fin_bank_accounts.account_number}`
                         ) : <span className="text-red-500">Belum diisi</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-500">
+                        {editingRowId === r.id ? (
+                          <input value={editRowDescription} onChange={e => setEditRowDescription(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm" />
+                        ) : (r.description || '—')}
                       </td>
                       <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
                       <td className="px-4 py-3 text-center">

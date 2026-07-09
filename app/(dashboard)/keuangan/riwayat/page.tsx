@@ -8,9 +8,11 @@ type Category = { code: string; label: string }
 type BankAccount = { id: string; bank_name: string; account_number: string | null; account_type: string }
 type CashOutRow = {
   id: string
+  branch_id: string
   amount: number
   description: string | null
   transaction_date: string
+  category: string
   status: string
   source_table: string | null
   account_id: string | null
@@ -33,8 +35,14 @@ export default function RiwayatKasKeluarPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
   const [rows, setRows] = useState<CashOutRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [editRowAccountId, setEditRowAccountId] = useState<string>('')
+  const [editRowDate, setEditRowDate] = useState<string>('')
+  const [editRowCategory, setEditRowCategory] = useState<string>('')
+  const [editRowAmount, setEditRowAmount] = useState<string>('')
+  const [editRowDescription, setEditRowDescription] = useState<string>('')
+  const [editRowBranchId, setEditRowBranchId] = useState<string>('')
 
   const today = new Date()
   const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
@@ -45,6 +53,7 @@ export default function RiwayatKasKeluarPage() {
   const [filterStatus, setFilterStatus] = useState('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
+  const isSupervisor = role === 'supervisor'
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
@@ -54,7 +63,7 @@ export default function RiwayatKasKeluarPage() {
 
     let query = supabase
       .from('fin_cash_out')
-      .select('id, amount, description, transaction_date, status, source_table, account_id, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
+      .select('id, branch_id, amount, description, transaction_date, category, status, source_table, account_id, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
@@ -102,6 +111,12 @@ export default function RiwayatKasKeluarPage() {
 
   useEffect(() => { fetchRows() }, [fetchRows])
 
+  function showMessage(type: 'success' | 'error', text: string) {
+    setMessage({ type, text })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setTimeout(() => setMessage(null), 5000)
+  }
+
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
@@ -119,15 +134,42 @@ export default function RiwayatKasKeluarPage() {
   const totalApproved = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount), 0)
   const countPending = rows.filter(r => r.status === 'pending').length
 
+  function canEditRow(r: CashOutRow) {
+    if (r.status !== 'pending') return false
+    if (r.source_table) return false // entri otomatis (payroll/driver/kasbon/dll) tidak boleh diubah manual
+    // Catatan: saat ini hanya owner/hr/finance yang punya izin UPDATE di fin_cash_out (RLS).
+    // Supervisor belum diberi izin edit di sini (beda dengan Kas Masuk) - lihat CHANGELOG Sesi 19/20.
+    return isAdmin
+  }
+
   function startEditRow(r: CashOutRow) {
     setEditingRowId(r.id)
     setEditRowAccountId(r.account_id || '')
+    setEditRowDate(r.transaction_date)
+    setEditRowCategory(r.category)
+    setEditRowAmount(String(r.amount))
+    setEditRowDescription(r.description || '')
+    setEditRowBranchId(r.branch_id)
   }
 
   async function saveEditRow(id: string) {
-    if (!editRowAccountId) { return }
-    const { error } = await supabase.from('fin_cash_out').update({ account_id: editRowAccountId }).eq('id', id)
-    if (!error) { setEditingRowId(null); fetchRows() }
+    const amountNum = parseFloat(editRowAmount)
+    if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
+    if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
+    if (!editRowCategory) { showMessage('error', 'Pilih kategori dulu.'); return }
+    if (!editRowBranchId) { showMessage('error', 'Pilih cabang dulu.'); return }
+    const { error } = await supabase.from('fin_cash_out')
+      .update({
+        branch_id: editRowBranchId,
+        transaction_date: editRowDate,
+        category: editRowCategory,
+        amount: amountNum,
+        description: editRowDescription || null,
+        account_id: editRowAccountId,
+      })
+      .eq('id', id)
+    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
+    else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
   }
 
   return (
@@ -136,6 +178,12 @@ export default function RiwayatKasKeluarPage() {
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Riwayat Kas Keluar</h1>
         <p className="text-sm text-slate-500">Semua pengeluaran (manual & otomatis) per cabang, kategori, dan status.</p>
       </div>
+
+      {message && (
+        <div className={`p-4 mb-4 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+          {message.text}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-4">
         <div>
@@ -207,21 +255,50 @@ export default function RiwayatKasKeluarPage() {
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Rekening/Kas</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Sumber</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
-                {isAdmin && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>}
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada data untuk filter ini.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada data untuk filter ini.</td></tr>
               ) : rows.map(r => (
                 <tr key={r.id} className="hover:bg-slate-50 transition">
-                  <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
-                  <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name}</td>
-                  <td className="px-4 py-3 text-sm text-slate-700">{r.fin_cash_out_categories?.label}</td>
-                  <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(r.amount)}</td>
-                  <td className="px-4 py-3 text-sm text-slate-500">{r.description || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600">
+                    {editingRowId === r.id ? (
+                      <input type="date" value={editRowDate} onChange={e => setEditRowDate(e.target.value)}
+                        className="px-2 py-1 border border-slate-300 rounded text-sm" />
+                    ) : new Date(r.transaction_date).toLocaleDateString('id-ID')}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-700">
+                    {editingRowId === r.id ? (
+                      <select value={editRowBranchId} onChange={e => setEditRowBranchId(e.target.value)}
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
+                        {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    ) : r.branches?.name}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-700">
+                    {editingRowId === r.id ? (
+                      <select value={editRowCategory} onChange={e => setEditRowCategory(e.target.value)}
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
+                        {categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                      </select>
+                    ) : r.fin_cash_out_categories?.label}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
+                    {editingRowId === r.id ? (
+                      <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                        className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
+                    ) : formatRupiah(r.amount)}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-500">
+                    {editingRowId === r.id ? (
+                      <input value={editRowDescription} onChange={e => setEditRowDescription(e.target.value)}
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-sm" />
+                    ) : (r.description || '—')}
+                  </td>
                   <td className="px-4 py-3 text-xs text-slate-500">
                     {editingRowId === r.id ? (
                       <select value={editRowAccountId} onChange={e => setEditRowAccountId(e.target.value)}
@@ -239,18 +316,18 @@ export default function RiwayatKasKeluarPage() {
                   </td>
                   <td className="px-4 py-3 text-center text-xs text-slate-500">{r.source_table ? 'Otomatis' : 'Manual'}</td>
                   <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
-                  {isAdmin && (
-                    <td className="px-4 py-3 text-center">
-                      {editingRowId === r.id ? (
-                        <div className="flex gap-1 justify-center">
-                          <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
-                          <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
-                      )}
-                    </td>
-                  )}
+                  <td className="px-4 py-3 text-center">
+                    {editingRowId === r.id ? (
+                      <div className="flex gap-1 justify-center">
+                        <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
+                        <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
+                      </div>
+                    ) : canEditRow(r) ? (
+                      <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
