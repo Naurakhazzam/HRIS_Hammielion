@@ -142,6 +142,18 @@ export default function RiwayatKasKeluarPage() {
     return isAdmin
   }
 
+  function canDeleteRow(r: CashOutRow) {
+    return role === 'owner' && r.status === 'pending' && !r.source_table
+  }
+
+  async function handleDeleteRow(r: CashOutRow) {
+    const ok = window.confirm(`Hapus entri pengeluaran ${formatRupiah(r.amount)} tanggal ${new Date(r.transaction_date).toLocaleDateString('id-ID')}? Tindakan ini tidak bisa dibatalkan.`)
+    if (!ok) return
+    const { error } = await supabase.from('fin_cash_out').delete().eq('id', r.id)
+    if (error) showMessage('error', 'Gagal menghapus: ' + error.message)
+    else { showMessage('success', 'Entri berhasil dihapus.'); fetchRows() }
+  }
+
   function startEditRow(r: CashOutRow) {
     setEditingRowId(r.id)
     setEditRowAccountId(r.account_id || '')
@@ -322,10 +334,18 @@ export default function RiwayatKasKeluarPage() {
                         <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
                         <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
                       </div>
-                    ) : canEditRow(r) ? (
-                      <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
                     ) : (
-                      <span className="text-xs text-slate-300">—</span>
+                      <div className="flex gap-2 justify-center">
+                        {canEditRow(r) && (
+                          <button onClick={() => startEditRow(r)} className="text-xs text-blue-600 hover:underline">Edit</button>
+                        )}
+                        {canDeleteRow(r) && (
+                          <button onClick={() => handleDeleteRow(r)} className="text-xs text-red-600 hover:underline">Hapus</button>
+                        )}
+                        {!canEditRow(r) && !canDeleteRow(r) && (
+                          <span className="text-xs text-slate-300">—</span>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>
