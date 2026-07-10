@@ -143,7 +143,9 @@ export default function RiwayatKasKeluarPage() {
   }
 
   function canDeleteRow(r: CashOutRow) {
-    return role === 'owner' && r.status === 'pending' && !r.source_table
+    if (r.status !== 'pending' && r.status !== 'rejected') return false
+    if (r.source_table) return false
+    return isAdmin
   }
 
   async function handleDeleteRow(r: CashOutRow) {

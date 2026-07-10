@@ -165,7 +165,10 @@ export default function KasMasukPage() {
   }
 
   function canDeleteRow(r: CashIn) {
-    return role === 'owner' && r.status === 'pending'
+    if (r.status !== 'pending' && r.status !== 'rejected') return false
+    if (isAdmin) return true
+    if (isSupervisor) return r.branch_id === myBranchId
+    return false
   }
 
   async function handleDeleteRow(r: CashIn) {
