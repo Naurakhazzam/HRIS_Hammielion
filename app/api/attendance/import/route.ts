@@ -13,14 +13,25 @@ function parsePeriod(rawData: string[][]): {
   startMonth: number; startDay: number; startYear: number
   endMonth: number;   endDay: number;   endYear: number
 } | null {
-  // Row 2, col 25: "Attendance date:05-26-2026~06-25-2026"
+  // Beberapa mesin fingerprint export dengan format berbeda:
+  //   "Attendance date:05-26-2026~06-25-2026"  → MM-DD-YYYY (pemisah "-")
+  //   "Attendance date:26/06/2026~25/07/2026"  → DD/MM/YYYY (pemisah "/")
   for (let col = 0; col < (rawData[2]?.length ?? 0); col++) {
     const str = String(rawData[2][col] || '')
-    const m = str.match(/(\d{2})-(\d{2})-(\d{4})~(\d{2})-(\d{2})-(\d{4})/)
-    if (m) {
+
+    const dash = str.match(/(\d{2})-(\d{2})-(\d{4})~(\d{2})-(\d{2})-(\d{4})/)
+    if (dash) {
       return {
-        startMonth: parseInt(m[1]), startDay: parseInt(m[2]), startYear: parseInt(m[3]),
-        endMonth:   parseInt(m[4]), endDay:   parseInt(m[5]), endYear:   parseInt(m[6]),
+        startMonth: parseInt(dash[1]), startDay: parseInt(dash[2]), startYear: parseInt(dash[3]),
+        endMonth:   parseInt(dash[4]), endDay:   parseInt(dash[5]), endYear:   parseInt(dash[6]),
+      }
+    }
+
+    const slash = str.match(/(\d{2})\/(\d{2})\/(\d{4})~(\d{2})\/(\d{2})\/(\d{4})/)
+    if (slash) {
+      return {
+        startDay: parseInt(slash[1]), startMonth: parseInt(slash[2]), startYear: parseInt(slash[3]),
+        endDay:   parseInt(slash[4]), endMonth:   parseInt(slash[5]), endYear:   parseInt(slash[6]),
       }
     }
   }
