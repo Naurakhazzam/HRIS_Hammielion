@@ -19,6 +19,16 @@ export default async function DashboardLayout({
     redirect('/login')
   }
 
+  // Tolak akses jika akun sudah dinonaktifkan (mis. karyawan resign),
+  // meskipun sesi login sebelumnya masih tersimpan di browser.
+  const { data: profile } = await supabase
+    .from('users').select('is_active').eq('id', user.id).single()
+
+  if (!profile || !profile.is_active) {
+    await supabase.auth.signOut()
+    redirect('/login')
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Navbar */}

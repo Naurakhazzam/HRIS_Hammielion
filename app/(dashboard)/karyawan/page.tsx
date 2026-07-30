@@ -255,9 +255,20 @@ export default function KaryawanPage() {
   }
 
   async function toggleStatus(id: string, cur: boolean) {
-    const { error } = await supabase.from('employees').update({ is_active: !cur }).eq('id', id)
-    if (error) showMessage('error', 'Gagal: ' + error.message)
-    else { showMessage('success', 'Status berhasil diubah'); fetchEmployees() }
+    const nextActive = !cur
+    const { error } = await supabase.from('employees').update({ is_active: nextActive }).eq('id', id)
+    if (error) { showMessage('error', 'Gagal: ' + error.message); return }
+
+    // Ikut nonaktifkan/aktifkan akun login terkait, jika karyawan ini punya akun
+    const { error: userError } = await supabase.from('users').update({ is_active: nextActive }).eq('employee_id', id)
+    if (userError) {
+      showMessage('error', `Status karyawan diubah, tapi gagal update akun login: ${userError.message}`)
+    } else {
+      showMessage('success', nextActive
+        ? 'Status berhasil diubah menjadi Aktif (akun login ikut diaktifkan).'
+        : 'Status berhasil diubah menjadi Nonaktif (akun login ikut dinonaktifkan).')
+    }
+    fetchEmployees()
   }
 
   async function handleDelete(emp: Employee) {

@@ -38,6 +38,18 @@ export default function LoginPage() {
       return
     }
 
+    // Tolak login jika akun sudah dinonaktifkan (mis. karyawan resign)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: profile } = await supabase
+      .from('users').select('is_active').eq('id', user?.id ?? '').single()
+
+    if (!profile || !profile.is_active) {
+      setError('Akun Anda sudah dinonaktifkan. Hubungi HR jika ini tidak sesuai.')
+      await supabase.auth.signOut()
+      setLoading(false)
+      return
+    }
+
     router.push('/dashboard')
     router.refresh()
   }

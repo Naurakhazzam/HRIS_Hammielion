@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
 
     // Load data dari Supabase
     const [{ data: employees }, { data: schedules }] = await Promise.all([
-      supabase.from('employees').select('id, full_name, fingerprint_id, department_id').not('fingerprint_id', 'is', null),
+      supabase.from('employees').select('id, full_name, fingerprint_id, department_id, is_active').not('fingerprint_id', 'is', null),
       supabase.from('work_schedules').select('check_in_time, check_out_time, detect_until, allow_overtime, applies_to_dept'),
     ])
 
@@ -134,6 +134,13 @@ export async function POST(req: NextRequest) {
       const emp = empMap.get(fingerprintId)
       if (!emp) {
         employeeResults.push({ fingerprintId, nameInFile, status: 'not_found', recordCount: 0 })
+        row = r; continue
+      }
+      if (!emp.is_active) {
+        employeeResults.push({
+          fingerprintId, nameInFile, nameInHris: emp.full_name, employeeId: emp.id,
+          status: 'inactive', recordCount: 0,
+        })
         row = r; continue
       }
 
@@ -213,6 +220,7 @@ export async function POST(req: NextRequest) {
       totalRecords: records.length,
       matchedCount: employeeResults.filter(e => e.status === 'matched').length,
       notFoundCount: employeeResults.filter(e => e.status === 'not_found').length,
+      inactiveCount: employeeResults.filter(e => e.status === 'inactive').length,
     })
 
   } catch (err: any) {

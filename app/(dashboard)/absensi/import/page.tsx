@@ -16,7 +16,7 @@ type EmpResult = {
   nameInFile: string
   nameInHris?: string
   employeeId?: string
-  status: 'matched' | 'not_found'
+  status: 'matched' | 'not_found' | 'inactive'
   recordCount: number
 }
 
@@ -27,6 +27,7 @@ type ParseResult = {
   totalRecords: number
   matchedCount: number
   notFoundCount: number
+  inactiveCount: number
 }
 
 type Phase = 'upload' | 'preview' | 'done'
@@ -214,12 +215,13 @@ export default function ImportAbsensiPage() {
           {/* Summary */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
             <h2 className="font-semibold text-slate-800 mb-4">Ringkasan Hasil Parse</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               {[
                 { label: 'Periode',             val: parseResult.period,                          color: 'bg-slate-50 text-slate-700' },
                 { label: 'Total Record Absensi', val: parseResult.totalRecords,                    color: 'bg-blue-50 text-blue-700' },
                 { label: 'Karyawan Cocok',       val: parseResult.matchedCount,                    color: 'bg-green-50 text-green-700' },
                 { label: 'Tidak Ditemukan',      val: parseResult.notFoundCount,                   color: 'bg-orange-50 text-orange-700' },
+                { label: 'Nonaktif',             val: parseResult.inactiveCount,                   color: 'bg-slate-100 text-slate-600' },
               ].map(item => (
                 <div key={item.label} className={`rounded-lg border px-4 py-3 ${item.color} border-transparent`}>
                   <p className="text-xs font-medium opacity-60 mb-1">{item.label}</p>
@@ -294,6 +296,42 @@ export default function ImportAbsensiPage() {
               <div className="px-5 py-3 bg-orange-50/50 border-t border-orange-100">
                 <p className="text-xs text-orange-600">
                   Buka halaman <strong>Data Karyawan</strong> → edit karyawan → isi kolom <strong>ID Fingerprint</strong> agar cocok dengan ID di atas, lalu import ulang.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Karyawan nonaktif */}
+          {parseResult.employees.filter(e => e.status === 'inactive').length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 bg-slate-100 border-b border-slate-200 flex items-center gap-2">
+                <span className="text-slate-500"><IconAlertCircle size={15} /></span>
+                <span className="text-sm font-semibold text-slate-700">Karyawan Berstatus Nonaktif</span>
+                <span className="ml-1 text-xs text-slate-500">(absensinya tidak diimpor)</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-100">
+                    <tr>
+                      {['ID Fingerprint', 'Nama di File', 'Nama di HRIS'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {parseResult.employees.filter(e => e.status === 'inactive').map(e => (
+                      <tr key={e.fingerprintId} className="hover:bg-slate-50/60">
+                        <td className="px-4 py-2.5 font-mono text-slate-500">{e.fingerprintId}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{e.nameInFile}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{e.nameInHris}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100">
+                <p className="text-xs text-slate-500">
+                  Karyawan ini berstatus <strong>Nonaktif</strong> di sistem, sehingga absensinya dilewati. Jika seharusnya masih aktif, aktifkan kembali di halaman <strong>Data Karyawan</strong>.
                 </p>
               </div>
             </div>
