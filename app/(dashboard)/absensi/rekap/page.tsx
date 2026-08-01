@@ -81,6 +81,9 @@ export default function RekapAbsensiPage() {
   const [bulkModal, setBulkModal]       = useState(false)
   const [bulkKet, setBulkKet]           = useState('leave')
   const [bulkSaving, setBulkSaving]     = useState(false)
+  const [bulkJamMasuk, setBulkJamMasuk]   = useState('')
+  const [bulkJamPulang, setBulkJamPulang] = useState('')
+  const [bulkCatatan, setBulkCatatan]     = useState('')
   const [formData, setFormData] = useState({ employee_id:'', date:new Date().toISOString().split('T')[0], check_in:'', check_out:'', status:'present', notes:'' })
 
   useEffect(() => { fetchReferenceData(); fetchMyRole() }, [])
@@ -158,15 +161,16 @@ export default function RekapAbsensiPage() {
   async function handleBulkSave() {
     setBulkSaving(true)
     const items = Array.from(selectedRows.values())
+    const isPresent = bulkKet === 'present'
     const upsertData = items.map(item => ({
       employee_id:    item.employeeId,
       date:           item.date,
-      check_in:       null,
-      check_out:      null,
+      check_in:       isPresent && bulkJamMasuk  ? new Date(item.date+'T'+bulkJamMasuk+':00+07:00').toISOString()  : null,
+      check_out:      isPresent && bulkJamPulang ? new Date(item.date+'T'+bulkJamPulang+':00+07:00').toISOString() : null,
       late_minutes:   0,
       overtime_hours: 0,
       status:         bulkKet === 'resign' ? 'permission' : bulkKet,
-      notes:          bulkKet === 'resign' ? 'Resign' : null,
+      notes:          bulkKet === 'resign' ? 'Resign' : (isPresent ? bulkCatatan.trim() : null),
     }))
 
     // Batch per 50 baris
@@ -807,7 +811,7 @@ export default function RekapAbsensiPage() {
           <span className="text-sm font-semibold text-white">{selectedRows.size} hari dipilih</span>
           <button onClick={() => setSelectedRows(new Map())} className="text-xs text-slate-400 hover:text-white transition px-2">Batal pilih</button>
           <button
-            onClick={() => setBulkModal(true)}
+            onClick={() => { setBulkKet('leave'); setBulkJamMasuk(''); setBulkJamPulang(''); setBulkCatatan(''); setBulkModal(true) }}
             className="px-4 py-1.5 bg-blue-500 hover:bg-blue-600 rounded-lg text-sm font-semibold transition"
           >
             Terapkan Keterangan →
@@ -829,6 +833,7 @@ export default function RekapAbsensiPage() {
             <div className="px-6 py-5 space-y-4">
               <div className="grid grid-cols-2 gap-2">
                 {[
+                  { val:'present',    label:'Hadir',      active:'border-green-400 bg-green-50 text-green-700' },
                   { val:'leave',      label:'Libur',      active:'border-slate-400 bg-slate-50 text-slate-700' },
                   { val:'absent',     label:'Alpha',      active:'border-red-400 bg-red-50 text-red-700' },
                   { val:'sick',       label:'Sakit',      active:'border-blue-400 bg-blue-50 text-blue-700' },
@@ -843,9 +848,33 @@ export default function RekapAbsensiPage() {
                   </button>
                 ))}
               </div>
+
+              {bulkKet === 'present' && (
+                <div className="space-y-3 pt-1 border-t border-slate-100">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Jam Masuk *</label>
+                      <input type="time" required value={bulkJamMasuk} onChange={e=>setBulkJamMasuk(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Jam Pulang *</label>
+                      <input type="time" required value={bulkJamPulang} onChange={e=>setBulkJamPulang(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Alasan / Dasar Konfirmasi *</label>
+                    <input type="text" required value={bulkCatatan} onChange={e=>setBulkCatatan(e.target.value)}
+                      placeholder="Contoh: Dikonfirmasi supervisor Budi — mesin fingerprint offline"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+                  </div>
+                  <p className="text-xs text-amber-600">Jam yang sama diterapkan ke semua hari terpilih. Pastikan kehadiran tiap orang/tanggal sudah diverifikasi sebelum menyimpan.</p>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-1">
                 <button onClick={() => setBulkModal(false)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
-                <button onClick={handleBulkSave} disabled={bulkSaving}
+                <button onClick={handleBulkSave}
+                  disabled={bulkSaving || (bulkKet === 'present' && (!bulkJamMasuk || !bulkJamPulang || !bulkCatatan.trim()))}
                   className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
                   {bulkSaving ? 'Menyimpan...' : `Simpan ${selectedRows.size} Hari`}
                 </button>
