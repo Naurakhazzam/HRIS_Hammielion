@@ -561,6 +561,7 @@ export default function PenggajianBulananPage() {
     const izinRecs  = validAtts.filter((a: any) => a.status === 'permission')
     const sickRecs  = validAtts.filter((a: any) => a.status === 'sick')
     const alphaRecs = validAtts.filter((a: any) => a.status === 'absent')
+    const leaveRecs = validAtts.filter((a: any) => a.status === 'leave')
 
     // Hari kosong (tidak ada record) → auto-libur (≤4 gratis, sisanya izin)
     const allPeriodDates: string[] = []
@@ -578,10 +579,12 @@ export default function PenggajianBulananPage() {
     const autoIzin    = Math.max(emptyDays - 4, 0)  // kosong >4 jadi izin
 
     // ── Kompensasi libur tidak diambil ──────────────────────────────────────
-    // Kuota libur 4 hari/periode. Kalau hari kosong (libur) < 4, berarti
-    // karyawan bekerja di hari yang seharusnya libur → dibayar dailyRate/hari.
+    // Kuota libur 4 hari/periode. "Libur diambil" dihitung dari hari kosong
+    // (tanpa record) DITAMBAH hari yang eksplisit berstatus 'leave' — sama
+    // seperti definisi "Libur" di Rekap Absensi. Kalau totalnya < 4, sisanya
+    // berarti karyawan bekerja di hari yang seharusnya libur → dibayar dailyRate/hari.
     const kuotaLibur      = 4
-    const liburDiambil    = Math.min(emptyDays, kuotaLibur)
+    const liburDiambil    = Math.min(emptyDays + leaveRecs.length, kuotaLibur)
     const kurangLibur     = Math.max(kuotaLibur - liburDiambil, 0)
     const liburKompensasi = Math.round(kurangLibur * dailyRate)
 
