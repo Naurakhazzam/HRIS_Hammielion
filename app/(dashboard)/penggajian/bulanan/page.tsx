@@ -586,17 +586,19 @@ export default function PenggajianBulananPage() {
       if (joinDateVal && d < joinDateVal) return false  // sebelum bergabung — diabaikan
       return !recordedDates.has(d)
     }).length
-    const autoIzin    = Math.max(emptyDays - 4, 0)  // kosong >4 jadi izin
 
-    // ── Kompensasi libur tidak diambil ──────────────────────────────────────
-    // Kuota libur 4 hari/periode. "Libur diambil" dihitung dari hari kosong
-    // (tanpa record) DITAMBAH hari yang eksplisit berstatus 'leave' — sama
-    // seperti definisi "Libur" di Rekap Absensi. Kalau totalnya < 4, sisanya
-    // berarti karyawan bekerja di hari yang seharusnya libur → dibayar dailyRate/hari.
+    // ── Kuota libur 4 hari/periode ───────────────────────────────────────────
+    // "Libur diambil" = hari kosong (tanpa record) + hari eksplisit berstatus
+    // 'leave' — sama seperti definisi "Libur" di Rekap Absensi. Kalau totalnya
+    // melebihi kuota, kelebihannya dipotong seperti izin (auto-izin). Kalau
+    // kurang dari kuota, sisanya berarti karyawan bekerja di hari yang
+    // seharusnya libur → dikompensasi dailyRate/hari.
     const kuotaLibur      = 4
-    const liburDiambil    = Math.min(emptyDays + leaveRecs.length, kuotaLibur)
-    const kurangLibur     = Math.max(kuotaLibur - liburDiambil, 0)
-    const liburKompensasi = Math.round(kurangLibur * dailyRate)
+    const totalLiburDiambil = emptyDays + leaveRecs.length
+    const autoIzin         = Math.max(totalLiburDiambil - kuotaLibur, 0)  // lewat kuota → jadi izin
+    const liburDiambil     = Math.min(totalLiburDiambil, kuotaLibur)
+    const kurangLibur      = Math.max(kuotaLibur - liburDiambil, 0)
+    const liburKompensasi  = Math.round(kurangLibur * dailyRate)
 
     // Izin: 1× per hari
     const izinCount = izinRecs.length + autoIzin
@@ -1077,7 +1079,8 @@ export default function PenggajianBulananPage() {
     while (cur <= endD) { allDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`); cur.setDate(cur.getDate()+1) }
 
     const emptyDays  = allDates.filter(d => !recordedDates.has(d)).length
-    const autoIzin   = Math.max(emptyDays - 4, 0)
+    const leaveDays  = atts.filter((a: any) => a.status === 'leave').length
+    const autoIzin   = Math.max((emptyDays + leaveDays) - 4, 0)
     const izinDays   = atts.filter((a: any) => a.status === 'permission').length
     const alphaDays  = atts.filter((a: any) => a.status === 'absent').length
     const sickDays   = atts.filter((a: any) => a.status === 'sick').length
