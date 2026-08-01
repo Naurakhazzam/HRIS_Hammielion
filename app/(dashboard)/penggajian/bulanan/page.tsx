@@ -25,6 +25,8 @@ type Payroll = {
   cashier_loss_deduction: number
   absent_days: number
   absent_deduction: number
+  libur_compensation_days: number
+  libur_compensation_amount: number
   gross_total: number
   net_total: number
   status: 'draft' | 'pending_approval' | 'approved' | 'paid'
@@ -183,6 +185,7 @@ export default function PenggajianBulananPage() {
     kasbonSaldo: number; kasbonDed: number
     absentDays: number; absentDed: number; absentRatePerDay: number
     absentBreakdown: { dailyRate: number; nonHadirDays: number; freeDays: number; deductedDays: number; alphaDays: number; izinDays: number; liburExtraDays: number; sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number } | null
+    liburCompDays: number; liburKompensasi: number
     invLoss: number; cashierLoss: number
     loyAutoRelease: number; loyBalSaldo: number; loyDurasi: number
     gross: number; net: number
@@ -300,6 +303,7 @@ export default function PenggajianBulananPage() {
         kasbon_deduction, loyalitas_deduction, conditional_bonus,
         inventory_loss_deduction, cashier_loss_deduction,
         absent_days, absent_deduction,
+        libur_compensation_days, libur_compensation_amount,
         gross_total, net_total,
         status, approved_by, created_at,
         employee:employees!payrolls_employee_id_fkey(
@@ -568,6 +572,14 @@ export default function PenggajianBulananPage() {
     }).length
     const autoIzin    = Math.max(emptyDays - 4, 0)  // kosong >4 jadi izin
 
+    // ── Kompensasi libur tidak diambil ──────────────────────────────────────
+    // Kuota libur 4 hari/periode. Kalau hari kosong (libur) < 4, berarti
+    // karyawan bekerja di hari yang seharusnya libur → dibayar dailyRate/hari.
+    const kuotaLibur      = 4
+    const liburDiambil    = Math.min(emptyDays, kuotaLibur)
+    const kurangLibur     = Math.max(kuotaLibur - liburDiambil, 0)
+    const liburKompensasi = Math.round(kurangLibur * dailyRate)
+
     // Izin: 1× per hari
     const izinCount = izinRecs.length + autoIzin
     const izinDed   = izinCount * dailyRate
@@ -616,7 +628,7 @@ export default function PenggajianBulananPage() {
       .filter(c => latestChecked[c.id])
       .reduce((s, c) => s + Number(c.nominal_amount), 0)
 
-    const gross = base + pos + meal + otTotal + kpi + loyAutoRelease + conditionalBonus
+    const gross = base + pos + meal + otTotal + kpi + loyAutoRelease + conditionalBonus + liburKompensasi
     const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyAutoRelease > 0 ? 0 : loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
 
     const preview: SlipPreview = {
@@ -626,6 +638,7 @@ export default function PenggajianBulananPage() {
       loyalitasDed: loyalitas, latDed, latMinutes: latMins, latRate,
       kasbonSaldo: saldo, kasbonDed,
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
+      liburCompDays: kurangLibur, liburKompensasi,
       invLoss, cashierLoss: cashLoss,
       loyAutoRelease, loyBalSaldo, loyDurasi,
       conditionalBonus,
@@ -664,6 +677,7 @@ export default function PenggajianBulananPage() {
       loyalitas_deduction: p.loyAutoRelease > 0 ? 0 : p.loyalitasDed,
       loyalitas_auto_release: p.loyAutoRelease,
       absent_days: p.absentDays, absent_deduction: p.absentDed,
+      libur_compensation_days: p.liburCompDays, libur_compensation_amount: p.liburKompensasi,
       inventory_loss_deduction: p.invLoss, cashier_loss_deduction: p.cashierLoss,
       gross_total: p.gross, net_total: p.net, status: 'draft', approved_by: null,
     }).select('id').single()
@@ -1043,7 +1057,7 @@ export default function PenggajianBulananPage() {
 
     // Update payroll: conditional_bonus + recalc gross & net
     const p = bonusModal
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + totalBonus
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + totalBonus
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const { error: updateErr } = await supabase
@@ -1175,6 +1189,7 @@ export default function PenggajianBulananPage() {
       <tr><td>Upah Lembur${otDetailHtml}</td><td>${otTotal>0?fmtR(otTotal):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus KPI</td><td>${Number(p.kpi_bonus)>0?fmtR(Number(p.kpi_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus Kondisional</td><td>${Number((p as any).conditional_bonus??0)>0?fmtR(Number((p as any).conditional_bonus)):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Kompensasi Libur Tidak Diambil (${(p as any).libur_compensation_days??0} hari)</td><td>${Number((p as any).libur_compensation_days??0)>0?fmtR(Number((p as any).libur_compensation_amount??0)):'<span class="zero">—</span>'}</td></tr>
       <tr class="section-label ded"><td colspan="2">Potongan</td></tr>
       <tr><td>Potongan Keterlambatan${lateDetailHtml}</td><td>${lateDed>0?'-'+fmtR(lateDed):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Potongan Kasbon</td><td class="${Number(p.kasbon_deduction)>0?'ded-val':'zero'}">${Number(p.kasbon_deduction)>0?'-'+fmtR(Number(p.kasbon_deduction)):'—'}</td></tr>
@@ -1729,6 +1744,20 @@ export default function PenggajianBulananPage() {
                       </td>
                     </tr>
                   ))}
+                  {/* Kompensasi Libur Tidak Diambil */}
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 text-slate-700 align-top">
+                      <div>Kompensasi Libur Tidak Diambil ({(selectedPayroll as any).libur_compensation_days ?? 0} hari)</div>
+                      {Number((selectedPayroll as any).libur_compensation_days ?? 0) > 0 && absentBreakdownDetail && (
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          └ Kuota libur 4 hari/periode, diambil {4 - (selectedPayroll as any).libur_compensation_days} hari → {(selectedPayroll as any).libur_compensation_days} hari kerja × {formatRupiah(absentBreakdownDetail.dailyRate)}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium text-emerald-600 align-top">
+                      {Number((selectedPayroll as any).libur_compensation_amount ?? 0) > 0 ? formatRupiah(Number((selectedPayroll as any).libur_compensation_amount)) : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
 
                   {/* Potongan */}
                   <tr className="bg-red-50/50">
@@ -2094,6 +2123,7 @@ export default function PenggajianBulananPage() {
                     ['Upah Lembur', slipPreview.otTotal],
                     ['Bonus KPI', slipPreview.kpiBonus],
                     ...(slipPreview.conditionalBonus > 0 ? [['Bonus Kondisional', slipPreview.conditionalBonus]] : []),
+                    ...(slipPreview.liburCompDays > 0 ? [[`Kompensasi Libur Tidak Diambil (${slipPreview.liburCompDays} hari)`, slipPreview.liburKompensasi]] : []),
                     ...(slipPreview.loyAutoRelease > 0 ? [[`✅ Cair Tabungan Loyalitas (${slipPreview.loyDurasi} bln)`, slipPreview.loyAutoRelease]] : []),
                   ].map(([l, v]) => Number(v) > 0 && (
                     <div key={String(l)} className="flex justify-between px-4 py-2 border-t border-slate-100">
