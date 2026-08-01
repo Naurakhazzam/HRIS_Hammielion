@@ -593,7 +593,10 @@ export default function PenggajianBulananPage() {
     // melebihi kuota, kelebihannya dipotong seperti izin (auto-izin). Kalau
     // kurang dari kuota, sisanya berarti karyawan bekerja di hari yang
     // seharusnya libur → dikompensasi dailyRate/hari.
-    const kuotaLibur      = 4
+    // Kuota ikut di-pro-rata pakai proRataFactor yang sama dengan gaji pokok —
+    // karyawan training yang baru join di tengah periode tidak adil kalau
+    // dianggap harus punya 4 hari libur penuh dari periode yang cuma dijalani sebagian.
+    const kuotaLibur      = Math.round(4 * proRataFactor)
     const totalLiburDiambil = emptyDays + leaveRecs.length
     const autoIzin         = Math.max(totalLiburDiambil - kuotaLibur, 0)  // lewat kuota → jadi izin
     const liburDiambil     = Math.min(totalLiburDiambil, kuotaLibur)
