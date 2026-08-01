@@ -293,7 +293,57 @@ export default function RingkasanOwnerPage() {
         <p className="text-sm text-slate-600">Periode: {getPeriodLabel(filterMonth, filterYear)}</p>
       </div>
 
-      <div id="ringkasan-print-area" className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      {/* Versi cetak — selalu tampilkan rincian lengkap tiap karyawan, terlepas dari status expand di layar */}
+      <div className="hidden print:block">
+        {rows.map(r => {
+          const notes = buildCatatan(r)
+          const totalPot = r.lateDeduction + r.kasbonDeduction + r.loyalitasDeduction + r.invLossDeduction + r.cashierLossDeduction + r.absentDeduction
+          return (
+            <div key={r.payrollId} className="mb-4 pb-4 border-b border-slate-300" style={{ breakInside: 'avoid' }}>
+              <div className="flex justify-between items-baseline">
+                <div>
+                  <span className="font-bold text-slate-900">{r.name}</span>
+                  <span className="text-slate-500 text-sm ml-2">{r.position} · {r.branchName}</span>
+                </div>
+                <span className="font-bold text-slate-900">{fmtRp(r.netTotal)}</span>
+              </div>
+              {notes.length > 0 && <p className="text-xs text-amber-700 mt-1">{notes.join(' · ')}</p>}
+              <div className="grid grid-cols-2 gap-x-8 mt-2 text-xs text-slate-600">
+                <div>
+                  <p className="font-semibold text-red-600 uppercase mb-1">Potongan</p>
+                  {r.lateDeduction > 0 && <div className="flex justify-between"><span>Keterlambatan ({fmtJam(r.totalLateMinutes)})</span><span>-{fmtRp(r.lateDeduction)}</span></div>}
+                  {r.absentDeduction > 0 && <div className="flex justify-between"><span>Tidak Hadir ({r.absentDays} hari)</span><span>-{fmtRp(r.absentDeduction)}</span></div>}
+                  {r.kasbonDeduction > 0 && <div className="flex justify-between"><span>Kasbon</span><span>-{fmtRp(r.kasbonDeduction)}</span></div>}
+                  {r.loyalitasDeduction > 0 && <div className="flex justify-between"><span>Tabungan Loyalitas</span><span>-{fmtRp(r.loyalitasDeduction)}</span></div>}
+                  {r.invLossDeduction > 0 && <div className="flex justify-between"><span>Kehilangan Barang (~{r.invLossPercent}% dr {fmtRp(r.invLossTotal)})</span><span>-{fmtRp(r.invLossDeduction)}</span></div>}
+                  {r.cashierLossDeduction > 0 && <div className="flex justify-between"><span>Minus Kas Kasir (~{r.cashierLossPercent}% dr {fmtRp(r.cashierLossTotal)})</span><span>-{fmtRp(r.cashierLossDeduction)}</span></div>}
+                  {totalPot === 0 && <p className="text-slate-300 italic">Tidak ada potongan.</p>}
+                </div>
+                <div>
+                  <p className="font-semibold text-emerald-700 uppercase mb-1">Tambahan di Luar Gaji Pokok</p>
+                  {r.overtimeTotal > 0 && <div className="flex justify-between"><span>Lembur</span><span>+{fmtRp(r.overtimeTotal)}</span></div>}
+                  {r.kurangLiburAmount > 0 && <div className="flex justify-between"><span>Kompensasi Libur ({r.kurangLiburDays} hari)</span><span>+{fmtRp(r.kurangLiburAmount)}</span></div>}
+                  {(r.bonusTotal - r.kurangLiburAmount) > 0 && <div className="flex justify-between"><span>Bonus (KPI/Kondisional/Tambahan)</span><span>+{fmtRp(r.bonusTotal - r.kurangLiburAmount)}</span></div>}
+                  {r.overtimeTotal === 0 && r.bonusTotal === 0 && <p className="text-slate-300 italic">Tidak ada tambahan.</p>}
+                </div>
+              </div>
+              <div className="flex justify-between mt-2 pt-1.5 border-t border-slate-200 text-xs text-slate-500">
+                <span>Gaji Awal: {fmtRp(r.gajiAwal)}</span>
+                <span>Total Bruto: {fmtRp(r.grossTotal)}</span>
+                <span className="font-semibold text-slate-700">Total Potongan: -{fmtRp(totalPot)}</span>
+              </div>
+            </div>
+          )
+        })}
+        {rows.length > 0 && (
+          <div className="flex justify-between pt-2 font-bold text-sm text-slate-900 border-t-2 border-slate-800">
+            <span>Total ({rows.length} karyawan)</span>
+            <span>Awal: {fmtRp(totalGajiAwal)} · Potongan: -{fmtRp(totalPotongan)} · Akhir: {fmtRp(totalGajiAkhir)}</span>
+          </div>
+        )}
+      </div>
+
+      <div id="ringkasan-print-area" className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:hidden">
         <div className="overflow-auto max-h-[70vh] print:max-h-none print:overflow-visible">
           <table className="w-full text-left border-collapse text-sm">
             <thead>
@@ -399,7 +449,6 @@ export default function RingkasanOwnerPage() {
           main { padding: 0 !important; overflow: visible !important; }
           .max-w-6xl { max-width: none !important; }
           .print-hide { display: none !important; }
-          #ringkasan-print-area { display: block !important; }
         }
       `}</style>
     </div>
