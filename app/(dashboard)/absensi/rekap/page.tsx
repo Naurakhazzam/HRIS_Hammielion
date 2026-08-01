@@ -5,12 +5,12 @@ import { createClient } from '@/lib/supabase/client'
 
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
-type Employee = { id: string; full_name: string; branch_id: string; department_id: string; join_date: string | null }
+type Employee = { id: string; full_name: string; branch_id: string; department_id: string; join_date: string | null; custom_check_in_time: string | null; custom_check_out_time: string | null }
 type WorkSchedule = { id: string; name: string; check_in_time: string; check_out_time: string; detect_until: string | null; applies_to_dept: string }
 type Attendance = {
   id: string; date: string; check_in: string | null; check_out: string | null
   late_minutes: number; overtime_hours: number; status: string; notes: string | null
-  employees: { full_name: string; branch_id: string; department_id: string; branches: { name: string }; departments: { name: string } }
+  employees: { full_name: string; branch_id: string; department_id: string; custom_check_in_time: string | null; custom_check_out_time: string | null; branches: { name: string }; departments: { name: string } }
 }
 
 const STATUS_LABEL: { [k: string]: string } = { present:'Hadir', absent:'Alpha', sick:'Sakit', permission:'Izin', leave:'Libur' }
@@ -102,7 +102,7 @@ export default function RekapAbsensiPage() {
     const [bRes,dRes,eRes,sRes] = await Promise.all([
       supabase.from('branches').select('id,name').order('name'),
       supabase.from('departments').select('id,name').order('name'),
-      supabase.from('employees').select('id,full_name,branch_id,department_id,join_date').eq('is_active',true).order('full_name'),
+      supabase.from('employees').select('id,full_name,branch_id,department_id,join_date,custom_check_in_time,custom_check_out_time').eq('is_active',true).order('full_name'),
       supabase.from('work_schedules').select('id,name,check_in_time,check_out_time,detect_until,applies_to_dept'),
     ])
     if (bRes.data) setBranches(bRes.data)
@@ -114,7 +114,7 @@ export default function RekapAbsensiPage() {
   async function fetchAttendances() {
     setLoading(true)
     let q = supabase.from('attendances')
-      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,employees!inner(full_name,branch_id,department_id,branches(name),departments(name))')
+      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,branches(name),departments(name))')
       .order('date', { ascending: true })
     if (filterMonth) {
       const p = filterMonth.split('-'); const y=parseInt(p[0]); const m=parseInt(p[1])
@@ -193,19 +193,38 @@ export default function RekapAbsensiPage() {
     return `${String(wib.getUTCHours()).padStart(2,'0')}:${String(wib.getUTCMinutes()).padStart(2,'0')}`
   }
   // Deteksi shift berdasarkan jam masuk WIB aktual + detect_until
-  function getScheduleForAtt(checkInIso: string | null, deptId: string): WorkSchedule | null {
+  // Kalau karyawan punya jam khusus (custom_check_in/out_time), itu dipakai langsung,
+  // fallback ke sisi jadwal departemen untuk bagian yang tidak diisi.
+  function getScheduleForAtt(
+    checkInIso: string | null, deptId: string,
+    custom?: { custom_check_in_time: string | null; custom_check_out_time: string | null } | null
+  ): WorkSchedule | null {
     const ds = schedules.filter(s => s.applies_to_dept === deptId)
-    if (ds.length === 0) return null
-    if (ds.length === 1) return ds[0]
-    const sorted = [...ds].sort((a, b) => {
-      if (!a.detect_until && !b.detect_until) return 0
-      if (!a.detect_until) return 1
-      if (!b.detect_until) return -1
-      return a.detect_until.localeCompare(b.detect_until)
-    })
-    if (!checkInIso) return sorted[0]
-    const ciWIB = toWIBTime(checkInIso)
-    return sorted.find(s => !s.detect_until || ciWIB! <= s.detect_until.substring(0,5)) ?? sorted[sorted.length - 1]
+    let detected: WorkSchedule | null = null
+    if (ds.length === 1) {
+      detected = ds[0]
+    } else if (ds.length > 1) {
+      const sorted = [...ds].sort((a, b) => {
+        if (!a.detect_until && !b.detect_until) return 0
+        if (!a.detect_until) return 1
+        if (!b.detect_until) return -1
+        return a.detect_until.localeCompare(b.detect_until)
+      })
+      if (!checkInIso) detected = sorted[0]
+      else {
+        const ciWIB = toWIBTime(checkInIso)
+        detected = sorted.find(s => !s.detect_until || ciWIB! <= s.detect_until.substring(0,5)) ?? sorted[sorted.length - 1]
+      }
+    }
+    if (custom && (custom.custom_check_in_time || custom.custom_check_out_time)) {
+      return {
+        id: 'custom', name: 'Jadwal Khusus',
+        check_in_time:  custom.custom_check_in_time  ?? detected?.check_in_time  ?? '',
+        check_out_time: custom.custom_check_out_time ?? detected?.check_out_time ?? '',
+        detect_until: null, applies_to_dept: deptId,
+      }
+    }
+    return detected
   }
   function fmtTime(t: string|null|undefined): string { return t?t.substring(0,5):'—' }
   // Tampilkan waktu dalam WIB — eksplisit agar tidak bergantung timezone browser
@@ -568,7 +587,7 @@ export default function RekapAbsensiPage() {
 
                   if (dayAtts.length === 0) {
                     // Tanggal tanpa data — default tampil sebagai Libur
-                    const sched = emp ? getScheduleForAtt(null, emp.department_id) : null
+                    const sched = emp ? getScheduleForAtt(null, emp.department_id, emp) : null
                     const emptyKey = `${filterEmployee}|${dateStr}`
                     return (
                       <tr key={dateStr} className={`hover:bg-slate-50 transition ${selectedRows.has(emptyKey) ? 'bg-blue-50/50' : 'bg-slate-50/40'}`}>
@@ -619,7 +638,7 @@ export default function RekapAbsensiPage() {
                   // Tanggal dengan data — render tiap record normal
                   return dayAtts.map(att => {
                     const deptId = (att.employees as any)?.department_id
-                    const sched  = getScheduleForAtt(att.check_in, deptId)
+                    const sched  = getScheduleForAtt(att.check_in, deptId, att.employees)
                     const dataKey = `${filterEmployee}|${dateStr}`
                     return (
                       <tr key={att.id} className={`hover:bg-slate-50 transition ${selectedRows.has(dataKey) ? 'bg-blue-50/50' : ''}`}>
@@ -671,7 +690,7 @@ export default function RekapAbsensiPage() {
                 // Mode semua karyawan: tampilkan hanya yang ada data
                 attendances.map(att => {
                   const deptId = (att.employees as any)?.department_id
-                  const sched = getScheduleForAtt(att.check_in, deptId)
+                  const sched = getScheduleForAtt(att.check_in, deptId, att.employees)
                   const allKey = `${(att as any).employee_id}|${att.date}`
                   return (
                     <tr key={att.id} className={`hover:bg-slate-50 transition ${selectedRows.has(allKey) ? 'bg-blue-50/50' : ''}`}>

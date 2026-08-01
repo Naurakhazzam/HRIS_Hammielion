@@ -37,6 +37,8 @@ type Employee = {
   education: string | null
   photo_url: string | null
   fingerprint_id: number | null
+  custom_check_in_time: string | null
+  custom_check_out_time: string | null
   branches: { id: string; name: string }
   departments: { id: string; name: string }
   positions: { id: string; name: string; department_id: string }
@@ -51,7 +53,8 @@ const emptyForm = {
   religion: '', marital_status: '', dependants: '0',
   bank_name: '', bank_account_number: '', bank_account_name: '',
   emergency_contact_name: '', emergency_contact_phone: '', emergency_contact_relation: '',
-  education: '', photo_url: '', fingerprint_id: ''
+  education: '', photo_url: '', fingerprint_id: '',
+  custom_check_in_time: '', custom_check_out_time: ''
 }
 
 const GENDER_OPTIONS = [{ value: 'male', label: 'Laki-laki' }, { value: 'female', label: 'Perempuan' }]
@@ -189,6 +192,8 @@ export default function KaryawanPage() {
       emergency_contact_relation: f.emergency_contact_relation || null,
       education: f.education || null,
       fingerprint_id: f.fingerprint_id !== '' ? parseInt(f.fingerprint_id) : null,
+      custom_check_in_time: f.custom_check_in_time || null,
+      custom_check_out_time: f.custom_check_out_time || null,
     }
   }
 
@@ -235,7 +240,9 @@ export default function KaryawanPage() {
       emergency_contact_phone: emp.emergency_contact_phone || '',
       emergency_contact_relation: emp.emergency_contact_relation || '',
       education: emp.education || '', photo_url: emp.photo_url || '',
-      fingerprint_id: emp.fingerprint_id != null ? String(emp.fingerprint_id) : ''
+      fingerprint_id: emp.fingerprint_id != null ? String(emp.fingerprint_id) : '',
+      custom_check_in_time: emp.custom_check_in_time ? emp.custom_check_in_time.substring(0,5) : '',
+      custom_check_out_time: emp.custom_check_out_time ? emp.custom_check_out_time.substring(0,5) : ''
     })
   }
 
@@ -364,7 +371,14 @@ export default function KaryawanPage() {
             <FormField label="ID Fingerprint">
               <input type="number" min="1" value={f.fingerprint_id} onChange={e => setF({ ...f, fingerprint_id: e.target.value })} placeholder="Nomor User ID di mesin absen" className={inputClass} />
             </FormField>
+            <FormField label="Jam Masuk Khusus (opsional)">
+              <input type="time" value={f.custom_check_in_time} onChange={e => setF({ ...f, custom_check_in_time: e.target.value })} placeholder="Kosongkan = ikut jadwal departemen" className={inputClass} />
+            </FormField>
+            <FormField label="Jam Pulang Khusus (opsional)">
+              <input type="time" value={f.custom_check_out_time} onChange={e => setF({ ...f, custom_check_out_time: e.target.value })} placeholder="Kosongkan = ikut jadwal departemen" className={inputClass} />
+            </FormField>
           </div>
+          <p className="text-xs text-slate-400 mt-1">Isi jam masuk/pulang khusus hanya jika karyawan ini punya jam kerja berbeda dari jadwal departemennya. Kosongkan untuk memakai jadwal departemen seperti biasa.</p>
         </div>
 
         {/* ─ Data Pribadi ─ */}
@@ -617,6 +631,9 @@ export default function KaryawanPage() {
                   ['Tanggal Bergabung', detailEmployee.join_date ? new Date(detailEmployee.join_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : '-'],
                   ['Pendidikan', detailEmployee.education || '-'],
                   ['ID Fingerprint', detailEmployee.fingerprint_id != null ? String(detailEmployee.fingerprint_id) : '— belum diset'],
+                  ['Jam Kerja Khusus', (detailEmployee.custom_check_in_time || detailEmployee.custom_check_out_time)
+                    ? `${detailEmployee.custom_check_in_time?.substring(0,5) ?? '—'} – ${detailEmployee.custom_check_out_time?.substring(0,5) ?? '—'}`
+                    : 'Ikut jadwal departemen'],
                 ]},
                 { title: 'Data Pribadi', rows: [
                   ['NIK', detailEmployee.nik || '-'],

@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
 
     // Load data dari Supabase
     const [{ data: employees }, { data: schedules }] = await Promise.all([
-      supabase.from('employees').select('id, full_name, fingerprint_id, department_id, is_active').not('fingerprint_id', 'is', null),
+      supabase.from('employees').select('id, full_name, fingerprint_id, department_id, is_active, custom_check_in_time, custom_check_out_time').not('fingerprint_id', 'is', null),
       supabase.from('work_schedules').select('check_in_time, check_out_time, detect_until, allow_overtime, applies_to_dept'),
     ])
 
@@ -167,8 +167,17 @@ export async function POST(req: NextRequest) {
         const checkInStr  = punches[0]
         const checkOutStr = punches.length > 1 ? punches[punches.length - 1] : null
 
-        // Cocokkan jadwal
-        const sched = matchSchedule(checkInStr, deptSchedules)
+        // Cocokkan jadwal departemen (dipakai sebagai fallback & sumber allow_overtime)
+        const deptSched = matchSchedule(checkInStr, deptSchedules)
+
+        // Override jam khusus karyawan — kalau diisi, dipakai langsung tanpa deteksi shift
+        const sched = (emp.custom_check_in_time || emp.custom_check_out_time)
+          ? {
+              check_in_time:  emp.custom_check_in_time  ?? deptSched?.check_in_time  ?? checkInStr,
+              check_out_time: emp.custom_check_out_time ?? deptSched?.check_out_time ?? null,
+              allow_overtime: deptSched?.allow_overtime ?? true,
+            }
+          : deptSched
 
         // Hitung keterlambatan
         let lateMinutes = 0
@@ -179,7 +188,7 @@ export async function POST(req: NextRequest) {
 
         // Hitung lembur — hanya dihitung jika sudah penuh 60 menit, dibulatkan ke bawah (jam penuh)
         let overtimeHours = 0
-        if (sched?.allow_overtime && checkOutStr) {
+        if (sched?.allow_overtime && sched.check_out_time && checkOutStr) {
           const diffMins = timeToMinutes(checkOutStr) - timeToMinutes(sched.check_out_time)
           if (diffMins >= 60) overtimeHours = Math.floor(diffMins / 60)
         }
