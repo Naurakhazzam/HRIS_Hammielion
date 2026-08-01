@@ -34,6 +34,7 @@ const adminNavItems: NavNode[] = [
     icon: '💰',
     submenu: [
       { name: 'Gaji Staff', href: '/penggajian/bulanan' },
+      { name: 'Ringkasan Owner', href: '/penggajian/ringkasan' },
       { name: 'Gaji Driver', href: '/penggajian/driver' },
       { name: 'Borongan (Rekap)', href: '/penggajian/borongan' },
       { name: 'Tabungan Loyalitas', href: '/penggajian/loyalitas' },
