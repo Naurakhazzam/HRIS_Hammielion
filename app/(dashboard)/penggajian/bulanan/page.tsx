@@ -146,6 +146,10 @@ export default function PenggajianBulananPage() {
   // ── State: approval action (Part 4) ──
   const [submitting, setSubmitting] = useState<string | null>(null)
 
+  // ── State: aksi massal (ajukan/approve/tandai lunas) ──
+  const [selectedPayrollIds, setSelectedPayrollIds] = useState<Set<string>>(new Set())
+  const [bulkActionRunning, setBulkActionRunning] = useState(false)
+
   // ── State: modal detail slip (Part 5) ──
   const [selectedPayroll, setSelectedPayroll] = useState<Payroll | null>(null)
   const [lateDetails, setLateDetails] = useState<{ date: string; late_minutes: number; deduction: number }[]>([])
@@ -221,6 +225,7 @@ export default function PenggajianBulananPage() {
   // Fetch payrolls setiap filter berubah
   useEffect(() => {
     fetchPayrolls()
+    setSelectedPayrollIds(new Set())
   }, [filterMonth, filterYear, filterBranch])
 
   // Cek hari belum terklasifikasi saat karyawan dipilih di modal buat slip
@@ -748,19 +753,11 @@ export default function PenggajianBulananPage() {
   const canApprove = () => ['hr', 'owner'].includes(currentUser?.role ?? '')
   const canPaid    = () => currentUser?.role === 'owner'
 
-  async function handleStatusChange(p: Payroll, action: 'ajukan' | 'approve' | 'paid') {
-    if (!currentUser) return
+  // Inti perubahan status + efek samping (kasbon, loyalitas) — dipakai oleh aksi
+  // satuan (handleStatusChange) maupun aksi massal (handleBulkStatusChange).
+  async function applyStatusChange(p: Payroll, action: 'ajukan' | 'approve' | 'paid'): Promise<{ ok: boolean; error?: string }> {
+    if (!currentUser) return { ok: false, error: 'Tidak terautentikasi.' }
 
-    const confirmMap: Record<string, string> = {
-      ajukan:  `Ajukan slip gaji ${p.employee?.full_name} ke status Menunggu Approval?`,
-      approve: `Setujui slip gaji ${p.employee?.full_name}?`,
-      paid:    `Tandai slip gaji ${p.employee?.full_name} sebagai LUNAS?\n\nSaldo kasbon karyawan akan dikurangi otomatis jika ada potongan kasbon.`,
-    }
-    if (!confirm(confirmMap[action])) return
-
-    setSubmitting(p.id)
-
-    // Tentukan data update
     const updates: Record<string, any> =
       action === 'ajukan'  ? { status: 'pending_approval' } :
       action === 'approve' ? { status: 'approved', approved_by: currentUser.employee_id } :
@@ -773,9 +770,7 @@ export default function PenggajianBulananPage() {
 
     if (error) {
       console.error('Detail:', JSON.stringify(error, null, 2))
-      showMessage('error', 'Gagal memperbarui status: ' + error.message)
-      setSubmitting(null)
-      return
+      return { ok: false, error: error.message }
     }
 
     // Jika paid: kurangi kasbon + tambah saldo loyalitas
@@ -821,8 +816,88 @@ export default function PenggajianBulananPage() {
       }
     }
 
+    return { ok: true }
+  }
+
+  async function handleStatusChange(p: Payroll, action: 'ajukan' | 'approve' | 'paid') {
+    if (!currentUser) return
+
+    const confirmMap: Record<string, string> = {
+      ajukan:  `Ajukan slip gaji ${p.employee?.full_name} ke status Menunggu Approval?`,
+      approve: `Setujui slip gaji ${p.employee?.full_name}?`,
+      paid:    `Tandai slip gaji ${p.employee?.full_name} sebagai LUNAS?\n\nSaldo kasbon karyawan akan dikurangi otomatis jika ada potongan kasbon.`,
+    }
+    if (!confirm(confirmMap[action])) return
+
+    setSubmitting(p.id)
+    const result = await applyStatusChange(p, action)
+    if (!result.ok) {
+      showMessage('error', 'Gagal memperbarui status: ' + result.error)
+      setSubmitting(null)
+      return
+    }
+
     showMessage('success', 'Status berhasil diperbarui.')
     setSubmitting(null)
+    await fetchPayrolls()
+  }
+
+  // ─── Aksi Massal: Ajukan / Approve / Tandai Lunas ──────────────────────────
+  const STATUS_FOR_ACTION: Record<'ajukan' | 'approve' | 'paid', string> = {
+    ajukan: 'draft', approve: 'pending_approval', paid: 'approved',
+  }
+  const ACTION_LABEL: Record<'ajukan' | 'approve' | 'paid', string> = {
+    ajukan: 'Ajukan', approve: 'Approve', paid: 'Tandai Lunas',
+  }
+
+  function togglePayrollSelection(id: string) {
+    setSelectedPayrollIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAllPayrolls() {
+    setSelectedPayrollIds(prev =>
+      prev.size === payrolls.length ? new Set() : new Set(payrolls.map(p => p.id))
+    )
+  }
+
+  async function handleBulkStatusChange(action: 'ajukan' | 'approve' | 'paid') {
+    const eligible = payrolls.filter(p => selectedPayrollIds.has(p.id) && p.status === STATUS_FOR_ACTION[action])
+    const skipped = selectedPayrollIds.size - eligible.length
+
+    if (eligible.length === 0) {
+      showMessage('error', `Tidak ada slip terpilih dengan status yang sesuai untuk aksi "${ACTION_LABEL[action]}".`)
+      return
+    }
+
+    const confirmMsg =
+      `${ACTION_LABEL[action]} ${eligible.length} slip gaji terpilih?` +
+      (skipped > 0 ? `\n\n${skipped} slip lain dilewati karena statusnya tidak sesuai.` : '') +
+      (action === 'paid' ? '\n\nSaldo kasbon karyawan akan dikurangi otomatis jika ada potongan kasbon.' : '')
+    if (!confirm(confirmMsg)) return
+
+    setBulkActionRunning(true)
+    let successCount = 0
+    const failed: string[] = []
+
+    for (const p of eligible) {
+      const result = await applyStatusChange(p, action)
+      if (result.ok) successCount++
+      else failed.push(`${p.employee?.full_name ?? p.id}: ${result.error}`)
+    }
+
+    if (failed.length > 0) {
+      console.error('[bulk status change] gagal:', failed)
+      showMessage('error', `${successCount} berhasil, ${failed.length} gagal. Cek console untuk detail.`)
+    } else {
+      showMessage('success', `${successCount} slip gaji berhasil di-${ACTION_LABEL[action].toLowerCase()}.`)
+    }
+
+    setSelectedPayrollIds(new Set())
+    setBulkActionRunning(false)
     await fetchPayrolls()
   }
 
@@ -1364,11 +1439,18 @@ export default function PenggajianBulananPage() {
           <span className="text-xs text-slate-400">{payrolls.length} slip ditemukan</span>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[65vh] print:max-h-none print:overflow-visible">
           <table className="w-full text-left border-collapse text-sm">
             <thead>
-              <tr className="border-b border-slate-200 bg-white">
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky left-0 z-20 bg-white shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
+              <tr className="border-b border-slate-200 bg-white sticky top-0 z-20">
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky top-0 left-0 z-30 bg-white shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">
+                  <input type="checkbox"
+                    checked={payrolls.length > 0 && selectedPayrollIds.size === payrolls.length}
+                    onChange={toggleSelectAllPayrolls}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer align-middle mr-2 print-hide"
+                  />
+                  Karyawan
+                </th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">Periode</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap">Gaji Pokok</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap">Total Tunjangan</th>
@@ -1417,12 +1499,21 @@ export default function PenggajianBulananPage() {
                     <tr key={p.id} className="group hover:bg-slate-50/70 transition-colors">
                       {/* Karyawan */}
                       <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50/70 transition-colors shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">
-                        <div className="font-medium text-slate-800 whitespace-nowrap">
-                          {p.employee?.full_name ?? '—'}
-                        </div>
-                        <div className="text-xs text-slate-400 mt-0.5">
-                          {p.employee?.positions?.name ?? ''}
-                          {p.employee?.branches?.name ? ` · ${p.employee.branches.name}` : ''}
+                        <div className="flex items-start gap-2">
+                          <input type="checkbox"
+                            checked={selectedPayrollIds.has(p.id)}
+                            onChange={() => togglePayrollSelection(p.id)}
+                            className="w-4 h-4 mt-0.5 rounded border-slate-300 text-blue-600 cursor-pointer flex-shrink-0 print-hide"
+                          />
+                          <div>
+                            <div className="font-medium text-slate-800 whitespace-nowrap">
+                              {p.employee?.full_name ?? '—'}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              {p.employee?.positions?.name ?? ''}
+                              {p.employee?.branches?.name ? ` · ${p.employee.branches.name}` : ''}
+                            </div>
+                          </div>
                         </div>
                       </td>
 
@@ -1610,6 +1701,41 @@ export default function PenggajianBulananPage() {
         )}
       </div>
     </div>
+
+    {/* ── Floating action bar: aksi massal ── */}
+    {selectedPayrollIds.size > 0 && (
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-slate-800 text-white rounded-2xl shadow-2xl px-5 py-3 print-hide">
+        <span className="text-sm font-semibold text-white">{selectedPayrollIds.size} slip dipilih</span>
+        <button onClick={() => setSelectedPayrollIds(new Set())} className="text-xs text-slate-400 hover:text-white transition px-2">Batal pilih</button>
+        {canAjukan() && (
+          <button
+            onClick={() => handleBulkStatusChange('ajukan')}
+            disabled={bulkActionRunning}
+            className="px-4 py-1.5 bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 rounded-lg text-sm font-semibold transition"
+          >
+            {bulkActionRunning ? 'Memproses...' : 'Ajukan'}
+          </button>
+        )}
+        {canApprove() && (
+          <button
+            onClick={() => handleBulkStatusChange('approve')}
+            disabled={bulkActionRunning}
+            className="px-4 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 rounded-lg text-sm font-semibold transition"
+          >
+            {bulkActionRunning ? 'Memproses...' : 'Approve'}
+          </button>
+        )}
+        {canPaid() && (
+          <button
+            onClick={() => handleBulkStatusChange('paid')}
+            disabled={bulkActionRunning}
+            className="px-4 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg text-sm font-semibold transition"
+          >
+            {bulkActionRunning ? 'Memproses...' : 'Tandai Lunas'}
+          </button>
+        )}
+      </div>
+    )}
 
     {/* ─── Part 5: Modal Detail Slip Gaji ───────────────────────────────────── */}
     {selectedPayroll && (
