@@ -90,11 +90,12 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     setLoading(true)
     const [lRes, eRes] = await Promise.all([
       supabase.from('loss_monthly_inputs').select('*').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).single(),
-      supabase.from('cashier_loss_entries').select('*, employees(full_name, employee_code)').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).order('entry_date'),
+      supabase.from('cashier_loss_entries').select('*, employees!cashier_loss_entries_employee_id_fkey(full_name, employee_code)').eq('branch_id', selectedBranch).eq('period_month', filterMonth).eq('period_year', filterYear).order('entry_date'),
     ])
     if (lRes.data) { setLossInput(lRes.data); setLossForm({ amount: String(lRes.data.total_loss_amount), notes: lRes.data.notes || '' }) }
     else { setLossInput(null); setLossForm({ amount: '', notes: '' }) }
-    setEntries(eRes.data || [])
+    if (eRes.error) { showMsg('error', 'Gagal memuat data minus kas: ' + eRes.error.message); setEntries([]) }
+    else setEntries(eRes.data || [])
 
     // Ambil SEMUA karyawan aktif di cabang (bisa di-assign ke siapa saja)
     const { data: empData } = await supabase
