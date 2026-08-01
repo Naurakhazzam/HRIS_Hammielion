@@ -26,8 +26,6 @@ type PayrollRow = {
   loyalitas_deduction: number
   inventory_loss_deduction: number
   cashier_loss_deduction: number
-  absent_days: number
-  absent_deduction: number
   gross_total: number
   net_total: number
   status: string
@@ -55,6 +53,10 @@ type SummaryRow = {
   kurangLiburDays: number
   kurangLiburAmount: number
   lebihLiburDays: number
+  lebihLiburDeduction: number
+  sickDeduction: number
+  izinDeduction: number
+  alphaDeduction: number
   totalLateMinutes: number
   lateDeduction: number
   kasbonDeduction: number
@@ -65,8 +67,6 @@ type SummaryRow = {
   cashierLossDeduction: number
   cashierLossPercent: number
   cashierLossTotal: number
-  absentDays: number
-  absentDeduction: number
   overtimeTotal: number
   bonusTotal: number
   grossTotal: number
@@ -130,7 +130,7 @@ export default function RingkasanOwnerPage() {
         libur_compensation_days, libur_compensation_amount,
         late_deduction, kasbon_deduction, loyalitas_deduction,
         inventory_loss_deduction, cashier_loss_deduction,
-        absent_days, absent_deduction, gross_total, net_total, status,
+        gross_total, net_total, status,
         employee:employees!payrolls_employee_id_fkey(
           full_name, join_date, employee_type, branch_id,
           positions(name), branches(name)
@@ -205,6 +205,19 @@ export default function RingkasanOwnerPage() {
       const totalLiburDiambil = emptyDays + leaveDays
       const lebihLiburDays = Math.max(totalLiburDiambil - kuotaLibur, 0)
 
+      // Rincian potongan tidak hadir — dihitung langsung dari data absensi
+      // asli (bukan angka gabungan di slip), supaya Sakit/Izin/Alpha/Libur
+      // Lebih selalu konsisten dengan yang tertulis di Catatan.
+      const gajiAwal = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance)
+      const dailyRate = Math.round(gajiAwal / 26)
+      const sick1Free  = Math.min(sickDays, 1)
+      const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
+      const sick4Full  = Math.max(0, sickDays - 3)
+      const sickDeduction = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
+      const izinDeduction = izinDays * dailyRate
+      const alphaDeduction = Math.round(alphaDays * dailyRate * 1.5)
+      const lebihLiburDeduction = lebihLiburDays * dailyRate
+
       const invLossTotal = lossTotalByBranch[emp?.branch_id || ''] || 0
       const cashierLossTotal = cashierTotalByBranch[emp?.branch_id || ''] || 0
 
@@ -215,10 +228,12 @@ export default function RingkasanOwnerPage() {
         payrollId: p.id, employeeId: p.employee_id,
         name: emp?.full_name ?? '—', position: emp?.positions?.name ?? '—',
         branchName: emp?.branches?.name ?? '—', branchId: emp?.branch_id ?? '',
-        gajiAwal: Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance),
+        gajiAwal,
         sickDays, izinDays, alphaDays,
         kurangLiburDays: Number(p.libur_compensation_days || 0), kurangLiburAmount: Number(p.libur_compensation_amount || 0),
-        lebihLiburDays, totalLateMinutes, lateDeduction: Number(p.late_deduction || 0),
+        lebihLiburDays, lebihLiburDeduction,
+        sickDeduction, izinDeduction, alphaDeduction,
+        totalLateMinutes, lateDeduction: Number(p.late_deduction || 0),
         kasbonDeduction: Number(p.kasbon_deduction || 0), loyalitasDeduction: Number(p.loyalitas_deduction || 0),
         invLossDeduction: Number(p.inventory_loss_deduction || 0),
         invLossPercent: invLossTotal > 0 ? Math.round((Number(p.inventory_loss_deduction||0) / invLossTotal) * 1000) / 10 : 0,
@@ -226,7 +241,6 @@ export default function RingkasanOwnerPage() {
         cashierLossDeduction: Number(p.cashier_loss_deduction || 0),
         cashierLossPercent: cashierLossTotal > 0 ? Math.round((Number(p.cashier_loss_deduction||0) / cashierLossTotal) * 1000) / 10 : 0,
         cashierLossTotal,
-        absentDays: Number(p.absent_days || 0), absentDeduction: Number(p.absent_deduction || 0),
         overtimeTotal, bonusTotal,
         grossTotal: Number(p.gross_total), netTotal: Number(p.net_total), status: p.status,
       }
@@ -248,8 +262,12 @@ export default function RingkasanOwnerPage() {
     return notes
   }
 
+  function absenDeductionTotal(r: SummaryRow): number {
+    return r.sickDeduction + r.izinDeduction + r.alphaDeduction + r.lebihLiburDeduction
+  }
+
   const totalGajiAwal = rows.reduce((s, r) => s + r.gajiAwal, 0)
-  const totalPotongan = rows.reduce((s, r) => s + r.lateDeduction + r.kasbonDeduction + r.loyalitasDeduction + r.invLossDeduction + r.cashierLossDeduction + r.absentDeduction, 0)
+  const totalPotongan = rows.reduce((s, r) => s + r.lateDeduction + r.kasbonDeduction + r.loyalitasDeduction + r.invLossDeduction + r.cashierLossDeduction + absenDeductionTotal(r), 0)
   const totalGajiAkhir = rows.reduce((s, r) => s + r.netTotal, 0)
 
   return (
@@ -297,7 +315,7 @@ export default function RingkasanOwnerPage() {
       <div className="hidden print:block">
         {rows.map(r => {
           const notes = buildCatatan(r)
-          const totalPot = r.lateDeduction + r.kasbonDeduction + r.loyalitasDeduction + r.invLossDeduction + r.cashierLossDeduction + r.absentDeduction
+          const totalPot = r.lateDeduction + r.kasbonDeduction + r.loyalitasDeduction + r.invLossDeduction + r.cashierLossDeduction + absenDeductionTotal(r)
           return (
             <div key={r.payrollId} className="mb-4 pb-4 border-b border-slate-300" style={{ breakInside: 'avoid' }}>
               <div className="flex justify-between items-baseline">
@@ -312,7 +330,10 @@ export default function RingkasanOwnerPage() {
                 <div>
                   <p className="font-semibold text-red-600 uppercase mb-1">Potongan</p>
                   {r.lateDeduction > 0 && <div className="flex justify-between"><span>Keterlambatan ({fmtJam(r.totalLateMinutes)})</span><span>-{fmtRp(r.lateDeduction)}</span></div>}
-                  {r.absentDeduction > 0 && <div className="flex justify-between"><span>Tidak Hadir ({r.absentDays} hari)</span><span>-{fmtRp(r.absentDeduction)}</span></div>}
+                  {r.sickDeduction > 0 && <div className="flex justify-between"><span>Sakit ({r.sickDays} hari)</span><span>-{fmtRp(r.sickDeduction)}</span></div>}
+                  {r.izinDeduction > 0 && <div className="flex justify-between"><span>Izin ({r.izinDays} hari)</span><span>-{fmtRp(r.izinDeduction)}</span></div>}
+                  {r.alphaDeduction > 0 && <div className="flex justify-between"><span>Alpha ({r.alphaDays} hari)</span><span>-{fmtRp(r.alphaDeduction)}</span></div>}
+                  {r.lebihLiburDeduction > 0 && <div className="flex justify-between"><span>Libur Lebih ({r.lebihLiburDays} hari)</span><span>-{fmtRp(r.lebihLiburDeduction)}</span></div>}
                   {r.kasbonDeduction > 0 && <div className="flex justify-between"><span>Kasbon</span><span>-{fmtRp(r.kasbonDeduction)}</span></div>}
                   {r.loyalitasDeduction > 0 && <div className="flex justify-between"><span>Tabungan Loyalitas</span><span>-{fmtRp(r.loyalitasDeduction)}</span></div>}
                   {r.invLossDeduction > 0 && <div className="flex justify-between"><span>Kehilangan Barang (~{r.invLossPercent}% dr {fmtRp(r.invLossTotal)})</span><span>-{fmtRp(r.invLossDeduction)}</span></div>}
@@ -365,7 +386,7 @@ export default function RingkasanOwnerPage() {
               ) : (
                 rows.map(r => {
                   const notes = buildCatatan(r)
-                  const totalPot = r.lateDeduction + r.kasbonDeduction + r.loyalitasDeduction + r.invLossDeduction + r.cashierLossDeduction + r.absentDeduction
+                  const totalPot = r.lateDeduction + r.kasbonDeduction + r.loyalitasDeduction + r.invLossDeduction + r.cashierLossDeduction + absenDeductionTotal(r)
                   const isOpen = expanded.has(r.payrollId)
                   return (
                     <Fragment key={r.payrollId}>
@@ -399,7 +420,10 @@ export default function RingkasanOwnerPage() {
                                 <p className="font-semibold text-red-600 uppercase mb-2">Rincian Potongan</p>
                                 <div className="space-y-1 text-slate-600">
                                   {r.lateDeduction > 0 && <div className="flex justify-between"><span>Keterlambatan ({fmtJam(r.totalLateMinutes)})</span><span className="text-red-500">-{fmtRp(r.lateDeduction)}</span></div>}
-                                  {r.absentDeduction > 0 && <div className="flex justify-between"><span>Tidak Hadir ({r.absentDays} hari)</span><span className="text-red-500">-{fmtRp(r.absentDeduction)}</span></div>}
+                                  {r.sickDeduction > 0 && <div className="flex justify-between"><span>Sakit ({r.sickDays} hari)</span><span className="text-red-500">-{fmtRp(r.sickDeduction)}</span></div>}
+                                  {r.izinDeduction > 0 && <div className="flex justify-between"><span>Izin ({r.izinDays} hari)</span><span className="text-red-500">-{fmtRp(r.izinDeduction)}</span></div>}
+                                  {r.alphaDeduction > 0 && <div className="flex justify-between"><span>Alpha ({r.alphaDays} hari)</span><span className="text-red-500">-{fmtRp(r.alphaDeduction)}</span></div>}
+                                  {r.lebihLiburDeduction > 0 && <div className="flex justify-between"><span>Libur Lebih ({r.lebihLiburDays} hari)</span><span className="text-red-500">-{fmtRp(r.lebihLiburDeduction)}</span></div>}
                                   {r.kasbonDeduction > 0 && <div className="flex justify-between"><span>Kasbon</span><span className="text-red-500">-{fmtRp(r.kasbonDeduction)}</span></div>}
                                   {r.loyalitasDeduction > 0 && <div className="flex justify-between"><span>Tabungan Loyalitas</span><span className="text-red-500">-{fmtRp(r.loyalitasDeduction)}</span></div>}
                                   {r.invLossDeduction > 0 && <div className="flex justify-between"><span>Kehilangan Barang (~{r.invLossPercent}% dari {fmtRp(r.invLossTotal)})</span><span className="text-red-500">-{fmtRp(r.invLossDeduction)}</span></div>}
