@@ -27,6 +27,7 @@ type Payroll = {
   absent_deduction: number
   libur_compensation_days: number
   libur_compensation_amount: number
+  extra_bonus_total: number
   gross_total: number
   net_total: number
   status: 'draft' | 'pending_approval' | 'approved' | 'paid'
@@ -216,6 +217,14 @@ export default function PenggajianBulananPage() {
   const [bonusNotes, setBonusNotes] = useState<Record<string, string>>({})
   const [bonusSaving, setBonusSaving] = useState(false)
 
+  // ── State: modal bonus tambahan (ad-hoc, pasca-finalisasi) ──
+  type ExtraBonusEntry = { id: string; amount: number; reason: string; created_at: string; employees: { full_name: string } | null }
+  const [extraBonusModal, setExtraBonusModal] = useState<Payroll | null>(null)
+  const [extraBonusForm, setExtraBonusForm] = useState({ amount: '', reason: '' })
+  const [extraBonusSaving, setExtraBonusSaving] = useState(false)
+  const [extraBonusHistory, setExtraBonusHistory] = useState<ExtraBonusEntry[]>([])
+  const [loadingExtraBonus, setLoadingExtraBonus] = useState(false)
+
   // ── Inisialisasi ──
   useEffect(() => {
     fetchCurrentUser()
@@ -309,6 +318,7 @@ export default function PenggajianBulananPage() {
         inventory_loss_deduction, cashier_loss_deduction,
         absent_days, absent_deduction,
         libur_compensation_days, libur_compensation_amount,
+        extra_bonus_total,
         gross_total, net_total,
         status, approved_by, created_at,
         employee:employees!payrolls_employee_id_fkey(
@@ -1135,7 +1145,7 @@ export default function PenggajianBulananPage() {
 
     // Update payroll: conditional_bonus + recalc gross & net
     const p = bonusModal
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + totalBonus
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + totalBonus
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const { error: updateErr } = await supabase
@@ -1150,6 +1160,61 @@ export default function PenggajianBulananPage() {
       await fetchPayrolls()
     }
     setBonusSaving(false)
+  }
+
+  // ─── Bonus Tambahan (ad-hoc, bisa ditambah kapan saja sebelum Lunas) ───────
+
+  async function openExtraBonusModal(p: Payroll) {
+    setExtraBonusModal(p)
+    setExtraBonusForm({ amount: '', reason: '' })
+    setLoadingExtraBonus(true)
+    const { data } = await supabase
+      .from('payroll_extra_bonuses')
+      .select('id, amount, reason, created_at, employees(full_name)')
+      .eq('payroll_id', p.id)
+      .order('created_at', { ascending: false })
+    setExtraBonusHistory((data as unknown as ExtraBonusEntry[]) || [])
+    setLoadingExtraBonus(false)
+  }
+
+  async function handleAddExtraBonus() {
+    if (!extraBonusModal || !currentUser) return
+    const p = extraBonusModal
+    if (p.status === 'paid') {
+      showMessage('error', 'Slip ini sudah Lunas — bonus tambahan untuk slip yang sudah dibayar tidak bisa ditambahkan lewat sini.')
+      return
+    }
+    const amt = parseFloat(extraBonusForm.amount)
+    if (isNaN(amt) || amt <= 0) { showMessage('error', 'Nominal bonus harus lebih dari 0.'); return }
+    if (!extraBonusForm.reason.trim()) { showMessage('error', 'Alasan bonus wajib diisi.'); return }
+
+    setExtraBonusSaving(true)
+
+    const { error: insertErr } = await supabase.from('payroll_extra_bonuses').insert({
+      payroll_id: p.id,
+      amount: amt,
+      reason: extraBonusForm.reason.trim(),
+      added_by: currentUser.employee_id,
+    })
+    if (insertErr) { showMessage('error', 'Gagal menyimpan bonus: ' + insertErr.message); setExtraBonusSaving(false); return }
+
+    const newExtraTotal = Number(p.extra_bonus_total ?? 0) + amt
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + newExtraTotal
+    const newNet = calcNet({ ...p, gross_total: newGross })
+
+    const wasFinalized = p.status === 'pending_approval' || p.status === 'approved'
+    const updates: Record<string, any> = { extra_bonus_total: newExtraTotal, gross_total: newGross, net_total: newNet }
+    if (wasFinalized) { updates.status = 'draft'; updates.approved_by = null }
+
+    const { error: updateErr } = await supabase.from('payrolls').update(updates).eq('id', p.id)
+    if (updateErr) { showMessage('error', 'Gagal update payroll: ' + updateErr.message); setExtraBonusSaving(false); return }
+
+    showMessage('success', wasFinalized
+      ? 'Bonus ditambahkan. Slip dikembalikan ke status Draft — perlu diajukan & disetujui ulang karena angkanya berubah.'
+      : 'Bonus tambahan berhasil disimpan.')
+    setExtraBonusModal(null)
+    setExtraBonusSaving(false)
+    await fetchPayrolls()
   }
 
   // ─── Summary kalkulasi ─────────────────────────────────────────────────────
@@ -1267,6 +1332,7 @@ export default function PenggajianBulananPage() {
       <tr><td>Upah Lembur${otDetailHtml}</td><td>${otTotal>0?fmtR(otTotal):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus KPI</td><td>${Number(p.kpi_bonus)>0?fmtR(Number(p.kpi_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus Kondisional</td><td>${Number((p as any).conditional_bonus??0)>0?fmtR(Number((p as any).conditional_bonus)):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Bonus Tambahan</td><td>${Number((p as any).extra_bonus_total??0)>0?fmtR(Number((p as any).extra_bonus_total)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Kompensasi Libur Tidak Diambil (${(p as any).libur_compensation_days??0} hari)</td><td>${Number((p as any).libur_compensation_days??0)>0?fmtR(Number((p as any).libur_compensation_amount??0)):'<span class="zero">—</span>'}</td></tr>
       <tr class="section-label ded"><td colspan="2">Potongan</td></tr>
       <tr><td>Potongan Keterlambatan${lateDetailHtml}</td><td>${lateDed>0?'-'+fmtR(lateDed):'<span class="zero">—</span>'}</td></tr>
@@ -1638,6 +1704,15 @@ export default function PenggajianBulananPage() {
                             </button>
                           )}
 
+                          {p.status !== 'paid' && canAjukan() && (
+                            <button
+                              onClick={() => openExtraBonusModal(p)}
+                              className="px-2.5 py-1.5 text-xs font-medium bg-amber-50 border border-amber-200 rounded-lg text-amber-700 hover:bg-amber-100 transition"
+                            >
+                              + Bonus
+                            </button>
+                          )}
+
                           {p.status === 'draft' && (
                             <button
                               onClick={() => handleDeletePayroll(p.id, p.employee?.full_name ?? '', p.employee_id, Number(p.kasbon_deduction))}
@@ -1865,6 +1940,7 @@ export default function PenggajianBulananPage() {
                   {[
                     ['Bonus KPI',            selectedPayroll.kpi_bonus],
                     ['Bonus Kondisional',    (selectedPayroll as any).conditional_bonus ?? 0],
+                    ['Bonus Tambahan',       (selectedPayroll as any).extra_bonus_total ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>
@@ -2101,6 +2177,72 @@ export default function PenggajianBulananPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Modal Bonus Tambahan (ad-hoc) ─── */}
+    {extraBonusModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+          <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+            <div>
+              <h2 className="text-base font-bold text-slate-700">Bonus Tambahan</h2>
+              <p className="text-sm text-slate-500">{extraBonusModal.employee?.full_name} — {MONTHS[extraBonusModal.period_month-1]} {extraBonusModal.period_year}</p>
+            </div>
+            <button onClick={() => setExtraBonusModal(null)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium rounded-lg">✕ Tutup</button>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            {(extraBonusModal.status === 'pending_approval' || extraBonusModal.status === 'approved') && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+                Slip ini statusnya <strong>{STATUS_CONFIG[extraBonusModal.status]?.label}</strong>. Menambah bonus akan mengembalikan status ke <strong>Draft</strong> — perlu diajukan &amp; disetujui ulang dengan angka yang baru.
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Bonus (Rp) *</label>
+              <input type="number" min="0" step="1000" value={extraBonusForm.amount}
+                onChange={e => setExtraBonusForm({ ...extraBonusForm, amount: e.target.value })}
+                placeholder="0" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Alasan *</label>
+              <input type="text" value={extraBonusForm.reason}
+                onChange={e => setExtraBonusForm({ ...extraBonusForm, reason: e.target.value })}
+                placeholder="Contoh: Instruksi owner — kinerja bagus bulan ini"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+            <div className="flex justify-end gap-3 pt-1">
+              <button onClick={() => setExtraBonusModal(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">Batal</button>
+              <button onClick={handleAddExtraBonus} disabled={extraBonusSaving}
+                className="px-6 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                {extraBonusSaving ? 'Menyimpan...' : 'Tambahkan Bonus'}
+              </button>
+            </div>
+
+            {/* Riwayat bonus tambahan */}
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Riwayat Bonus Tambahan</p>
+              {loadingExtraBonus ? (
+                <p className="text-xs text-slate-400">Memuat...</p>
+              ) : extraBonusHistory.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">Belum ada bonus tambahan untuk slip ini.</p>
+              ) : (
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {extraBonusHistory.map(h => (
+                    <div key={h.id} className="text-xs bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+                      <div className="flex justify-between items-start">
+                        <span className="font-semibold text-amber-700">+{formatRupiah(h.amount)}</span>
+                        <span className="text-slate-400">{new Date(h.created_at).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}</span>
+                      </div>
+                      <div className="text-slate-500 mt-0.5">{h.reason}</div>
+                      {h.employees?.full_name && <div className="text-slate-400 mt-0.5">oleh {h.employees.full_name}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
