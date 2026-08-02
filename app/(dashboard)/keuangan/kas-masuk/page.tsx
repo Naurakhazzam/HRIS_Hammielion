@@ -44,7 +44,11 @@ export default function KasMasukPage() {
   const [editRowDate, setEditRowDate] = useState<string>('')
   const [editRowBranchId, setEditRowBranchId] = useState<string>('')
 
-  const today = new Date().toISOString().split('T')[0]
+  // Pakai tanggal kalender lokal (bukan toISOString) — toISOString mengonversi
+  // ke UTC dulu, yang bisa menggeser tanggal mundur 1 hari untuk WIB (UTC+7).
+  const pad2 = (n: number) => String(n).padStart(2, '0')
+  const localDateStr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+  const today = localDateStr(new Date())
   const [form, setForm] = useState({
     branch_id: '', transaction_date: today, amount: '', payment_method: 'cash', description: '', account_id: '',
   })
@@ -59,8 +63,8 @@ export default function KasMasukPage() {
   const fetchRows = useCallback(async () => {
     setLoading(true)
     const [year, month] = filterMonth.split('-').map(Number)
-    const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0]
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+    const startDate = localDateStr(new Date(year, month - 1, 1))
+    const endDate = localDateStr(new Date(year, month, 0))
 
     let query = supabase
       .from('fin_cash_in')
