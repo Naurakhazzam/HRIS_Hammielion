@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 
 type Branch = { id: string; name: string }
 type Position = { id: string; name: string }
-type Employee = { id: string; full_name: string; employee_code: string; branch_id: string; position_id: string; positions: { name: string } | null }
+type Employee = { id: string; full_name: string; employee_code: string; branch_id: string; position_id: string; department_id: string | null; employee_type: string; positions: { name: string } | null; departments: { name: string } | null }
 type BranchLossConfig = { id: string; branch_id: string; company_coverage_percent: number; effective_date: string; notes: string | null; created_at: string }
 type LossEmployeeShare = { id: string; employee_id: string; branch_id: string; share_percent: number; effective_date: string; is_active: boolean; notes: string | null; created_at: string; employees?: { full_name: string; employee_code: string; positions?: { name: string } | null } }
 type CashierLossConfig = { id: string; branch_id: string; position_id: string; is_active: boolean; positions?: { name: string } }
@@ -45,7 +45,9 @@ export default function SetupKehilanganPage() {
     const [bRes, pRes, eRes, cRes, sRes, sHistRes, ccRes] = await Promise.all([
       supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
       supabase.from('positions').select('id, name').order('name'),
-      supabase.from('employees').select('id, full_name, employee_code, branch_id, position_id, positions(name)').eq('is_active', true).eq('employee_type', 'permanent').order('full_name'),
+      // Semua tipe karyawan aktif ikut ditampilkan (bukan cuma permanent) — training,
+      // driver, freelance dsb juga bisa diberi % tanggung jawab kehilangan barang.
+      supabase.from('employees').select('id, full_name, employee_code, branch_id, position_id, department_id, employee_type, positions(name), departments(name)').eq('is_active', true).order('full_name'),
       supabase.from('branch_loss_configs').select('*').order('created_at', { ascending: false }),
       supabase.from('loss_employee_shares').select('*').eq('is_active', true).order('created_at', { ascending: false }),
       supabase.from('loss_employee_shares').select('*').order('created_at', { ascending: false }),
@@ -64,6 +66,13 @@ export default function SetupKehilanganPage() {
   const currentKantorConfig = configs.filter(c => c.branch_id === selectedBranch).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
   const kantorHistory = configs.filter(c => c.branch_id === selectedBranch).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   const branchEmployees = employees.filter(e => e.branch_id === selectedBranch)
+  const branchEmployeesByDept = branchEmployees.reduce((acc, e) => {
+    const key = e.departments?.name || 'Tanpa Departemen'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(e)
+    return acc
+  }, {} as Record<string, Employee[]>)
+  const EMP_TYPE_LABEL: Record<string, string> = { permanent: 'Tetap', training: 'Training', driver: 'Driver', freelance: 'Lepas' }
   // shares hanya berisi is_active=true → langsung ambil yang pertama (terbaru)
   const getLatestShare = (empId: string) => shares
     .filter(s => s.employee_id === empId && s.branch_id === selectedBranch)
@@ -285,11 +294,15 @@ export default function SetupKehilanganPage() {
             return null
           })()}
           {branchEmployees.length === 0 ? (
-            <p className="text-sm text-slate-500 italic">Tidak ada karyawan tetap aktif di cabang ini.</p>
+            <p className="text-sm text-slate-500 italic">Tidak ada karyawan aktif di cabang ini.</p>
           ) : (
             <form onSubmit={handleSaveShares}>
-              <div className="space-y-3 mb-4">
-                {branchEmployees.map(emp => {
+              <div className="space-y-5 mb-4">
+                {Object.entries(branchEmployeesByDept).sort(([a], [b]) => a.localeCompare(b)).map(([deptName, deptEmployees]) => (
+                <div key={deptName}>
+                  <h4 className="text-xs font-bold text-slate-500 uppercase mb-2 pb-1 border-b border-slate-200">{deptName}</h4>
+                  <div className="space-y-3">
+                {deptEmployees.map(emp => {
                   const latest = getLatestShare(emp.id)
                   const history = employeeShareHistory(emp.id)
                   const f = shareForm[emp.id] || { percent: latest ? String(latest.share_percent) : '', notes: '' }
@@ -298,7 +311,14 @@ export default function SetupKehilanganPage() {
                       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                         <div className="flex-1">
                           <div className="font-medium text-slate-800 text-sm">{emp.full_name}</div>
-                          <div className="text-xs text-slate-400">{emp.employee_code} · {emp.positions?.name}</div>
+                          <div className="text-xs text-slate-400">
+                            {emp.employee_code} · {emp.positions?.name}
+                            {emp.employee_type !== 'permanent' && (
+                              <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-semibold">
+                                {EMP_TYPE_LABEL[emp.employee_type] ?? emp.employee_type}
+                              </span>
+                            )}
+                          </div>
                           <div className={`text-xs font-semibold mt-0.5 ${latest ? (Number(latest.share_percent) > 0 ? 'text-blue-600' : 'text-slate-400') : 'text-slate-400 italic'}`}>
                             {latest ? `Saat ini: ${Number(latest.share_percent).toFixed(1)}%` : 'Belum dikonfigurasi'}
                           </div>
@@ -331,6 +351,9 @@ export default function SetupKehilanganPage() {
                     </div>
                   )
                 })}
+                  </div>
+                </div>
+                ))}
               </div>
               <button type="submit" disabled={shareSubmitting} className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
                 {shareSubmitting ? 'Menyimpan...' : '💾 Simpan Semua % (Tambah ke History)'}
