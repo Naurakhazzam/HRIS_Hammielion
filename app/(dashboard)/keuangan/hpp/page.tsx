@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr, todayLocalStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type HppEntry = {
@@ -35,7 +36,7 @@ export default function HppPage() {
   const [editRowAmount, setEditRowAmount] = useState<string>('')
   const [editRowNotes, setEditRowNotes] = useState<string>('')
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalStr()
   const [form, setForm] = useState({ branch_id: '', entry_date: today, hpp_amount: '', notes: '' })
 
   const thisMonth = today.slice(0, 7)
@@ -48,8 +49,8 @@ export default function HppPage() {
   const fetchRows = useCallback(async () => {
     setLoading(true)
     const [year, month] = filterMonth.split('-').map(Number)
-    const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0]
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+    const startDate = localDateStr(new Date(year, month - 1, 1))
+    const endDate = localDateStr(new Date(year, month, 0))
     const branchScope = !isAdmin ? myBranchId : (filterBranch || null)
 
     let hppQuery = supabase

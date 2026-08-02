@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type Category = { code: string; label: string }
@@ -58,8 +59,8 @@ export default function RiwayatKasKeluarPage() {
   const fetchRows = useCallback(async () => {
     setLoading(true)
     const [year, month] = filterMonth.split('-').map(Number)
-    const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0]
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+    const startDate = localDateStr(new Date(year, month - 1, 1))
+    const endDate = localDateStr(new Date(year, month, 0))
 
     let query = supabase
       .from('fin_cash_out')

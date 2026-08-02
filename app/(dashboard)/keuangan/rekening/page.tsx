@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { todayLocalStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type BankAccount = {
@@ -32,7 +33,7 @@ export default function RekeningPage() {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalStr()
   const [form, setForm] = useState({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank', opening_balance: '0', opening_balance_date: today })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBankName, setEditBankName] = useState('')

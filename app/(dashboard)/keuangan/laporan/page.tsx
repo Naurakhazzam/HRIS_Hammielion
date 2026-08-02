@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr, todayLocalStr } from '@/lib/date'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
@@ -72,7 +73,7 @@ export default function LaporanResmiPage() {
 
   const [tab, setTab] = useState<Tab>('mingguan')
   const [week, setWeek] = useState(getCurrentIsoWeek())
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalStr()
   const [month, setMonth] = useState(today.slice(0, 7))
 
   const [loading, setLoading] = useState(true)
@@ -166,12 +167,12 @@ export default function LaporanResmiPage() {
       curStart = cur.start; curEnd = cur.end; prevStart = prev.start; prevEnd = prev.end
     } else {
       const [y, m] = month.split('-').map(Number)
-      curStart = new Date(y, m - 1, 1).toISOString().split('T')[0]
-      curEnd = new Date(y, m, 0).toISOString().split('T')[0]
+      curStart = localDateStr(new Date(y, m - 1, 1))
+      curEnd = localDateStr(new Date(y, m, 0))
       const prevMonth = shiftMonth(month, -1)
       const [py, pm] = prevMonth.split('-').map(Number)
-      prevStart = new Date(py, pm - 1, 1).toISOString().split('T')[0]
-      prevEnd = new Date(py, pm, 0).toISOString().split('T')[0]
+      prevStart = localDateStr(new Date(py, pm - 1, 1))
+      prevEnd = localDateStr(new Date(py, pm, 0))
     }
 
     const [cur, prev] = await Promise.all([computeTotals(curStart, curEnd), computeTotals(prevStart, prevEnd)])
@@ -207,8 +208,8 @@ export default function LaporanResmiPage() {
   async function handleExportOmzetPerCabang() {
     setExporting(true)
     const [y, m] = month.split('-').map(Number)
-    const startDate = new Date(y, m - 1, 1).toISOString().split('T')[0]
-    const endDate = new Date(y, m, 0).toISOString().split('T')[0]
+    const startDate = localDateStr(new Date(y, m - 1, 1))
+    const endDate = localDateStr(new Date(y, m, 0))
 
     const [cashInRes, hppRes] = await Promise.all([
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),

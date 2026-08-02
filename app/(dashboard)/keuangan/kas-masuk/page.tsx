@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr, todayLocalStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type BankAccount = { id: string; bank_name: string; account_number: string | null; account_holder_name: string | null; branch_id: string | null; account_type: string }
@@ -44,11 +45,7 @@ export default function KasMasukPage() {
   const [editRowDate, setEditRowDate] = useState<string>('')
   const [editRowBranchId, setEditRowBranchId] = useState<string>('')
 
-  // Pakai tanggal kalender lokal (bukan toISOString) — toISOString mengonversi
-  // ke UTC dulu, yang bisa menggeser tanggal mundur 1 hari untuk WIB (UTC+7).
-  const pad2 = (n: number) => String(n).padStart(2, '0')
-  const localDateStr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-  const today = localDateStr(new Date())
+  const today = todayLocalStr()
   const [form, setForm] = useState({
     branch_id: '', transaction_date: today, amount: '', payment_method: 'cash', description: '', account_id: '',
   })
@@ -307,18 +304,18 @@ export default function KasMasukPage() {
                 </div>
               )}
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-white border-b border-slate-200">
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Jumlah</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Metode</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Rekening</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Keterangan</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
+                  <tr className="bg-white border-b border-slate-200 sticky top-0 z-10">
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Tanggal</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Cabang</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Jumlah</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Metode</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Rekening</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Keterangan</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Status</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">

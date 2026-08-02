@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { todayLocalStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type Category = { code: string; label: string; affects_net_profit: boolean }
@@ -40,7 +41,7 @@ export default function InputKasKeluarPage() {
     branch_id: '',
     category: '',
     amount: '',
-    transaction_date: new Date().toISOString().split('T')[0],
+    transaction_date: todayLocalStr(),
     description: '',
     account_id: '',
   })

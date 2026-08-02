@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr, todayLocalStr } from '@/lib/date'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 const TYPE_LABEL: Record<string, string> = { bank: 'Rekening Bank', tunai: 'Kas Tunai' }
@@ -31,7 +32,7 @@ export default function CashFlowPage() {
   const [roleLoading, setRoleLoading] = useState(true)
   const [loading, setLoading] = useState(true)
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalStr()
   const [filterMonth, setFilterMonth] = useState(today.slice(0, 7))
 
   const [flows, setFlows] = useState<AccountFlow[]>([])
@@ -57,8 +58,8 @@ export default function CashFlowPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     const [year, month] = filterMonth.split('-').map(Number)
-    const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0]
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+    const startDate = localDateStr(new Date(year, month - 1, 1))
+    const endDate = localDateStr(new Date(year, month, 0))
 
     const [accRes, cashInRes, cashOutRes] = await Promise.all([
       supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active').order('account_type').order('bank_name'),

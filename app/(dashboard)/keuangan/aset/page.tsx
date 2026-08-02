@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { todayLocalStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type Asset = {
@@ -54,7 +55,7 @@ export default function AsetKontrakPage() {
     branch_id: '', name: '', type: '', acquisition_value: '', acquisition_date: '', status: 'aktif', notes: '',
   })
   const [contractForm, setContractForm] = useState({
-    asset_id: '', contract_type: '', start_date: new Date().toISOString().split('T')[0], end_date: '',
+    asset_id: '', contract_type: '', start_date: todayLocalStr(), end_date: '',
     rent_amount: '', payment_cycle: 'bulanan', reminder_days_before_due: '30', notes: '',
   })
 

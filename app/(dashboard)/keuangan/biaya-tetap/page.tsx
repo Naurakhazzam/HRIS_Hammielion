@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { todayLocalStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type Category = { code: string; label: string }
@@ -41,7 +42,7 @@ export default function BiayaTetapPage() {
 
   const [form, setForm] = useState({
     branch_id: '', category: '', description: '', daily_amount: '',
-    start_date: new Date().toISOString().split('T')[0], end_date: '',
+    start_date: todayLocalStr(), end_date: '',
   })
 
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -107,7 +108,7 @@ export default function BiayaTetapPage() {
       showMessage('error', 'Gagal menambah item: ' + error.message)
     } else {
       showMessage('success', 'Biaya tetap berkala berhasil ditambahkan. Akan otomatis di-generate ke kas keluar tiap tanggal 1.')
-      setForm({ branch_id: '', category: '', description: '', daily_amount: '', start_date: new Date().toISOString().split('T')[0], end_date: '' })
+      setForm({ branch_id: '', category: '', description: '', daily_amount: '', start_date: todayLocalStr(), end_date: '' })
       fetchItems()
     }
     setSubmitting(false)

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { todayLocalStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type Baseline = {
@@ -48,7 +49,7 @@ export default function ModalCabangPage() {
   const [existingBaseline, setExistingBaseline] = useState<Baseline | null>(null)
   const [existingSnapshot, setExistingSnapshot] = useState<Snapshot | null>(null)
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalStr()
   const thisMonth = today.slice(0, 7)
 
   const [baselineForm, setBaselineForm] = useState({

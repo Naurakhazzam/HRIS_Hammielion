@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr, todayLocalStr } from '@/lib/date'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
@@ -22,7 +23,7 @@ export default function DashboardKeuanganPage() {
   const [myBranchId, setMyBranchId] = useState<string | null>(null)
   const [roleLoading, setRoleLoading] = useState(true)
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayLocalStr()
   const [filterMonth, setFilterMonth] = useState(today.slice(0, 7))
   const [loading, setLoading] = useState(true)
   const [groups, setGroups] = useState<GroupTotals[]>([])
@@ -51,8 +52,8 @@ export default function DashboardKeuanganPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     const [year, month] = filterMonth.split('-').map(Number)
-    const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0]
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+    const startDate = localDateStr(new Date(year, month - 1, 1))
+    const endDate = localDateStr(new Date(year, month, 0))
 
     const [groupsRes, cashInRes, hppRes, cashOutRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
