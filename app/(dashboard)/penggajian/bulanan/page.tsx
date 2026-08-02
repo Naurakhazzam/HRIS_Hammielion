@@ -932,25 +932,26 @@ export default function PenggajianBulananPage() {
     const firstDay = `${sy}-${pad(sm)}-26`
     const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
 
-    // Ambil tarif potongan per menit dari salary_components
-    const { data: salComp } = await supabase
-      .from('salary_components')
-      .select('late_penalty_per_minute')
-      .eq('employee_id', p.employee_id)
-      .lte('effective_date', firstDay)
-      .order('effective_date', { ascending: false })
-      .limit(1)
-      .single()
+    // Tarif potongan per menit — pakai komponen gaji TERBARU (sama seperti kalkulasi
+    // utama), bukan yang efektif sebelum awal periode (karyawan baru sering baru
+    // diisi komponen gajinya belakangan, bukan sebelum periode berjalan).
+    const [salCompRes, empRes] = await Promise.all([
+      supabase.from('salary_components').select('late_penalty_per_minute').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
+      supabase.from('employees').select('join_date').eq('id', p.employee_id).single(),
+    ])
 
-    const rate = Number(salComp?.late_penalty_per_minute ?? 0)
+    const rate = Number(salCompRes.data?.[0]?.late_penalty_per_minute ?? 0)
     setLateRate(rate)
 
-    // Ambil hari-hari yang terlambat
+    // Jangan hitung hari sebelum karyawan bergabung
+    const joinDateVal = empRes.data?.join_date ?? null
+    const effectiveStart = joinDateVal && joinDateVal > firstDay ? joinDateVal : firstDay
+
     const { data: atts } = await supabase
       .from('attendances')
       .select('date, late_minutes')
       .eq('employee_id', p.employee_id)
-      .gte('date', firstDay)
+      .gte('date', effectiveStart)
       .lte('date', lastDay)
       .gt('late_minutes', 0)
       .order('date')
@@ -1041,10 +1042,15 @@ export default function PenggajianBulananPage() {
     const firstDay = `${sy2}-${pad2(sm2)}-26`
     const lastDay  = `${p.period_year}-${pad2(p.period_month)}-25`
 
-    const { data: sc } = await supabase.from('salary_components').select('overtime_rate_per_hour').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1)
-    const otRate = Number(sc?.[0]?.overtime_rate_per_hour ?? 0)
+    const [scRes, empRes] = await Promise.all([
+      supabase.from('salary_components').select('overtime_rate_per_hour').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
+      supabase.from('employees').select('join_date').eq('id', p.employee_id).single(),
+    ])
+    const otRate = Number(scRes.data?.[0]?.overtime_rate_per_hour ?? 0)
+    const joinDateVal = empRes.data?.join_date ?? null
+    const effectiveStart = joinDateVal && joinDateVal > firstDay ? joinDateVal : firstDay
 
-    const { data: atts } = await supabase.from('attendances').select('date, overtime_hours').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay).gt('overtime_hours', 0).order('date')
+    const { data: atts } = await supabase.from('attendances').select('date, overtime_hours').eq('employee_id', p.employee_id).gte('date', effectiveStart).lte('date', lastDay).gt('overtime_hours', 0).order('date')
 
     const details = (atts || []).map(a => {
       const rawHours = Number(a.overtime_hours)
@@ -1066,24 +1072,42 @@ export default function PenggajianBulananPage() {
     const firstDay = `${sy}-${pad(sm)}-26`
     const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
 
-    const [scRes, attRes] = await Promise.all([
+    const [scRes, attRes, empRes] = await Promise.all([
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
+      supabase.from('employees').select('join_date, employee_type').eq('id', p.employee_id).single(),
     ])
 
     const sc = scRes.data?.[0]
-    const atts = attRes.data || []
+    const joinDateVal = empRes.data?.join_date ?? null
     const dailyRate = sc ? Math.round((Number(sc.base_salary)+Number(sc.position_allowance)+Number(sc.meal_allowance))/26) : 0
 
+    // Buang record & tanggal sebelum karyawan bergabung
+    const atts = (attRes.data || []).filter((a: any) => !joinDateVal || a.date >= joinDateVal)
     const recordedDates = new Set(atts.map((a: any) => a.date))
     const allDates: string[] = []
     const cur = new Date(firstDay + 'T12:00:00')
     const endD = new Date(lastDay + 'T12:00:00')
     while (cur <= endD) { allDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`); cur.setDate(cur.getDate()+1) }
+    const totalPeriodDays = allDates.length
 
-    const emptyDays  = allDates.filter(d => !recordedDates.has(d)).length
+    const emptyDays  = allDates.filter(d => (!joinDateVal || d >= joinDateVal) && !recordedDates.has(d)).length
     const leaveDays  = atts.filter((a: any) => a.status === 'leave').length
-    const autoIzin   = Math.max((emptyDays + leaveDays) - 4, 0)
+
+    // Kuota libur ikut di-pro-rata untuk training yang join di tengah periode —
+    // samakan dengan kalkulasi utama saat slip dibuat.
+    const isTraining = empRes.data?.employee_type === 'training'
+    let proRataFactor = 1
+    if (isTraining && joinDateVal) {
+      if (joinDateVal > lastDay) proRataFactor = 0
+      else if (joinDateVal > firstDay) {
+        const joinD = new Date(joinDateVal + 'T12:00:00')
+        const activeDays = Math.round((endD.getTime() - joinD.getTime()) / 86400000) + 1
+        proRataFactor = activeDays / totalPeriodDays
+      }
+    }
+    const kuotaLibur = Math.round(4 * proRataFactor)
+    const autoIzin   = Math.max((emptyDays + leaveDays) - kuotaLibur, 0)
     const izinDays   = atts.filter((a: any) => a.status === 'permission').length
     const alphaDays  = atts.filter((a: any) => a.status === 'absent').length
     const sickDays   = atts.filter((a: any) => a.status === 'sick').length
