@@ -13,6 +13,7 @@ type GroupTotals = {
   kasMasuk: number
   hpp: number
   biayaOperasional: number
+  kasbonRealisasi: number
   labaKotor: number
   labaBersih: number
 }
@@ -103,24 +104,30 @@ export default function LaporanResmiPage() {
     init()
   }, [supabase])
 
-  const computeTotals = useCallback(async (startDate: string, endDate: string): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
-    const [groupsRes, cashInRes, hppRes, cashOutRes] = await Promise.all([
+  const computeTotals = useCallback(async (startDate: string, endDate: string, periodMonth?: number, periodYear?: number): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
+    const [groupsRes, cashInRes, hppRes, cashOutRes, kasbonRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').gte('entry_date', startDate).lte('entry_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount, fin_cash_out_categories(affects_net_profit)').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
+      // Realisasi kasbon cuma berlaku untuk tampilan bulanan (periodMonth/periodYear diisi) —
+      // tidak diikutkan untuk mingguan karena periode gaji tidak selaras dengan minggu.
+      periodMonth && periodYear
+        ? supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').eq('status', 'paid').eq('period_month', periodMonth).eq('period_year', periodYear).gt('kasbon_deduction', 0)
+        : Promise.resolve({ data: [], error: null }),
     ])
     if (groupsRes.error) console.error('Detail error report_groups:', JSON.stringify(groupsRes.error, null, 2))
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
     if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
     if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
+    if (kasbonRes.error) console.error('Detail error kasbon:', JSON.stringify(kasbonRes.error, null, 2))
 
     const branchToGroup = new Map<string, string>()
     for (const g of (groupsRes.data as ReportGroup[]) || []) branchToGroup.set(g.branch_id, g.report_group_label)
 
-    const totalsByGroup = new Map<string, { kasMasuk: number; hpp: number; biayaOperasional: number }>()
+    const totalsByGroup = new Map<string, { kasMasuk: number; hpp: number; biayaOperasional: number; kasbonRealisasi: number }>()
     function ensure(label: string) {
-      if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0 })
+      if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0 })
       return totalsByGroup.get(label)!
     }
     for (const row of (cashInRes.data as { branch_id: string; amount: number }[]) || []) {
@@ -136,10 +143,16 @@ export default function LaporanResmiPage() {
       if (!label) continue
       if (row.fin_cash_out_categories?.affects_net_profit !== false) ensure(label).biayaOperasional += Number(row.amount)
     }
+    for (const row of (kasbonRes.data as unknown as { kasbon_deduction: number; employees: { branch_id: string } | null }[]) || []) {
+      const branchId = row.employees?.branch_id
+      const label = branchId ? branchToGroup.get(branchId) : undefined
+      if (!label) continue
+      ensure(label).kasbonRealisasi += Number(row.kasbon_deduction)
+    }
 
     let groupList: GroupTotals[] = Array.from(totalsByGroup.entries()).map(([label, t]) => ({
-      label, kasMasuk: t.kasMasuk, hpp: t.hpp, biayaOperasional: t.biayaOperasional,
-      labaKotor: t.kasMasuk - t.hpp, labaBersih: t.kasMasuk - t.hpp - t.biayaOperasional,
+      label, kasMasuk: t.kasMasuk, hpp: t.hpp, biayaOperasional: t.biayaOperasional, kasbonRealisasi: t.kasbonRealisasi,
+      labaKotor: t.kasMasuk - t.hpp, labaBersih: t.kasMasuk - t.hpp - t.biayaOperasional - t.kasbonRealisasi,
     }))
 
     if (!isAdmin && myBranchId) {
@@ -151,8 +164,9 @@ export default function LaporanResmiPage() {
     const total: GroupTotals = groupList.reduce((acc, g) => ({
       label: 'Total Konsolidasi',
       kasMasuk: acc.kasMasuk + g.kasMasuk, hpp: acc.hpp + g.hpp, biayaOperasional: acc.biayaOperasional + g.biayaOperasional,
+      kasbonRealisasi: acc.kasbonRealisasi + g.kasbonRealisasi,
       labaKotor: acc.labaKotor + g.labaKotor, labaBersih: acc.labaBersih + g.labaBersih,
-    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, labaKotor: 0, labaBersih: 0 })
+    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, labaKotor: 0, labaBersih: 0 })
 
     return { groups: groupList, consolidated: total }
   }, [supabase, isAdmin, myBranchId])
@@ -160,6 +174,8 @@ export default function LaporanResmiPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     let curStart: string, curEnd: string, prevStart: string, prevEnd: string
+    let curPeriod: [number, number] | null = null
+    let prevPeriod: [number, number] | null = null
 
     if (tab === 'mingguan') {
       const cur = isoWeekRange(week)
@@ -169,13 +185,18 @@ export default function LaporanResmiPage() {
       const [y, m] = month.split('-').map(Number)
       curStart = localDateStr(new Date(y, m - 1, 1))
       curEnd = localDateStr(new Date(y, m, 0))
+      curPeriod = [m, y]
       const prevMonth = shiftMonth(month, -1)
       const [py, pm] = prevMonth.split('-').map(Number)
       prevStart = localDateStr(new Date(py, pm - 1, 1))
       prevEnd = localDateStr(new Date(py, pm, 0))
+      prevPeriod = [pm, py]
     }
 
-    const [cur, prev] = await Promise.all([computeTotals(curStart, curEnd), computeTotals(prevStart, prevEnd)])
+    const [cur, prev] = await Promise.all([
+      computeTotals(curStart, curEnd, curPeriod?.[0], curPeriod?.[1]),
+      computeTotals(prevStart, prevEnd, prevPeriod?.[0], prevPeriod?.[1]),
+    ])
     setGroups(cur.groups)
     setConsolidated(cur.consolidated)
     setPrevGroups(prev.groups)
@@ -302,7 +323,7 @@ export default function LaporanResmiPage() {
           {isAdmin && consolidated && prevConsolidated && (
             <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200">
               <h2 className="text-lg font-bold text-slate-800 mb-3">Total Konsolidasi (Seluruh Bisnis)</h2>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Kas Masuk</p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.kasMasuk)}</p>
@@ -322,6 +343,12 @@ export default function LaporanResmiPage() {
                   <p className="text-xs text-slate-500 uppercase mb-1">Biaya Operasional</p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.biayaOperasional)}</p>
                   <VarianceBadge cur={consolidated.biayaOperasional} prev={prevConsolidated.biayaOperasional} />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1">Realisasi Kasbon</p>
+                  <p className="text-lg font-semibold text-amber-700">{formatRupiah(consolidated.kasbonRealisasi)}</p>
+                  <VarianceBadge cur={consolidated.kasbonRealisasi} prev={prevConsolidated.kasbonRealisasi} />
+                  {tab === 'mingguan' && <p className="text-[10px] text-slate-400 mt-0.5">Cuma dihitung di tampilan bulanan</p>}
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Laba Bersih</p>
@@ -345,14 +372,15 @@ export default function LaporanResmiPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">HPP</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Kotor</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Biaya Operasional</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Realisasi Kasbon</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Bersih (vs periode lalu)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {groups.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
                   ) : groups.map(g => {
-                    const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, labaKotor: 0, labaBersih: 0 }
+                    const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, labaKotor: 0, labaBersih: 0 }
                     return (
                       <tr key={g.label} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm font-medium text-slate-800">{g.label}</td>
@@ -360,6 +388,7 @@ export default function LaporanResmiPage() {
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.hpp)}</td>
                         <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700">{formatRupiah(g.labaKotor)}</td>
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.biayaOperasional)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-amber-700">{formatRupiah(g.kasbonRealisasi)}</td>
                         <td className="px-4 py-3 text-right">
                           <div className={`text-sm font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</div>
                           <VarianceBadge cur={g.labaBersih} prev={prev.labaBersih} />

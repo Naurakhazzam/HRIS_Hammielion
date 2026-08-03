@@ -12,6 +12,7 @@ type GroupTotals = {
   kasMasuk: number
   hpp: number
   biayaOperasional: number
+  kasbonRealisasi: number
   labaKotor: number
   labaBersih: number
 }
@@ -55,24 +56,29 @@ export default function DashboardKeuanganPage() {
     const startDate = localDateStr(new Date(year, month - 1, 1))
     const endDate = localDateStr(new Date(year, month, 0))
 
-    const [groupsRes, cashInRes, hppRes, cashOutRes] = await Promise.all([
+    const [groupsRes, cashInRes, hppRes, cashOutRes, kasbonRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').gte('entry_date', startDate).lte('entry_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount, fin_cash_out_categories(affects_net_profit)').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
+      // Kasbon yang terpotong dari gaji (dilunasi) periode ini — bukan kas keluar baru
+      // (kasbon-nya sudah tercatat kas keluar saat dicairkan), tapi baru DI SINI beban
+      // gajinya benar-benar diakui penuh. Tidak menyentuh fin_cash_out sama sekali.
+      supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').eq('status', 'paid').eq('period_month', month).eq('period_year', year).gt('kasbon_deduction', 0),
     ])
 
     if (groupsRes.error) console.error('Detail error report_groups:', JSON.stringify(groupsRes.error, null, 2))
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
     if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
     if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
+    if (kasbonRes.error) console.error('Detail error kasbon:', JSON.stringify(kasbonRes.error, null, 2))
 
     const branchToGroup = new Map<string, string>()
     for (const g of (groupsRes.data as ReportGroup[]) || []) branchToGroup.set(g.branch_id, g.report_group_label)
 
-    const totalsByGroup = new Map<string, { kasMasuk: number; hpp: number; biayaOperasional: number }>()
+    const totalsByGroup = new Map<string, { kasMasuk: number; hpp: number; biayaOperasional: number; kasbonRealisasi: number }>()
     function ensure(label: string) {
-      if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0 })
+      if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0 })
       return totalsByGroup.get(label)!
     }
 
@@ -94,14 +100,21 @@ export default function DashboardKeuanganPage() {
         ensure(label).biayaOperasional += Number(row.amount)
       }
     }
+    for (const row of (kasbonRes.data as unknown as { kasbon_deduction: number; employees: { branch_id: string } | null }[]) || []) {
+      const branchId = row.employees?.branch_id
+      const label = branchId ? branchToGroup.get(branchId) : undefined
+      if (!label) continue
+      ensure(label).kasbonRealisasi += Number(row.kasbon_deduction)
+    }
 
     let groupList: GroupTotals[] = Array.from(totalsByGroup.entries()).map(([label, t]) => ({
       label,
       kasMasuk: t.kasMasuk,
       hpp: t.hpp,
       biayaOperasional: t.biayaOperasional,
+      kasbonRealisasi: t.kasbonRealisasi,
       labaKotor: t.kasMasuk - t.hpp,
-      labaBersih: t.kasMasuk - t.hpp - t.biayaOperasional,
+      labaBersih: t.kasMasuk - t.hpp - t.biayaOperasional - t.kasbonRealisasi,
     }))
 
     // Supervisor hanya melihat kelompok laporan cabangnya sendiri (RLS sudah membatasi baris yang kembali,
@@ -118,9 +131,10 @@ export default function DashboardKeuanganPage() {
       kasMasuk: acc.kasMasuk + g.kasMasuk,
       hpp: acc.hpp + g.hpp,
       biayaOperasional: acc.biayaOperasional + g.biayaOperasional,
+      kasbonRealisasi: acc.kasbonRealisasi + g.kasbonRealisasi,
       labaKotor: acc.labaKotor + g.labaKotor,
       labaBersih: acc.labaBersih + g.labaBersih,
-    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, labaKotor: 0, labaBersih: 0 })
+    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, labaKotor: 0, labaBersih: 0 })
 
     setGroups(groupList)
     setConsolidated(totalKonsolidasi)
@@ -140,7 +154,7 @@ export default function DashboardKeuanganPage() {
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Dashboard Keuangan</h1>
-          <p className="text-sm text-slate-500">Laba Kotor & Laba Bersih live berdasarkan data yang sudah disetujui. Laba Kotor = Kas Masuk − HPP. Laba Bersih = Laba Kotor − Biaya Operasional (restock dikecualikan).</p>
+          <p className="text-sm text-slate-500">Laba Kotor & Laba Bersih live berdasarkan data yang sudah disetujui. Laba Kotor = Kas Masuk − HPP. Laba Bersih = Laba Kotor − Biaya Operasional (restock dikecualikan) − Realisasi Kasbon dari gaji yang lunas.</p>
         </div>
         <div>
           <label className="block text-xs text-slate-500 mb-1">Bulan</label>
@@ -159,7 +173,7 @@ export default function DashboardKeuanganPage() {
                 <h2 className="text-lg font-bold text-slate-800">Total Konsolidasi (Seluruh Bisnis)</h2>
                 <span className="text-xs text-slate-400">per {asOf}</span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Kas Masuk</p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.kasMasuk)}</p>
@@ -175,6 +189,10 @@ export default function DashboardKeuanganPage() {
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Biaya Operasional</p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.biayaOperasional)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1">Realisasi Kasbon</p>
+                  <p className="text-lg font-semibold text-amber-700">{formatRupiah(consolidated.kasbonRealisasi)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Laba Bersih</p>
@@ -197,12 +215,13 @@ export default function DashboardKeuanganPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">HPP</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Kotor</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Biaya Operasional</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Realisasi Kasbon</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Bersih</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {groups.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk bulan ini.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk bulan ini.</td></tr>
                   ) : groups.map(g => (
                     <tr key={g.label} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3 text-sm font-medium text-slate-800">{g.label}</td>
@@ -210,6 +229,7 @@ export default function DashboardKeuanganPage() {
                       <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.hpp)}</td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700">{formatRupiah(g.labaKotor)}</td>
                       <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.biayaOperasional)}</td>
+                      <td className="px-4 py-3 text-sm text-right text-amber-700">{formatRupiah(g.kasbonRealisasi)}</td>
                       <td className={`px-4 py-3 text-sm text-right font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</td>
                     </tr>
                   ))}
