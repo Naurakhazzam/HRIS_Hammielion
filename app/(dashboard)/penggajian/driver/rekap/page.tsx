@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import { localDateStr } from '@/lib/date'
 
 type DeliveryTrip = {
   id: string
@@ -88,11 +89,22 @@ export default function RekapPerjalananPage() {
       const [s, e] = filterWeek.split('|')
       query = query.gte('trip_date', s).lte('trip_date', e)
     } else if (filterMode === 'bulanan' && filterMonth) {
+      // Gaji driver dibayar Sabtu (2 hari setelah minggu tutup Kamis, alias
+      // week_start_date/Jumat + 8 hari). Satu minggu trip bisa melewati akhir
+      // bulan (mis. trip tanggal 28 - 3), tapi upahnya cair sekaligus di SATU
+      // hari Sabtu — jadi seluruh minggu itu harus masuk ke bulan tempat
+      // Sabtu itu jatuh, bukan dipecah per tanggal trip individual. Makanya
+      // kita filter berdasarkan week_start_date yang Sabtu-nya (+8) jatuh di
+      // bulan terpilih, bukan trip_date mentah.
       const [year, month] = filterMonth.split('-')
-      const startDate = `${year}-${month}-01`
-      const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate()
-      const endDate = `${year}-${month}-${lastDay}`
-      query = query.gte('trip_date', startDate).lte('trip_date', endDate)
+      const y = parseInt(year), m = parseInt(month)
+      const monthStart = new Date(y, m - 1, 1)
+      const monthEnd = new Date(y, m, 0)
+      const weekStartFrom = new Date(monthStart)
+      weekStartFrom.setDate(weekStartFrom.getDate() - 8)
+      const weekStartTo = new Date(monthEnd)
+      weekStartTo.setDate(weekStartTo.getDate() - 8)
+      query = query.gte('week_start_date', localDateStr(weekStartFrom)).lte('week_start_date', localDateStr(weekStartTo))
     } else if (filterMode === 'kustom' && filterStart && filterEnd) {
       query = query.gte('trip_date', filterStart).lte('trip_date', filterEnd)
     }
