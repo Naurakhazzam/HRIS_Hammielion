@@ -75,6 +75,7 @@ export default function ApprovalKasKeluarPage() {
   const [processing, setProcessing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
 
@@ -150,7 +151,7 @@ export default function ApprovalKasKeluarPage() {
   }, [supabase])
 
   useEffect(() => { if (isAdmin) fetchAll() }, [isAdmin, fetchAll])
-  useEffect(() => { setSelectedIds([]) }, [tab])
+  useEffect(() => { setSelectedIds([]); setSearchTerm('') }, [tab])
 
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
@@ -214,8 +215,12 @@ export default function ApprovalKasKeluarPage() {
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
+  const filteredCashOut = searchTerm.trim()
+    ? cashOut.filter(en => (en.description || '').toLowerCase().includes(searchTerm.trim().toLowerCase()))
+    : cashOut
+
   const currentList: { id: string }[] =
-    tab === 'kas_keluar' ? cashOut :
+    tab === 'kas_keluar' ? filteredCashOut :
     tab === 'kas_masuk' ? cashIn :
     tab === 'hpp' ? hpp :
     tab === 'modal_cabang' ? modalItems :
@@ -268,6 +273,17 @@ export default function ApprovalKasKeluarPage() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        {tab === 'kas_keluar' && (
+          <div className="p-4 border-b border-slate-200">
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari berdasarkan keterangan..."
+              className="w-full sm:w-80 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        )}
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center gap-4">
           <span className="text-sm text-slate-500">{selectedIds.length > 0 ? `${selectedIds.length} dipilih` : 'Pilih entri untuk memproses massal'}</span>
           {selectedIds.length > 0 && (
@@ -309,8 +325,8 @@ export default function ApprovalKasKeluarPage() {
               {loading ? (
                 <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
               ) : currentList.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada entri yang menunggu verifikasi.</td></tr>
-              ) : tab === 'kas_keluar' ? cashOut.map(en => (
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">{tab === 'kas_keluar' && searchTerm.trim() ? 'Tidak ada entri yang cocok dengan pencarian.' : 'Tidak ada entri yang menunggu verifikasi.'}</td></tr>
+              ) : tab === 'kas_keluar' ? filteredCashOut.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
