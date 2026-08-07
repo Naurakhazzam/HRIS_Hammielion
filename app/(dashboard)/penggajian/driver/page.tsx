@@ -49,7 +49,7 @@ export default function PenggajianDriverPage() {
   const [filterWeek, setFilterWeek] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'input'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'kenek' | 'input'>('overview')
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
 
@@ -67,6 +67,12 @@ export default function PenggajianDriverPage() {
   const [kasbonForms, setKasbonForms] = useState<KasbonDeductionForm[]>([])
   const [fineForms, setFineForms] = useState<DriverFineForm[]>([{ tempId: '0', amount: '', reason: '' }])
   const [savingPotongan, setSavingPotongan] = useState(false)
+
+  const [detailKenek, setDetailKenek] = useState<{
+    helperName: string
+    weekLabel: string
+    trips: DeliveryTrip[]
+  } | null>(null)
 
   const supabase = createClient()
 
@@ -447,6 +453,83 @@ export default function PenggajianDriverPage() {
     if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => { win.print(); win.close() }, 400) }
   }
 
+  function openDetailKenek(helperName: string, helperTrips: DeliveryTrip[]) {
+    const weekLabel = weekOptions.find(w => w.value === filterWeek)?.label ?? filterWeek
+    setDetailKenek({ helperName, weekLabel, trips: helperTrips })
+  }
+
+  function handlePrintKenekSlip() {
+    if (!detailKenek) return
+    const totalUpah = detailKenek.trips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
+    const paidCount = detailKenek.trips.filter(t => t.payment_status === 'paid').length
+    const unpaidCount = detailKenek.trips.filter(t => t.payment_status === 'unpaid').length
+
+    const rowsHtml = detailKenek.trips.map(t => `
+      <tr>
+        <td>${new Date(t.trip_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</td>
+        <td>${t.delivery_routes?.name ?? '-'}</td>
+        <td>${t.vehicles?.name ?? '-'}</td>
+        <td>${t.driver?.full_name ?? '-'}</td>
+        <td class="center"><span class="badge ${t.payment_status === 'paid' ? 'green' : 'yellow'}">${t.payment_status === 'paid' ? 'Lunas' : 'Belum'}</span></td>
+        <td class="right">${formatRupiah(t.helper_earning)}</td>
+      </tr>`).join('')
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Slip - ${detailKenek.helperName}</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:sans-serif;padding:2rem;color:#1e293b}
+      .center{text-align:center}.right{text-align:right}
+      h1{font-size:1.25rem;font-weight:800;letter-spacing:.05em}
+      .sub{font-size:.875rem;color:#64748b;margin-top:.25rem}
+      .border-b{border-bottom:1px solid #e2e8f0;padding-bottom:1rem;margin-bottom:1rem}
+      .info{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:1rem;font-size:.875rem}
+      .info-row{display:flex;gap:.5rem}.lbl{color:#64748b;width:80px;flex-shrink:0}
+      .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem}
+      .stat{background:#f8fafc;border-radius:.5rem;padding:.75rem;text-align:center}
+      .stat.blue{background:#eff6ff}.stat.green{background:#f0fdf4}
+      .stat-lbl{font-size:.75rem;color:#64748b;margin-bottom:.25rem}
+      .stat-val{font-size:1.125rem;font-weight:700}
+      .stat-val.blue{color:#1d4ed8;font-size:.875rem}.stat-val.green{color:#15803d;font-size:.875rem}
+      .stat-sub{font-size:.75rem;color:#ef4444}
+      .tbl-wrap{border:1px solid #e2e8f0;border-radius:.5rem;overflow:hidden;margin-bottom:1rem}
+      table{width:100%;border-collapse:collapse;font-size:.875rem}
+      thead{background:#f8fafc}
+      th{padding:.6rem 1rem;text-align:left;font-size:.75rem;font-weight:600;color:#64748b;text-transform:uppercase;border-bottom:1px solid #e2e8f0}
+      td{padding:.6rem 1rem;border-bottom:1px solid #f1f5f9;color:#374151}
+      .badge{display:inline-flex;padding:.125rem .5rem;border-radius:.25rem;font-size:.75rem;font-weight:500}
+      .badge.green{background:#dcfce7;color:#166534}.badge.yellow{background:#fef9c3;color:#854d0e}
+      .total-row{display:flex;justify-content:space-between;align-items:center;padding:.75rem 1.25rem;border-radius:.5rem;background:#1e293b;color:#fff}
+      .total-amt{font-size:1.1rem;font-weight:700}
+    </style></head><body>
+    <div class="center border-b"><h1>HAMMIELION MANAGEMENT</h1><div class="sub">Slip Upah Kenek Ritase</div></div>
+    <div class="info">
+      <div class="info-row"><span class="lbl">Nama</span><span>: ${detailKenek.helperName}</span></div>
+      <div class="info-row"><span class="lbl">Periode</span><span>: ${detailKenek.weekLabel}</span></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-lbl">Total Trip</div><div class="stat-val">${detailKenek.trips.length}</div></div>
+      <div class="stat blue"><div class="stat-lbl">Total Upah</div><div class="stat-val blue">${formatRupiah(totalUpah)}</div></div>
+      <div class="stat green"><div class="stat-lbl">Status</div><div class="stat-val green">${paidCount} Lunas</div><div class="stat-sub">${unpaidCount} Belum</div></div>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Tgl</th><th>Rute</th><th>Mobil</th><th>Driver</th><th class="center">Status</th><th class="right">Upah</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table></div>
+    <div class="total-row"><span>Total Upah</span><span class="total-amt">${formatRupiah(totalUpah)}</span></div>
+    </body></html>`
+
+    const win = window.open('', '_blank', 'width=800,height=700')
+    if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => { win.print(); win.close() }, 400) }
+  }
+
+  const groupedByHelper = trips.reduce((acc, trip) => {
+    if (!trip.has_helper || !trip.helper?.full_name) return acc
+    const helperName = trip.helper.full_name
+    if (!acc[helperName]) acc[helperName] = []
+    acc[helperName].push(trip)
+    return acc
+  }, {} as Record<string, DeliveryTrip[]>)
+
   const groupedByDriver = trips.reduce((acc, trip) => {
     const driverName = trip.driver?.full_name ?? '(Tanpa Driver)'
     if (!acc[driverName]) acc[driverName] = { trips: [], driverId: trip.driver_id ?? '' }
@@ -533,6 +616,10 @@ export default function PenggajianDriverPage() {
           className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'overview' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
           Overview Driver
         </button>
+        <button onClick={() => setActiveTab('kenek')}
+          className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'kenek' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          Overview Kenek
+        </button>
         <button onClick={() => setActiveTab('input')}
           className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'input' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
           + Input Trip
@@ -592,6 +679,54 @@ export default function PenggajianDriverPage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Tab Overview Kenek */}
+      {activeTab === 'kenek' && (
+        <div>
+          {loading ? (
+            <div className="flex justify-center items-center h-32 text-slate-400 text-sm">Memuat data...</div>
+          ) : Object.keys(groupedByHelper).length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
+              Belum ada trip dengan kenek di minggu ini.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Object.entries(groupedByHelper).map(([helperName, helperTrips]) => {
+                const totalEarning = helperTrips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
+                const paidCount = helperTrips.filter(t => t.payment_status === 'paid').length
+                const unpaidCount = helperTrips.length - paidCount
+                const allPaid = unpaidCount === 0
+
+                return (
+                  <div key={helperName} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col gap-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-800">{helperName}</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">{helperTrips.length} trip · {weekRangeLabel}</p>
+                      </div>
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${allPaid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                        {allPaid ? '✓ Lunas' : `${unpaidCount} Belum`}
+                      </span>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg px-3 py-2 flex justify-between items-center">
+                      <span className="text-xs text-slate-500">Total Upah Kenek</span>
+                      <span className="text-sm font-bold text-purple-700">{formatRupiah(totalEarning)}</span>
+                    </div>
+                    <button
+                      onClick={() => openDetailKenek(helperName, helperTrips)}
+                      className="w-full py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition">
+                      Detail & Cetak Slip
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <p className="text-xs text-slate-400 mt-4">
+            Catatan: upah kenek mulai dicatat terpisah sebagai beban "Gaji Kenek" tersendiri di Keuangan sejak minggu 31 Juli 2026 ke atas. Minggu-minggu sebelumnya, upah kenek masih tergabung dalam angka "Gaji Driver" seperti sebelumnya (data lama tidak diubah).
+          </p>
         </div>
       )}
 
@@ -885,6 +1020,92 @@ export default function PenggajianDriverPage() {
                     </div>
                   </>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+
+    {/* Modal Detail Kenek */}
+    {detailKenek && (() => {
+      const totalUpah = detailKenek.trips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
+      return (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+              <h2 className="text-base font-bold text-slate-700">Detail Upah Kenek</h2>
+              <div className="flex gap-2">
+                <button onClick={handlePrintKenekSlip} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium rounded-lg transition">
+                  🖨️ Cetak Slip
+                </button>
+                <button onClick={() => setDetailKenek(null)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium rounded-lg transition">
+                  ✕ Tutup
+                </button>
+              </div>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              <div className="text-center pb-4 border-b border-slate-200">
+                <h1 className="text-xl font-bold text-slate-800 tracking-wide">HAMMIELION MANAGEMENT</h1>
+                <p className="text-sm text-slate-500 mt-0.5">Slip Upah Kenek Ritase</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">Nama</span><span className="font-medium text-slate-800">: {detailKenek.helperName}</span></div>
+                <div className="flex gap-2"><span className="text-slate-500 w-20 shrink-0">Periode</span><span className="font-medium text-slate-800">: {detailKenek.weekLabel}</span></div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-slate-50 rounded-xl p-3 text-center">
+                  <p className="text-xs text-slate-500 mb-1">Total Trip</p>
+                  <p className="text-lg font-bold text-slate-800">{detailKenek.trips.length}</p>
+                </div>
+                <div className="bg-purple-50 rounded-xl p-3 text-center">
+                  <p className="text-xs text-slate-500 mb-1">Total Upah</p>
+                  <p className="text-sm font-bold text-purple-700">{formatRupiah(totalUpah)}</p>
+                </div>
+                <div className="bg-green-50 rounded-xl p-3 text-center">
+                  <p className="text-xs text-slate-500 mb-1">Status</p>
+                  <p className="text-sm font-bold text-green-700">{detailKenek.trips.filter(t => t.payment_status === 'paid').length} Lunas</p>
+                  <p className="text-xs text-red-500">{detailKenek.trips.filter(t => t.payment_status === 'unpaid').length} Belum</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl overflow-hidden border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200">
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Tgl</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Rute</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Mobil</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Driver</th>
+                      <th className="px-4 py-2.5 text-center text-xs font-semibold text-slate-500 uppercase">Status</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-500 uppercase">Upah</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {detailKenek.trips.map((t) => (
+                      <tr key={t.id}>
+                        <td className="px-4 py-2.5 text-slate-600 text-xs">{new Date(t.trip_date).toLocaleDateString('id-ID', {day:'2-digit', month:'short'})}</td>
+                        <td className="px-4 py-2.5 text-slate-700">{t.delivery_routes?.name ?? '-'}</td>
+                        <td className="px-4 py-2.5 text-slate-600 text-xs">{t.vehicles?.name ?? '-'}</td>
+                        <td className="px-4 py-2.5 text-slate-600 text-xs">{t.driver?.full_name ?? '-'}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${t.payment_status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                            {t.payment_status === 'paid' ? 'Lunas' : 'Belum'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-medium text-slate-800">{formatRupiah(t.helper_earning)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex items-center justify-between bg-slate-800 text-white rounded-xl px-5 py-4">
+                <span className="font-bold">Total Upah</span>
+                <span className="font-bold text-xl">{formatRupiah(totalUpah)}</span>
               </div>
             </div>
           </div>
