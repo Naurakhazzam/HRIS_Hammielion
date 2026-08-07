@@ -29,6 +29,9 @@ export default function SetupDriverPage() {
   // Form tambah mobil
   const [vehicleForm, setVehicleForm] = useState({ name: '', plate_number: '' })
 
+  // Form tambah rute
+  const [routeForm, setRouteForm] = useState({ name: '' })
+
   // Form tambah/edit tarif
   const [rateForm, setRateForm] = useState({
     vehicle_id: '',
@@ -94,6 +97,31 @@ export default function SetupDriverPage() {
     } else {
       showMessage('success', 'Mobil berhasil ditambahkan.')
       setVehicleForm({ name: '', plate_number: '' })
+      fetchData()
+    }
+  }
+
+  // ── Tambah Rute ──
+  async function handleRouteSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const { error } = await supabase.from('delivery_routes').insert([{ name: routeForm.name }])
+    if (error) {
+      showMessage('error', 'Gagal menambah rute: ' + error.message)
+    } else {
+      showMessage('success', 'Rute berhasil ditambahkan.')
+      setRouteForm({ name: '' })
+      fetchData()
+    }
+  }
+
+  // ── Nonaktifkan Rute ──
+  async function handleDeactivateRoute(routeId: string, routeName: string) {
+    if (!confirm(`Nonaktifkan rute "${routeName}"? Rute ini tidak akan muncul lagi di pilihan tarif baru, tapi data trip/tarif lama tetap aman.`)) return
+    const { error } = await supabase.from('delivery_routes').update({ is_active: false }).eq('id', routeId)
+    if (error) {
+      showMessage('error', 'Gagal menonaktifkan rute: ' + error.message)
+    } else {
+      showMessage('success', `Rute "${routeName}" berhasil dinonaktifkan.`)
       fetchData()
     }
   }
@@ -244,6 +272,39 @@ export default function SetupDriverPage() {
                 Simpan Mobil
               </button>
             </form>
+          </div>
+
+          {/* Form Tambah Rute */}
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+            <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Tambah Rute Baru</h2>
+            <form onSubmit={handleRouteSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Nama Rute <span className="text-red-500">*</span></label>
+                <input
+                  type="text" required placeholder="Cth: Ciamis"
+                  value={routeForm.name} onChange={(e) => setRouteForm({ name: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <button type="submit" className="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium rounded shadow-sm transition">
+                Simpan Rute
+              </button>
+            </form>
+            {routes.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-100 space-y-1.5">
+                {routes.map(r => (
+                  <div key={r.id} className="flex items-center justify-between py-1">
+                    <span className="text-sm text-slate-700">{r.name}</span>
+                    <button
+                      onClick={() => handleDeactivateRoute(r.id, r.name)}
+                      className="px-2 py-0.5 text-xs font-medium bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded transition"
+                    >
+                      Nonaktifkan
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Form Atur Tarif */}
