@@ -16,6 +16,7 @@ type DeliveryTrip = {
   helper_earning: number
   payment_status: string
   driver_id: string | null
+  helper_id: string | null
   driver: { full_name: string } | null
   helper: { full_name: string } | null
   vehicles: { name: string; plate_number: string | null } | null
@@ -25,6 +26,15 @@ type DeliveryTrip = {
 type DriverKasbon = {
   id: string
   driver_id: string
+  total_amount: number
+  remaining_amount: number
+  notes: string | null
+  status: 'active' | 'lunas'
+}
+
+type HelperKasbon = {
+  id: string
+  helper_id: string
   total_amount: number
   remaining_amount: number
   notes: string | null
@@ -70,9 +80,18 @@ export default function PenggajianDriverPage() {
 
   const [detailKenek, setDetailKenek] = useState<{
     helperName: string
+    helperId: string
     weekLabel: string
+    weekStart: string
     trips: DeliveryTrip[]
+    activeKasbons: HelperKasbon[]
+    savedKasbonDeductions: { kasbon_id: string; deduction_amount: number; remaining_after: number }[]
+    savedFines: { id: string; amount: number; reason: string }[]
   } | null>(null)
+
+  const [kenekKasbonForms, setKenekKasbonForms] = useState<KasbonDeductionForm[]>([])
+  const [kenekFineForms, setKenekFineForms] = useState<DriverFineForm[]>([{ tempId: '0', amount: '', reason: '' }])
+  const [savingKenekPotongan, setSavingKenekPotongan] = useState(false)
 
   const supabase = createClient()
 
@@ -153,7 +172,7 @@ export default function PenggajianDriverPage() {
       .from('delivery_trips')
       .select(`
         id, trip_date, has_helper, driver_earning, helper_earning, payment_status,
-        driver_id,
+        driver_id, helper_id,
         driver:employees!delivery_trips_driver_id_fkey(full_name),
         helper:employees!delivery_trips_helper_id_fkey(full_name),
         vehicles(name, plate_number),
@@ -453,9 +472,87 @@ export default function PenggajianDriverPage() {
     if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => { win.print(); win.close() }, 400) }
   }
 
-  function openDetailKenek(helperName: string, helperTrips: DeliveryTrip[]) {
+  async function openDetailKenek(helperName: string, helperId: string, helperTrips: DeliveryTrip[]) {
     const weekLabel = weekOptions.find(w => w.value === filterWeek)?.label ?? filterWeek
-    setDetailKenek({ helperName, weekLabel, trips: helperTrips })
+    const [weekStart] = filterWeek.split('|')
+
+    const [{ data: kasbons }, { data: savedDed }, { data: savedFines }] = await Promise.all([
+      supabase.from('helper_kasbon').select('*').eq('helper_id', helperId).eq('status', 'active').order('created_at'),
+      supabase.from('helper_kasbon_deductions').select('*').eq('helper_id', helperId).eq('week_start_date', weekStart),
+      supabase.from('helper_fines').select('*').eq('helper_id', helperId).eq('week_start_date', weekStart),
+    ])
+
+    setDetailKenek({
+      helperName, helperId, weekLabel, weekStart,
+      trips: helperTrips,
+      activeKasbons: (kasbons || []) as HelperKasbon[],
+      savedKasbonDeductions: savedDed || [],
+      savedFines: savedFines || [],
+    })
+    setKenekKasbonForms((kasbons || []).map(k => ({ kasbon_id: k.id, amount: '' })))
+    setKenekFineForms([{ tempId: Date.now().toString(), amount: '', reason: '' }])
+  }
+
+  async function handleSaveKenekPotongan() {
+    if (!detailKenek) return
+    setSavingKenekPotongan(true)
+    const errors: string[] = []
+
+    for (const form of kenekKasbonForms) {
+      const amt = parseFloat(form.amount)
+      if (!amt || amt <= 0) continue
+      const kasbon = detailKenek.activeKasbons.find(k => k.id === form.kasbon_id)
+      if (!kasbon) continue
+      const deductAmt = Math.min(amt, kasbon.remaining_amount)
+      const remainingAfter = Math.round((kasbon.remaining_amount - deductAmt) * 100) / 100
+
+      const { error: e1 } = await supabase.from('helper_kasbon_deductions').insert({
+        kasbon_id: kasbon.id, helper_id: detailKenek.helperId,
+        week_start_date: detailKenek.weekStart,
+        deduction_amount: deductAmt, remaining_after: remainingAfter,
+      })
+      if (e1) { errors.push(e1.message); continue }
+
+      const upd: any = { remaining_amount: remainingAfter, updated_at: new Date().toISOString() }
+      if (remainingAfter === 0) upd.status = 'lunas'
+      await supabase.from('helper_kasbon').update(upd).eq('id', kasbon.id)
+    }
+
+    for (const fine of kenekFineForms) {
+      const amt = parseFloat(fine.amount)
+      if (!amt || amt <= 0 || !fine.reason.trim()) continue
+      const { error: e2 } = await supabase.from('helper_fines').insert({
+        helper_id: detailKenek.helperId,
+        week_start_date: detailKenek.weekStart,
+        amount: amt, reason: fine.reason.trim(),
+      })
+      if (e2) errors.push(e2.message)
+    }
+
+    if (errors.length > 0) showMessage('error', 'Ada error: ' + errors.join(', '))
+    else showMessage('success', 'Potongan berhasil disimpan.')
+
+    await openDetailKenek(detailKenek.helperName, detailKenek.helperId, detailKenek.trips)
+    setSavingKenekPotongan(false)
+  }
+
+  async function handleDeleteKenekFine(fineId: string) {
+    if (!detailKenek) return
+    if (!confirm('Hapus denda ini?')) return
+    await supabase.from('helper_fines').delete().eq('id', fineId)
+    await openDetailKenek(detailKenek.helperName, detailKenek.helperId, detailKenek.trips)
+  }
+
+  async function handleDeleteKenekKasbonDeduction(dedId: string, kasbonId: string) {
+    if (!detailKenek) return
+    if (!confirm('Batalkan potongan kasbon minggu ini? Saldo kasbon akan dikembalikan.')) return
+    const { data: ded } = await supabase.from('helper_kasbon_deductions').select('remaining_after, deduction_amount').eq('id', dedId).single()
+    if (ded) {
+      const restored = (ded as any).remaining_after + (ded as any).deduction_amount
+      await supabase.from('helper_kasbon').update({ remaining_amount: restored, status: 'active', updated_at: new Date().toISOString() }).eq('id', kasbonId)
+    }
+    await supabase.from('helper_kasbon_deductions').delete().eq('id', dedId)
+    await openDetailKenek(detailKenek.helperName, detailKenek.helperId, detailKenek.trips)
   }
 
   function handlePrintKenekSlip() {
@@ -463,6 +560,9 @@ export default function PenggajianDriverPage() {
     const totalUpah = detailKenek.trips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
     const paidCount = detailKenek.trips.filter(t => t.payment_status === 'paid').length
     const unpaidCount = detailKenek.trips.filter(t => t.payment_status === 'unpaid').length
+    const totalKasbon = detailKenek.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
+    const totalDenda = detailKenek.savedFines.reduce((s, f) => s + Number(f.amount), 0)
+    const gajiB = totalUpah - totalKasbon - totalDenda
 
     const rowsHtml = detailKenek.trips.map(t => `
       <tr>
@@ -474,11 +574,23 @@ export default function PenggajianDriverPage() {
         <td class="right">${formatRupiah(t.helper_earning)}</td>
       </tr>`).join('')
 
+    const kasbonRows = detailKenek.savedKasbonDeductions.map(d => `
+      <tr class="dedrow">
+        <td colspan="5">Potongan Kasbon <span class="sisa">(sisa: ${formatRupiah(d.remaining_after)})</span></td>
+        <td class="right red">-${formatRupiah(d.deduction_amount)}</td>
+      </tr>`).join('')
+
+    const dendaRows = detailKenek.savedFines.map(f => `
+      <tr class="dedrow">
+        <td colspan="5">Denda: ${f.reason}</td>
+        <td class="right red">-${formatRupiah(f.amount)}</td>
+      </tr>`).join('')
+
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Slip - ${detailKenek.helperName}</title>
     <style>
       *{box-sizing:border-box;margin:0;padding:0}
       body{font-family:sans-serif;padding:2rem;color:#1e293b}
-      .center{text-align:center}.right{text-align:right}
+      .center{text-align:center}.right{text-align:right}.red{color:#dc2626}
       h1{font-size:1.25rem;font-weight:800;letter-spacing:.05em}
       .sub{font-size:.875rem;color:#64748b;margin-top:.25rem}
       .border-b{border-bottom:1px solid #e2e8f0;padding-bottom:1rem;margin-bottom:1rem}
@@ -496,9 +608,15 @@ export default function PenggajianDriverPage() {
       thead{background:#f8fafc}
       th{padding:.6rem 1rem;text-align:left;font-size:.75rem;font-weight:600;color:#64748b;text-transform:uppercase;border-bottom:1px solid #e2e8f0}
       td{padding:.6rem 1rem;border-bottom:1px solid #f1f5f9;color:#374151}
+      .dedrow td{background:#fef2f2;color:#991b1b;font-size:.8rem;font-style:italic}
+      .sisa{font-size:.75rem;color:#64748b}
       .badge{display:inline-flex;padding:.125rem .5rem;border-radius:.25rem;font-size:.75rem;font-weight:500}
       .badge.green{background:#dcfce7;color:#166534}.badge.yellow{background:#fef9c3;color:#854d0e}
-      .total-row{display:flex;justify-content:space-between;align-items:center;padding:.75rem 1.25rem;border-radius:.5rem;background:#1e293b;color:#fff}
+      .total-wrap{display:flex;flex-direction:column;gap:.5rem}
+      .total-row{display:flex;justify-content:space-between;align-items:center;padding:.75rem 1.25rem;border-radius:.5rem}
+      .total-row.upah{background:#1e293b;color:#fff}
+      .total-row.pot{background:#fef2f2;color:#991b1b}
+      .total-row.bersih{background:#166534;color:#fff}
       .total-amt{font-size:1.1rem;font-weight:700}
     </style></head><body>
     <div class="center border-b"><h1>HAMMIELION MANAGEMENT</h1><div class="sub">Slip Upah Kenek Ritase</div></div>
@@ -513,9 +631,13 @@ export default function PenggajianDriverPage() {
     </div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>Tgl</th><th>Rute</th><th>Mobil</th><th>Driver</th><th class="center">Status</th><th class="right">Upah</th></tr></thead>
-      <tbody>${rowsHtml}</tbody>
+      <tbody>${rowsHtml}${kasbonRows}${dendaRows}</tbody>
     </table></div>
-    <div class="total-row"><span>Total Upah</span><span class="total-amt">${formatRupiah(totalUpah)}</span></div>
+    <div class="total-wrap">
+      <div class="total-row upah"><span>Total Upah</span><span class="total-amt">${formatRupiah(totalUpah)}</span></div>
+      ${(totalKasbon + totalDenda) > 0 ? `<div class="total-row pot"><span>Total Potongan</span><span class="total-amt">-${formatRupiah(totalKasbon + totalDenda)}</span></div>` : ''}
+      ${(totalKasbon + totalDenda) > 0 ? `<div class="total-row bersih"><span>Gaji Bersih</span><span class="total-amt">${formatRupiah(gajiB)}</span></div>` : ''}
+    </div>
     </body></html>`
 
     const win = window.open('', '_blank', 'width=800,height=700')
@@ -523,12 +645,12 @@ export default function PenggajianDriverPage() {
   }
 
   const groupedByHelper = trips.reduce((acc, trip) => {
-    if (!trip.has_helper || !trip.helper?.full_name) return acc
+    if (!trip.has_helper || !trip.helper?.full_name || !trip.helper_id) return acc
     const helperName = trip.helper.full_name
-    if (!acc[helperName]) acc[helperName] = []
-    acc[helperName].push(trip)
+    if (!acc[helperName]) acc[helperName] = { trips: [], helperId: trip.helper_id }
+    acc[helperName].trips.push(trip)
     return acc
-  }, {} as Record<string, DeliveryTrip[]>)
+  }, {} as Record<string, { trips: DeliveryTrip[]; helperId: string }>)
 
   const groupedByDriver = trips.reduce((acc, trip) => {
     const driverName = trip.driver?.full_name ?? '(Tanpa Driver)'
@@ -693,7 +815,8 @@ export default function PenggajianDriverPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Object.entries(groupedByHelper).map(([helperName, helperTrips]) => {
+              {Object.entries(groupedByHelper).map(([helperName, helperGroup]) => {
+                const { trips: helperTrips, helperId } = helperGroup
                 const totalEarning = helperTrips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
                 const paidCount = helperTrips.filter(t => t.payment_status === 'paid').length
                 const unpaidCount = helperTrips.length - paidCount
@@ -715,7 +838,7 @@ export default function PenggajianDriverPage() {
                       <span className="text-sm font-bold text-purple-700">{formatRupiah(totalEarning)}</span>
                     </div>
                     <button
-                      onClick={() => openDetailKenek(helperName, helperTrips)}
+                      onClick={() => openDetailKenek(helperName, helperId, helperTrips)}
                       className="w-full py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition">
                       Detail & Cetak Slip
                     </button>
@@ -1030,6 +1153,11 @@ export default function PenggajianDriverPage() {
     {/* Modal Detail Kenek */}
     {detailKenek && (() => {
       const totalUpah = detailKenek.trips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
+      const totalKenekKasbon = detailKenek.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
+      const totalKenekDenda = detailKenek.savedFines.reduce((s, f) => s + Number(f.amount), 0)
+      const totalKenekPotongan = totalKenekKasbon + totalKenekDenda
+      const kenekGajiB = totalUpah - totalKenekPotongan
+      const hasKenekSavedDeductions = detailKenek.savedKasbonDeductions.length > 0 || detailKenek.savedFines.length > 0
       return (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4">
@@ -1103,9 +1231,153 @@ export default function PenggajianDriverPage() {
                 </table>
               </div>
 
-              <div className="flex items-center justify-between bg-slate-800 text-white rounded-xl px-5 py-4">
-                <span className="font-bold">Total Upah</span>
-                <span className="font-bold text-xl">{formatRupiah(totalUpah)}</span>
+              {/* ─── SECTION POTONGAN KENEK ─── */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-700">✂️ Potongan Minggu Ini</span>
+                  {hasKenekSavedDeductions && (
+                    <span className="text-xs text-red-600 font-medium">Total: -{formatRupiah(totalKenekPotongan)}</span>
+                  )}
+                </div>
+                <div className="px-4 py-4 space-y-4">
+                  {hasKenekSavedDeductions && (
+                    <div className="space-y-2">
+                      {detailKenek.savedKasbonDeductions.map((d: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-2.5 bg-orange-50 rounded-lg border border-orange-100 text-sm">
+                          <div>
+                            <span className="font-medium text-orange-700">Kasbon</span>
+                            <span className="text-xs text-slate-500 ml-2">sisa: {formatRupiah(d.remaining_after)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-red-600">-{formatRupiah(d.deduction_amount)}</span>
+                            <button onClick={() => handleDeleteKenekKasbonDeduction(d.id, d.kasbon_id)}
+                              className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                          </div>
+                        </div>
+                      ))}
+                      {detailKenek.savedFines.map((f: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-2.5 bg-red-50 rounded-lg border border-red-100 text-sm">
+                          <div>
+                            <span className="font-medium text-red-700">Denda</span>
+                            <span className="text-xs text-slate-600 ml-2">{f.reason}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-red-600">-{formatRupiah(f.amount)}</span>
+                            <button onClick={() => handleDeleteKenekFine(f.id)}
+                              className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                          </div>
+                        </div>
+                      ))}
+                      <p className="text-xs text-slate-400 italic">Klik ✕ untuk membatalkan potongan yang sudah tersimpan.</p>
+                    </div>
+                  )}
+
+                  {hasKenekSavedDeductions && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <div className="flex-1 border-t border-dashed border-slate-300" />
+                      <span className="text-xs text-slate-400 font-medium px-1">Tambah Potongan Baru</span>
+                      <div className="flex-1 border-t border-dashed border-slate-300" />
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    {detailKenek.activeKasbons.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Kasbon Aktif</p>
+                        {detailKenek.activeKasbons.map((kasbon, i) => (
+                          <div key={kasbon.id} className="flex items-center gap-3 p-3 bg-orange-50 rounded-lg border border-orange-100">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-slate-700 truncate">{kasbon.notes || 'Kasbon'}</p>
+                              <p className="text-xs text-orange-600">Sisa: {formatRupiah(kasbon.remaining_amount)}</p>
+                            </div>
+                            <div className="shrink-0">
+                              <input
+                                type="number" min="0" max={kasbon.remaining_amount}
+                                placeholder="Potong Rp"
+                                value={kenekKasbonForms[i]?.amount || ''}
+                                onChange={e => {
+                                  const updated = [...kenekKasbonForms]
+                                  updated[i] = { ...updated[i], amount: e.target.value }
+                                  setKenekKasbonForms(updated)
+                                }}
+                                className="w-32 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-orange-400"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic bg-slate-50 rounded-lg p-3">
+                        Tidak ada kasbon aktif untuk kenek ini. Input kasbon di tab Kasbon → Kasbon Kenek.
+                      </p>
+                    )}
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Denda</p>
+                        <button
+                          onClick={() => setKenekFineForms([...kenekFineForms, { tempId: Date.now().toString(), amount: '', reason: '' }])}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+                          + Tambah Denda
+                        </button>
+                      </div>
+                      {kenekFineForms.map((fine, i) => (
+                        <div key={fine.tempId} className="flex gap-2 items-center">
+                          <input
+                            type="text" placeholder="Alasan denda"
+                            value={fine.reason}
+                            onChange={e => {
+                              const updated = [...kenekFineForms]
+                              updated[i] = { ...updated[i], reason: e.target.value }
+                              setKenekFineForms(updated)
+                            }}
+                            className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-xs outline-none focus:ring-1 focus:ring-red-400"
+                          />
+                          <input
+                            type="number" min="0" placeholder="Nominal"
+                            value={fine.amount}
+                            onChange={e => {
+                              const updated = [...kenekFineForms]
+                              updated[i] = { ...updated[i], amount: e.target.value }
+                              setKenekFineForms(updated)
+                            }}
+                            className="w-28 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-red-400"
+                          />
+                          {kenekFineForms.length > 1 && (
+                            <button onClick={() => setKenekFineForms(kenekFineForms.filter((_, idx) => idx !== i))}
+                              className="text-red-400 hover:text-red-600 text-sm px-1 shrink-0">✕</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={handleSaveKenekPotongan}
+                      disabled={savingKenekPotongan}
+                      className="w-full py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                      {savingKenekPotongan ? 'Menyimpan...' : '💾 Simpan Potongan'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between bg-slate-800 text-white rounded-xl px-5 py-4">
+                  <span className="font-bold">Total Upah</span>
+                  <span className="font-bold text-xl">{formatRupiah(totalUpah)}</span>
+                </div>
+                {totalKenekPotongan > 0 && (
+                  <>
+                    <div className="flex items-center justify-between bg-red-50 border border-red-100 rounded-xl px-5 py-3">
+                      <span className="text-sm font-medium text-red-700">Total Potongan</span>
+                      <span className="font-bold text-red-700">-{formatRupiah(totalKenekPotongan)}</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-green-700 text-white rounded-xl px-5 py-4">
+                      <span className="font-bold">Gaji Bersih</span>
+                      <span className="font-bold text-xl">{formatRupiah(kenekGajiB)}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
