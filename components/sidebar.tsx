@@ -61,6 +61,8 @@ const adminNavItems: NavNode[] = [
         submenu: [
           { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
           { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
+          { name: 'Pembelian & Utang Supplier', href: '/keuangan/pembelian' },
+          { name: 'Master Supplier', href: '/keuangan/pembelian/supplier' },
           { name: 'Kategori Kas Keluar', href: '/keuangan/kategori' },
           { name: 'Biaya Tetap Berkala', href: '/keuangan/biaya-tetap' },
         ]
@@ -143,6 +145,8 @@ const employeeNavItems: NavNode[] = [
         submenu: [
           { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
           { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
+          { name: 'Pembelian & Utang Supplier', href: '/keuangan/pembelian' },
+          { name: 'Master Supplier', href: '/keuangan/pembelian/supplier' },
         ]
       },
       {
@@ -183,7 +187,7 @@ export default function Sidebar() {
     'Penggajian': pathname.startsWith('/penggajian'),
     'Keuangan':   pathname.startsWith('/keuangan'),
     'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
-    'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
+    'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/pembelian') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
     'KPI':        pathname.startsWith('/kpi'),
     'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional') || pathname.startsWith('/keuangan/rekening'),
