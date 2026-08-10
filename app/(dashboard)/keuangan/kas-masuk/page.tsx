@@ -11,6 +11,7 @@ type CashIn = {
   branch_id: string
   transaction_date: string
   amount: number
+  expense_amount: number
   cash_adjustment: number
   payment_method: string
   description: string | null
@@ -47,11 +48,13 @@ export default function KasMasukPage() {
   const [editRowBranchId, setEditRowBranchId] = useState<string>('')
   const [editRowSelisihType, setEditRowSelisihType] = useState<'none' | 'plus' | 'minus'>('none')
   const [editRowSelisihAmount, setEditRowSelisihAmount] = useState<string>('')
+  const [editRowExpenseAmount, setEditRowExpenseAmount] = useState<string>('')
 
   const today = todayLocalStr()
   const [form, setForm] = useState({
     branch_id: '', transaction_date: today, amount: '', payment_method: 'cash', description: '', account_id: '',
   })
+  const [expenseAmount, setExpenseAmount] = useState('')
   const [selisihType, setSelisihType] = useState<'none' | 'plus' | 'minus'>('none')
   const [selisihAmount, setSelisihAmount] = useState('')
 
@@ -70,7 +73,7 @@ export default function KasMasukPage() {
 
     let query = supabase
       .from('fin_cash_in')
-      .select('id, branch_id, transaction_date, amount, cash_adjustment, payment_method, description, status, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
+      .select('id, branch_id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
@@ -136,20 +139,27 @@ export default function KasMasukPage() {
       return
     }
 
+    const expenseNum = expenseAmount ? (parseFloat(expenseAmount) || 0) : 0
+    if (expenseAmount && (isNaN(expenseNum) || expenseNum < 0)) {
+      showMessage('error', 'Nominal pengeluaran tidak valid.')
+      return
+    }
+
     const selisihNum = selisihType === 'none' ? 0 : (parseFloat(selisihAmount) || 0)
     if (selisihType !== 'none' && (isNaN(selisihNum) || selisihNum <= 0)) {
       showMessage('error', 'Nominal selisih tidak valid.')
       return
     }
     const cashAdjustment = selisihType === 'plus' ? selisihNum : selisihType === 'minus' ? -selisihNum : 0
-    if (amountNum + cashAdjustment < 0) {
-      showMessage('error', 'Selisih minus tidak boleh lebih besar dari omzet.')
+    if (amountNum - expenseNum + cashAdjustment < 0) {
+      showMessage('error', 'Pengeluaran + selisih minus tidak boleh lebih besar dari omzet.')
       return
     }
 
     setSubmitting(true)
     const { error } = await supabase.from('fin_cash_in').insert({
       branch_id: branchId, transaction_date: form.transaction_date, amount: amountNum,
+      expense_amount: expenseNum,
       cash_adjustment: cashAdjustment,
       payment_method: form.payment_method, description: form.description || null,
       account_id: form.account_id,
@@ -159,6 +169,7 @@ export default function KasMasukPage() {
     else {
       showMessage('success', 'Omzet harian berhasil dicatat, menunggu verifikasi.')
       setForm(f => ({ ...f, amount: '', description: '', account_id: '' }))
+      setExpenseAmount('')
       setSelisihType('none')
       setSelisihAmount('')
       fetchRows()
@@ -176,7 +187,7 @@ export default function KasMasukPage() {
   }
 
   const totalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount), 0)
-  const totalPhysicalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount) + Number(r.cash_adjustment), 0)
+  const totalPhysicalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount) - Number(r.expense_amount) + Number(r.cash_adjustment), 0)
 
   function canEditRow(r: CashIn) {
     if (r.status !== 'pending') return false
@@ -210,6 +221,7 @@ export default function KasMasukPage() {
     setEditRowBranchId(r.branch_id)
     setEditRowSelisihType(r.cash_adjustment > 0 ? 'plus' : r.cash_adjustment < 0 ? 'minus' : 'none')
     setEditRowSelisihAmount(r.cash_adjustment !== 0 ? String(Math.abs(r.cash_adjustment)) : '')
+    setEditRowExpenseAmount(r.expense_amount !== 0 ? String(r.expense_amount) : '')
   }
 
   async function saveEditRow(id: string) {
@@ -217,11 +229,12 @@ export default function KasMasukPage() {
     if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
     if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
     if (!editRowBranchId) { showMessage('error', 'Pilih cabang dulu.'); return }
+    const expenseNum = editRowExpenseAmount ? (parseFloat(editRowExpenseAmount) || 0) : 0
     const selisihNum = editRowSelisihType === 'none' ? 0 : (parseFloat(editRowSelisihAmount) || 0)
     const cashAdjustment = editRowSelisihType === 'plus' ? selisihNum : editRowSelisihType === 'minus' ? -selisihNum : 0
-    if (amountNum + cashAdjustment < 0) { showMessage('error', 'Selisih minus tidak boleh lebih besar dari omzet.'); return }
+    if (amountNum - expenseNum + cashAdjustment < 0) { showMessage('error', 'Pengeluaran + selisih minus tidak boleh lebih besar dari omzet.'); return }
     const { error } = await supabase.from('fin_cash_in')
-      .update({ branch_id: editRowBranchId, transaction_date: editRowDate, amount: amountNum, cash_adjustment: cashAdjustment, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId })
+      .update({ branch_id: editRowBranchId, transaction_date: editRowDate, amount: amountNum, expense_amount: expenseNum, cash_adjustment: cashAdjustment, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId })
       .eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
     else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
@@ -271,8 +284,16 @@ export default function KasMasukPage() {
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
             <div className="pt-2 border-t border-slate-100">
-              <label className="block text-xs font-medium text-slate-700 mb-1">Selisih Uang Fisik (Opsional)</label>
-              <p className="text-[11px] text-slate-400 mb-2">Isi jika uang fisik yang diterima beda dari omzet di atas (misal kurang/lebih saat hitung kas).</p>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Pengeluaran (Opsional)</label>
+              <p className="text-[11px] text-slate-400 mb-2">Uang yang dipakai langsung dari hasil kas hari itu (mengurangi uang fisik yang diterima).</p>
+              <input type="number" min="0" step="1" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)}
+                placeholder="Contoh: 100000"
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+
+            <div className="pt-2 border-t border-slate-100">
+              <label className="block text-xs font-medium text-slate-700 mb-1">Plus Minus Kasir (Opsional)</label>
+              <p className="text-[11px] text-slate-400 mb-2">Isi jika ada selisih hitung kasir (kurang/lebih saat hitung kas fisik).</p>
               <div className="flex gap-2 mb-2">
                 {(['none', 'plus', 'minus'] as const).map(t => (
                   <button key={t} type="button" onClick={() => setSelisihType(t)}
@@ -292,12 +313,13 @@ export default function KasMasukPage() {
               )}
               {(() => {
                 const amt = parseFloat(form.amount) || 0
+                const exp = expenseAmount ? (parseFloat(expenseAmount) || 0) : 0
                 const sel = selisihType === 'none' ? 0 : (parseFloat(selisihAmount) || 0)
                 const adj = selisihType === 'plus' ? sel : selisihType === 'minus' ? -sel : 0
-                if (selisihType === 'none') return null
+                if (exp === 0 && selisihType === 'none') return null
                 return (
                   <p className="text-xs text-slate-500 mt-2">
-                    Uang Fisik Diterima: <span className="font-bold text-slate-700">{formatRupiah(Math.max(0, amt + adj))}</span>
+                    Uang Fisik Diterima: <span className="font-bold text-slate-700">{formatRupiah(Math.max(0, amt - exp + adj))}</span>
                   </p>
                 )
               })()}
@@ -410,6 +432,9 @@ export default function KasMasukPage() {
                       <td className="px-4 py-3 text-sm text-right">
                         {editingRowId === r.id ? (
                           <div className="flex flex-col items-end gap-1">
+                            <input type="number" min="0" step="1" value={editRowExpenseAmount} onChange={e => setEditRowExpenseAmount(e.target.value)}
+                              placeholder="Pengeluaran"
+                              className="w-24 px-2 py-1 border border-slate-300 rounded text-xs text-right" />
                             <div className="flex gap-1">
                               {(['none', 'plus', 'minus'] as const).map(t => (
                                 <button key={t} type="button" onClick={() => setEditRowSelisihType(t)}
@@ -429,12 +454,15 @@ export default function KasMasukPage() {
                           </div>
                         ) : (
                           <div>
-                            <span className={`font-semibold ${r.cash_adjustment < 0 ? 'text-red-600' : r.cash_adjustment > 0 ? 'text-green-600' : 'text-slate-800'}`}>
-                              {formatRupiah(r.amount + r.cash_adjustment)}
+                            <span className={`font-semibold ${(r.expense_amount > 0 || r.cash_adjustment < 0) ? 'text-red-600' : r.cash_adjustment > 0 ? 'text-green-600' : 'text-slate-800'}`}>
+                              {formatRupiah(r.amount - r.expense_amount + r.cash_adjustment)}
                             </span>
+                            {r.expense_amount !== 0 && (
+                              <div className="text-[10px] text-slate-400">−{formatRupiah(r.expense_amount)} pengeluaran</div>
+                            )}
                             {r.cash_adjustment !== 0 && (
                               <div className="text-[10px] text-slate-400">
-                                {r.cash_adjustment > 0 ? '+' : '−'}{formatRupiah(Math.abs(r.cash_adjustment))} selisih
+                                {r.cash_adjustment > 0 ? '+' : '−'}{formatRupiah(Math.abs(r.cash_adjustment))} selisih kasir
                               </div>
                             )}
                           </div>

@@ -16,6 +16,7 @@ type PendingCashOut = {
 type PendingCashIn = {
   id: string
   amount: number
+  expense_amount: number
   cash_adjustment: number
   payment_method: string
   transaction_date: string
@@ -87,7 +88,7 @@ export default function ApprovalKasKeluarPage() {
         .select('id, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
         .eq('status', 'pending').order('transaction_date', { ascending: false }),
       supabase.from('fin_cash_in')
-        .select('id, amount, cash_adjustment, payment_method, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
+        .select('id, amount, expense_amount, cash_adjustment, payment_method, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
         .eq('status', 'pending').order('transaction_date', { ascending: false }),
       supabase.from('fin_hpp_entries')
         .select('id, hpp_amount, notes, entry_date, branches(name), input_user:users!fin_hpp_entries_input_by_fkey(email)')
@@ -371,15 +372,17 @@ export default function ApprovalKasKeluarPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-right">
                     <span className="font-semibold text-slate-800">{formatRupiah(en.amount)}</span>
-                    {en.cash_adjustment !== 0 && (
-                      <div className={`text-[10px] ${en.cash_adjustment < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        Fisik: {formatRupiah(en.amount + en.cash_adjustment)} ({en.cash_adjustment > 0 ? '+' : '−'}{formatRupiah(Math.abs(en.cash_adjustment))})
+                    {(en.expense_amount !== 0 || en.cash_adjustment !== 0) && (
+                      <div className="text-[10px] text-slate-500">
+                        Fisik: {formatRupiah(en.amount - en.expense_amount + en.cash_adjustment)}
+                        {en.expense_amount !== 0 && <span className="text-red-600"> (−{formatRupiah(en.expense_amount)} pengeluaran)</span>}
+                        {en.cash_adjustment !== 0 && <span className={en.cash_adjustment < 0 ? 'text-red-600' : 'text-green-600'}> ({en.cash_adjustment > 0 ? '+' : '−'}{formatRupiah(Math.abs(en.cash_adjustment))} selisih)</span>}
                       </div>
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-500">
-                    {en.cash_adjustment !== 0
-                      ? <span className={en.cash_adjustment < 0 ? 'text-red-600' : 'text-green-600'}>Ada selisih uang fisik, cek sebelum disetujui</span>
+                    {(en.expense_amount !== 0 || en.cash_adjustment !== 0)
+                      ? <span className="text-amber-600">Ada pengeluaran/selisih uang fisik, cek sebelum disetujui</span>
                       : '—'}
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500">{en.input_user?.email || '—'}</td>
