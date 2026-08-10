@@ -11,6 +11,7 @@ type CashIn = {
   branch_id: string
   transaction_date: string
   amount: number
+  cash_adjustment: number
   payment_method: string
   description: string | null
   status: string
@@ -44,11 +45,15 @@ export default function KasMasukPage() {
   const [editRowDescription, setEditRowDescription] = useState<string>('')
   const [editRowDate, setEditRowDate] = useState<string>('')
   const [editRowBranchId, setEditRowBranchId] = useState<string>('')
+  const [editRowSelisihType, setEditRowSelisihType] = useState<'none' | 'plus' | 'minus'>('none')
+  const [editRowSelisihAmount, setEditRowSelisihAmount] = useState<string>('')
 
   const today = todayLocalStr()
   const [form, setForm] = useState({
     branch_id: '', transaction_date: today, amount: '', payment_method: 'cash', description: '', account_id: '',
   })
+  const [selisihType, setSelisihType] = useState<'none' | 'plus' | 'minus'>('none')
+  const [selisihAmount, setSelisihAmount] = useState('')
 
   const thisMonth = today.slice(0, 7)
   const [filterMonth, setFilterMonth] = useState(thisMonth)
@@ -65,7 +70,7 @@ export default function KasMasukPage() {
 
     let query = supabase
       .from('fin_cash_in')
-      .select('id, branch_id, transaction_date, amount, payment_method, description, status, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
+      .select('id, branch_id, transaction_date, amount, cash_adjustment, payment_method, description, status, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
@@ -131,9 +136,21 @@ export default function KasMasukPage() {
       return
     }
 
+    const selisihNum = selisihType === 'none' ? 0 : (parseFloat(selisihAmount) || 0)
+    if (selisihType !== 'none' && (isNaN(selisihNum) || selisihNum <= 0)) {
+      showMessage('error', 'Nominal selisih tidak valid.')
+      return
+    }
+    const cashAdjustment = selisihType === 'plus' ? selisihNum : selisihType === 'minus' ? -selisihNum : 0
+    if (amountNum + cashAdjustment < 0) {
+      showMessage('error', 'Selisih minus tidak boleh lebih besar dari omzet.')
+      return
+    }
+
     setSubmitting(true)
     const { error } = await supabase.from('fin_cash_in').insert({
       branch_id: branchId, transaction_date: form.transaction_date, amount: amountNum,
+      cash_adjustment: cashAdjustment,
       payment_method: form.payment_method, description: form.description || null,
       account_id: form.account_id,
       input_by: myUserId, status: 'pending',
@@ -142,6 +159,8 @@ export default function KasMasukPage() {
     else {
       showMessage('success', 'Omzet harian berhasil dicatat, menunggu verifikasi.')
       setForm(f => ({ ...f, amount: '', description: '', account_id: '' }))
+      setSelisihType('none')
+      setSelisihAmount('')
       fetchRows()
     }
     setSubmitting(false)
@@ -157,6 +176,7 @@ export default function KasMasukPage() {
   }
 
   const totalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount), 0)
+  const totalPhysicalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount) + Number(r.cash_adjustment), 0)
 
   function canEditRow(r: CashIn) {
     if (r.status !== 'pending') return false
@@ -188,6 +208,8 @@ export default function KasMasukPage() {
     setEditRowDescription(r.description || '')
     setEditRowDate(r.transaction_date)
     setEditRowBranchId(r.branch_id)
+    setEditRowSelisihType(r.cash_adjustment > 0 ? 'plus' : r.cash_adjustment < 0 ? 'minus' : 'none')
+    setEditRowSelisihAmount(r.cash_adjustment !== 0 ? String(Math.abs(r.cash_adjustment)) : '')
   }
 
   async function saveEditRow(id: string) {
@@ -195,8 +217,11 @@ export default function KasMasukPage() {
     if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
     if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
     if (!editRowBranchId) { showMessage('error', 'Pilih cabang dulu.'); return }
+    const selisihNum = editRowSelisihType === 'none' ? 0 : (parseFloat(editRowSelisihAmount) || 0)
+    const cashAdjustment = editRowSelisihType === 'plus' ? selisihNum : editRowSelisihType === 'minus' ? -selisihNum : 0
+    if (amountNum + cashAdjustment < 0) { showMessage('error', 'Selisih minus tidak boleh lebih besar dari omzet.'); return }
     const { error } = await supabase.from('fin_cash_in')
-      .update({ branch_id: editRowBranchId, transaction_date: editRowDate, amount: amountNum, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId })
+      .update({ branch_id: editRowBranchId, transaction_date: editRowDate, amount: amountNum, cash_adjustment: cashAdjustment, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId })
       .eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
     else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
@@ -245,6 +270,38 @@ export default function KasMasukPage() {
                 placeholder="Contoh: 8000000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
+            <div className="pt-2 border-t border-slate-100">
+              <label className="block text-xs font-medium text-slate-700 mb-1">Selisih Uang Fisik (Opsional)</label>
+              <p className="text-[11px] text-slate-400 mb-2">Isi jika uang fisik yang diterima beda dari omzet di atas (misal kurang/lebih saat hitung kas).</p>
+              <div className="flex gap-2 mb-2">
+                {(['none', 'plus', 'minus'] as const).map(t => (
+                  <button key={t} type="button" onClick={() => setSelisihType(t)}
+                    className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${
+                      selisihType === t
+                        ? t === 'plus' ? 'bg-green-600 text-white border-green-600' : t === 'minus' ? 'bg-red-600 text-white border-red-600' : 'bg-slate-700 text-white border-slate-700'
+                        : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                    }`}>
+                    {t === 'none' ? 'Tidak Ada' : t === 'plus' ? '+ Lebih' : '− Kurang'}
+                  </button>
+                ))}
+              </div>
+              {selisihType !== 'none' && (
+                <input type="number" min="1" step="1" value={selisihAmount} onChange={e => setSelisihAmount(e.target.value)}
+                  placeholder="Nominal selisih, contoh: 100000"
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              )}
+              {(() => {
+                const amt = parseFloat(form.amount) || 0
+                const sel = selisihType === 'none' ? 0 : (parseFloat(selisihAmount) || 0)
+                const adj = selisihType === 'plus' ? sel : selisihType === 'minus' ? -sel : 0
+                if (selisihType === 'none') return null
+                return (
+                  <p className="text-xs text-slate-500 mt-2">
+                    Uang Fisik Diterima: <span className="font-bold text-slate-700">{formatRupiah(Math.max(0, amt + adj))}</span>
+                  </p>
+                )
+              })()}
+            </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Metode</label>
               <select value={form.payment_method}
@@ -281,9 +338,15 @@ export default function KasMasukPage() {
         </div>
 
         <div className="lg:col-span-2 space-y-4">
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-            <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Omzet Disetujui — Bulan Ini</p>
-            <p className="text-2xl font-bold text-green-700">{formatRupiah(totalApprovedThisMonth)}</p>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Omzet Disetujui — Bulan Ini</p>
+              <p className="text-2xl font-bold text-green-700">{formatRupiah(totalApprovedThisMonth)}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Uang Fisik Diterima — Bulan Ini</p>
+              <p className="text-2xl font-bold text-slate-800">{formatRupiah(totalPhysicalApprovedThisMonth)}</p>
+            </div>
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -310,7 +373,8 @@ export default function KasMasukPage() {
                   <tr className="bg-white border-b border-slate-200 sticky top-0 z-10">
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Tanggal</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Cabang</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Jumlah</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Omzet</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Uang Fisik</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Metode</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Rekening</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Keterangan</th>
@@ -320,7 +384,7 @@ export default function KasMasukPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {rows.length === 0 ? (
-                    <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
+                    <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
                   ) : rows.map(r => (
                     <tr key={r.id} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3 text-sm text-slate-600">
@@ -342,6 +406,39 @@ export default function KasMasukPage() {
                           <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
                             className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
                         ) : formatRupiah(r.amount)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right">
+                        {editingRowId === r.id ? (
+                          <div className="flex flex-col items-end gap-1">
+                            <div className="flex gap-1">
+                              {(['none', 'plus', 'minus'] as const).map(t => (
+                                <button key={t} type="button" onClick={() => setEditRowSelisihType(t)}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium border transition ${
+                                    editRowSelisihType === t
+                                      ? t === 'plus' ? 'bg-green-600 text-white border-green-600' : t === 'minus' ? 'bg-red-600 text-white border-red-600' : 'bg-slate-700 text-white border-slate-700'
+                                      : 'bg-white text-slate-600 border-slate-300'
+                                  }`}>
+                                  {t === 'none' ? '=' : t === 'plus' ? '+' : '−'}
+                                </button>
+                              ))}
+                            </div>
+                            {editRowSelisihType !== 'none' && (
+                              <input type="number" min="1" step="1" value={editRowSelisihAmount} onChange={e => setEditRowSelisihAmount(e.target.value)}
+                                className="w-24 px-2 py-1 border border-slate-300 rounded text-xs text-right" />
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <span className={`font-semibold ${r.cash_adjustment < 0 ? 'text-red-600' : r.cash_adjustment > 0 ? 'text-green-600' : 'text-slate-800'}`}>
+                              {formatRupiah(r.amount + r.cash_adjustment)}
+                            </span>
+                            {r.cash_adjustment !== 0 && (
+                              <div className="text-[10px] text-slate-400">
+                                {r.cash_adjustment > 0 ? '+' : '−'}{formatRupiah(Math.abs(r.cash_adjustment))} selisih
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">
                         {editingRowId === r.id ? (

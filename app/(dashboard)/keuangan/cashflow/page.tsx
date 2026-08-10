@@ -18,6 +18,7 @@ type Account = {
   is_active: boolean
 }
 type CashRow = { account_id: string | null; amount: number; transaction_date: string }
+type CashInRow = CashRow & { cash_adjustment: number }
 
 type AccountFlow = Account & {
   periodIn: number
@@ -63,7 +64,7 @@ export default function CashFlowPage() {
 
     const [accRes, cashInRes, cashOutRes] = await Promise.all([
       supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active').order('account_type').order('bank_name'),
-      supabase.from('fin_cash_in').select('account_id, amount, transaction_date').eq('status', 'approved').lte('transaction_date', endDate),
+      supabase.from('fin_cash_in').select('account_id, amount, cash_adjustment, transaction_date').eq('status', 'approved').lte('transaction_date', endDate),
       supabase.from('fin_cash_out').select('account_id, amount, transaction_date').eq('status', 'approved').lte('transaction_date', endDate),
     ])
 
@@ -72,7 +73,8 @@ export default function CashFlowPage() {
     if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
 
     const accounts = (accRes.data as Account[]) || []
-    const cashIn = (cashInRes.data as CashRow[]) || []
+    // Fisik = omzet + selisih (plus/minus) — inilah yang benar-benar masuk ke rekening/kas
+    const cashIn = ((cashInRes.data as CashInRow[]) || []).map(r => ({ ...r, amount: Number(r.amount) + Number(r.cash_adjustment || 0) }))
     const cashOut = (cashOutRes.data as CashRow[]) || []
 
     const flowList: AccountFlow[] = accounts.map(acc => {
@@ -130,7 +132,7 @@ export default function CashFlowPage() {
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Cash Flow per Rekening/Kas</h1>
-          <p className="text-sm text-slate-500">Saldo Berjalan = Saldo Awal + Kas Masuk − Kas Keluar (disetujui) sejak tanggal saldo awal masing-masing rekening/kas.</p>
+          <p className="text-sm text-slate-500">Saldo Berjalan = Saldo Awal + Uang Fisik Masuk (omzet ± selisih) − Kas Keluar (disetujui) sejak tanggal saldo awal masing-masing rekening/kas.</p>
         </div>
         <div>
           <label className="block text-xs text-slate-500 mb-1">Bulan</label>
