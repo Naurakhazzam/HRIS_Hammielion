@@ -20,6 +20,7 @@ type LoadingEntry = {
   rate_per_kg: number
   total_earning: number
   payment_status: string
+  description: string | null
   loading_entry_participants: Participant[]
 }
 
@@ -43,7 +44,8 @@ export default function RekapBoronganPage() {
 
   const [formData, setFormData] = useState({
     entry_date: new Date().toISOString().split('T')[0],
-    total_kg: ''
+    total_kg: '',
+    description: ''
   })
   // Kunci partisipan yang dicentang, format "fw:<id>" atau "emp:<id>"
   const [selectedWorkerKeys, setSelectedWorkerKeys] = useState<string[]>([])
@@ -129,7 +131,7 @@ export default function RekapBoronganPage() {
     setLoading(true)
     let query = supabase
       .from('loading_entries')
-      .select('id, entry_date, total_kg, rate_per_kg, total_earning, payment_status, loading_entry_participants(share_amount, freelance_workers(full_name), employees(full_name))')
+      .select('id, entry_date, total_kg, rate_per_kg, total_earning, payment_status, description, loading_entry_participants(share_amount, freelance_workers(full_name), employees(full_name))')
       .order('entry_date', { ascending: false })
       .order('created_at', { ascending: false })
 
@@ -209,7 +211,8 @@ export default function RekapBoronganPage() {
         rate_per_kg: activeRate,
         total_earning: totalEarning,
         payment_status: 'unpaid',
-        created_by: myEmployeeId
+        created_by: myEmployeeId,
+        description: formData.description.trim()
       })
       .select('id')
       .single()
@@ -244,7 +247,7 @@ export default function RekapBoronganPage() {
       showMessage('error', 'Entri tersimpan tapi gagal menyimpan daftar peserta: ' + partError.message)
     } else {
       showMessage('success', 'Catatan bongkar muat berhasil disimpan.')
-      setFormData({ ...formData, total_kg: '' }) // Reset kg saja
+      setFormData({ ...formData, total_kg: '', description: '' }) // Reset kg & keterangan
       setSelectedWorkerKeys([])
       fetchEntries()
     }
@@ -393,14 +396,26 @@ export default function RekapBoronganPage() {
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Total Muatan (Kg) <span className="text-red-500">*</span></label>
-              <input 
-                type="number" 
-                required 
+              <input
+                type="number"
+                required
                 min="0.1"
                 step="0.1"
-                value={formData.total_kg} 
+                value={formData.total_kg}
                 onChange={(e) => setFormData({...formData, total_kg: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Keterangan <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                required
+                value={formData.description}
+                onChange={(e) => setFormData({...formData, description: e.target.value})}
+                placeholder="Contoh: Bongkar pupuk NPK dari Cirebon"
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
@@ -512,6 +527,7 @@ export default function RekapBoronganPage() {
                     />
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Pekerja</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Keterangan</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Muatan (Kg)</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Tarif</th>
@@ -522,11 +538,11 @@ export default function RekapBoronganPage() {
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
                   </tr>
                 ) : entries.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada catatan bongkar muat.</td>
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada catatan bongkar muat.</td>
                   </tr>
                 ) : (
                   entries.map((ent) => (
@@ -559,6 +575,9 @@ export default function RekapBoronganPage() {
                             ))}
                           </div>
                         </details>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-sm text-slate-600 max-w-[220px]">{ent.description || '-'}</div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-sm text-slate-600 capitalize">
