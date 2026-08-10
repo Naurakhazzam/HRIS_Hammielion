@@ -542,20 +542,28 @@ export default function RekapBoronganPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="space-y-0.5">
-                          {ent.loading_entry_participants.map((p, i) => (
-                            <div key={i} className="text-sm text-slate-800 flex items-center gap-1.5">
-                              <span className="font-medium">{p.freelance_workers?.full_name ?? p.employees?.full_name}</span>
-                              {p.employees?.full_name && (
-                                <span className="text-[9px] text-blue-600 font-semibold uppercase bg-blue-50 px-1 rounded">Gudang</span>
-                              )}
-                              <span className="text-xs text-slate-400">({formatRupiah(p.share_amount)})</span>
-                            </div>
-                          ))}
-                        </div>
+                        <details className="group">
+                          <summary className="cursor-pointer list-none flex items-center gap-1.5 text-sm font-medium text-slate-800 select-none">
+                            <span className="text-slate-400 text-[10px] transition-transform group-open:rotate-90">▶</span>
+                            {ent.loading_entry_participants.length} Pekerja
+                          </summary>
+                          <div className="mt-1.5 ml-1 pl-3 space-y-1 border-l-2 border-slate-100">
+                            {ent.loading_entry_participants.map((p, i) => (
+                              <div key={i} className="text-xs text-slate-600 flex items-center gap-1.5">
+                                <span className="font-medium text-slate-700">{p.freelance_workers?.full_name ?? p.employees?.full_name}</span>
+                                {p.employees?.full_name && (
+                                  <span className="text-[9px] text-blue-600 font-semibold uppercase bg-blue-50 px-1 rounded">Gudang</span>
+                                )}
+                                <span className="text-slate-400">({formatRupiah(p.share_amount)})</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="text-sm text-slate-600">{new Date(ent.entry_date).toLocaleDateString('id-ID')}</div>
+                        <div className="text-sm text-slate-600 capitalize">
+                          {new Date(ent.entry_date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="text-sm font-semibold text-slate-700">{ent.total_kg} Kg</span>
