@@ -8,6 +8,8 @@ type FreelanceWorker = { id: string; full_name: string }
 type GudangEmployee = { id: string; full_name: string }
 
 type Participant = {
+  freelance_worker_id: string | null
+  employee_id: string | null
   share_amount: number
   freelance_workers: { full_name: string } | null
   employees: { full_name: string } | null
@@ -52,6 +54,16 @@ export default function RekapBoronganPage() {
 
   const toggleWorkerKey = (key: string) => {
     setSelectedWorkerKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+  }
+
+  // Edit modal state
+  const [editEntry, setEditEntry] = useState<LoadingEntry | null>(null)
+  const [editForm, setEditForm] = useState({ entry_date: '', total_kg: '', rate_per_kg: '', description: '' })
+  const [editSelectedWorkerKeys, setEditSelectedWorkerKeys] = useState<string[]>([])
+  const [editSubmitting, setEditSubmitting] = useState(false)
+
+  const toggleEditWorkerKey = (key: string) => {
+    setEditSelectedWorkerKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
   }
 
   useEffect(() => {
@@ -131,7 +143,7 @@ export default function RekapBoronganPage() {
     setLoading(true)
     let query = supabase
       .from('loading_entries')
-      .select('id, entry_date, total_kg, rate_per_kg, total_earning, payment_status, description, loading_entry_participants(share_amount, freelance_workers(full_name), employees(full_name))')
+      .select('id, entry_date, total_kg, rate_per_kg, total_earning, payment_status, description, loading_entry_participants(freelance_worker_id, employee_id, share_amount, freelance_workers(full_name), employees(full_name))')
       .order('entry_date', { ascending: false })
       .order('created_at', { ascending: false })
 
@@ -292,6 +304,110 @@ export default function RekapBoronganPage() {
       fetchEntries()
     }
     setSubmitting(false)
+  }
+
+  function openEditModal(ent: LoadingEntry) {
+    setEditEntry(ent)
+    setEditForm({
+      entry_date: ent.entry_date,
+      total_kg: String(ent.total_kg),
+      rate_per_kg: String(ent.rate_per_kg),
+      description: ent.description || ''
+    })
+    setEditSelectedWorkerKeys(
+      ent.loading_entry_participants.map(p =>
+        p.freelance_worker_id ? `fw:${p.freelance_worker_id}` : `emp:${p.employee_id}`
+      )
+    )
+  }
+
+  async function handleEditSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editEntry) return
+
+    if (editSelectedWorkerKeys.length === 0) {
+      showMessage('error', 'Pilih minimal satu pekerja yang ikut serta.')
+      return
+    }
+
+    const kgNum = parseFloat(editForm.total_kg)
+    const rateNum = parseFloat(editForm.rate_per_kg)
+    if (isNaN(kgNum) || kgNum <= 0 || isNaN(rateNum) || rateNum <= 0) {
+      showMessage('error', 'Muatan (Kg) dan Tarif harus berupa angka valid.')
+      return
+    }
+
+    setEditSubmitting(true)
+    const totalEarning = kgNum * rateNum
+
+    const { error: updateError } = await supabase
+      .from('loading_entries')
+      .update({
+        entry_date: editForm.entry_date,
+        total_kg: kgNum,
+        rate_per_kg: rateNum,
+        total_earning: totalEarning,
+        description: editForm.description.trim()
+      })
+      .eq('id', editEntry.id)
+
+    if (updateError) {
+      console.error('Detail error:', JSON.stringify(updateError, null, 2))
+      showMessage('error', 'Gagal mengupdate entri: ' + updateError.message)
+      setEditSubmitting(false)
+      return
+    }
+
+    // Ganti seluruh daftar peserta & bagi rata ulang
+    const { error: delError } = await supabase.from('loading_entry_participants').delete().eq('entry_id', editEntry.id)
+    if (delError) {
+      console.error('Detail error:', JSON.stringify(delError, null, 2))
+      showMessage('error', 'Gagal memperbarui daftar peserta: ' + delError.message)
+      setEditSubmitting(false)
+      return
+    }
+
+    const n = editSelectedWorkerKeys.length
+    const totalRounded = Math.round(totalEarning)
+    const baseShare = Math.floor(totalRounded / n)
+    const remainder = totalRounded - baseShare * n
+
+    const participantRows = editSelectedWorkerKeys.map((key, idx) => {
+      const [workerType, workerId] = key.split(':')
+      return {
+        entry_id: editEntry.id,
+        freelance_worker_id: workerType === 'fw' ? workerId : null,
+        employee_id: workerType === 'emp' ? workerId : null,
+        share_amount: baseShare + (idx === n - 1 ? remainder : 0)
+      }
+    })
+
+    const { error: insError } = await supabase.from('loading_entry_participants').insert(participantRows)
+
+    if (insError) {
+      console.error('Detail error:', JSON.stringify(insError, null, 2))
+      showMessage('error', 'Gagal menyimpan daftar peserta baru: ' + insError.message)
+    } else {
+      showMessage('success', 'Entri berhasil diperbarui.')
+      setEditEntry(null)
+      fetchEntries()
+    }
+    setEditSubmitting(false)
+  }
+
+  async function handleDeleteEntry(ent: LoadingEntry) {
+    if (!confirm(`Hapus entri bongkar muat tanggal ${new Date(ent.entry_date).toLocaleDateString('id-ID')} (${formatRupiah(ent.total_earning)})? Tindakan ini tidak bisa dibatalkan.`)) return
+
+    const { error } = await supabase.from('loading_entries').delete().eq('id', ent.id)
+
+    if (error) {
+      console.error('Detail error:', JSON.stringify(error, null, 2))
+      showMessage('error', 'Gagal menghapus entri: ' + error.message)
+    } else {
+      showMessage('success', 'Entri bongkar muat berhasil dihapus.')
+      setSelectedIds(prev => prev.filter(id => id !== ent.id))
+      fetchEntries()
+    }
   }
 
   const formatRupiah = (angka: number) => {
@@ -533,16 +649,17 @@ export default function RekapBoronganPage() {
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Tarif</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Total Upah</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center print-hide">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
+                    <td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
                   </tr>
                 ) : entries.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada catatan bongkar muat.</td>
+                    <td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada catatan bongkar muat.</td>
                   </tr>
                 ) : (
                   entries.map((ent) => (
@@ -598,6 +715,22 @@ export default function RekapBoronganPage() {
                           {ent.payment_status === 'paid' ? 'Lunas' : 'Belum Lunas'}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-center print-hide">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => openEditModal(ent)}
+                            className="text-xs px-2.5 py-1 rounded border font-medium transition text-blue-600 border-blue-200 hover:bg-blue-50"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteEntry(ent)}
+                            className="text-xs px-2.5 py-1 rounded border font-medium transition text-red-600 border-red-200 hover:bg-red-50"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -608,7 +741,129 @@ export default function RekapBoronganPage() {
         </div>
       </div>
     </div>
-    
+
+    {/* Modal Edit Entri */}
+    {editEntry && (
+      <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+          <div className="p-6">
+            <h2 className="text-lg font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Edit Entri Bongkar Muat</h2>
+            <form onSubmit={handleEditSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Pekerja yang Ikut Serta <span className="text-red-500">*</span>
+                  {editSelectedWorkerKeys.length > 0 && <span className="text-slate-400 font-normal"> ({editSelectedWorkerKeys.length} dipilih)</span>}
+                </label>
+                <div className="border border-slate-300 rounded-lg max-h-40 overflow-y-auto p-2 space-y-2">
+                  {workers.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Pekerja Lepas</p>
+                      {workers.map(w => {
+                        const key = `fw:${w.id}`
+                        return (
+                          <label key={key} className="flex items-center gap-2 text-sm py-0.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editSelectedWorkerKeys.includes(key)}
+                              onChange={() => toggleEditWorkerKey(key)}
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            {w.full_name}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {gudangEmployees.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 mt-1">Team Gudang</p>
+                      {gudangEmployees.map(w => {
+                        const key = `emp:${w.id}`
+                        return (
+                          <label key={key} className="flex items-center gap-2 text-sm py-0.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editSelectedWorkerKeys.includes(key)}
+                              onChange={() => toggleEditWorkerKey(key)}
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            {w.full_name}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tanggal Kerja <span className="text-red-500">*</span></label>
+                <input
+                  type="date" required
+                  value={editForm.entry_date}
+                  onChange={(e) => setEditForm({ ...editForm, entry_date: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Total Muatan (Kg) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number" required min="0.1" step="0.1"
+                    value={editForm.total_kg}
+                    onChange={(e) => setEditForm({ ...editForm, total_kg: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Tarif / Kg <span className="text-red-500">*</span></label>
+                  <input
+                    type="number" required min="0.01" step="0.01"
+                    value={editForm.rate_per_kg}
+                    onChange={(e) => setEditForm({ ...editForm, rate_per_kg: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Keterangan <span className="text-red-500">*</span></label>
+                <input
+                  type="text" required
+                  value={editForm.description}
+                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {(() => {
+                const kg = parseFloat(editForm.total_kg) || 0
+                const rate = parseFloat(editForm.rate_per_kg) || 0
+                return (
+                  <p className="text-xs text-slate-500">
+                    Total Upah: <span className="font-bold text-slate-700">{formatRupiah(kg * rate)}</span>
+                    {editSelectedWorkerKeys.length > 0 && ` — dibagi rata ke ${editSelectedWorkerKeys.length} orang`}
+                  </p>
+                )
+              })()}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setEditEntry(null)}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                  Batal
+                </button>
+                <button type="submit" disabled={editSubmitting}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                  {editSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    )}
+
     <style>{`
       @media print {
         nav, aside { display: none !important; }
