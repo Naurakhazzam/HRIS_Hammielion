@@ -5,6 +5,13 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 
 type FreelanceWorker = { id: string; full_name: string }
+type GudangEmployee = { id: string; full_name: string }
+
+type Participant = {
+  share_amount: number
+  freelance_workers: { full_name: string } | null
+  employees: { full_name: string } | null
+}
 
 type LoadingEntry = {
   id: string
@@ -13,13 +20,14 @@ type LoadingEntry = {
   rate_per_kg: number
   total_earning: number
   payment_status: string
-  freelance_workers: { full_name: string } | null
+  loading_entry_participants: Participant[]
 }
 
 export default function RekapBoronganPage() {
   const [entries, setEntries] = useState<LoadingEntry[]>([])
   const [workers, setWorkers] = useState<FreelanceWorker[]>([])
-  
+  const [gudangEmployees, setGudangEmployees] = useState<GudangEmployee[]>([])
+
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
@@ -34,10 +42,15 @@ export default function RekapBoronganPage() {
   const supabase = createClient()
 
   const [formData, setFormData] = useState({
-    freelance_worker_id: '',
     entry_date: new Date().toISOString().split('T')[0],
     total_kg: ''
   })
+  // Kunci partisipan yang dicentang, format "fw:<id>" atau "emp:<id>"
+  const [selectedWorkerKeys, setSelectedWorkerKeys] = useState<string[]>([])
+
+  const toggleWorkerKey = (key: string) => {
+    setSelectedWorkerKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+  }
 
   useEffect(() => {
     // Generate Weeks (Jumat - Kamis)
@@ -72,6 +85,7 @@ export default function RekapBoronganPage() {
 
     fetchMyUser().then(() => {
       fetchWorkers()
+      fetchGudangEmployees()
     })
   }, [])
 
@@ -97,11 +111,25 @@ export default function RekapBoronganPage() {
     if (data) setWorkers(data)
   }
 
+  async function fetchGudangEmployees() {
+    const { data: allPerm } = await supabase
+      .from('employees')
+      .select('id, full_name, departments(name)')
+      .eq('is_active', true)
+      .order('full_name')
+
+    const gudangWorkers = (allPerm || []).filter((p: any) => {
+      const dept = Array.isArray(p.departments) ? p.departments[0] : p.departments
+      return dept?.name === 'Team Gudang'
+    })
+    setGudangEmployees(gudangWorkers.map((p: any) => ({ id: p.id, full_name: p.full_name })))
+  }
+
   async function fetchEntries() {
     setLoading(true)
     let query = supabase
       .from('loading_entries')
-      .select('id, entry_date, total_kg, rate_per_kg, total_earning, payment_status, freelance_workers(full_name)')
+      .select('id, entry_date, total_kg, rate_per_kg, total_earning, payment_status, loading_entry_participants(share_amount, freelance_workers(full_name), employees(full_name))')
       .order('entry_date', { ascending: false })
       .order('created_at', { ascending: false })
 
@@ -154,6 +182,11 @@ export default function RekapBoronganPage() {
       return
     }
 
+    if (selectedWorkerKeys.length === 0) {
+      showMessage('error', 'Pilih minimal satu pekerja yang ikut serta.')
+      return
+    }
+
     setSubmitting(true)
     setMessage(null)
 
@@ -168,10 +201,9 @@ export default function RekapBoronganPage() {
     const activeRate = await getActiveRate(formData.entry_date)
     const totalEarning = kgNum * activeRate
 
-    const { error } = await supabase
+    const { data: entryData, error } = await supabase
       .from('loading_entries')
       .insert({
-        freelance_worker_id: formData.freelance_worker_id,
         entry_date: formData.entry_date,
         total_kg: kgNum,
         rate_per_kg: activeRate,
@@ -179,13 +211,41 @@ export default function RekapBoronganPage() {
         payment_status: 'unpaid',
         created_by: myEmployeeId
       })
+      .select('id')
+      .single()
 
-    if (error) {
+    if (error || !entryData) {
       console.error('Detail error:', JSON.stringify(error, null, 2))
-      showMessage('error', 'Gagal mencatat borongan: ' + error.message)
+      showMessage('error', 'Gagal mencatat bongkar muat: ' + error?.message)
+      setSubmitting(false)
+      return
+    }
+
+    // Bagi rata total upah ke seluruh peserta, dibulatkan ke rupiah penuh (sisa pembulatan ke orang terakhir)
+    const n = selectedWorkerKeys.length
+    const totalRounded = Math.round(totalEarning)
+    const baseShare = Math.floor(totalRounded / n)
+    const remainder = totalRounded - baseShare * n
+
+    const participantRows = selectedWorkerKeys.map((key, idx) => {
+      const [workerType, workerId] = key.split(':')
+      return {
+        entry_id: entryData.id,
+        freelance_worker_id: workerType === 'fw' ? workerId : null,
+        employee_id: workerType === 'emp' ? workerId : null,
+        share_amount: baseShare + (idx === n - 1 ? remainder : 0)
+      }
+    })
+
+    const { error: partError } = await supabase.from('loading_entry_participants').insert(participantRows)
+
+    if (partError) {
+      console.error('Detail error:', JSON.stringify(partError, null, 2))
+      showMessage('error', 'Entri tersimpan tapi gagal menyimpan daftar peserta: ' + partError.message)
     } else {
-      showMessage('success', 'Catatan borongan berhasil disimpan.')
+      showMessage('success', 'Catatan bongkar muat berhasil disimpan.')
       setFormData({ ...formData, total_kg: '' }) // Reset kg saja
+      setSelectedWorkerKeys([])
       fetchEntries()
     }
     setSubmitting(false)
@@ -246,8 +306,8 @@ export default function RekapBoronganPage() {
     <div>
       <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800 mb-1">Rekap Borongan</h1>
-          <p className="text-sm text-slate-500">Catat pekerjaan harian dan proses pembayaran pekerja lepas.</p>
+          <h1 className="text-2xl font-bold text-slate-800 mb-1">Gajian Bongkar Muat</h1>
+          <p className="text-sm text-slate-500">Catat pekerjaan harian dan proses pembayaran pekerja lepas &amp; Team Gudang.</p>
         </div>
         <div className="flex gap-2">
           <Link href="/penggajian/borongan/pekerja" className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
@@ -269,20 +329,55 @@ export default function RekapBoronganPage() {
         
         {/* Form Input Harian */}
         <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit print-hide">
-          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Catat Borongan</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Catat Bongkar Muat</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Pekerja Lepas <span className="text-red-500">*</span></label>
-              <select 
-                required 
-                value={formData.freelance_worker_id} 
-                onChange={(e) => setFormData({...formData, freelance_worker_id: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-              >
-                <option value="">-- Pilih Pekerja --</option>
-                {workers.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
-              </select>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Pekerja yang Ikut Serta <span className="text-red-500">*</span>
+                {selectedWorkerKeys.length > 0 && <span className="text-slate-400 font-normal"> ({selectedWorkerKeys.length} dipilih)</span>}
+              </label>
+              <div className="border border-slate-300 rounded max-h-48 overflow-y-auto p-2 space-y-2">
+                {workers.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Pekerja Lepas</p>
+                    {workers.map(w => {
+                      const key = `fw:${w.id}`
+                      return (
+                        <label key={key} className="flex items-center gap-2 text-sm py-0.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedWorkerKeys.includes(key)}
+                            onChange={() => toggleWorkerKey(key)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          {w.full_name}
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+                {gudangEmployees.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 mt-1">Team Gudang</p>
+                    {gudangEmployees.map(w => {
+                      const key = `emp:${w.id}`
+                      return (
+                        <label key={key} className="flex items-center gap-2 text-sm py-0.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedWorkerKeys.includes(key)}
+                            onChange={() => toggleWorkerKey(key)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          {w.full_name}
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">Total upah akan dibagi rata ke semua yang dicentang.</p>
             </div>
 
             <div>
@@ -312,7 +407,7 @@ export default function RekapBoronganPage() {
             <div className="pt-2">
               <button 
                 type="submit" 
-                disabled={submitting || !myEmployeeId} 
+                disabled={submitting || !myEmployeeId || selectedWorkerKeys.length === 0}
                 className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded shadow-sm transition disabled:opacity-50"
               >
                 {submitting ? 'Menyimpan...' : 'Simpan Entri'}
@@ -327,7 +422,7 @@ export default function RekapBoronganPage() {
           <div className="hidden" id="borongan-print-header">
             <div className="text-center mb-4 pb-4 border-b-2 border-slate-800">
               <h1 className="text-xl font-bold text-slate-900 uppercase tracking-wider">HAMMIELION MANAGEMENT</h1>
-              <p className="text-sm text-slate-600 mt-1">Rekap Penggajian Borongan</p>
+              <p className="text-sm text-slate-600 mt-1">Rekap Gajian Bongkar Muat</p>
               <p className="text-sm text-slate-600">
                 Periode: {weekOptions.find(w => w.value === filterWeek)?.label ?? filterWeek}
               </p>
@@ -431,7 +526,7 @@ export default function RekapBoronganPage() {
                   </tr>
                 ) : entries.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada catatan borongan.</td>
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada catatan bongkar muat.</td>
                   </tr>
                 ) : (
                   entries.map((ent) => (
@@ -447,7 +542,17 @@ export default function RekapBoronganPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-slate-800">{ent.freelance_workers?.full_name}</div>
+                        <div className="space-y-0.5">
+                          {ent.loading_entry_participants.map((p, i) => (
+                            <div key={i} className="text-sm text-slate-800 flex items-center gap-1.5">
+                              <span className="font-medium">{p.freelance_workers?.full_name ?? p.employees?.full_name}</span>
+                              {p.employees?.full_name && (
+                                <span className="text-[9px] text-blue-600 font-semibold uppercase bg-blue-50 px-1 rounded">Gudang</span>
+                              )}
+                              <span className="text-xs text-slate-400">({formatRupiah(p.share_amount)})</span>
+                            </div>
+                          ))}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-sm text-slate-600">{new Date(ent.entry_date).toLocaleDateString('id-ID')}</div>

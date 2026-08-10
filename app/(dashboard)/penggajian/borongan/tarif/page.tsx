@@ -135,8 +135,8 @@ export default function SetupTarifBoronganPage() {
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">Setup Tarif Borongan</h1>
-        <p className="text-sm text-slate-500">Atur tarif per kilogram untuk pekerja bongkar muat.</p>
+        <h1 className="text-2xl font-bold text-slate-800 mb-1">Setup Tarif Bongkar Muat</h1>
+        <p className="text-sm text-slate-500">Atur tarif per kilogram untuk pekerja bongkar muat (berlaku untuk pekerja lepas &amp; Team Gudang).</p>
       </div>
 
       {message && (

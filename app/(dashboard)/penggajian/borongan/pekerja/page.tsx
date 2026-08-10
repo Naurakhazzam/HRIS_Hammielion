@@ -112,8 +112,8 @@ export default function MasterPekerjaBoronganPage() {
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">Pekerja Borongan</h1>
-        <p className="text-sm text-slate-500">Master data pekerja lepas harian (Bongkar Muat).</p>
+        <h1 className="text-2xl font-bold text-slate-800 mb-1">Pekerja Lepas (Bongkar Muat)</h1>
+        <p className="text-sm text-slate-500">Master data pekerja lepas harian untuk Gajian Bongkar Muat. Karyawan Team Gudang tidak perlu didaftarkan di sini &mdash; otomatis ikut terdaftar lewat data Karyawan.</p>
       </div>
 
       {message && (
