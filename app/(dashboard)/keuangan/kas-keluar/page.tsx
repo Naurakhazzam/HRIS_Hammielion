@@ -329,7 +329,7 @@ export default function InputKasKeluarPage() {
                 {(['biasa', 'supplier'] as const).map(m => (
                   <button key={m} type="button" onClick={() => { setEntryMode(m); resetSupplierFields() }}
                     className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${
-                      entryMode === m ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                      entryMode === m ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                     }`}>
                     {m === 'biasa' ? 'Pengeluaran Biasa' : '🏭 Bayar ke Supplier'}
                   </button>
@@ -427,7 +427,7 @@ export default function InputKasKeluarPage() {
                       </button>
                       <button type="button" onClick={() => setSupplierSubMode('new')}
                         className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${
-                          supplierSubMode === 'new' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                          supplierSubMode === 'new' ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                         }`}>
                         Catat Tagihan Baru
                       </button>
