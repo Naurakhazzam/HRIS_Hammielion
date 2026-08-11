@@ -139,6 +139,10 @@ export default function PembelianSupplierPage() {
   function remainingOf(pur: Purchase) {
     return Number(pur.total_amount) - paidApproved(pur.id)
   }
+  // Bagian yang belum diajukan sama sekali (belum ada di approved maupun pending) — inilah batas maksimal & syarat tombol Bayar/Cicil muncul
+  function unrequestedOf(pur: Purchase) {
+    return Number(pur.total_amount) - paidApproved(pur.id) - paidPending(pur.id)
+  }
   function statusBadge(pur: Purchase) {
     const remaining = remainingOf(pur)
     const paid = paidApproved(pur.id)
@@ -247,7 +251,7 @@ export default function PembelianSupplierPage() {
 
   function openPayModal(p: Purchase) {
     setPayPurchase(p)
-    setPayForm({ amount: String(remainingOf(p)), payment_date: today, account_id: '', notes: '' })
+    setPayForm({ amount: String(Math.max(0, unrequestedOf(p))), payment_date: today, account_id: '', notes: '' })
   }
 
   async function handlePaySubmit(e: React.FormEvent) {
@@ -255,8 +259,8 @@ export default function PembelianSupplierPage() {
     if (!payPurchase || !myUserId) return
     const amountNum = parseFloat(payForm.amount)
     if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Nominal tidak valid.'); return }
-    const remaining = remainingOf(payPurchase)
-    if (amountNum > remaining) { showMessage('error', `Nominal melebihi sisa utang (${formatRupiah(remaining)}).`); return }
+    const unrequested = unrequestedOf(payPurchase)
+    if (amountNum > unrequested) { showMessage('error', `Nominal melebihi sisa yang belum diajukan (${formatRupiah(unrequested)}). Sebagian sudah menunggu verifikasi.`); return }
     if (!payForm.account_id) { showMessage('error', 'Pilih rekening/kas.'); return }
 
     setPaySubmitting(true)
@@ -434,6 +438,7 @@ export default function PembelianSupplierPage() {
                     const paid = paidApproved(p.id)
                     const pending = paidPending(p.id)
                     const remaining = remainingOf(p)
+                    const unrequested = unrequestedOf(p)
                     return (
                       <tr key={p.id} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm text-slate-600">{new Date(p.purchase_date).toLocaleDateString('id-ID')}</td>
@@ -449,11 +454,15 @@ export default function PembelianSupplierPage() {
                         <td className="px-4 py-3 text-center">{statusBadge(p)}</td>
                         <td className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1 flex-wrap">
-                            {remaining > 0 && (
+                            {unrequested > 0 ? (
                               <button onClick={() => openPayModal(p)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-green-600 border-green-200 hover:bg-green-50">
                                 Bayar/Cicil
                               </button>
-                            )}
+                            ) : remaining > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-yellow-50 text-yellow-700 border border-yellow-200 font-medium">
+                                ⏳ Menunggu Approval
+                              </span>
+                            ) : null}
                             <button onClick={() => openEditModal(p)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-blue-600 border-blue-200 hover:bg-blue-50">
                               Edit
                             </button>
@@ -533,13 +542,19 @@ export default function PembelianSupplierPage() {
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
             <div className="p-6">
               <h2 className="text-lg font-semibold text-slate-800 mb-1">Bayar / Cicil ke {payPurchase.suppliers?.name}</h2>
+              <p className="text-xs text-slate-500 mb-1">
+                Total tagihan {formatRupiah(payPurchase.total_amount)} — Sisa utang <span className="font-bold text-red-600">{formatRupiah(remainingOf(payPurchase))}</span>
+              </p>
+              {paidPending(payPurchase.id) > 0 && (
+                <p className="text-xs text-yellow-700 mb-1">{formatRupiah(paidPending(payPurchase.id))} sudah diajukan, masih menunggu verifikasi finance.</p>
+              )}
               <p className="text-xs text-slate-500 mb-4 pb-3 border-b border-slate-100">
-                Total tagihan {formatRupiah(payPurchase.total_amount)} — Sisa utang saat ini <span className="font-bold text-red-600">{formatRupiah(remainingOf(payPurchase))}</span>
+                Maksimal bisa diajukan sekarang: <span className="font-bold text-slate-700">{formatRupiah(unrequestedOf(payPurchase))}</span>
               </p>
               <form onSubmit={handlePaySubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
-                  <input type="number" required min="1" step="1" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })}
+                  <input type="number" required min="1" max={unrequestedOf(payPurchase)} step="1" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
