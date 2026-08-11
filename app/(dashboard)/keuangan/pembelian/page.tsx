@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr } from '@/lib/date'
+import { paidApprovedFor, paidPendingFor, remainingFor, unrequestedFor } from '@/lib/supplierPurchases'
 import Link from 'next/link'
 
 type Supplier = { id: string; name: string }
@@ -131,17 +132,16 @@ export default function PembelianSupplierPage() {
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
   function paidApproved(purchaseId: string) {
-    return payments.filter(p => p.source_id === purchaseId && p.status === 'approved').reduce((s, p) => s + Number(p.amount), 0)
+    return paidApprovedFor(purchaseId, payments)
   }
   function paidPending(purchaseId: string) {
-    return payments.filter(p => p.source_id === purchaseId && p.status === 'pending').reduce((s, p) => s + Number(p.amount), 0)
+    return paidPendingFor(purchaseId, payments)
   }
   function remainingOf(pur: Purchase) {
-    return Number(pur.total_amount) - paidApproved(pur.id)
+    return remainingFor(pur.total_amount, pur.id, payments)
   }
-  // Bagian yang belum diajukan sama sekali (belum ada di approved maupun pending) — inilah batas maksimal & syarat tombol Bayar/Cicil muncul
   function unrequestedOf(pur: Purchase) {
-    return Number(pur.total_amount) - paidApproved(pur.id) - paidPending(pur.id)
+    return unrequestedFor(pur.total_amount, pur.id, payments)
   }
   const purchasesThisMonth = purchases.filter(p => p.purchase_date.slice(0, 7) === filterMonth)
   const totalPembelianBulanIni = purchasesThisMonth.reduce((s, p) => s + Number(p.total_amount), 0)
