@@ -420,37 +420,46 @@ export default function PembelianSupplierPage() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-white border-b border-slate-200 sticky top-0 z-10">
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Tanggal</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Supplier</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Cabang</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Barang</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Total Tagihan</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Sudah Dibayar</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Sisa Utang</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Status</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Aksi</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white">Tanggal</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white">Supplier</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white">Cabang</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white">Tagihan &amp; Progres</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Status</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {purchasesThisMonth.length === 0 ? (
-                    <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pembelian bulan ini.</td></tr>
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pembelian bulan ini.</td></tr>
                   ) : purchasesThisMonth.map(p => {
                     const paid = paidApproved(p.id)
                     const pending = paidPending(p.id)
                     const remaining = remainingOf(p)
                     const unrequested = unrequestedOf(p)
+                    const totalAmt = Number(p.total_amount) || 1
+                    const paidPct = Math.min(100, (paid / totalAmt) * 100)
+                    const pendingPct = Math.min(100 - paidPct, (pending / totalAmt) * 100)
                     return (
-                      <tr key={p.id} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-3 text-sm text-slate-600">{new Date(p.purchase_date).toLocaleDateString('id-ID')}</td>
-                        <td className="px-4 py-3 text-sm font-medium text-slate-800">{p.suppliers?.name || '—'}</td>
-                        <td className="px-4 py-3 text-sm text-slate-700">{p.branches?.name || '—'}</td>
-                        <td className="px-4 py-3 text-sm text-slate-500">{p.description || '—'}</td>
-                        <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(p.total_amount)}</td>
-                        <td className="px-4 py-3 text-sm text-right text-slate-600">
-                          {formatRupiah(paid)}
-                          {pending > 0 && <div className="text-[10px] text-yellow-600">+{formatRupiah(pending)} menunggu</div>}
+                      <tr key={p.id} className="hover:bg-slate-50 transition align-top">
+                        <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{new Date(p.purchase_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm font-semibold text-slate-900">{p.suppliers?.name || '—'}</div>
+                          {p.description && <div className="text-xs text-slate-400 mt-0.5">{p.description}</div>}
                         </td>
-                        <td className={`px-4 py-3 text-sm text-right font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatRupiah(Math.max(0, remaining))}</td>
+                        <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{p.branches?.name || '—'}</td>
+                        <td className="px-4 py-3 min-w-[190px]">
+                          <div className="text-sm font-semibold text-slate-900">{formatRupiah(p.total_amount)}</div>
+                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden flex mt-1.5">
+                            {paidPct > 0 && <div style={{ width: `${paidPct}%` }} className="bg-green-500 h-full" />}
+                            {pendingPct > 0 && <div style={{ width: `${pendingPct}%` }} className="bg-amber-400 h-full" />}
+                          </div>
+                          <div className="text-xs mt-1 flex flex-wrap gap-x-1.5">
+                            {remaining > 0
+                              ? <span className="text-red-600 font-medium">Sisa {formatRupiah(remaining)}</span>
+                              : <span className="text-green-600 font-medium">Lunas</span>}
+                            {pending > 0 && <span className="text-amber-600">· {formatRupiah(pending)} menunggu</span>}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-center">{statusBadge(p)}</td>
                         <td className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1 flex-wrap">
@@ -459,8 +468,8 @@ export default function PembelianSupplierPage() {
                                 Bayar/Cicil
                               </button>
                             ) : remaining > 0 ? (
-                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-yellow-50 text-yellow-700 border border-yellow-200 font-medium">
-                                ⏳ Menunggu Approval
+                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">
+                                ⏳ Menunggu
                               </span>
                             ) : null}
                             <button onClick={() => openEditModal(p)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-blue-600 border-blue-200 hover:bg-blue-50">
