@@ -143,14 +143,6 @@ export default function PembelianSupplierPage() {
   function unrequestedOf(pur: Purchase) {
     return Number(pur.total_amount) - paidApproved(pur.id) - paidPending(pur.id)
   }
-  function statusBadge(pur: Purchase) {
-    const remaining = remainingOf(pur)
-    const paid = paidApproved(pur.id)
-    if (remaining <= 0) return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">Lunas</span>
-    if (paid > 0) return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">Dicicil Sebagian</span>
-    return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">Belum Dibayar</span>
-  }
-
   const purchasesThisMonth = purchases.filter(p => p.purchase_date.slice(0, 7) === filterMonth)
   const totalPembelianBulanIni = purchasesThisMonth.reduce((s, p) => s + Number(p.total_amount), 0)
   const totalSisaUtang = purchases.reduce((s, p) => s + Math.max(0, remainingOf(p)), 0)
@@ -420,17 +412,16 @@ export default function PembelianSupplierPage() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-white border-b border-slate-200 sticky top-0 z-10">
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white">Tanggal</th>
                     <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white">Supplier</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white">Cabang</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white">Tagihan &amp; Progres</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Status</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Total Utang</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Total Dibayar</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Sisa Utang</th>
                     <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {purchasesThisMonth.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pembelian bulan ini.</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pembelian bulan ini.</td></tr>
                   ) : purchasesThisMonth.map(p => {
                     const paid = paidApproved(p.id)
                     const pending = paidPending(p.id)
@@ -441,26 +432,28 @@ export default function PembelianSupplierPage() {
                     const pendingPct = Math.min(100 - paidPct, (pending / totalAmt) * 100)
                     return (
                       <tr key={p.id} className="hover:bg-slate-50 transition align-top">
-                        <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{new Date(p.purchase_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</td>
                         <td className="px-4 py-3">
-                          <div className="text-sm font-semibold text-slate-900">{p.suppliers?.name || '—'}</div>
-                          {p.description && <div className="text-xs text-slate-400 mt-0.5">{p.description}</div>}
+                          <details className="group">
+                            <summary className="cursor-pointer list-none flex items-center gap-1.5 text-sm font-semibold text-slate-900 select-none">
+                              <span className="text-slate-400 text-[10px] transition-transform group-open:rotate-90">▶</span>
+                              {p.suppliers?.name || '—'}
+                            </summary>
+                            <div className="mt-1.5 ml-1 pl-3 space-y-1.5 border-l-2 border-slate-100">
+                              <div className="text-xs text-slate-500">
+                                {new Date(p.purchase_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {p.branches?.name || '—'}
+                                {p.description && <> · {p.description}</>}
+                              </div>
+                              <div className="w-40 h-1.5 bg-slate-100 rounded-full overflow-hidden flex">
+                                {paidPct > 0 && <div style={{ width: `${paidPct}%` }} className="bg-green-500 h-full" />}
+                                {pendingPct > 0 && <div style={{ width: `${pendingPct}%` }} className="bg-amber-400 h-full" />}
+                              </div>
+                              {pending > 0 && <div className="text-[11px] text-amber-600">{formatRupiah(pending)} menunggu verifikasi</div>}
+                            </div>
+                          </details>
                         </td>
-                        <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{p.branches?.name || '—'}</td>
-                        <td className="px-4 py-3 min-w-[190px]">
-                          <div className="text-sm font-semibold text-slate-900">{formatRupiah(p.total_amount)}</div>
-                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden flex mt-1.5">
-                            {paidPct > 0 && <div style={{ width: `${paidPct}%` }} className="bg-green-500 h-full" />}
-                            {pendingPct > 0 && <div style={{ width: `${pendingPct}%` }} className="bg-amber-400 h-full" />}
-                          </div>
-                          <div className="text-xs mt-1 flex flex-wrap gap-x-1.5">
-                            {remaining > 0
-                              ? <span className="text-red-600 font-medium">Sisa {formatRupiah(remaining)}</span>
-                              : <span className="text-green-600 font-medium">Lunas</span>}
-                            {pending > 0 && <span className="text-amber-600">· {formatRupiah(pending)} menunggu</span>}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center">{statusBadge(p)}</td>
+                        <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(p.total_amount)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-600">{formatRupiah(paid)}</td>
+                        <td className={`px-4 py-3 text-sm text-right font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatRupiah(Math.max(0, remaining))}</td>
                         <td className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1 flex-wrap">
                             {unrequested > 0 ? (
