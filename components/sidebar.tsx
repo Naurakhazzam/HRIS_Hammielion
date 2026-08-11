@@ -79,6 +79,7 @@ const adminNavItems: NavNode[] = [
       { name: 'Cash Flow per Rekening', href: '/keuangan/cashflow' },
       { name: 'Laporan Resmi', href: '/keuangan/laporan' },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
+      { name: 'Petty Cash', href: '/keuangan/petty-cash' },
     ]
   },
   {
