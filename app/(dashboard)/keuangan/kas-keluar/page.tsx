@@ -121,6 +121,22 @@ export default function InputKasKeluarPage() {
     if (data) setRecent(data as unknown as MyCashOut[])
   }, [supabase])
 
+  // Terpisah dari "10 Input Terakhir" — supaya entri lama yang ditolak tidak pernah "hilang" dari daftar
+  const [needsRevision, setNeedsRevision] = useState<MyCashOut[]>([])
+  const fetchNeedsRevision = useCallback(async (userId: string) => {
+    const { data } = await supabase
+      .from('fin_cash_out')
+      .select('id, branch_id, category, amount, description, transaction_date, status, rejection_reason, account_id, source_table, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
+      .eq('input_by', userId)
+      .eq('status', 'rejected')
+      .order('transaction_date', { ascending: false })
+    if (data) setNeedsRevision(data as unknown as MyCashOut[])
+  }, [supabase])
+
+  const refreshMine = useCallback(async (userId: string) => {
+    await Promise.all([fetchRecent(userId), fetchNeedsRevision(userId)])
+  }, [fetchRecent, fetchNeedsRevision])
+
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
   const [editRowBranchId, setEditRowBranchId] = useState('')
   const [editRowCategory, setEditRowCategory] = useState('')
@@ -175,7 +191,7 @@ export default function InputKasKeluarPage() {
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
     else {
       showMessage('success', wasRejected ? 'Entri berhasil diperbaiki dan diajukan ulang untuk verifikasi.' : 'Entri berhasil diperbarui.')
-      setEditingRowId(null); fetchRecent(myUserId)
+      setEditingRowId(null); refreshMine(myUserId)
     }
   }
 
@@ -185,7 +201,7 @@ export default function InputKasKeluarPage() {
     if (!ok) return
     const { error } = await supabase.from('fin_cash_out').delete().eq('id', r.id)
     if (error) showMessage('error', 'Gagal menghapus: ' + error.message)
-    else { showMessage('success', 'Entri berhasil dihapus.'); fetchRecent(myUserId) }
+    else { showMessage('success', 'Entri berhasil dihapus.'); refreshMine(myUserId) }
   }
 
   useEffect(() => {
@@ -219,11 +235,11 @@ export default function InputKasKeluarPage() {
       if (baRes.data) setBankAccounts(baRes.data)
       if (sRes.data) setSuppliers(sRes.data)
 
-      await fetchRecent(user.id)
+      await refreshMine(user.id)
       setLoading(false)
     }
     init()
-  }, [supabase, fetchRecent])
+  }, [supabase, refreshMine])
 
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
@@ -261,7 +277,7 @@ export default function InputKasKeluarPage() {
       } else {
         showMessage('success', 'Kas keluar berhasil dicatat, menunggu verifikasi tim finance pusat.')
         setFormData(f => ({ ...f, amount: '', description: '', account_id: '' }))
-        fetchRecent(myUserId)
+        refreshMine(myUserId)
       }
       setSubmitting(false)
       return
@@ -295,7 +311,7 @@ export default function InputKasKeluarPage() {
         showMessage('success', `Pembayaran ke ${supplierName} berhasil dicatat, menunggu verifikasi tim finance pusat.`)
         setFormData(f => ({ ...f, description: '', account_id: '' }))
         resetSupplierFields()
-        fetchRecent(myUserId)
+        refreshMine(myUserId)
       }
       setSubmitting(false)
       return
@@ -342,7 +358,7 @@ export default function InputKasKeluarPage() {
     showMessage('success', `Tagihan ke ${supplierName} berhasil dicatat${payNow ? ', pembayaran menunggu verifikasi' : ' (belum dibayar)'}.`)
     setFormData(f => ({ ...f, description: '', account_id: '' }))
     resetSupplierFields()
-    fetchRecent(myUserId)
+    refreshMine(myUserId)
     setSubmitting(false)
   }
 
@@ -603,7 +619,69 @@ export default function InputKasKeluarPage() {
           </form>
         </div>
 
-        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="lg:col-span-2 space-y-4">
+        {needsRevision.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
+            <div className="p-4 border-b border-red-200 bg-red-50">
+              <h2 className="font-semibold text-red-800 text-sm">⚠️ Perlu Direvisi ({needsRevision.length})</h2>
+              <p className="text-xs text-red-600 mt-0.5">Semua entri kamu yang ditolak, tidak dibatasi 10 terakhir atau bulan tertentu — perbaiki di sini.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <tbody className="divide-y divide-slate-100">
+                  {needsRevision.map(r => (
+                    <tr key={r.id} className="hover:bg-red-50/50 transition">
+                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                        {editingRowId === r.id ? (
+                          <input type="date" value={editRowDate} onChange={e => setEditRowDate(e.target.value)}
+                            className="px-2 py-1 border border-slate-300 rounded text-sm" />
+                        ) : new Date(r.transaction_date).toLocaleDateString('id-ID')}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {editingRowId === r.id ? (
+                          <select value={editRowCategory} onChange={e => setEditRowCategory(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
+                            {categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                          </select>
+                        ) : r.fin_cash_out_categories?.label}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
+                        {editingRowId === r.id ? (
+                          <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                            className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
+                        ) : formatRupiah(r.amount)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-500 max-w-[220px]">
+                        {editingRowId === r.id ? (
+                          <input value={editRowDescription} onChange={e => setEditRowDescription(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm" />
+                        ) : (
+                          <div>
+                            {r.description && <div>{r.description}</div>}
+                            {r.rejection_reason && <div className="text-red-600 text-xs mt-0.5">Alasan: {r.rejection_reason}</div>}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                        {editingRowId === r.id ? (
+                          <div className="flex gap-1 justify-center">
+                            <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
+                            <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
+                          </div>
+                        ) : canEditRow(r) ? (
+                          <button onClick={() => startEditRow(r)} className="text-xs text-blue-600 hover:underline font-medium">Perbaiki</button>
+                        ) : (
+                          <span className="text-xs text-slate-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50">
             <h2 className="font-semibold text-slate-800 text-sm">10 Input Terakhir Saya</h2>
           </div>
@@ -697,6 +775,7 @@ export default function InputKasKeluarPage() {
               </tbody>
             </table>
           </div>
+        </div>
         </div>
       </div>
     </div>

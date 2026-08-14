@@ -91,6 +91,21 @@ export default function KasMasukPage() {
     setLoading(false)
   }, [supabase, filterMonth, filterBranch, filterStatus, isAdmin, myBranchId])
 
+  // Terpisah dari tabel utama (yang dibatasi bulan) — supaya entri lama yang ditolak tidak pernah "hilang" dari daftar
+  const [needsRevision, setNeedsRevision] = useState<CashIn[]>([])
+  const fetchNeedsRevision = useCallback(async () => {
+    let query = supabase
+      .from('fin_cash_in')
+      .select('id, branch_id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, rejection_reason, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
+      .eq('status', 'rejected')
+      .order('transaction_date', { ascending: false })
+    if (!isAdmin && myBranchId) query = query.eq('branch_id', myBranchId)
+    const { data } = await query
+    if (data) setNeedsRevision(data as unknown as CashIn[])
+  }, [supabase, isAdmin, myBranchId])
+
+  useEffect(() => { fetchNeedsRevision() }, [fetchNeedsRevision])
+
   useEffect(() => {
     async function init() {
       setLoading(true)
@@ -212,7 +227,7 @@ export default function KasMasukPage() {
     if (!ok) return
     const { error } = await supabase.from('fin_cash_in').delete().eq('id', r.id)
     if (error) showMessage('error', 'Gagal menghapus: ' + error.message)
-    else { showMessage('success', 'Entri berhasil dihapus.'); fetchRows() }
+    else { showMessage('success', 'Entri berhasil dihapus.'); fetchRows(); fetchNeedsRevision() }
   }
 
   function startEditRow(r: CashIn) {
@@ -248,7 +263,7 @@ export default function KasMasukPage() {
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
     else {
       showMessage('success', wasRejected ? 'Entri berhasil diperbaiki dan diajukan ulang untuk verifikasi.' : 'Entri berhasil diperbarui.')
-      setEditingRowId(null); fetchRows()
+      setEditingRowId(null); fetchRows(); fetchNeedsRevision()
     }
   }
 
@@ -382,6 +397,61 @@ export default function KasMasukPage() {
               <p className="text-2xl font-bold text-slate-800">{formatRupiah(totalPhysicalApprovedThisMonth)}</p>
             </div>
           </div>
+
+          {needsRevision.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
+              <div className="p-4 border-b border-red-200 bg-red-50">
+                <h2 className="font-semibold text-red-800 text-sm">⚠️ Perlu Direvisi ({needsRevision.length})</h2>
+                <p className="text-xs text-red-600 mt-0.5">Semua entri yang ditolak, tidak dibatasi bulan yang sedang difilter — perbaiki di sini.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <tbody className="divide-y divide-slate-100">
+                    {needsRevision.map(r => (
+                      <tr key={r.id} className="hover:bg-red-50/50 transition">
+                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                          {editingRowId === r.id ? (
+                            <input type="date" value={editRowDate} onChange={e => setEditRowDate(e.target.value)}
+                              className="px-2 py-1 border border-slate-300 rounded text-sm" />
+                          ) : new Date(r.transaction_date).toLocaleDateString('id-ID')}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{r.branches?.name}</td>
+                        <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
+                          {editingRowId === r.id ? (
+                            <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                              className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
+                          ) : formatRupiah(r.amount)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-500 max-w-[220px]">
+                          {editingRowId === r.id ? (
+                            <input value={editRowDescription} onChange={e => setEditRowDescription(e.target.value)}
+                              className="w-full px-2 py-1 border border-slate-300 rounded text-sm" />
+                          ) : (
+                            <div>
+                              {r.description && <div>{r.description}</div>}
+                              {r.rejection_reason && <div className="text-red-600 text-xs mt-0.5">Alasan: {r.rejection_reason}</div>}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center whitespace-nowrap">
+                          {editingRowId === r.id ? (
+                            <div className="flex gap-1 justify-center">
+                              <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
+                              <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
+                            </div>
+                          ) : canEditRow(r) ? (
+                            <button onClick={() => startEditRow(r)} className="text-xs text-blue-600 hover:underline font-medium">Perbaiki</button>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-4">
