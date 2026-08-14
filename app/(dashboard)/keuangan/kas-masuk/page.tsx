@@ -64,6 +64,7 @@ export default function KasMasukPage() {
   const [filterMonth, setFilterMonth] = useState(thisMonth)
   const [filterBranch, setFilterBranch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [activeSubTab, setActiveSubTab] = useState<'riwayat' | 'revisi'>('riwayat')
 
   const isSupervisor = role === 'supervisor'
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -398,7 +399,18 @@ export default function KasMasukPage() {
             </div>
           </div>
 
-          {needsRevision.length > 0 && (
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+            <button onClick={() => setActiveSubTab('riwayat')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeSubTab === 'riwayat' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              Riwayat
+            </button>
+            <button onClick={() => setActiveSubTab('revisi')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeSubTab === 'revisi' ? 'bg-white text-red-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              ⚠️ Perlu Direvisi {needsRevision.length > 0 && `(${needsRevision.length})`}
+            </button>
+          </div>
+
+          {activeSubTab === 'revisi' && (
             <div className="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
               <div className="p-4 border-b border-red-200 bg-red-50">
                 <h2 className="font-semibold text-red-800 text-sm">⚠️ Perlu Direvisi ({needsRevision.length})</h2>
@@ -407,7 +419,9 @@ export default function KasMasukPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <tbody className="divide-y divide-slate-100">
-                    {needsRevision.map(r => (
+                    {needsRevision.length === 0 ? (
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada entri yang perlu direvisi.</td></tr>
+                    ) : needsRevision.map(r => (
                       <tr key={r.id} className="hover:bg-red-50/50 transition">
                         <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
                           {editingRowId === r.id ? (
@@ -453,6 +467,7 @@ export default function KasMasukPage() {
             </div>
           )}
 
+          {activeSubTab === 'riwayat' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-4">
               <div>
@@ -626,6 +641,7 @@ export default function KasMasukPage() {
               </table>
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>
