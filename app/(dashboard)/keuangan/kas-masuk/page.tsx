@@ -311,9 +311,30 @@ export default function KasMasukPage() {
                 placeholder="Contoh: 8000000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Metode</label>
+              <select value={form.payment_method}
+                onChange={e => {
+                  const val = e.target.value
+                  setForm({ ...form, payment_method: val })
+                  if (val === 'transfer') {
+                    // Selisih hitung kasir & pengeluaran langsung cuma berlaku untuk uang tunai
+                    setExpenseAmount('')
+                    setSelisihType('none')
+                    setSelisihAmount('')
+                  }
+                }}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                <option value="cash">Tunai</option>
+                <option value="transfer">Transfer</option>
+                <option value="campuran">Campuran</option>
+              </select>
+            </div>
+            {form.payment_method !== 'transfer' && (
+            <>
             <div className="pt-2 border-t border-slate-100">
               <label className="block text-xs font-medium text-slate-700 mb-1">Pengeluaran (Opsional)</label>
-              <p className="text-[11px] text-slate-400 mb-2">Uang yang dipakai langsung dari hasil kas hari itu (mengurangi uang fisik yang diterima).</p>
+              <p className="text-[11px] text-slate-400 mb-2">Uang tunai yang dipakai langsung dari hasil kas hari itu (mengurangi uang yang diterima).</p>
               <input type="number" min="0" step="1" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)}
                 placeholder="Contoh: 100000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -321,7 +342,7 @@ export default function KasMasukPage() {
 
             <div className="pt-2 border-t border-slate-100">
               <label className="block text-xs font-medium text-slate-700 mb-1">Plus Minus Kasir (Opsional)</label>
-              <p className="text-[11px] text-slate-400 mb-2">Isi jika ada selisih hitung kasir (kurang/lebih saat hitung kas fisik).</p>
+              <p className="text-[11px] text-slate-400 mb-2">Isi jika ada selisih hitung kasir (kurang/lebih saat hitung uang tunai).</p>
               <div className="flex gap-2 mb-2">
                 {(['none', 'plus', 'minus'] as const).map(t => (
                   <button key={t} type="button" onClick={() => setSelisihType(t)}
@@ -345,23 +366,16 @@ export default function KasMasukPage() {
                 const sel = selisihType === 'none' ? 0 : (parseFloat(selisihAmount) || 0)
                 const adj = selisihType === 'plus' ? sel : selisihType === 'minus' ? -sel : 0
                 if (exp === 0 && selisihType === 'none') return null
+                const label = form.payment_method === 'cash' ? 'Uang Fisik Diterima' : 'Uang Diterima'
                 return (
                   <p className="text-xs text-slate-500 mt-2">
-                    Uang Fisik Diterima: <span className="font-bold text-slate-700">{formatRupiah(Math.max(0, amt - exp + adj))}</span>
+                    {label}: <span className="font-bold text-slate-700">{formatRupiah(Math.max(0, amt - exp + adj))}</span>
                   </p>
                 )
               })()}
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Metode</label>
-              <select value={form.payment_method}
-                onChange={e => setForm({ ...form, payment_method: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                <option value="cash">Tunai</option>
-                <option value="transfer">Transfer</option>
-                <option value="campuran">Campuran</option>
-              </select>
-            </div>
+            </>
+            )}
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Tujuan <span className="text-red-500">*</span></label>
               <select required value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })}
@@ -394,7 +408,7 @@ export default function KasMasukPage() {
               <p className="text-2xl font-bold text-green-700">{formatRupiah(totalApprovedThisMonth)}</p>
             </div>
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Uang Fisik Diterima — Bulan Ini</p>
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Uang Diterima — Bulan Ini</p>
               <p className="text-2xl font-bold text-slate-800">{formatRupiah(totalPhysicalApprovedThisMonth)}</p>
             </div>
           </div>
@@ -504,7 +518,7 @@ export default function KasMasukPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Tanggal</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Cabang</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Omzet</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Uang Fisik</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Uang Diterima</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Metode</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Rekening</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Keterangan</th>
@@ -539,6 +553,9 @@ export default function KasMasukPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-right">
                         {editingRowId === r.id ? (
+                          editRowPaymentMethod === 'transfer' ? (
+                            <p className="text-[10px] text-slate-400 italic">Tidak berlaku untuk Transfer</p>
+                          ) : (
                           <div className="flex flex-col items-end gap-1">
                             <input type="number" min="0" step="1" value={editRowExpenseAmount} onChange={e => setEditRowExpenseAmount(e.target.value)}
                               placeholder="Pengeluaran"
@@ -560,6 +577,7 @@ export default function KasMasukPage() {
                                 className="w-24 px-2 py-1 border border-slate-300 rounded text-xs text-right" />
                             )}
                           </div>
+                          )
                         ) : (
                           <div>
                             <span className={`font-semibold ${(r.expense_amount > 0 || r.cash_adjustment < 0) ? 'text-red-600' : r.cash_adjustment > 0 ? 'text-green-600' : 'text-slate-800'}`}>
@@ -578,7 +596,15 @@ export default function KasMasukPage() {
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">
                         {editingRowId === r.id ? (
-                          <select value={editRowPaymentMethod} onChange={e => setEditRowPaymentMethod(e.target.value)}
+                          <select value={editRowPaymentMethod} onChange={e => {
+                            const val = e.target.value
+                            setEditRowPaymentMethod(val)
+                            if (val === 'transfer') {
+                              setEditRowExpenseAmount('')
+                              setEditRowSelisihType('none')
+                              setEditRowSelisihAmount('')
+                            }
+                          }}
                             className="px-2 py-1 border border-slate-300 rounded text-xs bg-white">
                             <option value="cash">Tunai</option>
                             <option value="transfer">Transfer</option>
