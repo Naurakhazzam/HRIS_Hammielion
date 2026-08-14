@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr } from '@/lib/date'
 import { unrequestedFor } from '@/lib/supplierPurchases'
+import RupiahInput from '@/components/RupiahInput'
 import Link from 'next/link'
 
 type Branch = { id: string; name: string }
@@ -474,11 +475,11 @@ export default function InputKasKeluarPage() {
             {entryMode === 'biasa' && (
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Jumlah (Rp) <span className="text-red-500">*</span></label>
-                <input
-                  type="number" required min="1" step="1"
+                <RupiahInput
+                  required
                   value={formData.amount}
-                  onChange={e => setFormData({ ...formData, amount: e.target.value })}
-                  placeholder="Contoh: 500000"
+                  onChange={v => setFormData({ ...formData, amount: v })}
+                  placeholder="Contoh: 500.000"
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>
@@ -555,7 +556,7 @@ export default function InputKasKeluarPage() {
                         {selectedPurchaseId && (
                           <div>
                             <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
-                            <input type="number" required min="1" step="1" value={payAmount} onChange={e => setPayAmount(e.target.value)}
+                            <RupiahInput required value={payAmount} onChange={setPayAmount}
                               className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                           </div>
                         )}
@@ -564,8 +565,8 @@ export default function InputKasKeluarPage() {
                       <>
                         <div>
                           <label className="block text-xs font-medium text-slate-700 mb-1">Total Tagihan (Rp) <span className="text-red-500">*</span></label>
-                          <input type="number" required min="1" step="1" value={newTotalAmount} onChange={e => setNewTotalAmount(e.target.value)}
-                            placeholder="Contoh: 5000000"
+                          <RupiahInput required value={newTotalAmount} onChange={setNewTotalAmount}
+                            placeholder="Contoh: 5.000.000"
                             className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                         </div>
                         <div>
@@ -582,7 +583,7 @@ export default function InputKasKeluarPage() {
                         {payNow && (
                           <div>
                             <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
-                            <input type="number" min="1" step="1" value={payNowAmount} onChange={e => setPayNowAmount(e.target.value)}
+                            <RupiahInput value={payNowAmount} onChange={setPayNowAmount}
                               placeholder="Boleh sebagian saja"
                               className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                           </div>
@@ -660,7 +661,7 @@ export default function InputKasKeluarPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                         {editingRowId === r.id ? (
-                          <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                          <RupiahInput value={editRowAmount} onChange={setEditRowAmount}
                             className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
                         ) : formatRupiah(r.amount)}
                       </td>
@@ -741,7 +742,7 @@ export default function InputKasKeluarPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                       {editingRowId === r.id ? (
-                        <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                        <RupiahInput value={editRowAmount} onChange={setEditRowAmount}
                           className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
                       ) : formatRupiah(r.amount)}
                     </td>

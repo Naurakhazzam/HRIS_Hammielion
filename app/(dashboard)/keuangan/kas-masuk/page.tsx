@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr, todayLocalStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
 type BankAccount = { id: string; bank_name: string; account_number: string | null; account_holder_name: string | null; branch_id: string | null; account_type: string }
@@ -307,8 +308,8 @@ export default function KasMasukPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Total Omzet (Rp) <span className="text-red-500">*</span></label>
-              <input type="number" required min="1" step="1" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}
-                placeholder="Contoh: 8000000"
+              <RupiahInput required value={form.amount} onChange={v => setForm({ ...form, amount: v })}
+                placeholder="Contoh: 8.000.000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
             <div>
@@ -335,8 +336,8 @@ export default function KasMasukPage() {
             <div className="pt-2 border-t border-slate-100">
               <label className="block text-xs font-medium text-slate-700 mb-1">Pengeluaran (Opsional)</label>
               <p className="text-[11px] text-slate-400 mb-2">Uang tunai yang dipakai langsung dari hasil kas hari itu (mengurangi uang yang diterima).</p>
-              <input type="number" min="0" step="1" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)}
-                placeholder="Contoh: 100000"
+              <RupiahInput value={expenseAmount} onChange={setExpenseAmount}
+                placeholder="Contoh: 100.000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
 
@@ -356,8 +357,8 @@ export default function KasMasukPage() {
                 ))}
               </div>
               {selisihType !== 'none' && (
-                <input type="number" min="1" step="1" value={selisihAmount} onChange={e => setSelisihAmount(e.target.value)}
-                  placeholder="Nominal selisih, contoh: 100000"
+                <RupiahInput value={selisihAmount} onChange={setSelisihAmount}
+                  placeholder="Nominal selisih, contoh: 100.000"
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               )}
               {(() => {
@@ -446,7 +447,7 @@ export default function KasMasukPage() {
                         <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{r.branches?.name}</td>
                         <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                           {editingRowId === r.id ? (
-                            <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                            <RupiahInput value={editRowAmount} onChange={setEditRowAmount}
                               className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
                           ) : formatRupiah(r.amount)}
                         </td>
@@ -547,7 +548,7 @@ export default function KasMasukPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                         {editingRowId === r.id ? (
-                          <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                          <RupiahInput value={editRowAmount} onChange={setEditRowAmount}
                             className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
                         ) : formatRupiah(r.amount)}
                       </td>
@@ -557,7 +558,7 @@ export default function KasMasukPage() {
                             <p className="text-[10px] text-slate-400 italic">Tidak berlaku untuk Transfer</p>
                           ) : (
                           <div className="flex flex-col items-end gap-1">
-                            <input type="number" min="0" step="1" value={editRowExpenseAmount} onChange={e => setEditRowExpenseAmount(e.target.value)}
+                            <RupiahInput value={editRowExpenseAmount} onChange={setEditRowExpenseAmount}
                               placeholder="Pengeluaran"
                               className="w-24 px-2 py-1 border border-slate-300 rounded text-xs text-right" />
                             <div className="flex gap-1">
@@ -573,7 +574,7 @@ export default function KasMasukPage() {
                               ))}
                             </div>
                             {editRowSelisihType !== 'none' && (
-                              <input type="number" min="1" step="1" value={editRowSelisihAmount} onChange={e => setEditRowSelisihAmount(e.target.value)}
+                              <RupiahInput value={editRowSelisihAmount} onChange={setEditRowSelisihAmount}
                                 className="w-24 px-2 py-1 border border-slate-300 rounded text-xs text-right" />
                             )}
                           </div>
