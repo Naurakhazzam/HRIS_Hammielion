@@ -58,6 +58,7 @@ export default function InputKasKeluarPage() {
 
   // Mode "Bayar ke Supplier" — supaya tidak perlu pindah ke halaman Pembelian & Utang Supplier untuk aktivitas harian
   const [entryMode, setEntryMode] = useState<'biasa' | 'supplier'>('biasa')
+  const [activeSubTab, setActiveSubTab] = useState<'riwayat' | 'revisi'>('riwayat')
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [supplierId, setSupplierId] = useState('')
   const [supplierPurchases, setSupplierPurchases] = useState<SupplierPurchaseOpt[]>([])
@@ -620,7 +621,17 @@ export default function InputKasKeluarPage() {
         </div>
 
         <div className="lg:col-span-2 space-y-4">
-        {needsRevision.length > 0 && (
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+          <button onClick={() => setActiveSubTab('riwayat')}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeSubTab === 'riwayat' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            10 Input Terakhir
+          </button>
+          <button onClick={() => setActiveSubTab('revisi')}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeSubTab === 'revisi' ? 'bg-white text-red-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            ⚠️ Perlu Direvisi {needsRevision.length > 0 && `(${needsRevision.length})`}
+          </button>
+        </div>
+        {activeSubTab === 'revisi' && (
           <div className="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
             <div className="p-4 border-b border-red-200 bg-red-50">
               <h2 className="font-semibold text-red-800 text-sm">⚠️ Perlu Direvisi ({needsRevision.length})</h2>
@@ -629,7 +640,9 @@ export default function InputKasKeluarPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <tbody className="divide-y divide-slate-100">
-                  {needsRevision.map(r => (
+                  {needsRevision.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada entri yang perlu direvisi.</td></tr>
+                  ) : needsRevision.map(r => (
                     <tr key={r.id} className="hover:bg-red-50/50 transition">
                       <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
                         {editingRowId === r.id ? (
@@ -681,6 +694,7 @@ export default function InputKasKeluarPage() {
             </div>
           </div>
         )}
+        {activeSubTab === 'riwayat' && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50">
             <h2 className="font-semibold text-slate-800 text-sm">10 Input Terakhir Saya</h2>
@@ -776,6 +790,7 @@ export default function InputKasKeluarPage() {
             </table>
           </div>
         </div>
+        )}
         </div>
       </div>
     </div>
