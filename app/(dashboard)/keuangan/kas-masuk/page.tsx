@@ -16,6 +16,7 @@ type CashIn = {
   payment_method: string
   description: string | null
   status: string
+  rejection_reason: string | null
   account_id: string | null
   branches?: { name: string } | null
   fin_bank_accounts?: { bank_name: string; account_number: string | null; account_holder_name: string | null; account_type: string } | null
@@ -49,6 +50,7 @@ export default function KasMasukPage() {
   const [editRowSelisihType, setEditRowSelisihType] = useState<'none' | 'plus' | 'minus'>('none')
   const [editRowSelisihAmount, setEditRowSelisihAmount] = useState<string>('')
   const [editRowExpenseAmount, setEditRowExpenseAmount] = useState<string>('')
+  const [editingRowOriginalStatus, setEditingRowOriginalStatus] = useState<string>('')
 
   const today = todayLocalStr()
   const [form, setForm] = useState({
@@ -61,6 +63,7 @@ export default function KasMasukPage() {
   const thisMonth = today.slice(0, 7)
   const [filterMonth, setFilterMonth] = useState(thisMonth)
   const [filterBranch, setFilterBranch] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
 
   const isSupervisor = role === 'supervisor'
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -73,19 +76,20 @@ export default function KasMasukPage() {
 
     let query = supabase
       .from('fin_cash_in')
-      .select('id, branch_id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
+      .select('id, branch_id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, rejection_reason, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
 
     if (!isAdmin && myBranchId) query = query.eq('branch_id', myBranchId)
     if (isAdmin && filterBranch) query = query.eq('branch_id', filterBranch)
+    if (filterStatus) query = query.eq('status', filterStatus)
 
     const { data, error } = await query
     if (error) console.error('Detail error:', JSON.stringify(error, null, 2))
     else setRows((data as unknown as CashIn[]) || [])
     setLoading(false)
-  }, [supabase, filterMonth, filterBranch, isAdmin, myBranchId])
+  }, [supabase, filterMonth, filterBranch, filterStatus, isAdmin, myBranchId])
 
   useEffect(() => {
     async function init() {
@@ -181,8 +185,8 @@ export default function KasMasukPage() {
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
   const statusBadge = (status: string) => {
-    const map: Record<string, string> = { pending: 'bg-yellow-100 text-yellow-800', approved: 'bg-green-100 text-green-800', rejected: 'bg-red-100 text-red-800' }
-    const label: Record<string, string> = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Ditolak' }
+    const map: Record<string, string> = { pending: 'bg-yellow-100 text-yellow-800', approved: 'bg-green-100 text-green-800', rejected: 'bg-red-100 text-red-800', revisi: 'bg-blue-100 text-blue-800' }
+    const label: Record<string, string> = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Ditolak', revisi: '🔄 Revisi' }
     return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-slate-100 text-slate-700'}`}>{label[status] || status}</span>
   }
 
@@ -190,7 +194,7 @@ export default function KasMasukPage() {
   const totalPhysicalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount) - Number(r.expense_amount) + Number(r.cash_adjustment), 0)
 
   function canEditRow(r: CashIn) {
-    if (r.status !== 'pending') return false
+    if (r.status !== 'pending' && r.status !== 'rejected') return false
     if (isAdmin) return true
     if (isSupervisor) return r.branch_id === myBranchId
     return false
@@ -213,6 +217,7 @@ export default function KasMasukPage() {
 
   function startEditRow(r: CashIn) {
     setEditingRowId(r.id)
+    setEditingRowOriginalStatus(r.status)
     setEditRowAccountId(r.account_id || '')
     setEditRowAmount(String(r.amount))
     setEditRowPaymentMethod(r.payment_method)
@@ -233,11 +238,18 @@ export default function KasMasukPage() {
     const selisihNum = editRowSelisihType === 'none' ? 0 : (parseFloat(editRowSelisihAmount) || 0)
     const cashAdjustment = editRowSelisihType === 'plus' ? selisihNum : editRowSelisihType === 'minus' ? -selisihNum : 0
     if (amountNum - expenseNum + cashAdjustment < 0) { showMessage('error', 'Pengeluaran + selisih minus tidak boleh lebih besar dari omzet.'); return }
+    const wasRejected = editingRowOriginalStatus === 'rejected'
     const { error } = await supabase.from('fin_cash_in')
-      .update({ branch_id: editRowBranchId, transaction_date: editRowDate, amount: amountNum, expense_amount: expenseNum, cash_adjustment: cashAdjustment, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId })
+      .update({
+        branch_id: editRowBranchId, transaction_date: editRowDate, amount: amountNum, expense_amount: expenseNum, cash_adjustment: cashAdjustment, payment_method: editRowPaymentMethod, description: editRowDescription || null, account_id: editRowAccountId,
+        ...(wasRejected ? { status: 'revisi', rejection_reason: null, verified_by: null, verified_at: null } : {}),
+      })
       .eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-    else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
+    else {
+      showMessage('success', wasRejected ? 'Entri berhasil diperbaiki dan diajukan ulang untuk verifikasi.' : 'Entri berhasil diperbarui.')
+      setEditingRowId(null); fetchRows()
+    }
   }
 
   if (loading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
@@ -388,6 +400,17 @@ export default function KasMasukPage() {
                   </select>
                 </div>
               )}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Status</label>
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+                  className="w-40 px-2 py-1.5 border border-slate-300 rounded text-sm outline-none bg-white">
+                  <option value="">Semua Status</option>
+                  <option value="pending">Menunggu</option>
+                  <option value="approved">Disetujui</option>
+                  <option value="rejected">Ditolak</option>
+                  <option value="revisi">Revisi</option>
+                </select>
+              </div>
             </div>
             <div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-left border-collapse">
@@ -501,7 +524,12 @@ export default function KasMasukPage() {
                             className="w-full px-2 py-1 border border-slate-300 rounded text-sm" />
                         ) : (r.description || '—')}
                       </td>
-                      <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
+                      <td className="px-4 py-3 text-center">
+                        {statusBadge(r.status)}
+                        {r.status === 'rejected' && r.rejection_reason && (
+                          <div className="text-[10px] text-red-600 mt-1 max-w-[160px] mx-auto">Alasan: {r.rejection_reason}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-center">
                         {editingRowId === r.id ? (
                           <div className="flex gap-1 justify-center">
@@ -511,7 +539,7 @@ export default function KasMasukPage() {
                         ) : (
                           <div className="flex gap-2 justify-center">
                             {canEditRow(r) && (
-                              <button onClick={() => startEditRow(r)} className="text-xs text-blue-600 hover:underline">Edit</button>
+                              <button onClick={() => startEditRow(r)} className="text-xs text-blue-600 hover:underline font-medium">{r.status === 'rejected' ? 'Perbaiki' : 'Edit'}</button>
                             )}
                             {canDeleteRow(r) && (
                               <button onClick={() => handleDeleteRow(r)} className="text-xs text-red-600 hover:underline">Hapus</button>

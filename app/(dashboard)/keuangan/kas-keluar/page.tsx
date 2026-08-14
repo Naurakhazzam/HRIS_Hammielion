@@ -20,6 +20,7 @@ type MyCashOut = {
   description: string | null
   transaction_date: string
   status: string
+  rejection_reason: string | null
   account_id: string | null
   source_table: string | null
   branches: { name: string } | null
@@ -113,7 +114,7 @@ export default function InputKasKeluarPage() {
   const fetchRecent = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from('fin_cash_out')
-      .select('id, branch_id, category, amount, description, transaction_date, status, account_id, source_table, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
+      .select('id, branch_id, category, amount, description, transaction_date, status, rejection_reason, account_id, source_table, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
       .eq('input_by', userId)
       .order('created_at', { ascending: false })
       .limit(10)
@@ -127,9 +128,10 @@ export default function InputKasKeluarPage() {
   const [editRowDescription, setEditRowDescription] = useState('')
   const [editRowDate, setEditRowDate] = useState('')
   const [editRowAccountId, setEditRowAccountId] = useState('')
+  const [editingRowOriginalStatus, setEditingRowOriginalStatus] = useState('')
 
   function canEditRow(r: MyCashOut) {
-    if (r.status !== 'pending') return false
+    if (r.status !== 'pending' && r.status !== 'rejected') return false
     if (r.source_table) return false // entri otomatis (payroll/driver/kasbon/pembelian supplier/dll) tidak boleh diubah manual
     return isAdmin
   }
@@ -142,6 +144,7 @@ export default function InputKasKeluarPage() {
 
   function startEditRow(r: MyCashOut) {
     setEditingRowId(r.id)
+    setEditingRowOriginalStatus(r.status)
     setEditRowBranchId(r.branch_id)
     setEditRowCategory(r.category)
     setEditRowAmount(String(r.amount))
@@ -157,6 +160,7 @@ export default function InputKasKeluarPage() {
     if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
     if (!editRowCategory) { showMessage('error', 'Pilih kategori dulu.'); return }
     if (!editRowBranchId) { showMessage('error', 'Pilih cabang dulu.'); return }
+    const wasRejected = editingRowOriginalStatus === 'rejected'
     const { error } = await supabase.from('fin_cash_out')
       .update({
         branch_id: editRowBranchId,
@@ -165,10 +169,14 @@ export default function InputKasKeluarPage() {
         amount: amountNum,
         description: editRowDescription || null,
         account_id: editRowAccountId,
+        ...(wasRejected ? { status: 'revisi', rejection_reason: null, verified_by: null, verified_at: null } : {}),
       })
       .eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-    else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRecent(myUserId) }
+    else {
+      showMessage('success', wasRejected ? 'Entri berhasil diperbaiki dan diajukan ulang untuk verifikasi.' : 'Entri berhasil diperbarui.')
+      setEditingRowId(null); fetchRecent(myUserId)
+    }
   }
 
   async function handleDeleteRow(r: MyCashOut) {
@@ -346,8 +354,9 @@ export default function InputKasKeluarPage() {
       pending: 'bg-yellow-100 text-yellow-800',
       approved: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800',
+      revisi: 'bg-blue-100 text-blue-800',
     }
-    const label: Record<string, string> = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Ditolak' }
+    const label: Record<string, string> = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Ditolak', revisi: '🔄 Revisi' }
     return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-slate-100 text-slate-700'}`}>{label[status] || status}</span>
   }
 
@@ -657,7 +666,12 @@ export default function InputKasKeluarPage() {
                         </select>
                       ) : r.fin_bank_accounts ? (r.fin_bank_accounts.account_type === 'tunai' ? r.fin_bank_accounts.bank_name : `${r.fin_bank_accounts.bank_name} — ${r.fin_bank_accounts.account_number}`) : '—'}
                     </td>
-                    <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
+                    <td className="px-4 py-3 text-center">
+                      {statusBadge(r.status)}
+                      {r.status === 'rejected' && r.rejection_reason && (
+                        <div className="text-[10px] text-red-600 mt-1 max-w-[160px] mx-auto">Alasan: {r.rejection_reason}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center">
                       {editingRowId === r.id ? (
                         <div className="flex gap-1 justify-center">
@@ -667,7 +681,7 @@ export default function InputKasKeluarPage() {
                       ) : (
                         <div className="flex gap-2 justify-center">
                           {canEditRow(r) && (
-                            <button onClick={() => startEditRow(r)} className="text-xs text-blue-600 hover:underline">Edit</button>
+                            <button onClick={() => startEditRow(r)} className="text-xs text-blue-600 hover:underline font-medium">{r.status === 'rejected' ? 'Perbaiki' : 'Edit'}</button>
                           )}
                           {canDeleteRow(r) && (
                             <button onClick={() => handleDeleteRow(r)} className="text-xs text-red-600 hover:underline">Hapus</button>

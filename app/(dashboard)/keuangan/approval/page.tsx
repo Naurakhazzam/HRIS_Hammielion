@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 type PendingCashOut = {
   id: string
   branch_id: string
+  status: string
   amount: number
   description: string | null
   transaction_date: string
@@ -17,6 +18,7 @@ type PendingCashOut = {
 type PendingCashIn = {
   id: string
   branch_id: string
+  status: string
   amount: number
   expense_amount: number
   cash_adjustment: number
@@ -87,6 +89,8 @@ export default function ApprovalKasKeluarPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [branches, setBranches] = useState<BranchOpt[]>([])
   const [filterBranch, setFilterBranch] = useState('')
+  const [rejectModal, setRejectModal] = useState<{ ids: string[] } | null>(null)
+  const [rejectReasonText, setRejectReasonText] = useState('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
 
@@ -94,11 +98,11 @@ export default function ApprovalKasKeluarPage() {
     setLoading(true)
     const [coRes, ciRes, hpRes, baseRes, snapRes, assetRes, contractRes] = await Promise.all([
       supabase.from('fin_cash_out')
-        .select('id, branch_id, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
-        .eq('status', 'pending').order('transaction_date', { ascending: false }),
+        .select('id, branch_id, status, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
+        .in('status', ['pending', 'revisi']).order('transaction_date', { ascending: false }),
       supabase.from('fin_cash_in')
-        .select('id, branch_id, amount, expense_amount, cash_adjustment, payment_method, description, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
-        .eq('status', 'pending').order('transaction_date', { ascending: false }),
+        .select('id, branch_id, status, amount, expense_amount, cash_adjustment, payment_method, description, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
+        .in('status', ['pending', 'revisi']).order('transaction_date', { ascending: false }),
       supabase.from('fin_hpp_entries')
         .select('id, branch_id, hpp_amount, notes, entry_date, branches(name), input_user:users!fin_hpp_entries_input_by_fkey(email)')
         .eq('status', 'pending').order('entry_date', { ascending: false }),
@@ -172,14 +176,35 @@ export default function ApprovalKasKeluarPage() {
     setTimeout(() => setMessage(null), 5000)
   }
 
+  // Kas Keluar & Kas Masuk wajib diisi alasan saat ditolak, supaya yang input tahu apa yang perlu diperbaiki
+  const REASON_REQUIRED_TABS: Tab[] = ['kas_keluar', 'kas_masuk']
+
+  function handleRejectClick(ids: string[]) {
+    if (ids.length === 0) return
+    if (REASON_REQUIRED_TABS.includes(tab)) {
+      setRejectReasonText('')
+      setRejectModal({ ids })
+    } else {
+      processEntries(ids, 'rejected')
+    }
+  }
+
+  async function confirmRejectWithReason() {
+    if (!rejectModal || !rejectReasonText.trim()) return
+    await processEntries(rejectModal.ids, 'rejected', rejectReasonText.trim())
+    setRejectModal(null)
+    setSelectedIds([])
+  }
+
   const LABEL_BY_TAB: Record<Tab, string> = { kas_keluar: 'Kas Keluar', kas_masuk: 'Kas Masuk', hpp: 'HPP', modal_cabang: 'Modal Cabang', aset: 'Aset & Kontrak' }
   // Tabel & kolom status per tab sederhana (single-table)
   const SIMPLE_TABLE_BY_TAB: Partial<Record<Tab, string>> = { kas_keluar: 'fin_cash_out', kas_masuk: 'fin_cash_in', hpp: 'fin_hpp_entries' }
 
-  async function processEntries(ids: string[], newStatus: 'approved' | 'rejected') {
+  async function processEntries(ids: string[], newStatus: 'approved' | 'rejected', reason?: string) {
     if (!myUserId || ids.length === 0) return
     const verb = newStatus === 'approved' ? 'menyetujui' : 'menolak'
-    if (!confirm(`Yakin ingin ${verb} ${ids.length} entri ${LABEL_BY_TAB[tab]}?`)) return
+    // Kalau reason sudah diisi (lewat modal alasan penolakan), modal itu sendiri sudah jadi langkah konfirmasi
+    if (reason === undefined && !confirm(`Yakin ingin ${verb} ${ids.length} entri ${LABEL_BY_TAB[tab]}?`)) return
 
     setProcessing(true)
 
@@ -211,6 +236,9 @@ export default function ApprovalKasKeluarPage() {
       const [table, statusCol] = key.split('|')
       const payload: Record<string, unknown> = { verified_by: myUserId, verified_at: new Date().toISOString() }
       payload[statusCol] = newStatus
+      if (newStatus === 'rejected' && reason && (table === 'fin_cash_out' || table === 'fin_cash_in')) {
+        payload.rejection_reason = reason
+      }
       const { error } = await supabase.from(table).update(payload).in('id', groupIds)
       if (error) anyError = error.message
     }
@@ -327,7 +355,7 @@ export default function ApprovalKasKeluarPage() {
                 className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50">
                 Setujui ({selectedIds.length})
               </button>
-              <button onClick={() => processEntries(selectedIds, 'rejected')} disabled={processing}
+              <button onClick={() => handleRejectClick(selectedIds)} disabled={processing}
                 className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50">
                 Tolak ({selectedIds.length})
               </button>
@@ -367,7 +395,10 @@ export default function ApprovalKasKeluarPage() {
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
                       className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                   </td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{new Date(en.transaction_date).toLocaleDateString('id-ID')}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600">
+                    {new Date(en.transaction_date).toLocaleDateString('id-ID')}
+                    {en.status === 'revisi' && <div className="text-[10px] text-blue-600 font-semibold">🔄 Revisi</div>}
+                  </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{en.branches?.name}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">
                     {en.fin_cash_out_categories?.label}
@@ -383,7 +414,7 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-center">
                     <div className="flex gap-1 justify-center">
                       <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
-                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      <button onClick={() => handleRejectClick([en.id])} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                     </div>
                   </td>
                 </tr>
@@ -393,7 +424,10 @@ export default function ApprovalKasKeluarPage() {
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
                       className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                   </td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{new Date(en.transaction_date).toLocaleDateString('id-ID')}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600">
+                    {new Date(en.transaction_date).toLocaleDateString('id-ID')}
+                    {en.status === 'revisi' && <div className="text-[10px] text-blue-600 font-semibold">🔄 Revisi</div>}
+                  </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{en.branches?.name}</td>
                   <td className="px-4 py-3 text-sm text-slate-700">
                     {PAYMENT_LABEL[en.payment_method] || en.payment_method}
@@ -422,7 +456,7 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-center">
                     <div className="flex gap-1 justify-center">
                       <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
-                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      <button onClick={() => handleRejectClick([en.id])} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                     </div>
                   </td>
                 </tr>
@@ -440,7 +474,7 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-center">
                     <div className="flex gap-1 justify-center">
                       <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
-                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      <button onClick={() => handleRejectClick([en.id])} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                     </div>
                   </td>
                 </tr>
@@ -465,7 +499,7 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-center">
                     <div className="flex gap-1 justify-center">
                       <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
-                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      <button onClick={() => handleRejectClick([en.id])} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                     </div>
                   </td>
                 </tr>
@@ -484,7 +518,7 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-center">
                     <div className="flex gap-1 justify-center">
                       <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
-                      <button onClick={() => processEntries([en.id], 'rejected')} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      <button onClick={() => handleRejectClick([en.id])} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                     </div>
                   </td>
                 </tr>
@@ -493,6 +527,38 @@ export default function ApprovalKasKeluarPage() {
           </table>
         </div>
       </div>
+
+      {rejectModal && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">Tolak {rejectModal.ids.length} Entri {LABEL_BY_TAB[tab]}</h2>
+              <p className="text-xs text-slate-500 mb-4 pb-3 border-b border-slate-100">
+                Tuliskan alasan penolakan — supaya yang input tahu apa yang perlu diperbaiki sebelum mengajukan ulang.
+              </p>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Alasan Ditolak <span className="text-red-500">*</span></label>
+              <textarea
+                required
+                value={rejectReasonText}
+                onChange={e => setRejectReasonText(e.target.value)}
+                rows={3}
+                placeholder="Contoh: Nominal tidak sesuai nota, cek ulang."
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              <div className="flex justify-end gap-3 pt-4">
+                <button type="button" onClick={() => setRejectModal(null)}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                  Batal
+                </button>
+                <button type="button" onClick={confirmRejectWithReason} disabled={!rejectReasonText.trim() || processing}
+                  className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                  {processing ? 'Memproses...' : 'Tolak Entri'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
