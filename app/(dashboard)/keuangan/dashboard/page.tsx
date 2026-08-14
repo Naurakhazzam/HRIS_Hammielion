@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr, todayLocalStr } from '@/lib/date'
+import Link from 'next/link'
+import InfoTooltip from '@/components/InfoTooltip'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
@@ -16,6 +18,13 @@ type GroupTotals = {
   labaKotor: number
   labaBersih: number
 }
+const EMPTY_TOTALS = { kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, labaKotor: 0, labaBersih: 0 }
+
+function shiftMonth(monthStr: string, delta: number): string {
+  const [y, m] = monthStr.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 
 export default function DashboardKeuanganPage() {
   const supabase = createClient()
@@ -28,7 +37,9 @@ export default function DashboardKeuanganPage() {
   const [filterMonth, setFilterMonth] = useState(today.slice(0, 7))
   const [loading, setLoading] = useState(true)
   const [groups, setGroups] = useState<GroupTotals[]>([])
+  const [prevGroups, setPrevGroups] = useState<GroupTotals[]>([])
   const [consolidated, setConsolidated] = useState<GroupTotals | null>(null)
+  const [prevConsolidated, setPrevConsolidated] = useState<GroupTotals | null>(null)
   const [asOf, setAsOf] = useState<string>('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -50,12 +61,7 @@ export default function DashboardKeuanganPage() {
     init()
   }, [supabase])
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    const [year, month] = filterMonth.split('-').map(Number)
-    const startDate = localDateStr(new Date(year, month - 1, 1))
-    const endDate = localDateStr(new Date(year, month, 0))
-
+  const computeTotals = useCallback(async (startDate: string, endDate: string, month: number, year: number): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
     const [groupsRes, cashInRes, hppRes, cashOutRes, kasbonRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
@@ -134,18 +140,56 @@ export default function DashboardKeuanganPage() {
       kasbonRealisasi: acc.kasbonRealisasi + g.kasbonRealisasi,
       labaKotor: acc.labaKotor + g.labaKotor,
       labaBersih: acc.labaBersih + g.labaBersih,
-    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, labaKotor: 0, labaBersih: 0 })
+    }), { label: 'Total Konsolidasi', ...EMPTY_TOTALS })
 
-    setGroups(groupList)
-    setConsolidated(totalKonsolidasi)
+    return { groups: groupList, consolidated: totalKonsolidasi }
+  }, [supabase, isAdmin, myBranchId])
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    const [year, month] = filterMonth.split('-').map(Number)
+    const startDate = localDateStr(new Date(year, month - 1, 1))
+    const endDate = localDateStr(new Date(year, month, 0))
+
+    const prevMonthStr = shiftMonth(filterMonth, -1)
+    const [prevYear, prevMonth] = prevMonthStr.split('-').map(Number)
+    const prevStartDate = localDateStr(new Date(prevYear, prevMonth - 1, 1))
+    const prevEndDate = localDateStr(new Date(prevYear, prevMonth, 0))
+
+    const [cur, prev] = await Promise.all([
+      computeTotals(startDate, endDate, month, year),
+      computeTotals(prevStartDate, prevEndDate, prevMonth, prevYear),
+    ])
+
+    setGroups(cur.groups)
+    setConsolidated(cur.consolidated)
+    setPrevGroups(prev.groups)
+    setPrevConsolidated(prev.consolidated)
     setAsOf(new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }))
     setLoading(false)
-  }, [supabase, filterMonth, isAdmin, myBranchId])
+  }, [filterMonth, computeTotals])
 
   useEffect(() => { if (!roleLoading) fetchData() }, [roleLoading, fetchData])
 
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
+
+  function variance(cur: number, prev: number) {
+    const diff = cur - prev
+    const pct = prev !== 0 ? (diff / Math.abs(prev)) * 100 : (cur !== 0 ? 100 : 0)
+    return { diff, pct }
+  }
+
+  function VarianceBadge({ cur, prev }: { cur: number; prev: number }) {
+    const { diff, pct } = variance(cur, prev)
+    if (diff === 0 && prev === 0) return <span className="text-xs text-slate-400">—</span>
+    const positive = diff >= 0
+    return (
+      <span className={`text-xs font-medium ${positive ? 'text-green-600' : 'text-red-600'}`}>
+        {positive ? '▲' : '▼'} {formatRupiah(Math.abs(diff))} ({pct >= 0 ? '+' : ''}{pct.toFixed(0)}%)
+      </span>
+    )
+  }
 
   if (roleLoading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
 
@@ -155,6 +199,10 @@ export default function DashboardKeuanganPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Dashboard Keuangan</h1>
           <p className="text-sm text-slate-500">Laba Kotor & Laba Bersih live berdasarkan data yang sudah disetujui. Laba Kotor = Kas Masuk − HPP. Laba Bersih = Laba Kotor − Biaya Operasional (restock dikecualikan) − Realisasi Kasbon dari gaji yang lunas.</p>
+          <p className="text-xs text-slate-400 mt-1">
+            Ini ringkasan cepat bulan berjalan. Butuh laporan mingguan atau file unduhan (CSV) untuk pajak/arsip? Buka{' '}
+            <Link href="/keuangan/laporan" className="text-blue-600 hover:underline font-medium">Laporan Resmi</Link>.
+          </p>
         </div>
         <div>
           <label className="block text-xs text-slate-500 mb-1">Bulan</label>
@@ -167,7 +215,7 @@ export default function DashboardKeuanganPage() {
         <div className="py-10 text-center text-slate-500">Memuat data...</div>
       ) : (
         <>
-          {isAdmin && consolidated && (
+          {isAdmin && consolidated && prevConsolidated && (
             <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200">
               <div className="flex justify-between items-center mb-3">
                 <h2 className="text-lg font-bold text-slate-800">Total Konsolidasi (Seluruh Bisnis)</h2>
@@ -177,28 +225,39 @@ export default function DashboardKeuanganPage() {
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Kas Masuk</p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.kasMasuk)}</p>
+                  <VarianceBadge cur={consolidated.kasMasuk} prev={prevConsolidated.kasMasuk} />
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">HPP</p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.hpp)}</p>
+                  <VarianceBadge cur={consolidated.hpp} prev={prevConsolidated.hpp} />
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Laba Kotor</p>
                   <p className="text-lg font-semibold text-blue-700">{formatRupiah(consolidated.labaKotor)}</p>
+                  <VarianceBadge cur={consolidated.labaKotor} prev={prevConsolidated.labaKotor} />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Biaya Operasional</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Biaya Operasional
+                    <InfoTooltip text="Tidak termasuk pembelian stok/restock ke supplier (Gudang/Hammielion) — itu sudah dihitung di HPP, supaya tidak dihitung dobel." />
+                  </p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.biayaOperasional)}</p>
+                  <VarianceBadge cur={consolidated.biayaOperasional} prev={prevConsolidated.biayaOperasional} />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Realisasi Kasbon</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Realisasi Kasbon
+                    <InfoTooltip text="Uang kasbon sudah keluar duluan saat dicairkan ke karyawan. Di sini dihitung SEBAGAI BIAYA baru saat gajinya benar-benar lunas dan potongannya jalan — bukan dihitung dua kali, cuma waktu pengakuannya beda." />
+                  </p>
                   <p className="text-lg font-semibold text-amber-700">{formatRupiah(consolidated.kasbonRealisasi)}</p>
+                  <VarianceBadge cur={consolidated.kasbonRealisasi} prev={prevConsolidated.kasbonRealisasi} />
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Laba Bersih</p>
                   <p className={`text-lg font-bold ${consolidated.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(consolidated.labaBersih)}</p>
+                  <VarianceBadge cur={consolidated.labaBersih} prev={prevConsolidated.labaBersih} />
                 </div>
               </div>
+              <p className="text-[11px] text-slate-400 mt-3">Dibanding bulan sebelumnya ({shiftMonth(filterMonth, -1)}).</p>
             </div>
           )}
 
@@ -214,25 +273,39 @@ export default function DashboardKeuanganPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Masuk</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">HPP</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Kotor</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Biaya Operasional</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Realisasi Kasbon</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Bersih</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">
+                      <span className="inline-flex items-center justify-end">Biaya Operasional
+                        <InfoTooltip text="Tidak termasuk pembelian stok/restock ke supplier — sudah dihitung di HPP, supaya tidak dobel." />
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">
+                      <span className="inline-flex items-center justify-end">Realisasi Kasbon
+                        <InfoTooltip text="Baru dihitung sebagai biaya saat gajinya lunas, meski uangnya sudah keluar duluan saat kasbon dicairkan. Bukan dobel hitung." />
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Bersih (vs bulan lalu)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {groups.length === 0 ? (
                     <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk bulan ini.</td></tr>
-                  ) : groups.map(g => (
-                    <tr key={g.label} className="hover:bg-slate-50 transition">
-                      <td className="px-4 py-3 text-sm font-medium text-slate-800">{g.label}</td>
-                      <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.kasMasuk)}</td>
-                      <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.hpp)}</td>
-                      <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700">{formatRupiah(g.labaKotor)}</td>
-                      <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.biayaOperasional)}</td>
-                      <td className="px-4 py-3 text-sm text-right text-amber-700">{formatRupiah(g.kasbonRealisasi)}</td>
-                      <td className={`px-4 py-3 text-sm text-right font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</td>
-                    </tr>
-                  ))}
+                  ) : groups.map(g => {
+                    const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, ...EMPTY_TOTALS }
+                    return (
+                      <tr key={g.label} className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-800">{g.label}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.kasMasuk)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.hpp)}</td>
+                        <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700">{formatRupiah(g.labaKotor)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.biayaOperasional)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-amber-700">{formatRupiah(g.kasbonRealisasi)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <div className={`text-sm font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</div>
+                          <VarianceBadge cur={g.labaBersih} prev={prev.labaBersih} />
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

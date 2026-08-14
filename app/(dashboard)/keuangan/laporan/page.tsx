@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr, todayLocalStr } from '@/lib/date'
+import Link from 'next/link'
+import InfoTooltip from '@/components/InfoTooltip'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
@@ -276,6 +278,10 @@ export default function LaporanResmiPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Laporan Resmi</h1>
         <p className="text-sm text-slate-500">Laporan P&L per kelompok laporan dengan perbandingan periode sebelumnya, berdasarkan data yang sudah disetujui.</p>
+        <p className="text-xs text-slate-400 mt-1">
+          Ini versi lengkap (mingguan/bulanan + ekspor CSV). Untuk sekilas lihat laba bulan ini saja, buka{' '}
+          <Link href="/keuangan/dashboard" className="text-blue-600 hover:underline font-medium">Dashboard Keuangan</Link>.
+        </p>
       </div>
 
       <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6">
@@ -340,12 +346,16 @@ export default function LaporanResmiPage() {
                   <VarianceBadge cur={consolidated.labaKotor} prev={prevConsolidated.labaKotor} />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Biaya Operasional</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Biaya Operasional
+                    <InfoTooltip text="Tidak termasuk pembelian stok/restock ke supplier (Gudang/Hammielion) — itu sudah dihitung di HPP, supaya tidak dihitung dobel." />
+                  </p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.biayaOperasional)}</p>
                   <VarianceBadge cur={consolidated.biayaOperasional} prev={prevConsolidated.biayaOperasional} />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Realisasi Kasbon</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Realisasi Kasbon
+                    <InfoTooltip text="Uang kasbon sudah keluar duluan saat dicairkan ke karyawan. Di sini dihitung SEBAGAI BIAYA baru saat gajinya benar-benar lunas dan potongannya jalan — bukan dihitung dua kali, cuma waktu pengakuannya beda." />
+                  </p>
                   <p className="text-lg font-semibold text-amber-700">{formatRupiah(consolidated.kasbonRealisasi)}</p>
                   <VarianceBadge cur={consolidated.kasbonRealisasi} prev={prevConsolidated.kasbonRealisasi} />
                   {tab === 'mingguan' && <p className="text-[10px] text-slate-400 mt-0.5">Cuma dihitung di tampilan bulanan</p>}
@@ -371,8 +381,16 @@ export default function LaporanResmiPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Masuk</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">HPP</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Kotor</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Biaya Operasional</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Realisasi Kasbon</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">
+                      <span className="inline-flex items-center justify-end">Biaya Operasional
+                        <InfoTooltip text="Tidak termasuk pembelian stok/restock ke supplier — sudah dihitung di HPP, supaya tidak dobel." />
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">
+                      <span className="inline-flex items-center justify-end">Realisasi Kasbon
+                        <InfoTooltip text="Baru dihitung sebagai biaya saat gajinya lunas, meski uangnya sudah keluar duluan saat kasbon dicairkan. Bukan dobel hitung." />
+                      </span>
+                    </th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Bersih (vs periode lalu)</th>
                   </tr>
                 </thead>
