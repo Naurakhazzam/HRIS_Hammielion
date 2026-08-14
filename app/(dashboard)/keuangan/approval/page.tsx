@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 
 type PendingCashOut = {
   id: string
+  branch_id: string
   amount: number
   description: string | null
   transaction_date: string
@@ -15,10 +16,12 @@ type PendingCashOut = {
 }
 type PendingCashIn = {
   id: string
+  branch_id: string
   amount: number
   expense_amount: number
   cash_adjustment: number
   payment_method: string
+  description: string | null
   transaction_date: string
   branches: { name: string } | null
   input_user: { email: string } | null
@@ -26,6 +29,7 @@ type PendingCashIn = {
 }
 type PendingHpp = {
   id: string
+  branch_id: string
   hpp_amount: number
   notes: string | null
   entry_date: string
@@ -34,6 +38,7 @@ type PendingHpp = {
 }
 type PendingModal = {
   id: string
+  branch_id: string | null
   jenis: 'Modal Awal' | 'Snapshot Bulanan'
   table: 'fin_branch_capital_baseline' | 'fin_branch_capital_snapshot'
   tanggal: string
@@ -46,6 +51,7 @@ type PendingModal = {
 }
 type PendingAset = {
   id: string
+  branch_id: string | null
   jenis: 'Aset' | 'Kontrak Sewa'
   table: 'fin_assets' | 'fin_asset_contracts'
   nama: string
@@ -54,6 +60,7 @@ type PendingAset = {
   notes: string | null
   input_user: { email: string } | null
 }
+type BranchOpt = { id: string; name: string }
 
 type Tab = 'kas_keluar' | 'kas_masuk' | 'hpp' | 'modal_cabang' | 'aset'
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
@@ -78,6 +85,8 @@ export default function ApprovalKasKeluarPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [branches, setBranches] = useState<BranchOpt[]>([])
+  const [filterBranch, setFilterBranch] = useState('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
 
@@ -85,25 +94,25 @@ export default function ApprovalKasKeluarPage() {
     setLoading(true)
     const [coRes, ciRes, hpRes, baseRes, snapRes, assetRes, contractRes] = await Promise.all([
       supabase.from('fin_cash_out')
-        .select('id, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
+        .select('id, branch_id, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
         .eq('status', 'pending').order('transaction_date', { ascending: false }),
       supabase.from('fin_cash_in')
-        .select('id, amount, expense_amount, cash_adjustment, payment_method, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
+        .select('id, branch_id, amount, expense_amount, cash_adjustment, payment_method, description, transaction_date, branches(name), input_user:users!fin_cash_in_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
         .eq('status', 'pending').order('transaction_date', { ascending: false }),
       supabase.from('fin_hpp_entries')
-        .select('id, hpp_amount, notes, entry_date, branches(name), input_user:users!fin_hpp_entries_input_by_fkey(email)')
+        .select('id, branch_id, hpp_amount, notes, entry_date, branches(name), input_user:users!fin_hpp_entries_input_by_fkey(email)')
         .eq('status', 'pending').order('entry_date', { ascending: false }),
       supabase.from('fin_branch_capital_baseline')
-        .select('id, baseline_date, cash_amount, inventory_value, asset_value, notes, branches(name), input_user:users!fin_branch_capital_baseline_input_by_fkey(email)')
+        .select('id, branch_id, baseline_date, cash_amount, inventory_value, asset_value, notes, branches(name), input_user:users!fin_branch_capital_baseline_input_by_fkey(email)')
         .eq('status', 'pending').order('created_at', { ascending: false }),
       supabase.from('fin_branch_capital_snapshot')
-        .select('id, snapshot_period, inventory_value, asset_value, notes, branches(name), input_user:users!fin_branch_capital_snapshot_input_by_fkey(email)')
+        .select('id, branch_id, snapshot_period, inventory_value, asset_value, notes, branches(name), input_user:users!fin_branch_capital_snapshot_input_by_fkey(email)')
         .eq('status', 'pending').order('created_at', { ascending: false }),
       supabase.from('fin_assets')
-        .select('id, name, acquisition_value, notes, branches(name), input_user:users!fin_assets_input_by_fkey(email)')
+        .select('id, branch_id, name, acquisition_value, notes, branches(name), input_user:users!fin_assets_input_by_fkey(email)')
         .eq('approval_status', 'pending').order('created_at', { ascending: false }),
       supabase.from('fin_asset_contracts')
-        .select('id, contract_type, rent_amount, notes, fin_assets(name, branches(name)), input_user:users!fin_asset_contracts_input_by_fkey(email)')
+        .select('id, contract_type, rent_amount, notes, fin_assets(name, branch_id, branches(name)), input_user:users!fin_asset_contracts_input_by_fkey(email)')
         .eq('approval_status', 'pending').order('created_at', { ascending: false }),
     ])
     if (coRes.error) console.error('Detail error kas_keluar:', JSON.stringify(coRes.error, null, 2))
@@ -116,24 +125,24 @@ export default function ApprovalKasKeluarPage() {
     if (baseRes.error) console.error('Detail error baseline:', JSON.stringify(baseRes.error, null, 2))
     if (snapRes.error) console.error('Detail error snapshot:', JSON.stringify(snapRes.error, null, 2))
     const baseItems: PendingModal[] = ((baseRes.data as unknown[]) || []).map((r) => {
-      const row = r as { id: string; baseline_date: string; cash_amount: number; inventory_value: number; asset_value: number; notes: string | null; branches: { name: string } | null; input_user: { email: string } | null }
-      return { id: row.id, jenis: 'Modal Awal', table: 'fin_branch_capital_baseline', tanggal: row.baseline_date, cash_amount: row.cash_amount, inventory_value: row.inventory_value, asset_value: row.asset_value, notes: row.notes, branches: row.branches, input_user: row.input_user }
+      const row = r as { id: string; branch_id: string; baseline_date: string; cash_amount: number; inventory_value: number; asset_value: number; notes: string | null; branches: { name: string } | null; input_user: { email: string } | null }
+      return { id: row.id, branch_id: row.branch_id, jenis: 'Modal Awal', table: 'fin_branch_capital_baseline', tanggal: row.baseline_date, cash_amount: row.cash_amount, inventory_value: row.inventory_value, asset_value: row.asset_value, notes: row.notes, branches: row.branches, input_user: row.input_user }
     })
     const snapItems: PendingModal[] = ((snapRes.data as unknown[]) || []).map((r) => {
-      const row = r as { id: string; snapshot_period: string; inventory_value: number; asset_value: number; notes: string | null; branches: { name: string } | null; input_user: { email: string } | null }
-      return { id: row.id, jenis: 'Snapshot Bulanan', table: 'fin_branch_capital_snapshot', tanggal: row.snapshot_period, cash_amount: null, inventory_value: row.inventory_value, asset_value: row.asset_value, notes: row.notes, branches: row.branches, input_user: row.input_user }
+      const row = r as { id: string; branch_id: string; snapshot_period: string; inventory_value: number; asset_value: number; notes: string | null; branches: { name: string } | null; input_user: { email: string } | null }
+      return { id: row.id, branch_id: row.branch_id, jenis: 'Snapshot Bulanan', table: 'fin_branch_capital_snapshot', tanggal: row.snapshot_period, cash_amount: null, inventory_value: row.inventory_value, asset_value: row.asset_value, notes: row.notes, branches: row.branches, input_user: row.input_user }
     })
     setModalItems([...baseItems, ...snapItems])
 
     if (assetRes.error) console.error('Detail error aset:', JSON.stringify(assetRes.error, null, 2))
     if (contractRes.error) console.error('Detail error kontrak:', JSON.stringify(contractRes.error, null, 2))
     const assetItemsList: PendingAset[] = ((assetRes.data as unknown[]) || []).map((r) => {
-      const row = r as { id: string; name: string; acquisition_value: number; notes: string | null; branches: { name: string } | null; input_user: { email: string } | null }
-      return { id: row.id, jenis: 'Aset', table: 'fin_assets', nama: row.name, branchName: row.branches?.name || null, jumlah: row.acquisition_value, notes: row.notes, input_user: row.input_user }
+      const row = r as { id: string; branch_id: string | null; name: string; acquisition_value: number; notes: string | null; branches: { name: string } | null; input_user: { email: string } | null }
+      return { id: row.id, branch_id: row.branch_id, jenis: 'Aset', table: 'fin_assets', nama: row.name, branchName: row.branches?.name || null, jumlah: row.acquisition_value, notes: row.notes, input_user: row.input_user }
     })
     const contractItemsList: PendingAset[] = ((contractRes.data as unknown[]) || []).map((r) => {
-      const row = r as { id: string; contract_type: string; rent_amount: number; notes: string | null; fin_assets: { name: string; branches: { name: string } | null } | null; input_user: { email: string } | null }
-      return { id: row.id, jenis: 'Kontrak Sewa', table: 'fin_asset_contracts', nama: `${row.contract_type} — ${row.fin_assets?.name || ''}`, branchName: row.fin_assets?.branches?.name || null, jumlah: row.rent_amount, notes: row.notes, input_user: row.input_user }
+      const row = r as { id: string; contract_type: string; rent_amount: number; notes: string | null; fin_assets: { name: string; branch_id: string | null; branches: { name: string } | null } | null; input_user: { email: string } | null }
+      return { id: row.id, branch_id: row.fin_assets?.branch_id || null, jenis: 'Kontrak Sewa', table: 'fin_asset_contracts', nama: `${row.contract_type} — ${row.fin_assets?.name || ''}`, branchName: row.fin_assets?.branches?.name || null, jumlah: row.rent_amount, notes: row.notes, input_user: row.input_user }
     })
     setAsetItems([...assetItemsList, ...contractItemsList])
 
@@ -147,6 +156,8 @@ export default function ApprovalKasKeluarPage() {
       setMyUserId(user.id)
       const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).single()
       if (userRow) setRole(userRow.role)
+      const { data: bRes } = await supabase.from('branches').select('id, name').eq('is_active', true).order('name')
+      if (bRes) setBranches(bRes)
       setRoleLoading(false)
     }
     init()
@@ -217,17 +228,33 @@ export default function ApprovalKasKeluarPage() {
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
-  const filteredCashOut = searchTerm.trim()
-    ? cashOut.filter(en => (en.description || '').toLowerCase().includes(searchTerm.trim().toLowerCase()))
-    : cashOut
+  const q = searchTerm.trim().toLowerCase()
+  const matchesBranch = (branchId: string | null) => !filterBranch || branchId === filterBranch
+
+  const filteredCashOut = cashOut.filter(en =>
+    matchesBranch(en.branch_id) && (!q || (en.description || '').toLowerCase().includes(q))
+  )
+  const filteredCashIn = cashIn.filter(en =>
+    matchesBranch(en.branch_id) && (!q || (en.description || '').toLowerCase().includes(q))
+  )
+  const filteredHpp = hpp.filter(en =>
+    matchesBranch(en.branch_id) && (!q || (en.notes || '').toLowerCase().includes(q))
+  )
+  const filteredModal = modalItems.filter(en =>
+    matchesBranch(en.branch_id) && (!q || (en.notes || '').toLowerCase().includes(q))
+  )
+  const filteredAset = asetItems.filter(en =>
+    matchesBranch(en.branch_id) && (!q || `${en.nama} ${en.notes || ''}`.toLowerCase().includes(q))
+  )
 
   const currentList: { id: string }[] =
     tab === 'kas_keluar' ? filteredCashOut :
-    tab === 'kas_masuk' ? cashIn :
-    tab === 'hpp' ? hpp :
-    tab === 'modal_cabang' ? modalItems :
-    asetItems
+    tab === 'kas_masuk' ? filteredCashIn :
+    tab === 'hpp' ? filteredHpp :
+    tab === 'modal_cabang' ? filteredModal :
+    filteredAset
   const currentIds = currentList.map((en) => en.id)
+  const hasActiveFilter = q.length > 0 || filterBranch.length > 0
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSelectedIds(e.target.checked ? currentIds : [])
@@ -275,17 +302,23 @@ export default function ApprovalKasKeluarPage() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        {tab === 'kas_keluar' && (
-          <div className="p-4 border-b border-slate-200">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cari berdasarkan keterangan..."
-              className="w-full sm:w-80 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        )}
+        <div className="p-4 border-b border-slate-200 flex flex-wrap gap-3">
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Cari berdasarkan keterangan..."
+            className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <select
+            value={filterBranch}
+            onChange={(e) => setFilterBranch(e.target.value)}
+            className="w-full sm:w-48 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            <option value="">Semua Cabang</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center gap-4">
           <span className="text-sm text-slate-500">{selectedIds.length > 0 ? `${selectedIds.length} dipilih` : 'Pilih entri untuk memproses massal'}</span>
           {selectedIds.length > 0 && (
@@ -327,7 +360,7 @@ export default function ApprovalKasKeluarPage() {
               {loading ? (
                 <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
               ) : currentList.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">{tab === 'kas_keluar' && searchTerm.trim() ? 'Tidak ada entri yang cocok dengan pencarian.' : 'Tidak ada entri yang menunggu verifikasi.'}</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">{hasActiveFilter ? 'Tidak ada entri yang cocok dengan pencarian/filter.' : 'Tidak ada entri yang menunggu verifikasi.'}</td></tr>
               ) : tab === 'kas_keluar' ? filteredCashOut.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-center">
@@ -354,7 +387,7 @@ export default function ApprovalKasKeluarPage() {
                     </div>
                   </td>
                 </tr>
-              )) : tab === 'kas_masuk' ? cashIn.map(en => (
+              )) : tab === 'kas_masuk' ? filteredCashIn.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
@@ -393,7 +426,7 @@ export default function ApprovalKasKeluarPage() {
                     </div>
                   </td>
                 </tr>
-              )) : tab === 'hpp' ? hpp.map(en => (
+              )) : tab === 'hpp' ? filteredHpp.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
@@ -411,7 +444,7 @@ export default function ApprovalKasKeluarPage() {
                     </div>
                   </td>
                 </tr>
-              )) : tab === 'modal_cabang' ? modalItems.map(en => (
+              )) : tab === 'modal_cabang' ? filteredModal.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
@@ -436,7 +469,7 @@ export default function ApprovalKasKeluarPage() {
                     </div>
                   </td>
                 </tr>
-              )) : asetItems.map(en => (
+              )) : filteredAset.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
