@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
@@ -204,57 +205,47 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Gaji Pokok (Rp) <span className="text-red-500">*</span></label>
-              <input 
-                type="number" 
-                required 
-                min="0"
-                value={formData.base_salary} 
-                onChange={(e) => setFormData({...formData, base_salary: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+              <RupiahInput
+                required
+                value={formData.base_salary}
+                onChange={(v) => setFormData({...formData, base_salary: v})}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Tunj. Jabatan (Rp)</label>
-              <input 
-                type="number" 
-                min="0"
-                value={formData.position_allowance} 
-                onChange={(e) => setFormData({...formData, position_allowance: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+              <RupiahInput
+                value={formData.position_allowance}
+                onChange={(v) => setFormData({...formData, position_allowance: v})}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Tunj. Tetap (Rp)</label>
-              <input 
-                type="number" 
-                min="0"
-                value={formData.meal_allowance} 
-                onChange={(e) => setFormData({...formData, meal_allowance: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+              <RupiahInput
+                value={formData.meal_allowance}
+                onChange={(v) => setFormData({...formData, meal_allowance: v})}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Tarif Lembur / Jam (Rp)</label>
-              <input 
-                type="number" 
-                min="0"
-                value={formData.overtime_rate_per_hour} 
-                onChange={(e) => setFormData({...formData, overtime_rate_per_hour: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+              <RupiahInput
+                value={formData.overtime_rate_per_hour}
+                onChange={(v) => setFormData({...formData, overtime_rate_per_hour: v})}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Potongan Telat / Menit (Rp)</label>
-              <input 
-                type="number" 
-                min="0"
-                value={formData.late_penalty_per_minute} 
-                onChange={(e) => setFormData({...formData, late_penalty_per_minute: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+              <RupiahInput
+                value={formData.late_penalty_per_minute}
+                onChange={(v) => setFormData({...formData, late_penalty_per_minute: v})}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 

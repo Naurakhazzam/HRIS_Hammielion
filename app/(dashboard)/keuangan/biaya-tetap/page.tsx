@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
 type Category = { code: string; label: string }
@@ -175,8 +176,8 @@ export default function BiayaTetapPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Harian (Rp) <span className="text-red-500">*</span></label>
-              <input type="number" required min="1" step="1" value={form.daily_amount} onChange={e => setForm({ ...form, daily_amount: e.target.value })}
-                placeholder="Contoh: 100000"
+              <RupiahInput required value={form.daily_amount} onChange={v => setForm({ ...form, daily_amount: v })}
+                placeholder="Contoh: 100.000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               {form.daily_amount && !isNaN(parseFloat(form.daily_amount)) && (
                 <p className="text-xs text-slate-400 mt-1">≈ {formatRupiah(parseFloat(form.daily_amount) * thisMonthDays)} / bulan ini ({thisMonthDays} hari)</p>

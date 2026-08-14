@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr, todayLocalStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
 type HppEntry = {
@@ -203,8 +204,8 @@ export default function HppPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Total HPP (Rp) <span className="text-red-500">*</span></label>
-              <input type="number" required min="1" step="1" value={form.hpp_amount} onChange={e => setForm({ ...form, hpp_amount: e.target.value })}
-                placeholder="Contoh: 6000000"
+              <RupiahInput required value={form.hpp_amount} onChange={v => setForm({ ...form, hpp_amount: v })}
+                placeholder="Contoh: 6.000.000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
             <div>
@@ -274,7 +275,7 @@ export default function HppPage() {
                       <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name}</td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                         {editingRowId === r.id ? (
-                          <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                          <RupiahInput value={editRowAmount} onChange={setEditRowAmount}
                             className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
                         ) : formatRupiah(r.hpp_amount)}
                       </td>

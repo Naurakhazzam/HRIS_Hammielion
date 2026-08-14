@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 type Employee = {
   id: string
@@ -264,9 +265,9 @@ export default function BonusKondisionalPage() {
                         </div>
                         <div className="w-40">
                           <label className="block text-xs text-slate-500 mb-1">Nominal (Rp)</label>
-                          <input type="number" min="0" value={f.nominal}
-                            onChange={e => setAddForm(prev => ({ ...prev, [emp.id]: { ...f, nominal: e.target.value } }))}
-                            placeholder="500000"
+                          <RupiahInput value={f.nominal}
+                            onChange={v => setAddForm(prev => ({ ...prev, [emp.id]: { ...f, nominal: v } }))}
+                            placeholder="500.000"
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                           />
                         </div>
@@ -298,7 +299,7 @@ export default function BonusKondisionalPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Nominal (Rp) <span className="text-red-500">*</span></label>
-                  <input type="number" required min="0" value={editForm.nominal} onChange={e => setEditForm({ ...editForm, nominal: e.target.value })}
+                  <RupiahInput required value={editForm.nominal} onChange={v => setEditForm({ ...editForm, nominal: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div className="flex justify-end gap-3 pt-2">

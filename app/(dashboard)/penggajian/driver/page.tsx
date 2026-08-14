@@ -3,6 +3,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import RupiahInput from '@/components/RupiahInput'
 
 type Employee = { id: string; full_name: string }
 type Vehicle = { id: string; name: string; plate_number: string | null }
@@ -1054,13 +1055,12 @@ export default function PenggajianDriverPage() {
                               <p className="text-xs text-orange-600">Sisa: {formatRupiah(kasbon.remaining_amount)}</p>
                             </div>
                             <div className="shrink-0">
-                              <input
-                                type="number" min="0" max={kasbon.remaining_amount}
+                              <RupiahInput
                                 placeholder="Potong Rp"
                                 value={kasbonForms[i]?.amount || ''}
-                                onChange={e => {
+                                onChange={v => {
                                   const updated = [...kasbonForms]
-                                  updated[i] = { ...updated[i], amount: e.target.value }
+                                  updated[i] = { ...updated[i], amount: v }
                                   setKasbonForms(updated)
                                 }}
                                 className="w-32 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-orange-400"
@@ -1097,12 +1097,12 @@ export default function PenggajianDriverPage() {
                             }}
                             className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-xs outline-none focus:ring-1 focus:ring-red-400"
                           />
-                          <input
-                            type="number" min="0" placeholder="Nominal"
+                          <RupiahInput
+                            placeholder="Nominal"
                             value={fine.amount}
-                            onChange={e => {
+                            onChange={v => {
                               const updated = [...fineForms]
-                              updated[i] = { ...updated[i], amount: e.target.value }
+                              updated[i] = { ...updated[i], amount: v }
                               setFineForms(updated)
                             }}
                             className="w-28 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-red-400"
@@ -1291,13 +1291,12 @@ export default function PenggajianDriverPage() {
                               <p className="text-xs text-orange-600">Sisa: {formatRupiah(kasbon.remaining_amount)}</p>
                             </div>
                             <div className="shrink-0">
-                              <input
-                                type="number" min="0" max={kasbon.remaining_amount}
+                              <RupiahInput
                                 placeholder="Potong Rp"
                                 value={kenekKasbonForms[i]?.amount || ''}
-                                onChange={e => {
+                                onChange={v => {
                                   const updated = [...kenekKasbonForms]
-                                  updated[i] = { ...updated[i], amount: e.target.value }
+                                  updated[i] = { ...updated[i], amount: v }
                                   setKenekKasbonForms(updated)
                                 }}
                                 className="w-32 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-orange-400"
@@ -1333,12 +1332,12 @@ export default function PenggajianDriverPage() {
                             }}
                             className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-xs outline-none focus:ring-1 focus:ring-red-400"
                           />
-                          <input
-                            type="number" min="0" placeholder="Nominal"
+                          <RupiahInput
+                            placeholder="Nominal"
                             value={fine.amount}
-                            onChange={e => {
+                            onChange={v => {
                               const updated = [...kenekFineForms]
-                              updated[i] = { ...updated[i], amount: e.target.value }
+                              updated[i] = { ...updated[i], amount: v }
                               setKenekFineForms(updated)
                             }}
                             className="w-28 px-2 py-1.5 border border-slate-300 rounded text-sm text-right outline-none focus:ring-1 focus:ring-red-400"

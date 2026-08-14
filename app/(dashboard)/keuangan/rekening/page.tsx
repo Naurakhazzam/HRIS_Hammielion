@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
 type BankAccount = {
@@ -213,8 +214,8 @@ export default function RekeningPage() {
             </div>
             <div className="pt-2 border-t border-slate-100">
               <label className="block text-xs font-medium text-slate-700 mb-1">Saldo Awal (Rp) <span className="text-red-500">*</span></label>
-              <input type="number" required min="0" step="1" value={form.opening_balance}
-                onChange={e => setForm({ ...form, opening_balance: e.target.value })}
+              <RupiahInput required value={form.opening_balance}
+                onChange={v => setForm({ ...form, opening_balance: v })}
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
             <div>
@@ -298,7 +299,7 @@ export default function RekeningPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-right font-mono text-slate-600">
                       {editingId === a.id ? (
-                        <input type="number" min="0" step="1" value={editOpeningBalance} onChange={e => setEditOpeningBalance(e.target.value)}
+                        <RupiahInput value={editOpeningBalance} onChange={setEditOpeningBalance}
                           className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
                       ) : (
                         new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(a.opening_balance)

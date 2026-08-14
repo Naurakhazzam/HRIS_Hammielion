@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 type KasbonRequest = {
   id: string
@@ -289,8 +290,8 @@ function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', m
             <form onSubmit={handleApprove} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Potongan Gaji per Bulan (Rp) *</label>
-                <input required type="number" min="1" value={approveForm.deduction_per_month}
-                  onChange={e => setApproveForm({...approveForm, deduction_per_month: e.target.value})}
+                <RupiahInput required value={approveForm.deduction_per_month}
+                  onChange={v => setApproveForm({...approveForm, deduction_per_month: v})}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Contoh: 500000" />
                 {approveForm.deduction_per_month && (
@@ -437,8 +438,8 @@ function TabLimit({ showMessage }: { showMessage: (t: 'success' | 'error', msg: 
                     <td className="px-4 py-3">
                       {isEditing ? (
                         <div className="flex items-center gap-2">
-                          <input type="number" min="0" value={editValue}
-                            onChange={e => setEditValue(e.target.value)}
+                          <RupiahInput value={editValue}
+                            onChange={setEditValue}
                             className="w-28 px-2 py-1 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none"
                             autoFocus />
                           <button onClick={() => handleSaveLimit(emp.id)} disabled={saving}
@@ -836,9 +837,9 @@ function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error'
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Kasbon (Rp) <span className="text-red-500">*</span></label>
-                <input required type="number" min="1" value={form.total_amount}
-                  onChange={e => setForm({...form, total_amount: e.target.value})}
-                  placeholder="Contoh: 500000"
+                <RupiahInput required value={form.total_amount}
+                  onChange={v => setForm({...form, total_amount: v})}
+                  placeholder="Contoh: 500.000"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
               <div>
@@ -1137,9 +1138,9 @@ function TabKasbonKenek({ showMessage }: { showMessage: (t: 'success' | 'error',
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Kasbon (Rp) <span className="text-red-500">*</span></label>
-                <input required type="number" min="1" value={form.total_amount}
-                  onChange={e => setForm({...form, total_amount: e.target.value})}
-                  placeholder="Contoh: 300000"
+                <RupiahInput required value={form.total_amount}
+                  onChange={v => setForm({...form, total_amount: v})}
+                  placeholder="Contoh: 300.000"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
               <div>

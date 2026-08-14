@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
 type Category = { code: string; label: string }
@@ -304,7 +305,7 @@ export default function RiwayatKasKeluarPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                     {editingRowId === r.id ? (
-                      <input type="number" min="1" step="1" value={editRowAmount} onChange={e => setEditRowAmount(e.target.value)}
+                      <RupiahInput value={editRowAmount} onChange={setEditRowAmount}
                         className="w-28 px-2 py-1 border border-slate-300 rounded text-sm text-right" />
                     ) : formatRupiah(r.amount)}
                   </td>

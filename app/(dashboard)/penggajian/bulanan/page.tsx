@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1659,12 +1660,9 @@ export default function PenggajianBulananPage() {
                             )}
                             {/* Input potongan */}
                             <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min="0"
-                                step="1000"
+                              <RupiahInput
                                 value={kasbonEdit[p.id] ?? '0'}
-                                onChange={e => setKasbonEdit(prev => ({ ...prev, [p.id]: e.target.value }))}
+                                onChange={v => setKasbonEdit(prev => ({ ...prev, [p.id]: v }))}
                                 onKeyDown={e => e.key === 'Enter' && handleSaveKasbon(p)}
                                 className="w-28 px-2 py-1 border border-slate-300 rounded text-xs text-right focus:ring-1 focus:ring-blue-400 outline-none"
                               />
@@ -2231,8 +2229,8 @@ export default function PenggajianBulananPage() {
             )}
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Bonus (Rp) *</label>
-              <input type="number" min="0" step="1000" value={extraBonusForm.amount}
-                onChange={e => setExtraBonusForm({ ...extraBonusForm, amount: e.target.value })}
+              <RupiahInput value={extraBonusForm.amount}
+                onChange={v => setExtraBonusForm({ ...extraBonusForm, amount: v })}
                 placeholder="0" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
             <div>
@@ -2355,8 +2353,8 @@ export default function PenggajianBulananPage() {
                         <p className="text-sm font-medium text-slate-700">⚠️ Potongan Kasbon Bulan Ini</p>
                         <p className="text-xs text-slate-500">Cek saldo kasbon karyawan sebelum mengisi</p>
                       </div>
-                      <input type="number" min="0" step="50000" value={createKasbon}
-                        onChange={e => setCreateKasbon(Math.max(0, parseInt(e.target.value) || 0))}
+                      <RupiahInput value={String(createKasbon)}
+                        onChange={v => setCreateKasbon(Math.max(0, parseInt(v) || 0))}
                         className="w-28 px-2 py-1.5 border border-orange-300 rounded text-sm text-right focus:ring-2 focus:ring-orange-400 outline-none" />
                     </div>
 

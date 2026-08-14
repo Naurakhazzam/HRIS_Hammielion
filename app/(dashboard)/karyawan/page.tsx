@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
@@ -366,7 +367,7 @@ export default function KaryawanPage() {
               </select>
             </FormField>
             <FormField label="Nominal Bonus KPI Maks (Rp)">
-              <input type="number" min="0" value={f.kpi_bonus_max} onChange={e => setF({ ...f, kpi_bonus_max: e.target.value })} className={inputClass} />
+              <RupiahInput value={f.kpi_bonus_max} onChange={v => setF({ ...f, kpi_bonus_max: v })} className={inputClass} />
             </FormField>
             <FormField label="ID Fingerprint">
               <input type="number" min="1" value={f.fingerprint_id} onChange={e => setF({ ...f, fingerprint_id: e.target.value })} placeholder="Nomor User ID di mesin absen" className={inputClass} />

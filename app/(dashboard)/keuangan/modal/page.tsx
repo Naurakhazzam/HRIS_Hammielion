@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
 type Baseline = {
@@ -273,17 +274,17 @@ export default function ModalCabangPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Modal Cash (Rp)</label>
-                  <input type="number" min="0" step="1" value={baselineForm.cash_amount} onChange={e => setBaselineForm({ ...baselineForm, cash_amount: e.target.value })}
+                  <RupiahInput value={baselineForm.cash_amount} onChange={v => setBaselineForm({ ...baselineForm, cash_amount: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Nilai Barang/Inventory (Rp)</label>
-                  <input type="number" min="0" step="1" value={baselineForm.inventory_value} onChange={e => setBaselineForm({ ...baselineForm, inventory_value: e.target.value })}
+                  <RupiahInput value={baselineForm.inventory_value} onChange={v => setBaselineForm({ ...baselineForm, inventory_value: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Nilai Aset Tetap (Rp)</label>
-                  <input type="number" min="0" step="1" value={baselineForm.asset_value} onChange={e => setBaselineForm({ ...baselineForm, asset_value: e.target.value })}
+                  <RupiahInput value={baselineForm.asset_value} onChange={v => setBaselineForm({ ...baselineForm, asset_value: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
@@ -362,12 +363,12 @@ export default function ModalCabangPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Nilai Barang/Inventory (Rp)</label>
-                  <input type="number" min="0" step="1" value={snapshotForm.inventory_value} onChange={e => setSnapshotForm({ ...snapshotForm, inventory_value: e.target.value })}
+                  <RupiahInput value={snapshotForm.inventory_value} onChange={v => setSnapshotForm({ ...snapshotForm, inventory_value: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Nilai Aset Tetap (Rp)</label>
-                  <input type="number" min="0" step="1" value={snapshotForm.asset_value} onChange={e => setSnapshotForm({ ...snapshotForm, asset_value: e.target.value })}
+                  <RupiahInput value={snapshotForm.asset_value} onChange={v => setSnapshotForm({ ...snapshotForm, asset_value: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>

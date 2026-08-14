@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
 type Asset = {
@@ -238,7 +239,7 @@ export default function AsetKontrakPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Nilai Perolehan (Rp)</label>
-                  <input type="number" min="0" step="1" value={assetForm.acquisition_value} onChange={e => setAssetForm({ ...assetForm, acquisition_value: e.target.value })}
+                  <RupiahInput value={assetForm.acquisition_value} onChange={v => setAssetForm({ ...assetForm, acquisition_value: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
@@ -336,7 +337,7 @@ export default function AsetKontrakPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Sewa (Rp)</label>
-                  <input type="number" min="0" step="1" value={contractForm.rent_amount} onChange={e => setContractForm({ ...contractForm, rent_amount: e.target.value })}
+                  <RupiahInput value={contractForm.rent_amount} onChange={v => setContractForm({ ...contractForm, rent_amount: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>

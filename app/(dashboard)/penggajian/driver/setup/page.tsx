@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 type Vehicle = { id: string; name: string; plate_number: string | null; is_active: boolean }
 type Route = { id: string; name: string }
@@ -333,25 +334,25 @@ export default function SetupDriverPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Upah Driver (Tanpa Kenek) Rp</label>
-                <input
-                  type="number" required min="0" value={rateForm.driver_rate_without_helper}
-                  onChange={(e) => setRateForm({ ...rateForm, driver_rate_without_helper: e.target.value })}
+                <RupiahInput
+                  required value={rateForm.driver_rate_without_helper}
+                  onChange={(v) => setRateForm({ ...rateForm, driver_rate_without_helper: v })}
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Upah Driver (Dengan Kenek) Rp</label>
-                <input
-                  type="number" required min="0" value={rateForm.driver_rate_with_helper}
-                  onChange={(e) => setRateForm({ ...rateForm, driver_rate_with_helper: e.target.value })}
+                <RupiahInput
+                  required value={rateForm.driver_rate_with_helper}
+                  onChange={(v) => setRateForm({ ...rateForm, driver_rate_with_helper: v })}
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Upah Kenek Rp</label>
-                <input
-                  type="number" required min="0" value={rateForm.helper_rate}
-                  onChange={(e) => setRateForm({ ...rateForm, helper_rate: e.target.value })}
+                <RupiahInput
+                  required value={rateForm.helper_rate}
+                  onChange={(v) => setRateForm({ ...rateForm, helper_rate: v })}
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>
@@ -516,28 +517,28 @@ export default function SetupDriverPage() {
               <form onSubmit={handleEditRateSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Upah Driver (Tanpa Kenek) Rp <span className="text-red-500">*</span></label>
-                  <input
-                    type="number" required min="0"
+                  <RupiahInput
+                    required
                     value={editRateForm.driver_rate_without_helper}
-                    onChange={(e) => setEditRateForm({ ...editRateForm, driver_rate_without_helper: e.target.value })}
+                    onChange={(v) => setEditRateForm({ ...editRateForm, driver_rate_without_helper: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Upah Driver (Dengan Kenek) Rp <span className="text-red-500">*</span></label>
-                  <input
-                    type="number" required min="0"
+                  <RupiahInput
+                    required
                     value={editRateForm.driver_rate_with_helper}
-                    onChange={(e) => setEditRateForm({ ...editRateForm, driver_rate_with_helper: e.target.value })}
+                    onChange={(v) => setEditRateForm({ ...editRateForm, driver_rate_with_helper: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Upah Kenek Rp <span className="text-red-500">*</span></label>
-                  <input
-                    type="number" required min="0"
+                  <RupiahInput
+                    required
                     value={editRateForm.helper_rate}
-                    onChange={(e) => setEditRateForm({ ...editRateForm, helper_rate: e.target.value })}
+                    onChange={(v) => setEditRateForm({ ...editRateForm, helper_rate: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

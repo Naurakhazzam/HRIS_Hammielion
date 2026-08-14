@@ -20,6 +20,7 @@ type Props = {
   disabled?: boolean
   id?: string
   autoFocus?: boolean
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
 }
 
 /**
@@ -27,7 +28,7 @@ type Props = {
  * `value`/`onChange` tetap berupa string digit mentah (tanpa titik) — pas dipakai
  * langsung dengan parseFloat() seperti input number biasa, cuma tampilannya yang beda.
  */
-export default function RupiahInput({ value, onChange, required, placeholder, className, disabled, id, autoFocus }: Props) {
+export default function RupiahInput({ value, onChange, required, placeholder, className, disabled, id, autoFocus, onKeyDown }: Props) {
   const ref = useRef<HTMLInputElement>(null)
   const display = formatId(value)
 
@@ -70,6 +71,7 @@ export default function RupiahInput({ value, onChange, required, placeholder, cl
       id={id}
       value={display}
       onChange={handleChange}
+      onKeyDown={onKeyDown}
     />
   )
 }

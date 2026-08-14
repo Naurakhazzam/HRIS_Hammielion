@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Branch = { id: string; name: string }
@@ -209,7 +210,7 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
           <form onSubmit={handleSaveLoss} className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Total Kehilangan Barang (Rp) <span className="text-red-500">*</span></label>
-              <input type="number" required min="0" value={lossForm.amount} onChange={e => setLossForm({...lossForm, amount: e.target.value})}
+              <RupiahInput required value={lossForm.amount} onChange={v => setLossForm({...lossForm, amount: v})}
                 placeholder="0" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
             <div>
@@ -269,8 +270,8 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
               </div>
               <div>
                 <label className="block text-xs text-slate-500 mb-1">Nominal (Rp)</label>
-                <input type="number" required min="1" value={entryForm.amount} onChange={e => setEntryForm({...entryForm, amount: e.target.value})}
-                  placeholder="50000" className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
+                <RupiahInput required value={entryForm.amount} onChange={v => setEntryForm({...entryForm, amount: v})}
+                  placeholder="50.000" className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
               </div>
             </div>
             <div>
@@ -305,7 +306,7 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Nominal (Rp)</label>
-                <input type="number" required min="1" value={editForm.amount} onChange={e => setEditForm({...editForm, amount: e.target.value})}
+                <RupiahInput required value={editForm.amount} onChange={v => setEditForm({...editForm, amount: v})}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
               <div>

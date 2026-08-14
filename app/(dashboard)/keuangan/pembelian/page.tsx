@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 import { paidApprovedFor, paidPendingFor, remainingFor, unrequestedFor } from '@/lib/supplierPurchases'
 import Link from 'next/link'
 
@@ -326,8 +327,8 @@ export default function PembelianSupplierPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Total Tagihan (Rp) <span className="text-red-500">*</span></label>
-              <input type="number" required min="1" step="1" value={form.total_amount} onChange={e => setForm({ ...form, total_amount: e.target.value })}
-                placeholder="Contoh: 5000000"
+              <RupiahInput required value={form.total_amount} onChange={v => setForm({ ...form, total_amount: v })}
+                placeholder="Contoh: 5.000.000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
             <div>
@@ -347,7 +348,7 @@ export default function PembelianSupplierPage() {
                 <div className="mt-3 space-y-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
-                    <input type="number" min="1" step="1" value={form.pay_now_amount} onChange={e => setForm({ ...form, pay_now_amount: e.target.value })}
+                    <RupiahInput value={form.pay_now_amount} onChange={v => setForm({ ...form, pay_now_amount: v })}
                       placeholder="Boleh sebagian saja"
                       className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
@@ -511,7 +512,7 @@ export default function PembelianSupplierPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Total Tagihan (Rp) <span className="text-red-500">*</span></label>
-                  <input type="number" required min="1" step="1" value={editForm.total_amount} onChange={e => setEditForm({ ...editForm, total_amount: e.target.value })}
+                  <RupiahInput required value={editForm.total_amount} onChange={v => setEditForm({ ...editForm, total_amount: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   {editPurchase && paidApproved(editPurchase.id) > 0 && (
                     <p className="text-[11px] text-amber-600 mt-1">Sudah ada pembayaran {formatRupiah(paidApproved(editPurchase.id))} disetujui untuk pembelian ini — pastikan total baru tidak lebih kecil dari itu.</p>
@@ -556,7 +557,7 @@ export default function PembelianSupplierPage() {
               <form onSubmit={handlePaySubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
-                  <input type="number" required min="1" max={unrequestedOf(payPurchase)} step="1" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })}
+                  <RupiahInput required value={payForm.amount} onChange={v => setPayForm({ ...payForm, amount: v })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>

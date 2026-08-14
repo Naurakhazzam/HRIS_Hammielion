@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 type Employee = {
   id: string
@@ -324,7 +325,7 @@ export default function TabunganLoyalitasPage() {
                       <td className="px-4 py-3 text-slate-600">{emp.branches?.name || '—'}</td>
                       <td className="px-4 py-3">
                         {isEditing ? (
-                          <input type="number" min="0" value={editNominal} onChange={e => setEditNominal(e.target.value)}
+                          <RupiahInput value={editNominal} onChange={setEditNominal}
                             className="w-32 px-2 py-1 border border-slate-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none"
                             placeholder="0" />
                         ) : (

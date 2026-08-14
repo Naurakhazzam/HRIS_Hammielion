@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 // --- TYPES ---
 export type BonusRule = {
@@ -431,7 +432,7 @@ function TabAturan({ showMessage }: { showMessage: (type: 'success'|'error', tex
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Bonus (Rp) *</label>
-                    <input required type="number" min="0" value={tierForm.bonus_amount} onChange={e => setTierForm({...tierForm, bonus_amount: e.target.value})} className="w-32 px-3 py-1.5 border border-slate-300 rounded text-sm" placeholder="Contoh: 1000000" />
+                    <RupiahInput required value={tierForm.bonus_amount} onChange={v => setTierForm({...tierForm, bonus_amount: v})} className="w-32 px-3 py-1.5 border border-slate-300 rounded text-sm" placeholder="Contoh: 1.000.000" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">Label</label>
@@ -968,11 +969,9 @@ function TabSiklus({ showMessage }: { showMessage: (type: 'success'|'error', tex
                                         <p className="font-medium text-slate-800 text-sm">{emp.full_name}</p>
                                         <p className="text-xs text-slate-500">{emp.employee_code}</p>
                                       </div>
-                                      <input 
-                                        type="number" 
-                                        min="0"
-                                        value={allocForm[emp.id] || ''} 
-                                        onChange={e => setAllocForm({...allocForm, [emp.id]: e.target.value})} 
+                                      <RupiahInput
+                                        value={allocForm[emp.id] || ''}
+                                        onChange={v => setAllocForm({...allocForm, [emp.id]: v})}
                                         className="w-32 px-3 py-1.5 border border-slate-300 rounded text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
                                         placeholder="Rp"
                                       />
