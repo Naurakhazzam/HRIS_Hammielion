@@ -34,8 +34,11 @@ export default function RupiahInput({ value, onChange, required, placeholder, cl
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target
-    const prevCursor = input.selectionStart ?? display.length
-    const digitsBeforeCursor = display.slice(0, prevCursor).replace(/[^\d]/g, '').length
+    const cursorPos = input.selectionStart ?? input.value.length
+    // Hitung dari input.value (sudah termasuk karakter yang baru diketik/dihapus),
+    // BUKAN dari `display` lama — kalau pakai `display` lama, posisi kursor baru
+    // dibandingkan dengan teks sebelum diedit sehingga hasilnya salah hitung.
+    const digitsBeforeCursor = input.value.slice(0, cursorPos).replace(/[^\d]/g, '').length
 
     const rawDigits = toDigits(input.value)
     const newDisplay = formatId(rawDigits)
