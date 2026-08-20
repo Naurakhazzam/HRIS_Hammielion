@@ -24,6 +24,7 @@ type MyCashOut = {
   rejection_reason: string | null
   account_id: string | null
   source_table: string | null
+  source_id: string | null
   branches: { name: string } | null
   fin_cash_out_categories: { label: string } | null
   fin_bank_accounts: { bank_name: string; account_number: string | null; account_type: string } | null
@@ -116,7 +117,7 @@ export default function InputKasKeluarPage() {
   const fetchRecent = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from('fin_cash_out')
-      .select('id, branch_id, category, amount, description, transaction_date, status, rejection_reason, account_id, source_table, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
+      .select('id, branch_id, category, amount, description, transaction_date, status, rejection_reason, account_id, source_table, source_id, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
       .eq('input_by', userId)
       .order('created_at', { ascending: false })
       .limit(10)
@@ -128,7 +129,7 @@ export default function InputKasKeluarPage() {
   const fetchNeedsRevision = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from('fin_cash_out')
-      .select('id, branch_id, category, amount, description, transaction_date, status, rejection_reason, account_id, source_table, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
+      .select('id, branch_id, category, amount, description, transaction_date, status, rejection_reason, account_id, source_table, source_id, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
       .eq('input_by', userId)
       .eq('status', 'rejected')
       .order('transaction_date', { ascending: false })
@@ -147,15 +148,23 @@ export default function InputKasKeluarPage() {
   const [editRowDate, setEditRowDate] = useState('')
   const [editRowAccountId, setEditRowAccountId] = useState('')
   const [editingRowOriginalStatus, setEditingRowOriginalStatus] = useState('')
+  const [editRowSourceTable, setEditRowSourceTable] = useState<string | null>(null)
+  const [editRowSourceId, setEditRowSourceId] = useState<string | null>(null)
 
+  // Entri otomatis (payroll/driver/kasbon/dll) tetap tidak boleh diubah manual — kecuali
+  // pembayaran supplier, yang sengaja dibuka supaya nominal salah ketik (mis. kasus FRONTERA:
+  // tercatat Rp131jt padahal maksudnya Rp50jt) bisa diperbaiki dari sini, bukan lewat database.
   function canEditRow(r: MyCashOut) {
     if (r.status !== 'pending' && r.status !== 'rejected') return false
-    if (r.source_table) return false // entri otomatis (payroll/driver/kasbon/pembelian supplier/dll) tidak boleh diubah manual
+    if (r.source_table && r.source_table !== 'supplier_purchases') return false
     return isAdmin
   }
 
   function canDeleteRow(r: MyCashOut) {
     if (r.status !== 'pending' && r.status !== 'rejected') return false
+    // Beda dari canEditRow: hapus entri pembayaran supplier TIDAK diizinkan sama sekali,
+    // termasuk di database (RLS fin_cash_out_delete_admin mensyaratkan source_table IS NULL)
+    // — sengaja, supaya jejak pembayaran tidak bisa hilang, cuma bisa diperbaiki nominalnya.
     if (r.source_table) return false
     return isAdmin
   }
@@ -169,6 +178,8 @@ export default function InputKasKeluarPage() {
     setEditRowDescription(r.description || '')
     setEditRowDate(r.transaction_date)
     setEditRowAccountId(r.account_id || '')
+    setEditRowSourceTable(r.source_table)
+    setEditRowSourceId(r.source_id)
   }
 
   async function saveEditRow(id: string) {
@@ -178,6 +189,25 @@ export default function InputKasKeluarPage() {
     if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
     if (!editRowCategory) { showMessage('error', 'Pilih kategori dulu.'); return }
     if (!editRowBranchId) { showMessage('error', 'Pilih cabang dulu.'); return }
+
+    // Entri pembayaran supplier: nominal baru tidak boleh melebihi sisa utang yang bisa
+    // diajukan (dicek ulang ke database saat ini, bukan pakai data lama di layar).
+    if (editRowSourceTable === 'supplier_purchases' && editRowSourceId) {
+      const [{ data: purchase }, { data: otherPayments }] = await Promise.all([
+        supabase.from('supplier_purchases').select('total_amount').eq('id', editRowSourceId).single(),
+        supabase.from('fin_cash_out').select('amount, status').eq('source_table', 'supplier_purchases').eq('source_id', editRowSourceId).neq('id', id),
+      ])
+      if (purchase) {
+        const approved = (otherPayments || []).filter(p => p.status === 'approved').reduce((s, p) => s + Number(p.amount), 0)
+        const pendingIsh = (otherPayments || []).filter(p => p.status === 'pending' || p.status === 'revisi').reduce((s, p) => s + Number(p.amount), 0)
+        const maxAllowed = Number(purchase.total_amount) - approved - pendingIsh
+        if (amountNum > maxAllowed) {
+          showMessage('error', `Nominal melebihi sisa utang yang bisa diajukan untuk tagihan ini (${formatRupiah(maxAllowed)}).`)
+          return
+        }
+      }
+    }
+
     const wasRejected = editingRowOriginalStatus === 'rejected'
     const { error } = await supabase.from('fin_cash_out')
       .update({
@@ -658,10 +688,14 @@ export default function InputKasKeluarPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {editingRowId === r.id ? (
-                          <select value={editRowCategory} onChange={e => setEditRowCategory(e.target.value)}
-                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
-                            {categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
-                          </select>
+                          r.source_table === 'supplier_purchases' ? (
+                            <span className="text-slate-500">{r.fin_cash_out_categories?.label}</span>
+                          ) : (
+                            <select value={editRowCategory} onChange={e => setEditRowCategory(e.target.value)}
+                              className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
+                              {categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                            </select>
+                          )
                         ) : r.fin_cash_out_categories?.label}
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
@@ -679,6 +713,9 @@ export default function InputKasKeluarPage() {
                             {r.description && <div>{r.description}</div>}
                             {r.rejection_reason && <div className="text-red-600 text-xs mt-0.5">Alasan: {r.rejection_reason}</div>}
                           </div>
+                        )}
+                        {r.source_table === 'supplier_purchases' && (
+                          <div className="text-[10px] text-blue-600 mt-0.5">🔗 Pembayaran supplier — nominal dicek ulang ke sisa utang saat disimpan.</div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-center whitespace-nowrap">
@@ -731,19 +768,30 @@ export default function InputKasKeluarPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">
                       {editingRowId === r.id ? (
-                        <select value={editRowBranchId} onChange={e => setEditRowBranchId(e.target.value)}
-                          className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
-                          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                        </select>
+                        r.source_table === 'supplier_purchases' ? (
+                          <span className="text-slate-500">{r.branches?.name}</span>
+                        ) : (
+                          <select value={editRowBranchId} onChange={e => setEditRowBranchId(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
+                            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                          </select>
+                        )
                       ) : r.branches?.name}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">
                       {editingRowId === r.id ? (
-                        <select value={editRowCategory} onChange={e => setEditRowCategory(e.target.value)}
-                          className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
-                          {categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
-                        </select>
+                        r.source_table === 'supplier_purchases' ? (
+                          <span className="text-slate-500">{r.fin_cash_out_categories?.label}</span>
+                        ) : (
+                          <select value={editRowCategory} onChange={e => setEditRowCategory(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-sm bg-white">
+                            {categories.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                          </select>
+                        )
                       ) : r.fin_cash_out_categories?.label}
+                      {editingRowId === r.id && r.source_table === 'supplier_purchases' && (
+                        <div className="text-[10px] text-blue-600 mt-0.5">🔗 Pembayaran supplier — nominal dicek ulang ke sisa utang saat disimpan.</div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                       {editingRowId === r.id ? (
@@ -753,15 +801,19 @@ export default function InputKasKeluarPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">
                       {editingRowId === r.id ? (
-                        <select value={editRowAccountId} onChange={e => setEditRowAccountId(e.target.value)}
-                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs bg-white">
-                          <option value="">-- Pilih --</option>
-                          {bankAccounts.map(a => (
-                            <option key={a.id} value={a.id}>
-                              {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
-                            </option>
-                          ))}
-                        </select>
+                        r.source_table === 'supplier_purchases' ? (
+                          <span className="text-slate-500">{r.fin_bank_accounts ? (r.fin_bank_accounts.account_type === 'tunai' ? r.fin_bank_accounts.bank_name : `${r.fin_bank_accounts.bank_name} — ${r.fin_bank_accounts.account_number}`) : '—'}</span>
+                        ) : (
+                          <select value={editRowAccountId} onChange={e => setEditRowAccountId(e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs bg-white">
+                            <option value="">-- Pilih --</option>
+                            {bankAccounts.map(a => (
+                              <option key={a.id} value={a.id}>
+                                {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
+                              </option>
+                            ))}
+                          </select>
+                        )
                       ) : r.fin_bank_accounts ? (r.fin_bank_accounts.account_type === 'tunai' ? r.fin_bank_accounts.bank_name : `${r.fin_bank_accounts.bank_name} — ${r.fin_bank_accounts.account_number}`) : '—'}
                     </td>
                     <td className="px-4 py-3 text-center">

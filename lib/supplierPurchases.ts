@@ -13,7 +13,7 @@ export function paidApprovedFor(purchaseId: string, payments: SupplierPaymentRow
 
 export function paidPendingFor(purchaseId: string, payments: SupplierPaymentRow[]) {
   return payments
-    .filter(p => p.source_id === purchaseId && p.status === 'pending')
+    .filter(p => p.source_id === purchaseId && (p.status === 'pending' || p.status === 'revisi'))
     .reduce((s, p) => s + Number(p.amount), 0)
 }
 
