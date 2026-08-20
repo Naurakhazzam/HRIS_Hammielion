@@ -244,7 +244,7 @@ export default function PembelianSupplierPage() {
 
   function openPayModal(p: Purchase) {
     setPayPurchase(p)
-    setPayForm({ amount: String(Math.max(0, unrequestedOf(p))), payment_date: today, account_id: '', notes: '' })
+    setPayForm({ amount: '', payment_date: today, account_id: '', notes: '' })
   }
 
   async function handlePaySubmit(e: React.FormEvent) {
@@ -558,7 +558,9 @@ export default function PembelianSupplierPage() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
                   <RupiahInput required value={payForm.amount} onChange={v => setPayForm({ ...payForm, amount: v })}
+                    placeholder={`Boleh sebagian, maksimal ${formatRupiah(unrequestedOf(payPurchase))}`}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <p className="text-[11px] text-slate-400 mt-1">Wajib diisi manual — tidak diisi otomatis, supaya tidak salah bayar.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Tanggal Bayar <span className="text-red-500">*</span></label>

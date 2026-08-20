@@ -539,8 +539,7 @@ export default function InputKasKeluarPage() {
                               onChange={e => {
                                 const pid = e.target.value
                                 setSelectedPurchaseId(pid)
-                                const pur = supplierPurchases.find(p => p.id === pid)
-                                if (pur) setPayAmount(String(unrequestedFor(pur.total_amount, pur.id, supplierPayments)))
+                                setPayAmount('')
                               }}
                               className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                             >
@@ -553,13 +552,19 @@ export default function InputKasKeluarPage() {
                             </select>
                           </div>
                         )}
-                        {selectedPurchaseId && (
-                          <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
-                            <RupiahInput required value={payAmount} onChange={setPayAmount}
-                              className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                          </div>
-                        )}
+                        {selectedPurchaseId && (() => {
+                          const pur = supplierPurchases.find(p => p.id === selectedPurchaseId)
+                          const sisa = pur ? unrequestedFor(pur.total_amount, pur.id, supplierPayments) : 0
+                          return (
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
+                              <RupiahInput required value={payAmount} onChange={setPayAmount}
+                                placeholder={`Boleh sebagian, maksimal ${formatRupiah(sisa)}`}
+                                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                              <p className="text-[11px] text-slate-400 mt-1">Sisa yang belum diajukan: {formatRupiah(sisa)}. Wajib diisi manual — tidak diisi otomatis, supaya tidak salah bayar.</p>
+                            </div>
+                          )
+                        })()}
                       </>
                     ) : (
                       <>
