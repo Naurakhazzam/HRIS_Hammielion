@@ -206,6 +206,11 @@ export default function PenggajianBulananPage() {
   const [selectedEmpId, setSelectedEmpId]   = useState('')
   const [unclassifiedDays, setUnclassifiedDays] = useState<{missing_date: string}[]>([])
   const [checkingUnclassified, setCheckingUnclassified] = useState(false)
+  // ── Checklist validasi lembur (cocokkan dengan surat lembur fisik yang ter-ACC) ──
+  // Default TIDAK dicentang — harus divalidasi manual dulu, tidak otomatis ikut ke gaji.
+  const [otCandidates, setOtCandidates] = useState<{ date: string; hours: number }[]>([])
+  const [otChecked, setOtChecked]       = useState<Record<string, boolean>>({})
+  const [loadingOtCandidates, setLoadingOtCandidates] = useState(false)
   const [createKasbon, setCreateKasbon]     = useState(0)
   const [slipPreview, setSlipPreview]       = useState<SlipPreview | null>(null)
   const [buildingPreview, setBuildingPreview] = useState(false)
@@ -265,6 +270,30 @@ export default function PenggajianBulananPage() {
         // tidak ada hari yang benar-benar unclassified
         setUnclassifiedDays([])
         setCheckingUnclassified(false)
+      })
+  }, [selectedEmpId, createModal])
+
+  // Fetch hari-hari lembur yang tercatat mesin, untuk divalidasi manual terhadap surat lembur fisik
+  useEffect(() => {
+    if (!selectedEmpId || !createModal) { setOtCandidates([]); setOtChecked({}); return }
+    setLoadingOtCandidates(true)
+    const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
+    supabase
+      .from('attendances')
+      .select('date, overtime_hours, overtime_validated')
+      .eq('employee_id', selectedEmpId)
+      .gte('date', firstDay)
+      .lte('date', lastDay)
+      .gt('overtime_hours', 0)
+      .order('date')
+      .then(({ data }) => {
+        const list = (data || []).map((a: any) => ({ date: a.date, hours: roundOvertimeHours(Number(a.overtime_hours)) }))
+        setOtCandidates(list)
+        // Default ikut status overtime_validated tersimpan (baris baru = false, belum tervalidasi)
+        const init: Record<string, boolean> = {}
+        ;(data || []).forEach((a: any) => { init[a.date] = a.overtime_validated === true })
+        setOtChecked(init)
+        setLoadingOtCandidates(false)
       })
   }, [selectedEmpId, createModal])
 
@@ -443,7 +472,7 @@ export default function PenggajianBulananPage() {
   // ─── Buat Slip Per Karyawan ────────────────────────────────────────────────────
 
   async function openCreateModal() {
-    setCreateStep(1); setSelectedEmpId(''); setUnclassifiedDays([]); setCreateKasbon(0); setSlipPreview(null)
+    setCreateStep(1); setSelectedEmpId(''); setUnclassifiedDays([]); setOtCandidates([]); setOtChecked({}); setCreateKasbon(0); setSlipPreview(null)
     // Ambil karyawan permanent + training aktif yang belum punya slip bulan ini
     const { data: emps } = await supabase
       .from('employees')
@@ -457,7 +486,7 @@ export default function PenggajianBulananPage() {
     setCreateModal(true)
   }
 
-  async function buildSlipPreview(empId: string, kasbonDed: number) {
+  async function buildSlipPreview(empId: string, kasbonDed: number, validatedOtDates: Set<string>) {
     setBuildingPreview(true)
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
@@ -540,7 +569,8 @@ export default function PenggajianBulananPage() {
     const base = Math.round(baseRaw * proRataFactor)
     const pos  = Math.round(posRaw  * proRataFactor)
     const meal = Math.round(mealRaw * proRataFactor)
-    const otHours  = (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
+    // Hanya lembur yang sudah dicentang valid (cocok surat lembur fisik ter-ACC) yang dihitung
+    const otHours  = (atts as any[]).filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && validatedOtDates.has(a.date)).reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
     const latMins  = (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
     const otTotal  = otHours * otRate
     const latDed   = latMins * latRate
@@ -729,10 +759,22 @@ export default function PenggajianBulananPage() {
         }))
         await supabase.from('payroll_bonus_assessments').upsert(assessPayloads, { onConflict: 'payroll_id,criteria_id' })
       }
+      // Simpan hasil checklist validasi lembur ke attendances, supaya rincian lembur di
+      // slip (dan slip yang dicetak) nanti hanya menampilkan hari yang benar-benar tervalidasi.
+      const validDates = otCandidates.filter(d => otChecked[d.date]).map(d => d.date)
+      const invalidDates = otCandidates.filter(d => !otChecked[d.date]).map(d => d.date)
+      if (validDates.length > 0) {
+        await supabase.from('attendances').update({ overtime_validated: true }).eq('employee_id', p.employeeId).in('date', validDates)
+      }
+      if (invalidDates.length > 0) {
+        await supabase.from('attendances').update({ overtime_validated: false }).eq('employee_id', p.employeeId).in('date', invalidDates)
+      }
       showMessage('success', `Slip gaji ${p.employeeName} berhasil dibuat.`)
       setCreateModal(false)
       setCreateBonusCriteria([])
       setCreateBonusChecked({})
+      setOtCandidates([])
+      setOtChecked({})
       fetchPayrolls()
     }
     setFinalizing(false)
@@ -1087,7 +1129,9 @@ export default function PenggajianBulananPage() {
     const joinDateVal = empRes.data?.join_date ?? null
     const effectiveStart = joinDateVal && joinDateVal > firstDay ? joinDateVal : firstDay
 
-    const { data: atts } = await supabase.from('attendances').select('date, overtime_hours').eq('employee_id', p.employee_id).gte('date', effectiveStart).lte('date', lastDay).gt('overtime_hours', 0).order('date')
+    // Hanya yang overtime_validated=true — supaya rincian yang tampil di sini sinkron dengan
+    // overtime_total yang sudah tersimpan di slip (yang cuma dihitung dari hari tervalidasi).
+    const { data: atts } = await supabase.from('attendances').select('date, overtime_hours').eq('employee_id', p.employee_id).eq('overtime_validated', true).gte('date', effectiveStart).lte('date', lastDay).gt('overtime_hours', 0).order('date')
 
     const details = (atts || []).map(a => {
       const rawHours = Number(a.overtime_hours)
@@ -2453,15 +2497,47 @@ export default function PenggajianBulananPage() {
                       </div>
                     )}
 
-                    <p className="text-xs text-slate-400">KPI, lembur, keterlambatan, kehilangan barang akan diambil otomatis dari data yang sudah ada.</p>
+                    {/* Checklist Validasi Lembur */}
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                      <p className="text-sm font-semibold text-slate-700">📋 Checklist Validasi Lembur</p>
+                      <p className="text-xs text-slate-500">Cocokkan dengan surat lembur fisik yang sudah di-ACC. Yang tidak dicentang tidak ikut dihitung ke gaji.</p>
+                      {loadingOtCandidates ? (
+                        <p className="text-xs text-slate-400 text-center py-2">Memuat data lembur...</p>
+                      ) : otCandidates.length === 0 ? (
+                        <p className="text-xs text-slate-400 italic">Tidak ada lembur tercatat bulan ini.</p>
+                      ) : (
+                        <div className="space-y-1.5 mt-1">
+                          {otCandidates.map(d => (
+                            <label key={d.date} className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition ${otChecked[d.date] ? 'bg-green-50 border-green-300' : 'bg-white border-slate-200 hover:border-blue-200'}`}>
+                              <div className="flex items-center gap-2">
+                                <input type="checkbox" checked={otChecked[d.date] ?? false}
+                                  onChange={e => setOtChecked(prev => ({ ...prev, [d.date]: e.target.checked }))}
+                                  className="w-4 h-4 accent-green-500" />
+                                <span className="text-sm text-slate-700">{new Date(d.date + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long' })}</span>
+                              </div>
+                              <span className={`text-sm font-semibold ${otChecked[d.date] ? 'text-green-600' : 'text-slate-400'}`}>{d.hours} jam</span>
+                            </label>
+                          ))}
+                          <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                            <span className="text-xs text-slate-500 font-medium">Total tervalidasi:</span>
+                            <span className="text-sm font-bold text-green-600">
+                              {otCandidates.filter(d => otChecked[d.date]).reduce((s, d) => s + d.hours, 0)} jam
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-slate-400">KPI, keterlambatan, kehilangan barang akan diambil otomatis dari data yang sudah ada.</p>
                   </div>
                 )}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <button onClick={() => setCreateModal(false)} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
-                  <button disabled={!selectedEmpId || buildingPreview || checkingUnclassified || unclassifiedDays.length > 0}
+                  <button disabled={!selectedEmpId || buildingPreview || checkingUnclassified || unclassifiedDays.length > 0 || loadingOtCandidates}
                     onClick={async () => {
-                      const preview = await buildSlipPreview(selectedEmpId, createKasbon)
+                      const validatedDates = new Set(otCandidates.filter(d => otChecked[d.date]).map(d => d.date))
+                      const preview = await buildSlipPreview(selectedEmpId, createKasbon, validatedDates)
                       if (preview) setCreateStep(2)
                     }}
                     className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
