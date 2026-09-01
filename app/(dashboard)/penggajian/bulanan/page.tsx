@@ -189,7 +189,7 @@ export default function PenggajianBulananPage() {
   type SlipPreview = {
     employeeId: string; employeeName: string; employeeCode: string
     positionName: string; branchName: string
-    base: number; pos: number; meal: number; otTotal: number; kpiBonus: number
+    base: number; pos: number; meal: number; otHours: number; otTotal: number; kpiBonus: number
     conditionalBonus: number
     loyalitasDed: number; latDed: number; latMinutes: number; latRate: number
     kasbonSaldo: number; kasbonDed: number
@@ -215,6 +215,15 @@ export default function PenggajianBulananPage() {
   const [slipPreview, setSlipPreview]       = useState<SlipPreview | null>(null)
   const [buildingPreview, setBuildingPreview] = useState(false)
   const [finalizing, setFinalizing]         = useState(false)
+
+  // ── State: Preview Semua Karyawan (tabel estimasi, murni untuk dilihat) ──
+  type BulkPreviewRow = {
+    employeeId: string; isFinal: boolean
+    preview: SlipPreview | null   // null kalau gagal dihitung (mis. komponen gaji belum diisi)
+  }
+  const [bulkPreviewOpen, setBulkPreviewOpen]     = useState(false)
+  const [bulkPreviewLoading, setBulkPreviewLoading] = useState(false)
+  const [bulkPreviewRows, setBulkPreviewRows]     = useState<BulkPreviewRow[]>([])
 
   // ── State: bonus kondisional saat buat slip ──
   const [createBonusCriteria, setCreateBonusCriteria]       = useState<BonusCriteria[]>([])
@@ -471,6 +480,33 @@ export default function PenggajianBulananPage() {
 
   // ─── Buat Slip Per Karyawan ────────────────────────────────────────────────────
 
+  // Preview estimasi gaji SEMUA karyawan sekaligus — murni untuk dilihat, bukan final.
+  // Lembur diasumsikan semuanya valid, kasbon diasumsikan 0, bonus kondisional diasumsikan semua
+  // terpenuhi — angka final tetap lewat "Buat Slip Karyawan" seperti biasa (lengkap dengan
+  // checklist validasi lembur & input kasbon manual).
+  async function openBulkPreview() {
+    setBulkPreviewOpen(true)
+    setBulkPreviewLoading(true)
+    setBulkPreviewRows([])
+
+    const { data: emps } = await supabase
+      .from('employees')
+      .select('id')
+      .in('employee_type', ['permanent', 'training']).eq('is_active', true)
+
+    const existSet = new Set(payrolls.map(p => p.employee_id))
+    const results = await Promise.all(
+      ((emps || []) as { id: string }[]).map(async e => ({
+        employeeId: e.id,
+        isFinal: existSet.has(e.id),
+        preview: await buildSlipPreview(e.id, 0, new Set<string>(), { silent: true }),
+      }))
+    )
+    results.sort((a, b) => (a.preview?.employeeName || '').localeCompare(b.preview?.employeeName || ''))
+    setBulkPreviewRows(results)
+    setBulkPreviewLoading(false)
+  }
+
   async function openCreateModal() {
     setCreateStep(1); setSelectedEmpId(''); setUnclassifiedDays([]); setOtCandidates([]); setOtChecked({}); setCreateKasbon(0); setSlipPreview(null)
     // Ambil karyawan permanent + training aktif yang belum punya slip bulan ini
@@ -486,8 +522,12 @@ export default function PenggajianBulananPage() {
     setCreateModal(true)
   }
 
-  async function buildSlipPreview(empId: string, kasbonDed: number, validatedOtDates: Set<string>) {
-    setBuildingPreview(true)
+  // opts.silent = true dipakai oleh Preview Semua Karyawan (tabel massal): tidak menyentuh state
+  // wizard (setSlipPreview/setBuildingPreview/showMessage/checklist bonus), dan lembur diasumsikan
+  // semuanya valid (belum lewat checklist) karena tujuannya cuma untuk dilihat, bukan final.
+  async function buildSlipPreview(empId: string, kasbonDed: number, validatedOtDates: Set<string>, opts?: { silent?: boolean }) {
+    const silent = opts?.silent ?? false
+    if (!silent) setBuildingPreview(true)
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
@@ -504,10 +544,10 @@ export default function PenggajianBulananPage() {
     const emp  = empRes.data as any
     const atts = attRes.data || []
 
-    if (scRes.error) { showMessage('error', 'Gagal ambil komponen gaji: ' + scRes.error.message); setBuildingPreview(false); return null }
-    if (empRes.error) { showMessage('error', 'Gagal ambil data karyawan: ' + empRes.error.message); setBuildingPreview(false); return null }
-    if (!sc) { showMessage('error', 'Komponen gaji belum diisi untuk karyawan ini. Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false); return null }
-    if (!emp) { showMessage('error', 'Data karyawan tidak ditemukan.'); setBuildingPreview(false); return null }
+    if (scRes.error) { if (!silent) { showMessage('error', 'Gagal ambil komponen gaji: ' + scRes.error.message); setBuildingPreview(false) }; return null }
+    if (empRes.error) { if (!silent) { showMessage('error', 'Gagal ambil data karyawan: ' + empRes.error.message); setBuildingPreview(false) }; return null }
+    if (!sc) { if (!silent) { showMessage('error', 'Komponen gaji belum diisi untuk karyawan ini. Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false) }; return null }
+    if (!emp) { if (!silent) { showMessage('error', 'Data karyawan tidak ditemukan.'); setBuildingPreview(false) }; return null }
 
     // ── Hitung kehilangan barang & kerugian kasir dari sumber asli ──
     const branchId = emp.branch_id
@@ -574,7 +614,7 @@ export default function PenggajianBulananPage() {
     // dikecualikan total dari perhitungan ini, terlepas dari checklist/data absensi apa pun.
     const otApplicableForEmp  = (emp as any).overtime_applicable !== false
     const lateApplicableForEmp = (emp as any).late_penalty_applicable !== false
-    const otHours  = !otApplicableForEmp ? 0 : (atts as any[]).filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && validatedOtDates.has(a.date)).reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
+    const otHours  = !otApplicableForEmp ? 0 : (atts as any[]).filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && (silent ? Number(a.overtime_hours ?? 0) > 0 : validatedOtDates.has(a.date))).reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
     const latMins  = !lateApplicableForEmp ? 0 : (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
     const otTotal  = otHours * otRate
     const latDed   = latMins * latRate
@@ -681,11 +721,16 @@ export default function PenggajianBulananPage() {
       .eq('employee_id', empId)
       .eq('is_active', true)
     const latestCriteria = (freshCriteria as BonusCriteria[]) || []
-    // Sync state UI agar tampilan checklist ikut update
-    setCreateBonusCriteria(latestCriteria)
     const latestChecked: Record<string, boolean> = {}
-    latestCriteria.forEach(c => { latestChecked[c.id] = createBonusChecked[c.id] ?? true })
-    setCreateBonusChecked(latestChecked)
+    if (!silent) {
+      // Sync state UI agar tampilan checklist ikut update
+      setCreateBonusCriteria(latestCriteria)
+      latestCriteria.forEach(c => { latestChecked[c.id] = createBonusChecked[c.id] ?? true })
+      setCreateBonusChecked(latestChecked)
+    } else {
+      // Preview massal: asumsikan semua kriteria aktif terpenuhi
+      latestCriteria.forEach(c => { latestChecked[c.id] = true })
+    }
     const conditionalBonus = latestCriteria
       .filter(c => latestChecked[c.id])
       .reduce((s, c) => s + Number(c.nominal_amount), 0)
@@ -696,7 +741,7 @@ export default function PenggajianBulananPage() {
     const preview: SlipPreview = {
       employeeId: empId, employeeName: emp.full_name, employeeCode: emp.employee_code,
       positionName: (emp.positions as any)?.name ?? '—', branchName: (emp.branches as any)?.name ?? '—',
-      base, pos, meal, otTotal, kpiBonus: kpi,
+      base, pos, meal, otHours, otTotal, kpiBonus: kpi,
       loyalitasDed: loyalitas, latDed, latMinutes: latMins, latRate,
       kasbonSaldo: saldo, kasbonDed,
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
@@ -706,12 +751,10 @@ export default function PenggajianBulananPage() {
       conditionalBonus,
       gross, net,
     }
-    setSlipPreview(preview)
-    setBuildingPreview(false)
+    if (!silent) { setSlipPreview(preview); setBuildingPreview(false) }
     return preview
     } catch (err: any) {
-      showMessage('error', 'Terjadi kesalahan: ' + (err.message || 'Unknown error'))
-      setBuildingPreview(false)
+      if (!silent) { showMessage('error', 'Terjadi kesalahan: ' + (err.message || 'Unknown error')); setBuildingPreview(false) }
       return null
     }
   }
@@ -1506,14 +1549,23 @@ export default function PenggajianBulananPage() {
           </button>
         </div>
 
-        {/* Tombol Buat Slip Per Karyawan */}
-        <button
-          onClick={openCreateModal}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50"
-        >
-          ✨ Buat Slip Karyawan
-        </button>
+        {/* Tombol Buat Slip Per Karyawan & Preview Semua Karyawan */}
+        <div className="flex gap-2">
+          <button
+            onClick={openBulkPreview}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50"
+          >
+            📊 Preview Semua Karyawan
+          </button>
+          <button
+            onClick={openCreateModal}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50"
+          >
+            ✨ Buat Slip Karyawan
+          </button>
+        </div>
       </div>
 
       {/* ── Alert message ── */}
@@ -2658,6 +2710,97 @@ export default function PenggajianBulananPage() {
               </>
             )}
 
+          </div>
+        </div>
+      </div>
+    )}
+
+    {bulkPreviewOpen && (
+      <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl max-h-[90vh] flex flex-col">
+          <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+            <div>
+              <h2 className="text-base font-bold text-slate-700">📊 Preview Semua Karyawan</h2>
+              <p className="text-xs text-slate-500 mt-0.5">{getPeriodLabel(filterMonth, filterYear)} — cuma untuk dilihat, bukan slip resmi. Lembur diasumsikan semuanya valid, kasbon diasumsikan 0, bonus kondisional diasumsikan semua terpenuhi.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={openBulkPreview} disabled={bulkPreviewLoading}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg disabled:opacity-50">
+                🔄 Muat Ulang
+              </button>
+              <button onClick={() => setBulkPreviewOpen(false)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg">✕</button>
+            </div>
+          </div>
+
+          <div className="overflow-auto flex-1 p-4">
+            {bulkPreviewLoading ? (
+              <div className="py-16 text-center text-slate-400 text-sm">Menghitung estimasi semua karyawan, mohon tunggu...</div>
+            ) : bulkPreviewRows.length === 0 ? (
+              <div className="py-16 text-center text-slate-400 text-sm">Tidak ada karyawan tetap/training aktif.</div>
+            ) : (
+              <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 sticky top-0">
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase">Karyawan</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Gaji Pokok+Tunjangan</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Menit Telat</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Potongan Telat</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Jam Lembur</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Nominal Lembur</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Bonus KPI+Kondisional</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Tidak Hadir (hari)</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Potongan Tidak Hadir</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Kompensasi Libur</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Kehilangan Barang</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Kerugian Kasir</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Tabungan Loyalitas</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Estimasi Gaji Bersih</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {bulkPreviewRows.map(row => (
+                    <tr key={row.employeeId} className="hover:bg-slate-50 transition">
+                      {!row.preview ? (
+                        <>
+                          <td className="px-3 py-2 text-slate-400 italic">(gagal dihitung)</td>
+                          <td colSpan={13} className="px-3 py-2 text-red-500">⚠️ Komponen gaji belum diisi / data karyawan bermasalah</td>
+                          <td className="px-3 py-2"></td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-3 py-2">
+                            <div className="font-medium text-slate-800">{row.preview.employeeName}</div>
+                            <div className="text-slate-400">{row.preview.positionName} · {row.preview.branchName}</div>
+                            {row.isFinal && <span className="inline-block mt-0.5 px-1.5 py-0.5 bg-green-50 text-green-700 rounded text-[10px] font-medium">✅ Slip resmi sudah dibuat</span>}
+                          </td>
+                          <td className="px-3 py-2 text-right">{formatRupiah(row.preview.base + row.preview.pos + row.preview.meal)}</td>
+                          <td className="px-3 py-2 text-right">{row.preview.latMinutes > 0 ? `${row.preview.latMinutes} mnt` : '—'}</td>
+                          <td className="px-3 py-2 text-right text-red-500">{row.preview.latDed > 0 ? formatRupiah(row.preview.latDed) : '—'}</td>
+                          <td className="px-3 py-2 text-right">{row.preview.otHours > 0 ? `${row.preview.otHours} jam` : '—'}</td>
+                          <td className="px-3 py-2 text-right text-green-600">{row.preview.otTotal > 0 ? formatRupiah(row.preview.otTotal) : '—'}</td>
+                          <td className="px-3 py-2 text-right text-green-600">{(row.preview.kpiBonus + row.preview.conditionalBonus) > 0 ? formatRupiah(row.preview.kpiBonus + row.preview.conditionalBonus) : '—'}</td>
+                          <td className="px-3 py-2 text-right">{row.preview.absentDays > 0 ? row.preview.absentDays : '—'}</td>
+                          <td className="px-3 py-2 text-right text-red-500">{row.preview.absentDed > 0 ? formatRupiah(row.preview.absentDed) : '—'}</td>
+                          <td className="px-3 py-2 text-right text-green-600">{row.preview.liburKompensasi > 0 ? formatRupiah(row.preview.liburKompensasi) : '—'}</td>
+                          <td className="px-3 py-2 text-right text-red-500">{row.preview.invLoss > 0 ? formatRupiah(row.preview.invLoss) : '—'}</td>
+                          <td className="px-3 py-2 text-right text-red-500">{row.preview.cashierLoss > 0 ? formatRupiah(row.preview.cashierLoss) : '—'}</td>
+                          <td className="px-3 py-2 text-right text-red-500">{row.preview.loyalitasDed > 0 ? formatRupiah(row.preview.loyalitasDed) : '—'}</td>
+                          <td className="px-3 py-2 text-right font-bold text-slate-800">{formatRupiah(row.preview.net)}</td>
+                          <td className="px-3 py-2 text-center">
+                            {!row.isFinal && (
+                              <button
+                                onClick={async () => { setBulkPreviewOpen(false); await openCreateModal(); setSelectedEmpId(row.employeeId) }}
+                                className="text-blue-600 hover:underline font-medium">Buat Slip →</button>
+                            )}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       </div>
