@@ -108,12 +108,13 @@ export default function KasMasukPage() {
     const startDate = localDateStr(new Date(year, month - 1, 1))
     const endDate = localDateStr(new Date(year, month, 0))
 
+    // Ambil SEMUA entri periode/cabang ini (bukan cuma yang ada selisih) — supaya Total Omzet
+    // & Total Uang Diterima juga bisa ditampilkan di tab ini, bukan cuma angka Plus/Minus-nya.
     let query = supabase
       .from('fin_cash_in')
       .select('id, branch_id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, rejection_reason, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
-      .neq('cash_adjustment', 0)
       .order('transaction_date', { ascending: false })
 
     if (!isAdmin && myBranchId) query = query.eq('branch_id', myBranchId)
@@ -521,9 +522,14 @@ export default function KasMasukPage() {
           )}
 
           {activeSubTab === 'selisih' && (() => {
-            const totalPlus = selisihRows.filter(r => r.cash_adjustment > 0).reduce((s, r) => s + r.cash_adjustment, 0)
-            const totalMinus = selisihRows.filter(r => r.cash_adjustment < 0).reduce((s, r) => s + r.cash_adjustment, 0)
-            const filtered = selisihRows.filter(r => selisihTypeFilter === 'all' ? true : selisihTypeFilter === 'plus' ? r.cash_adjustment > 0 : r.cash_adjustment < 0)
+            const selisihApproved = selisihRows.filter(r => r.status === 'approved')
+            const totalOmzetSelisihTab = selisihApproved.reduce((s, r) => s + Number(r.amount), 0)
+            const totalPengeluaranSelisihTab = selisihApproved.reduce((s, r) => s + Number(r.expense_amount), 0)
+            const totalDiterimaSelisihTab = selisihApproved.reduce((s, r) => s + Number(r.amount) - Number(r.expense_amount) + Number(r.cash_adjustment), 0)
+            const selisihOnly = selisihRows.filter(r => r.cash_adjustment !== 0)
+            const totalPlus = selisihOnly.filter(r => r.cash_adjustment > 0).reduce((s, r) => s + r.cash_adjustment, 0)
+            const totalMinus = selisihOnly.filter(r => r.cash_adjustment < 0).reduce((s, r) => s + r.cash_adjustment, 0)
+            const filtered = selisihOnly.filter(r => selisihTypeFilter === 'all' ? true : selisihTypeFilter === 'plus' ? r.cash_adjustment > 0 : r.cash_adjustment < 0)
             const sorted = [...filtered].sort((a, b) => selisihSortDir === 'desc' ? b.cash_adjustment - a.cash_adjustment : a.cash_adjustment - b.cash_adjustment)
             return (
               <div className="space-y-4">
@@ -552,14 +558,28 @@ export default function KasMasukPage() {
                 <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Uang Masuk (Omzet)</p>
+                    <p className="text-2xl font-bold text-green-700">{formatRupiah(totalOmzetSelisihTab)}</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Uang Keluar (Pengeluaran)</p>
+                    <p className="text-2xl font-bold text-red-700">{formatRupiah(totalPengeluaranSelisihTab)}</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Uang Diterima</p>
+                    <p className="text-2xl font-bold text-slate-800">{formatRupiah(totalDiterimaSelisihTab)}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                     <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Plus (Kelebihan)</p>
                     <p className="text-2xl font-bold text-green-700">{formatRupiah(totalPlus)}</p>
-                    <p className="text-xs text-slate-400 mt-1">{selisihRows.filter(r => r.cash_adjustment > 0).length} transaksi</p>
+                    <p className="text-xs text-slate-400 mt-1">{selisihOnly.filter(r => r.cash_adjustment > 0).length} transaksi</p>
                   </div>
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                     <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Minus (Kekurangan)</p>
                     <p className="text-2xl font-bold text-red-700">{formatRupiah(totalMinus)}</p>
-                    <p className="text-xs text-slate-400 mt-1">{selisihRows.filter(r => r.cash_adjustment < 0).length} transaksi</p>
+                    <p className="text-xs text-slate-400 mt-1">{selisihOnly.filter(r => r.cash_adjustment < 0).length} transaksi</p>
                   </div>
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                     <p className="text-xs text-slate-500 font-medium uppercase mb-1">Selisih Bersih</p>
@@ -576,7 +596,7 @@ export default function KasMasukPage() {
                         {t === 'all' ? 'Semua' : t === 'plus' ? 'Plus' : 'Minus'}
                       </button>
                     ))}
-                    <span className="text-xs text-slate-400 ml-2">{selisihRows.length} transaksi ditemukan.</span>
+                    <span className="text-xs text-slate-400 ml-2">{selisihOnly.length} transaksi ditemukan.</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
