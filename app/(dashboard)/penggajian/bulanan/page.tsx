@@ -2741,8 +2741,8 @@ export default function PenggajianBulananPage() {
             ) : (
               <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 sticky top-0">
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase">Karyawan</th>
+                  <tr className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20">
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase sticky left-0 z-30 bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
                     <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Gaji Pokok+Tunjangan</th>
                     <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Menit Telat</th>
                     <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right">Potongan Telat</th>
@@ -2761,16 +2761,16 @@ export default function PenggajianBulananPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {bulkPreviewRows.map(row => (
-                    <tr key={row.employeeId} className="hover:bg-slate-50 transition">
+                    <tr key={row.employeeId} className="hover:bg-slate-50 transition group">
                       {!row.preview ? (
                         <>
-                          <td className="px-3 py-2 text-slate-400 italic">(gagal dihitung)</td>
+                          <td className="px-3 py-2 text-slate-400 italic sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">(gagal dihitung)</td>
                           <td colSpan={13} className="px-3 py-2 text-red-500">⚠️ Komponen gaji belum diisi / data karyawan bermasalah</td>
                           <td className="px-3 py-2"></td>
                         </>
                       ) : (
                         <>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2 sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">
                             <div className="font-medium text-slate-800">{row.preview.employeeName}</div>
                             <div className="text-slate-400">{row.preview.positionName} · {row.preview.branchName}</div>
                             {row.isFinal && <span className="inline-block mt-0.5 px-1.5 py-0.5 bg-green-50 text-green-700 rounded text-[10px] font-medium">✅ Slip resmi sudah dibuat</span>}
