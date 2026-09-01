@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 type Branch = { id: string; name: string }
@@ -43,6 +43,9 @@ type EditLog = {
 export default function RekapAbsensiPage() {
   const supabase = createClient()
   const [attendances, setAttendances] = useState<Attendance[]>([])
+  // Penanda permintaan terbaru — supaya kalau beberapa filter diganti cepat berturut-turut,
+  // hasil dari permintaan LAMA yang kebetulan selesai belakangan tidak menimpa hasil yang baru.
+  const fetchSeq = useRef(0)
   const [branches, setBranches] = useState<Branch[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -115,6 +118,7 @@ export default function RekapAbsensiPage() {
   }
 
   async function fetchAttendances() {
+    const mySeq = ++fetchSeq.current
     setLoading(true)
     let q = supabase.from('attendances')
       .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,branches(name),departments(name))')
@@ -129,6 +133,9 @@ export default function RekapAbsensiPage() {
     if (filterDept) q = q.eq('employees.department_id', filterDept)
     if (filterEmployee) q = q.eq('employee_id', filterEmployee)
     const { data, error } = await q
+    // Kalau ada filter lain yang berubah (dan fetch baru sudah jalan) sebelum request ini
+    // selesai, jangan timpa state dengan hasil yang sudah basi ini.
+    if (mySeq !== fetchSeq.current) return
     if (error) showMsg('error','Gagal memuat: '+error.message)
     else setAttendances((data as unknown as Attendance[])||[])
     setLoading(false)
