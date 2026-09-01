@@ -518,7 +518,9 @@ export default function PenggajianBulananPage() {
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
     window.scrollTo({ top: 0, behavior: 'smooth' })
-    setTimeout(() => setMessage(null), 6000)
+    // Pesan error (apalagi yang berisi detail teknis, mis. error database) TIDAK auto-hilang —
+    // biar sempat dibaca/di-copy. Cuma pesan sukses yang auto-dismiss.
+    if (type === 'success') setTimeout(() => setMessage(null), 6000)
   }
 
   // ─── Part 2: Generate Slip Gaji ────────────────────────────────────────────
@@ -1787,12 +1789,13 @@ export default function PenggajianBulananPage() {
 
       {/* ── Alert message ── */}
       {message && (
-        <div className={`p-4 mb-6 rounded-lg border text-sm ${
+        <div className={`p-4 mb-6 rounded-lg border text-sm flex items-start justify-between gap-3 ${
           message.type === 'success'
             ? 'bg-green-50 border-green-200 text-green-700'
             : 'bg-red-50 border-red-200 text-red-700'
         }`}>
-          {message.text}
+          <span className="whitespace-pre-wrap break-words">{message.text}</span>
+          <button onClick={() => setMessage(null)} className="shrink-0 text-lg leading-none opacity-60 hover:opacity-100">×</button>
         </div>
       )}
 
