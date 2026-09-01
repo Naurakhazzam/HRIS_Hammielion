@@ -40,6 +40,8 @@ type Employee = {
   fingerprint_id: number | null
   custom_check_in_time: string | null
   custom_check_out_time: string | null
+  late_penalty_applicable: boolean
+  overtime_applicable: boolean
   branches: { id: string; name: string }
   departments: { id: string; name: string }
   positions: { id: string; name: string; department_id: string }
@@ -55,7 +57,8 @@ const emptyForm = {
   bank_name: '', bank_account_number: '', bank_account_name: '',
   emergency_contact_name: '', emergency_contact_phone: '', emergency_contact_relation: '',
   education: '', photo_url: '', fingerprint_id: '',
-  custom_check_in_time: '', custom_check_out_time: ''
+  custom_check_in_time: '', custom_check_out_time: '',
+  late_penalty_applicable: true, overtime_applicable: true
 }
 
 const GENDER_OPTIONS = [{ value: 'male', label: 'Laki-laki' }, { value: 'female', label: 'Perempuan' }]
@@ -195,6 +198,8 @@ export default function KaryawanPage() {
       fingerprint_id: f.fingerprint_id !== '' ? parseInt(f.fingerprint_id) : null,
       custom_check_in_time: f.custom_check_in_time || null,
       custom_check_out_time: f.custom_check_out_time || null,
+      late_penalty_applicable: f.late_penalty_applicable,
+      overtime_applicable: f.overtime_applicable,
     }
   }
 
@@ -243,7 +248,9 @@ export default function KaryawanPage() {
       education: emp.education || '', photo_url: emp.photo_url || '',
       fingerprint_id: emp.fingerprint_id != null ? String(emp.fingerprint_id) : '',
       custom_check_in_time: emp.custom_check_in_time ? emp.custom_check_in_time.substring(0,5) : '',
-      custom_check_out_time: emp.custom_check_out_time ? emp.custom_check_out_time.substring(0,5) : ''
+      custom_check_out_time: emp.custom_check_out_time ? emp.custom_check_out_time.substring(0,5) : '',
+      late_penalty_applicable: emp.late_penalty_applicable,
+      overtime_applicable: emp.overtime_applicable
     })
   }
 
@@ -380,6 +387,25 @@ export default function KaryawanPage() {
             </FormField>
           </div>
           <p className="text-xs text-slate-400 mt-1">Isi jam masuk/pulang khusus hanya jika karyawan ini punya jam kerja berbeda dari jadwal departemennya. Kosongkan untuk memakai jadwal departemen seperti biasa.</p>
+
+          <div className="mt-4 pt-3 border-t border-slate-100">
+            <p className="text-xs font-semibold text-slate-600 mb-2">Aturan Perhitungan Gaji</p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <label className={`flex-1 flex items-center justify-between gap-2 p-2.5 rounded-lg border cursor-pointer transition ${f.late_penalty_applicable ? 'bg-white border-slate-200' : 'bg-amber-50 border-amber-300'}`}>
+                <span className="text-sm text-slate-700">Berlaku Potongan Keterlambatan</span>
+                <input type="checkbox" checked={f.late_penalty_applicable}
+                  onChange={e => setF({ ...f, late_penalty_applicable: e.target.checked })}
+                  className="w-4 h-4 accent-blue-600" />
+              </label>
+              <label className={`flex-1 flex items-center justify-between gap-2 p-2.5 rounded-lg border cursor-pointer transition ${f.overtime_applicable ? 'bg-white border-slate-200' : 'bg-amber-50 border-amber-300'}`}>
+                <span className="text-sm text-slate-700">Berlaku Perhitungan Lembur</span>
+                <input type="checkbox" checked={f.overtime_applicable}
+                  onChange={e => setF({ ...f, overtime_applicable: e.target.checked })}
+                  className="w-4 h-4 accent-blue-600" />
+              </label>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Kalau dimatikan, potongan telat / upah lembur karyawan ini tidak ikut dihitung saat Buat Slip Gaji — absensi hariannya tetap tercatat normal di Rekap Absensi.</p>
+          </div>
         </div>
 
         {/* ─ Data Pribadi ─ */}
@@ -635,6 +661,8 @@ export default function KaryawanPage() {
                   ['Jam Kerja Khusus', (detailEmployee.custom_check_in_time || detailEmployee.custom_check_out_time)
                     ? `${detailEmployee.custom_check_in_time?.substring(0,5) ?? '—'} – ${detailEmployee.custom_check_out_time?.substring(0,5) ?? '—'}`
                     : 'Ikut jadwal departemen'],
+                  ['Potongan Keterlambatan', detailEmployee.late_penalty_applicable ? 'Berlaku' : 'Tidak Berlaku'],
+                  ['Perhitungan Lembur', detailEmployee.overtime_applicable ? 'Berlaku' : 'Tidak Berlaku'],
                 ]},
                 { title: 'Data Pribadi', rows: [
                   ['NIK', detailEmployee.nik || '-'],

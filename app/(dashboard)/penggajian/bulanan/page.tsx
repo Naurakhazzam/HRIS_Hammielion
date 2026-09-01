@@ -202,7 +202,7 @@ export default function PenggajianBulananPage() {
   }
   const [createModal, setCreateModal]       = useState(false)
   const [createStep, setCreateStep]         = useState<1|2|3>(1)
-  const [availableEmps, setAvailableEmps]   = useState<{id:string;full_name:string;employee_code:string;positions:{name:string}|null;branches:{name:string}|null}[]>([])
+  const [availableEmps, setAvailableEmps]   = useState<{id:string;full_name:string;employee_code:string;positions:{name:string}|null;branches:{name:string}|null;late_penalty_applicable:boolean;overtime_applicable:boolean}[]>([])
   const [selectedEmpId, setSelectedEmpId]   = useState('')
   const [unclassifiedDays, setUnclassifiedDays] = useState<{missing_date: string}[]>([])
   const [checkingUnclassified, setCheckingUnclassified] = useState(false)
@@ -476,7 +476,7 @@ export default function PenggajianBulananPage() {
     // Ambil karyawan permanent + training aktif yang belum punya slip bulan ini
     const { data: emps } = await supabase
       .from('employees')
-      .select('id, full_name, employee_code, positions(name), branches(name)')
+      .select('id, full_name, employee_code, positions(name), branches(name), late_penalty_applicable, overtime_applicable')
       .in('employee_type', ['permanent', 'training']).eq('is_active', true)
     const { data: existing } = await supabase
       .from('payrolls').select('employee_id')
@@ -496,7 +496,7 @@ export default function PenggajianBulananPage() {
       supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
-      supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
     ])
 
@@ -570,8 +570,12 @@ export default function PenggajianBulananPage() {
     const pos  = Math.round(posRaw  * proRataFactor)
     const meal = Math.round(mealRaw * proRataFactor)
     // Hanya lembur yang sudah dicentang valid (cocok surat lembur fisik ter-ACC) yang dihitung
-    const otHours  = (atts as any[]).filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && validatedOtDates.has(a.date)).reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
-    const latMins  = (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
+    // Karyawan dengan overtime_applicable/late_penalty_applicable = false (diatur di Data Karyawan)
+    // dikecualikan total dari perhitungan ini, terlepas dari checklist/data absensi apa pun.
+    const otApplicableForEmp  = (emp as any).overtime_applicable !== false
+    const lateApplicableForEmp = (emp as any).late_penalty_applicable !== false
+    const otHours  = !otApplicableForEmp ? 0 : (atts as any[]).filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && validatedOtDates.has(a.date)).reduce((s: number, a: any) => s + roundOvertimeHours(Number(a.overtime_hours ?? 0)), 0)
+    const latMins  = !lateApplicableForEmp ? 0 : (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
     const otTotal  = otHours * otRate
     const latDed   = latMins * latRate
     const kpi      = Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
@@ -2429,9 +2433,19 @@ export default function PenggajianBulananPage() {
                   )}
                 </div>
 
-                {selectedEmpId && (
+                {selectedEmpId && (() => {
+                  const selectedEmpFlags = availableEmps.find(e => e.id === selectedEmpId)
+                  const lateApplicable = selectedEmpFlags?.late_penalty_applicable !== false
+                  const otApplicable = selectedEmpFlags?.overtime_applicable !== false
+                  return (
                   <div className="space-y-3">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Checklist Validasi</p>
+
+                    {(!lateApplicable || !otApplicable) && (
+                      <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+                        ℹ️ Karyawan ini tidak berlaku: {[!lateApplicable && 'Potongan Keterlambatan', !otApplicable && 'Perhitungan Lembur'].filter(Boolean).join(' & ')}. Diatur di halaman Data Karyawan.
+                      </div>
+                    )}
 
                     {/* Cek hari belum terklasifikasi */}
                     {checkingUnclassified ? (
@@ -2497,40 +2511,43 @@ export default function PenggajianBulananPage() {
                       </div>
                     )}
 
-                    {/* Checklist Validasi Lembur */}
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
-                      <p className="text-sm font-semibold text-slate-700">📋 Checklist Validasi Lembur</p>
-                      <p className="text-xs text-slate-500">Cocokkan dengan surat lembur fisik yang sudah di-ACC. Yang tidak dicentang tidak ikut dihitung ke gaji.</p>
-                      {loadingOtCandidates ? (
-                        <p className="text-xs text-slate-400 text-center py-2">Memuat data lembur...</p>
-                      ) : otCandidates.length === 0 ? (
-                        <p className="text-xs text-slate-400 italic">Tidak ada lembur tercatat bulan ini.</p>
-                      ) : (
-                        <div className="space-y-1.5 mt-1">
-                          {otCandidates.map(d => (
-                            <label key={d.date} className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition ${otChecked[d.date] ? 'bg-green-50 border-green-300' : 'bg-white border-slate-200 hover:border-blue-200'}`}>
-                              <div className="flex items-center gap-2">
-                                <input type="checkbox" checked={otChecked[d.date] ?? false}
-                                  onChange={e => setOtChecked(prev => ({ ...prev, [d.date]: e.target.checked }))}
-                                  className="w-4 h-4 accent-green-500" />
-                                <span className="text-sm text-slate-700">{new Date(d.date + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long' })}</span>
-                              </div>
-                              <span className={`text-sm font-semibold ${otChecked[d.date] ? 'text-green-600' : 'text-slate-400'}`}>{d.hours} jam</span>
-                            </label>
-                          ))}
-                          <div className="flex justify-between items-center pt-1 border-t border-slate-200">
-                            <span className="text-xs text-slate-500 font-medium">Total tervalidasi:</span>
-                            <span className="text-sm font-bold text-green-600">
-                              {otCandidates.filter(d => otChecked[d.date]).reduce((s, d) => s + d.hours, 0)} jam
-                            </span>
+                    {/* Checklist Validasi Lembur — disembunyikan kalau lembur tidak berlaku untuk karyawan ini */}
+                    {otApplicable && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                        <p className="text-sm font-semibold text-slate-700">📋 Checklist Validasi Lembur</p>
+                        <p className="text-xs text-slate-500">Cocokkan dengan surat lembur fisik yang sudah di-ACC. Yang tidak dicentang tidak ikut dihitung ke gaji.</p>
+                        {loadingOtCandidates ? (
+                          <p className="text-xs text-slate-400 text-center py-2">Memuat data lembur...</p>
+                        ) : otCandidates.length === 0 ? (
+                          <p className="text-xs text-slate-400 italic">Tidak ada lembur tercatat bulan ini.</p>
+                        ) : (
+                          <div className="space-y-1.5 mt-1">
+                            {otCandidates.map(d => (
+                              <label key={d.date} className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition ${otChecked[d.date] ? 'bg-green-50 border-green-300' : 'bg-white border-slate-200 hover:border-blue-200'}`}>
+                                <div className="flex items-center gap-2">
+                                  <input type="checkbox" checked={otChecked[d.date] ?? false}
+                                    onChange={e => setOtChecked(prev => ({ ...prev, [d.date]: e.target.checked }))}
+                                    className="w-4 h-4 accent-green-500" />
+                                  <span className="text-sm text-slate-700">{new Date(d.date + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long' })}</span>
+                                </div>
+                                <span className={`text-sm font-semibold ${otChecked[d.date] ? 'text-green-600' : 'text-slate-400'}`}>{d.hours} jam</span>
+                              </label>
+                            ))}
+                            <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                              <span className="text-xs text-slate-500 font-medium">Total tervalidasi:</span>
+                              <span className="text-sm font-bold text-green-600">
+                                {otCandidates.filter(d => otChecked[d.date]).reduce((s, d) => s + d.hours, 0)} jam
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
 
-                    <p className="text-xs text-slate-400">KPI, keterlambatan, kehilangan barang akan diambil otomatis dari data yang sudah ada.</p>
+                    <p className="text-xs text-slate-400">KPI, {lateApplicable ? 'keterlambatan, ' : ''}kehilangan barang akan diambil otomatis dari data yang sudah ada.</p>
                   </div>
-                )}
+                  )
+                })()}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <button onClick={() => setCreateModal(false)} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
