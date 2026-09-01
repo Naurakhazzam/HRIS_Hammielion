@@ -423,6 +423,14 @@ Klik "Tandai Lunas" (satuan maupun massal) sekarang membuka modal: tanggal pemba
 
 **Fix:** `DROP TRIGGER trg_fin_autopost_payroll ON payrolls;` — dihapus total, bukan diperbaiki, karena sudah digantikan sepenuhnya (dan lebih baik) oleh fitur #15 di atas: modal client-side punya `account_id`, dukungan split sumber, dan tanggal pembayaran yang benar. Membiarkan keduanya aktif bersamaan akan mencatat pengeluaran gaji **dua kali**.
 
+### 17. Fix: Unique Index `fin_cash_out_source_unique` Terlalu Ketat untuk Split Pembayaran
+
+**Ditemukan:** Ada partial unique index `fin_cash_out_source_unique` pada `(source_table, source_id)` — dibuat bersamaan dengan sistem auto-post trigger lama (item #16) sebagai pengaman "1 sumber = 1 baris pengeluaran", berlaku untuk `payrolls`, `loading_entries`, `driver_kasbon`, `kasbon_requests`, `driver_wage_weekly`. Index ini otomatis menolak baris kedua untuk slip gaji yang sama — jadi begitu pembayaran dipecah ke 2+ rekening (fitur #15), insert baris kedua selalu gagal dengan duplicate key error.
+
+**Fix:** Index diganti jadi `(source_table, source_id, account_id)` — tetap mencegah baris dobel untuk kombinasi sumber+rekening yang SAMA (jaga niat aslinya: anti double-post), tapi sekarang membolehkan banyak baris per slip selama rekening/kasnya beda (kasus split pembayaran yang sah).
+
+**Data yang sempat kena:** Slip Elan Suherlan (Agustus 2026) — pembayaran split Rp 10jt Kas Tunai + Rp 10jt BRI IRMA, baris keduanya sempat gagal dan harus dilengkapi manual setelah index diperbaiki.
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-01)*
