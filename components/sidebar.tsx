@@ -170,7 +170,15 @@ const employeeNavItems: NavNode[] = [
   },
 ]
 
-export default function Sidebar() {
+type SidebarProps = {
+  // null = ikuti perilaku bawaan (tampil >=768px, sembunyi di bawahnya).
+  // true = paksa tampil (overlay di layar kecil, in-flow di layar besar).
+  // false = paksa sembunyi total, di semua ukuran layar.
+  forceOpen?: boolean | null
+  onNavigate?: () => void
+}
+
+export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) {
   const pathname = usePathname()
   const supabase = createClient()
   const [userRole, setUserRole] = useState<string>('hr')
@@ -208,8 +216,24 @@ export default function Sidebar() {
     setOpenMenus(prev => ({ ...prev, [name]: !prev[name] }))
   }
 
+  const asideClass = forceOpen === false
+    ? 'hidden'
+    : forceOpen === true
+      ? 'block fixed left-0 top-16 bottom-0 z-40 w-64 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 md:static md:z-0 md:h-auto md:min-h-[calc(100vh-4rem)]'
+      : 'hidden md:block w-64 bg-white border-r border-slate-200 flex-shrink-0 min-h-[calc(100vh-4rem)]'
+
   return (
-    <aside className="w-64 bg-white border-r border-slate-200 hidden md:block flex-shrink-0 min-h-[calc(100vh-4rem)]">
+    <aside className={asideClass}>
+      {forceOpen === true && (
+        <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Menu</span>
+          <button onClick={onNavigate} aria-label="Tutup menu" className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       <div className="py-4">
         <ul className="space-y-1 px-3">
           {navItems.map((item) => {
