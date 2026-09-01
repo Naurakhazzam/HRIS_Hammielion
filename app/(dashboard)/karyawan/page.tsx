@@ -203,6 +203,15 @@ export default function KaryawanPage() {
     }
   }
 
+  // Pesan error yang lebih jelas untuk pelanggaran ID Fingerprint unik per Kelompok Mesin
+  // (bukan error mentah dari Postgres yang membingungkan untuk HR)
+  function friendlyEmployeeError(error: { code?: string; message: string }, fallbackPrefix: string) {
+    if (error.code === '23505' && error.message.includes('employees_fingerprint_id_per_group_key')) {
+      return 'ID Fingerprint ini sudah dipakai karyawan lain yang SATU KELOMPOK MESIN dengannya (cabang yang pakai mesin fingerprint fisik yang sama). Cek di halaman Manajemen Cabang kelompok mesin cabang ini, lalu pastikan ID-nya beda dari karyawan lain di kelompok yang sama.'
+    }
+    return fallbackPrefix + ': ' + error.message
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
@@ -216,7 +225,7 @@ export default function KaryawanPage() {
       if (url) payload.photo_url = url
     }
     const { error } = await supabase.from('employees').insert([payload])
-    if (error) { showMessage('error', 'Gagal menambah karyawan: ' + error.message) }
+    if (error) { showMessage('error', friendlyEmployeeError(error, 'Gagal menambah karyawan')) }
     else {
       showMessage('success', 'Karyawan berhasil ditambahkan.')
       setShowForm(false); setFormData(emptyForm)
@@ -264,7 +273,7 @@ export default function KaryawanPage() {
       if (url) payload.photo_url = url
     }
     const { error } = await supabase.from('employees').update(payload).eq('id', editEmployee.id)
-    if (error) { showMessage('error', 'Gagal mengupdate: ' + error.message) }
+    if (error) { showMessage('error', friendlyEmployeeError(error, 'Gagal mengupdate')) }
     else { showMessage('success', 'Data karyawan berhasil diupdate.'); setEditEmployee(null); fetchEmployees() }
     setEditSubmitting(false)
   }

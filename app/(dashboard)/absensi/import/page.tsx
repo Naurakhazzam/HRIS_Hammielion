@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 // icons — inline SVG agar tidak perlu lucide-react
 const IconUpload        = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
 const IconCheckCircle   = ({ size = 16 }: { size?: number }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
@@ -40,6 +41,8 @@ type DoneResult = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+type DeviceGroup = { id: string; name: string; branchNames: string[] }
+
 export default function ImportAbsensiPage() {
   const [phase, setPhase]           = useState<Phase>('upload')
   const [file, setFile]             = useState<File | null>(null)
@@ -49,6 +52,26 @@ export default function ImportAbsensiPage() {
   const [parseResult, setParseResult] = useState<ParseResult | null>(null)
   const [doneResult, setDoneResult] = useState<DoneResult | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // ── Kelompok mesin fingerprint — file harus ditandai ini absen dari mesin/kelompok cabang mana ──
+  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([])
+  const [deviceGroupId, setDeviceGroupId] = useState('')
+  const [loadingGroups, setLoadingGroups] = useState(true)
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase
+      .from('fingerprint_device_groups')
+      .select('id, name, branches(name)')
+      .order('name')
+      .then(({ data }) => {
+        const groups = ((data as any[]) || []).map(g => ({
+          id: g.id, name: g.name, branchNames: (g.branches || []).map((b: any) => b.name),
+        }))
+        setDeviceGroups(groups)
+        setLoadingGroups(false)
+      })
+  }, [])
 
   // ── Drag & drop ──────────────────────────────────────────────────────────
 
@@ -70,11 +93,13 @@ export default function ImportAbsensiPage() {
 
   async function handleParse() {
     if (!file) return
+    if (!deviceGroupId) { setError('Pilih dulu file ini absensi dari mesin/kelompok cabang mana.'); return }
     setLoading(true)
     setError(null)
     try {
       const fd = new FormData()
       fd.append('file', file)
+      fd.append('deviceGroupId', deviceGroupId)
       const res = await fetch('/api/attendance/import', { method: 'POST', body: fd })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Gagal memproses file.')
@@ -160,6 +185,36 @@ export default function ImportAbsensiPage() {
       {/* ── Phase: upload ─────────────────────────────────────────────── */}
       {phase === 'upload' && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          {/* Pilih kelompok mesin fingerprint */}
+          <div className="mb-6">
+            <label className="block text-sm font-semibold text-slate-700 mb-1">
+              File ini absensi dari mesin/kelompok cabang mana? <span className="text-red-500">*</span>
+            </label>
+            <p className="text-xs text-slate-400 mb-2">
+              Wajib dipilih — supaya ID Fingerprint yang sama di mesin berbeda tidak salah cocok ke karyawan cabang lain.
+            </p>
+            {loadingGroups ? (
+              <p className="text-sm text-slate-400">Memuat kelompok mesin...</p>
+            ) : deviceGroups.length === 0 ? (
+              <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700">
+                Belum ada Kelompok Mesin Fingerprint. Atur dulu di halaman <strong>Manajemen Cabang</strong>.
+              </div>
+            ) : (
+              <select
+                value={deviceGroupId}
+                onChange={e => setDeviceGroupId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- Pilih Kelompok Mesin --</option>
+                {deviceGroups.map(g => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}{g.branchNames.length > 0 ? ` (${g.branchNames.join(', ')})` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           {/* Drop zone */}
           <div
             onClick={() => inputRef.current?.click()}
@@ -197,7 +252,7 @@ export default function ImportAbsensiPage() {
           <div className="mt-6 flex justify-end">
             <button
               onClick={handleParse}
-              disabled={!file || loading}
+              disabled={!file || !deviceGroupId || loading}
               className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300
                 text-white text-sm font-semibold rounded-lg transition-colors"
             >

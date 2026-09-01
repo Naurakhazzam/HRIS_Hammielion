@@ -77,10 +77,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Ambil file dari form data
+    // Ambil file & kelompok mesin dari form data
     const formData = await req.formData()
     const file = formData.get('file') as File | null
     if (!file) return NextResponse.json({ error: 'File tidak ditemukan.' }, { status: 400 })
+    const deviceGroupId = formData.get('deviceGroupId') as string | null
+    if (!deviceGroupId) return NextResponse.json({ error: 'Pilih dulu file ini absensi dari mesin/kelompok cabang mana.' }, { status: 400 })
 
     // Parse XLS
     const buffer = await file.arrayBuffer()
@@ -96,9 +98,11 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    // Load data dari Supabase
+    // Load data dari Supabase — HANYA karyawan yang berada di kelompok mesin fingerprint
+    // yang sama dengan file ini, supaya ID yang sama di mesin berbeda tidak saling tumpang
+    // tindih (mis. ID 12 di mesin Raja Petshop ≠ ID 12 di Mesin Pusat).
     const [{ data: employees }, { data: schedules }] = await Promise.all([
-      supabase.from('employees').select('id, full_name, fingerprint_id, department_id, is_active, custom_check_in_time, custom_check_out_time').not('fingerprint_id', 'is', null),
+      supabase.from('employees').select('id, full_name, fingerprint_id, department_id, is_active, custom_check_in_time, custom_check_out_time').not('fingerprint_id', 'is', null).eq('fingerprint_device_group_id', deviceGroupId),
       supabase.from('work_schedules').select('check_in_time, check_out_time, detect_until, allow_overtime, applies_to_dept'),
     ])
 

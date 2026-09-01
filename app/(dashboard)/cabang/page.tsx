@@ -9,7 +9,10 @@ type Branch = {
   address: string | null
   is_active: boolean
   created_at: string
+  fingerprint_device_group_id: string | null
 }
+
+type DeviceGroup = { id: string; name: string }
 
 export default function CabangPage() {
   const [branches, setBranches] = useState<Branch[]>([])
@@ -25,10 +28,16 @@ export default function CabangPage() {
   const [editAddress, setEditAddress] = useState('')
   const [editSubmitting, setEditSubmitting] = useState(false)
 
+  // Kelompok Mesin Fingerprint
+  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([])
+  const [newGroupName, setNewGroupName] = useState('')
+  const [creatingGroup, setCreatingGroup] = useState(false)
+
   const supabase = createClient()
 
   useEffect(() => {
     fetchBranches()
+    fetchDeviceGroups()
   }, [])
 
   async function fetchBranches() {
@@ -44,6 +53,35 @@ export default function CabangPage() {
       setBranches(data || [])
     }
     setLoading(false)
+  }
+
+  async function fetchDeviceGroups() {
+    const { data } = await supabase.from('fingerprint_device_groups').select('id, name').order('name')
+    setDeviceGroups(data || [])
+  }
+
+  async function handleCreateGroup(e: React.FormEvent) {
+    e.preventDefault()
+    if (!newGroupName.trim()) return
+    setCreatingGroup(true)
+    const { error } = await supabase.from('fingerprint_device_groups').insert([{ name: newGroupName.trim() }])
+    if (error) {
+      showMessage('error', 'Gagal menambah kelompok mesin: ' + error.message)
+    } else {
+      showMessage('success', 'Kelompok mesin berhasil ditambahkan.')
+      setNewGroupName('')
+      fetchDeviceGroups()
+    }
+    setCreatingGroup(false)
+  }
+
+  async function handleBranchGroupChange(branchId: string, groupId: string) {
+    const { error } = await supabase
+      .from('branches')
+      .update({ fingerprint_device_group_id: groupId || null })
+      .eq('id', branchId)
+    if (error) showMessage('error', 'Gagal mengubah kelompok mesin: ' + error.message)
+    else { showMessage('success', 'Kelompok mesin cabang berhasil diubah.'); fetchBranches() }
   }
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -138,6 +176,37 @@ export default function CabangPage() {
         </div>
       )}
 
+      {/* Kelompok Mesin Fingerprint */}
+      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-6">
+        <h2 className="text-lg font-semibold text-slate-700 mb-1">Kelompok Mesin Fingerprint</h2>
+        <p className="text-xs text-slate-500 mb-4">
+          Cabang yang pakai mesin fingerprint fisik yang SAMA harus satu kelompok — supaya ID Fingerprint yang sama tidak tumpang tindih dengan cabang yang pakai mesin lain, dan Import Absensi tahu file itu untuk kelompok cabang mana.
+        </p>
+        <form onSubmit={handleCreateGroup} className="flex gap-2 mb-4">
+          <input
+            type="text"
+            value={newGroupName}
+            onChange={e => setNewGroupName(e.target.value)}
+            placeholder="Contoh: Mesin Cabang Garut"
+            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button type="submit" disabled={creatingGroup || !newGroupName.trim()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+            {creatingGroup ? 'Menyimpan...' : '+ Tambah Kelompok'}
+          </button>
+        </form>
+        {deviceGroups.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {deviceGroups.map(g => (
+              <span key={g.id} className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-medium">
+                {g.name}
+              </span>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-slate-400 mt-3">Atur cabang mana masuk kelompok mana lewat kolom <strong>Kelompok Mesin</strong> di tabel cabang di bawah.</p>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Form Tambah Cabang */}
         <div className="lg:col-span-1">
@@ -185,6 +254,7 @@ export default function CabangPage() {
                   <tr className="bg-slate-50 border-b border-slate-200">
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Nama Cabang</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Alamat</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Kelompok Mesin</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider text-center">Status</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider text-center">Aksi</th>
                   </tr>
@@ -192,17 +262,29 @@ export default function CabangPage() {
                 <tbody className="divide-y divide-slate-200">
                   {loading ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
+                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
                     </tr>
                   ) : branches.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data cabang.</td>
+                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data cabang.</td>
                     </tr>
                   ) : (
                     branches.map((branch) => (
                       <tr key={branch.id} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm font-medium text-slate-800">{branch.name}</td>
                         <td className="px-4 py-3 text-sm text-slate-600 whitespace-pre-wrap">{branch.address || '-'}</td>
+                        <td className="px-4 py-3 text-sm">
+                          <select
+                            value={branch.fingerprint_device_group_id || ''}
+                            onChange={e => handleBranchGroupChange(branch.id, e.target.value)}
+                            className="px-2 py-1.5 border border-slate-300 rounded text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="">-- Belum diatur --</option>
+                            {deviceGroups.map(g => (
+                              <option key={g.id} value={g.id}>{g.name}</option>
+                            ))}
+                          </select>
+                        </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             branch.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
