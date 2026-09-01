@@ -17,6 +17,7 @@ type BankAccount = {
   opening_balance_date: string
   is_active: boolean
   created_at: string
+  settlement_account_id: string | null
   branches?: { name: string } | null
 }
 
@@ -35,7 +36,7 @@ export default function RekeningPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const today = todayLocalStr()
-  const [form, setForm] = useState({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank', opening_balance: '0', opening_balance_date: today })
+  const [form, setForm] = useState({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank', opening_balance: '0', opening_balance_date: today, settlement_account_id: '' })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBankName, setEditBankName] = useState('')
   const [editAccountNumber, setEditAccountNumber] = useState('')
@@ -43,6 +44,7 @@ export default function RekeningPage() {
   const [editBranchId, setEditBranchId] = useState('')
   const [editOpeningBalance, setEditOpeningBalance] = useState('')
   const [editOpeningBalanceDate, setEditOpeningBalanceDate] = useState('')
+  const [editSettlementAccountId, setEditSettlementAccountId] = useState('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
 
@@ -50,7 +52,7 @@ export default function RekeningPage() {
     setLoading(true)
     const { data, error } = await supabase
       .from('fin_bank_accounts')
-      .select('id, branch_id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active, created_at, branches(name)')
+      .select('id, branch_id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active, created_at, settlement_account_id, branches(name)')
       .order('account_type').order('created_at')
     if (error) console.error('Detail error:', JSON.stringify(error, null, 2))
     else setAccounts((data as unknown as BankAccount[]) || [])
@@ -102,12 +104,13 @@ export default function RekeningPage() {
       account_type: form.account_type,
       opening_balance: openingBalanceNum,
       opening_balance_date: form.opening_balance_date,
+      settlement_account_id: form.settlement_account_id || null,
     })
     if (error) {
       showMessage('error', 'Gagal menambah: ' + error.message)
     } else {
       showMessage('success', `"${form.bank_name}" berhasil ditambahkan.`)
-      setForm({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank', opening_balance: '0', opening_balance_date: today })
+      setForm({ branch_id: '', bank_name: '', account_number: '', account_holder_name: '', account_type: 'bank', opening_balance: '0', opening_balance_date: today, settlement_account_id: '' })
       fetchAccounts()
     }
     setSubmitting(false)
@@ -121,11 +124,13 @@ export default function RekeningPage() {
     setEditBranchId(a.branch_id || '')
     setEditOpeningBalance(String(a.opening_balance))
     setEditOpeningBalanceDate(a.opening_balance_date)
+    setEditSettlementAccountId(a.settlement_account_id || '')
   }
 
   async function saveEdit(id: string, accountType: string) {
     const openingBalanceNum = parseFloat(editOpeningBalance)
     if (isNaN(openingBalanceNum) || openingBalanceNum < 0) { showMessage('error', 'Saldo awal tidak valid.'); return }
+    if (editSettlementAccountId === id) { showMessage('error', 'Rekening tidak bisa digabung ke dirinya sendiri.'); return }
     const { error } = await supabase.from('fin_bank_accounts')
       .update({
         bank_name: editBankName,
@@ -134,6 +139,7 @@ export default function RekeningPage() {
         branch_id: editBranchId || null,
         opening_balance: openingBalanceNum,
         opening_balance_date: editOpeningBalanceDate,
+        settlement_account_id: editSettlementAccountId || null,
       })
       .eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
@@ -212,6 +218,15 @@ export default function RekeningPage() {
                 {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Gabung Saldo Ke (opsional)</label>
+              <select value={form.settlement_account_id} onChange={e => setForm({ ...form, settlement_account_id: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                <option value="">-- Berdiri sendiri --</option>
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.bank_name}{a.account_number ? ` — ${a.account_number}` : ''}</option>)}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">Pilih ini untuk rekening yang cuma label channel pembayaran (mis. EDC/QRIS) yang uangnya sebenarnya bermuara ke rekening lain. Saldo Berjalan-nya akan otomatis dijumlahkan ke rekening tujuan di halaman Cash Flow.</p>
+            </div>
             <div className="pt-2 border-t border-slate-100">
               <label className="block text-xs font-medium text-slate-700 mb-1">Saldo Awal (Rp) <span className="text-red-500">*</span></label>
               <RupiahInput required value={form.opening_balance}
@@ -244,15 +259,16 @@ export default function RekeningPage() {
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Saldo Awal</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Per Tanggal</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Gabung Ke</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                 ) : accounts.length === 0 ? (
-                  <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada rekening.</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada rekening.</td></tr>
                 ) : accounts.map(a => (
                   <tr key={a.id} className="hover:bg-slate-50 transition">
                     <td className="px-4 py-3 text-xs">
@@ -312,6 +328,17 @@ export default function RekeningPage() {
                       ) : (
                         new Date(a.opening_balance_date).toLocaleDateString('id-ID')
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      {editingId === a.id ? (
+                        <select value={editSettlementAccountId} onChange={e => setEditSettlementAccountId(e.target.value)}
+                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs bg-white">
+                          <option value="">-- Berdiri sendiri --</option>
+                          {accounts.filter(x => x.id !== a.id).map(x => <option key={x.id} value={x.id}>{x.bank_name}</option>)}
+                        </select>
+                      ) : a.settlement_account_id ? (
+                        <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">→ {accounts.find(x => x.id === a.settlement_account_id)?.bank_name || '—'}</span>
+                      ) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <button onClick={() => toggleActive(a)}

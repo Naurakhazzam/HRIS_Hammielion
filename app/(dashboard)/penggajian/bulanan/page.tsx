@@ -138,6 +138,11 @@ export default function PenggajianBulananPage() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [kasbonSaldoMap, setKasbonSaldoMap] = useState<Record<string, number>>({})
 
+  // ── State: tab & riwayat potongan keterlambatan ──
+  const [activeTab, setActiveTab] = useState<'slip' | 'riwayat-telat'>('slip')
+  const [lateHistory, setLateHistory] = useState<{ month: number; year: number; total: number; count: number }[]>([])
+  const [loadingLateHistory, setLoadingLateHistory] = useState(false)
+
   // ── State: UI ──
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -259,6 +264,34 @@ export default function PenggajianBulananPage() {
     fetchPayrolls()
     setSelectedPayrollIds(new Set())
   }, [filterMonth, filterYear, filterBranch])
+
+  // Riwayat potongan keterlambatan — lintas periode, ikut filter Cabang saja (bukan Bulan/Tahun,
+  // karena tujuannya justru membandingkan antar bulan)
+  useEffect(() => {
+    if (activeTab === 'riwayat-telat') fetchLateHistory()
+  }, [activeTab, filterBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchLateHistory() {
+    setLoadingLateHistory(true)
+    let query = supabase
+      .from('payrolls')
+      .select('period_month, period_year, late_deduction, employee:employees!inner(branch_id)')
+      .order('period_year', { ascending: false })
+      .order('period_month', { ascending: false })
+    if (filterBranch) query = query.eq('employee.branch_id', filterBranch)
+    const { data, error } = await query
+    if (error) { console.error('Detail error riwayat telat:', JSON.stringify(error, null, 2)); setLoadingLateHistory(false); return }
+    const grouped: Record<string, { month: number; year: number; total: number; count: number }> = {}
+    ;(data || []).forEach((row: any) => {
+      const key = `${row.period_year}-${row.period_month}`
+      if (!grouped[key]) grouped[key] = { month: row.period_month, year: row.period_year, total: 0, count: 0 }
+      grouped[key].total += Number(row.late_deduction)
+      if (Number(row.late_deduction) > 0) grouped[key].count += 1
+    })
+    const rows = Object.values(grouped).sort((a, b) => (b.year - a.year) || (b.month - a.month))
+    setLateHistory(rows)
+    setLoadingLateHistory(false)
+  }
 
   // Cek hari belum terklasifikasi saat karyawan dipilih di modal buat slip
   // Menggunakan logika yang sama dengan Rekap Absensi:
@@ -1408,6 +1441,24 @@ export default function PenggajianBulananPage() {
 
   const totalGross   = payrolls.reduce((sum, p) => sum + Number(p.gross_total), 0)
   const totalNet     = payrolls.reduce((sum, p) => sum + Number(p.net_total), 0)
+
+  // ── Ringkasan potongan per kategori (periode & cabang yang sedang difilter) ──
+  const totalLateDeduction    = payrolls.reduce((sum, p) => sum + Number(p.late_deduction), 0)
+  const totalKasbonDeduction  = payrolls.reduce((sum, p) => sum + Number(p.kasbon_deduction), 0)
+  const totalInvLossDeduction = payrolls.reduce((sum, p) => sum + Number(p.inventory_loss_deduction), 0)
+  const totalCashierLossDeduction = payrolls.reduce((sum, p) => sum + Number(p.cashier_loss_deduction), 0)
+  const totalAbsentDeduction  = payrolls.reduce((sum, p) => sum + Number(p.absent_deduction), 0)
+  const totalLoyalitasHeld    = payrolls.reduce((sum, p) => sum + Number(p.loyalitas_deduction), 0)
+  const totalAllDeductions    = totalLateDeduction + totalKasbonDeduction + totalInvLossDeduction + totalCashierLossDeduction + totalAbsentDeduction + totalLoyalitasHeld
+  const deductionCategories = [
+    { label: 'Keterlambatan',     value: totalLateDeduction,        count: payrolls.filter(p => Number(p.late_deduction) > 0).length },
+    { label: 'Kasbon',            value: totalKasbonDeduction,      count: payrolls.filter(p => Number(p.kasbon_deduction) > 0).length },
+    { label: 'Kehilangan Barang', value: totalInvLossDeduction,     count: payrolls.filter(p => Number(p.inventory_loss_deduction) > 0).length },
+    { label: 'Kerugian Kasir',    value: totalCashierLossDeduction, count: payrolls.filter(p => Number(p.cashier_loss_deduction) > 0).length },
+    { label: 'Tidak Hadir',       value: totalAbsentDeduction,      count: payrolls.filter(p => Number(p.absent_deduction) > 0).length },
+    { label: 'Tabungan Loyalitas (ditahan)', value: totalLoyalitasHeld, count: payrolls.filter(p => Number(p.loyalitas_deduction) > 0).length },
+  ]
+
   const countDraft   = payrolls.filter(p => p.status === 'draft').length
   const countPending = payrolls.filter(p => p.status === 'pending_approval').length
   const countApproved= payrolls.filter(p => p.status === 'approved').length
@@ -1692,9 +1743,80 @@ export default function PenggajianBulananPage() {
         </div>
       </div>
 
+      {/* ── Ringkasan Potongan per Kategori ── */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-bold text-slate-800">📉 Ringkasan Potongan per Kategori</h2>
+            <p className="text-xs text-slate-400">{getPeriodLabel(filterMonth, filterYear)}{filterBranch && branches.find(b => b.id === filterBranch) ? ` · ${branches.find(b => b.id === filterBranch)!.name}` : ' · Semua Cabang'}</p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-[11px] font-medium text-slate-400 uppercase">Total Semua Potongan</p>
+            <p className="text-lg font-bold text-red-700">{formatRupiah(totalAllDeductions)}</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {deductionCategories.map(c => (
+            <div key={c.label} className={`rounded-lg border p-3 ${c.value > 0 ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100'}`}>
+              <p className={`text-[11px] font-medium uppercase mb-1 ${c.value > 0 ? 'text-red-500' : 'text-slate-400'}`}>{c.label}</p>
+              <p className={`text-base font-bold leading-tight ${c.value > 0 ? 'text-red-700' : 'text-slate-400'}`}>{formatRupiah(c.value)}</p>
+              <p className={`text-[10px] mt-0.5 ${c.value > 0 ? 'text-red-400' : 'text-slate-300'}`}>{c.count} karyawan</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Tab: Daftar Slip vs Riwayat Potongan Keterlambatan ── */}
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-5 print-hide">
+        <button onClick={() => setActiveTab('slip')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'slip' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          Daftar Slip
+        </button>
+        <button onClick={() => setActiveTab('riwayat-telat')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'riwayat-telat' ? 'bg-white text-red-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          📊 Riwayat Potongan Keterlambatan
+        </button>
+      </div>
+
+      {activeTab === 'riwayat-telat' && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+          <div className="px-5 py-3 border-b border-slate-200 bg-slate-50">
+            <span className="text-sm font-semibold text-slate-700">Riwayat Potongan Keterlambatan Per Bulan</span>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Rekap dari semua slip yang sudah dibuat, per periode payroll{filterBranch && branches.find(b => b.id === filterBranch) ? ` · ${branches.find(b => b.id === filterBranch)!.name}` : ' · Semua Cabang'}. Ganti filter Cabang di atas untuk lihat per cabang.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-white border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Periode</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Total Potongan Keterlambatan</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Karyawan Kena Potong</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loadingLateHistory ? (
+                  <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
+                ) : lateHistory.length === 0 ? (
+                  <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada slip gaji yang dibuat.</td></tr>
+                ) : lateHistory.map(h => (
+                  <tr key={`${h.year}-${h.month}`} className="hover:bg-slate-50 transition">
+                    <td className="px-4 py-3 font-medium text-slate-800">{getLabelBulan(h.month, h.year)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-red-600">{formatRupiah(h.total)}</td>
+                    <td className="px-4 py-3 text-right text-slate-500">{h.count} orang</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* ── Tabel Daftar Slip Gaji ── */}
+      {activeTab === 'slip' && (
       <div id="rekap-print-area" className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        
+
         {/* Kop Surat Print Rekap */}
         <div className="hidden print:block text-center mt-6 mb-4 pb-4 border-b-2 border-slate-800 mx-6">
           <h1 className="text-xl font-bold text-slate-900 uppercase tracking-wider">HAMMIELION MANAGEMENT</h1>
@@ -1981,6 +2103,7 @@ export default function PenggajianBulananPage() {
           </div>
         )}
       </div>
+      )}
     </div>
 
     {/* ── Floating action bar: aksi massal ── */}

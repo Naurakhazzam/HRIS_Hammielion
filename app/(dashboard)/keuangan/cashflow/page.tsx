@@ -16,6 +16,7 @@ type Account = {
   opening_balance: number
   opening_balance_date: string
   is_active: boolean
+  settlement_account_id: string | null
 }
 type CashRow = { account_id: string | null; amount: number; transaction_date: string }
 type CashInRow = CashRow & { expense_amount: number; cash_adjustment: number }
@@ -37,6 +38,7 @@ export default function CashFlowPage() {
   const [filterMonth, setFilterMonth] = useState(today.slice(0, 7))
 
   const [flows, setFlows] = useState<AccountFlow[]>([])
+  const [groups, setGroups] = useState<{ root: AccountFlow; members: AccountFlow[]; totalSaldo: number; totalPeriodIn: number; totalPeriodOut: number }[]>([])
   const [unlinkedIn, setUnlinkedIn] = useState(0)
   const [unlinkedOut, setUnlinkedOut] = useState(0)
   const [unlinkedCount, setUnlinkedCount] = useState(0)
@@ -63,7 +65,7 @@ export default function CashFlowPage() {
     const endDate = localDateStr(new Date(year, month, 0))
 
     const [accRes, cashInRes, cashOutRes] = await Promise.all([
-      supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active').order('account_type').order('bank_name'),
+      supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active, settlement_account_id').order('account_type').order('bank_name'),
       supabase.from('fin_cash_in').select('account_id, amount, expense_amount, cash_adjustment, transaction_date').eq('status', 'approved').lte('transaction_date', endDate),
       supabase.from('fin_cash_out').select('account_id, amount, transaction_date').eq('status', 'approved').lte('transaction_date', endDate),
     ])
@@ -104,6 +106,29 @@ export default function CashFlowPage() {
     setUnlinkedIn(unlinkedInRows.reduce((s, r) => s + Number(r.amount), 0))
     setUnlinkedOut(unlinkedOutRows.reduce((s, r) => s + Number(r.amount), 0))
     setUnlinkedCount(unlinkedInRows.length + unlinkedOutRows.length)
+
+    // Kelompokkan rekening yang "gabung saldo ke" rekening lain (mis. EDC/QRIS yang muara ke rekening bank utama)
+    const byId = new Map(flowList.map(f => [f.id, f]))
+    function resolveRoot(f: AccountFlow): AccountFlow {
+      let cur = f
+      const seen = new Set<string>()
+      while (cur.settlement_account_id && byId.has(cur.settlement_account_id) && !seen.has(cur.id)) {
+        seen.add(cur.id)
+        cur = byId.get(cur.settlement_account_id)!
+      }
+      return cur
+    }
+    const groupMap = new Map<string, { root: AccountFlow; members: AccountFlow[]; totalSaldo: number; totalPeriodIn: number; totalPeriodOut: number }>()
+    flowList.forEach(f => {
+      const root = resolveRoot(f)
+      const g = groupMap.get(root.id) || { root, members: [], totalSaldo: 0, totalPeriodIn: 0, totalPeriodOut: 0 }
+      g.members.push(f)
+      g.totalSaldo += f.saldoBerjalan
+      g.totalPeriodIn += f.periodIn
+      g.totalPeriodOut += f.periodOut
+      groupMap.set(root.id, g)
+    })
+    setGroups(Array.from(groupMap.values()).filter(g => g.members.length > 1))
 
     setFlows(flowList)
     setAsOf(new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }))
@@ -165,6 +190,39 @@ export default function CashFlowPage() {
             <p className="text-xs text-slate-400 mt-1">Akumulasi saldo berjalan sampai akhir bulan yang dipilih, dari seluruh rekening bank + kas tunai.</p>
           </div>
 
+          {groups.length > 0 && (
+            <div className="mb-6 bg-white rounded-xl shadow-sm border border-indigo-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-indigo-100 bg-indigo-50">
+                <h2 className="text-sm font-bold text-indigo-800">Saldo Riil per Kantong (Rekening yang Digabung)</h2>
+                <p className="text-xs text-indigo-500">Rekening yang ditandai &quot;Gabung Saldo Ke&quot; di Setup Kas &amp; Rekening (mis. EDC/QRIS yang muaranya ke satu rekening bank) dijumlahkan otomatis di sini — tidak perlu hitung manual.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-white border-b border-slate-200">
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kantong (Rekening Tujuan)</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Digabung Dari</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Masuk (Bulan Ini)</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Keluar (Bulan Ini)</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Saldo Berjalan (Gabungan)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {groups.map(g => (
+                      <tr key={g.root.id} className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-800">{g.root.bank_name}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{g.members.map(m => m.bank_name).join(' + ')}</td>
+                        <td className="px-4 py-3 text-sm text-right text-green-700">{formatRupiah(g.totalPeriodIn)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-red-700">{formatRupiah(g.totalPeriodOut)}</td>
+                        <td className={`px-4 py-3 text-sm text-right font-bold ${g.totalSaldo >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.totalSaldo)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -188,7 +246,12 @@ export default function CashFlowPage() {
                           {f.account_type === 'tunai' ? f.bank_name : `${f.bank_name} — ${f.account_number}`}
                         </span>
                         {!f.is_active && <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">Nonaktif</span>}
-                        <div className="text-xs text-slate-400">{TYPE_LABEL[f.account_type] || f.account_type}</div>
+                        <div className="text-xs text-slate-400">
+                          {TYPE_LABEL[f.account_type] || f.account_type}
+                          {f.settlement_account_id && (
+                            <span className="ml-1 text-indigo-500">→ digabung ke {flows.find(x => x.id === f.settlement_account_id)?.bank_name || '—'}</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-right text-slate-600">{formatRupiah(f.opening_balance)}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{new Date(f.opening_balance_date).toLocaleDateString('id-ID')}</td>

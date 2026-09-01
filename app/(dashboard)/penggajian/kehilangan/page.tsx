@@ -79,8 +79,26 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
   const [editEntry, setEditEntry] = useState<CashierLossEntry | null>(null)
   const [editForm, setEditForm] = useState({ date: '', amount: '', notes: '', employee_id: '' })
 
+  // Riwayat semua periode (cabang ini) — TIDAK dibatasi filter bulan/tahun, supaya
+  // ketahuan kalau ada entry yang "nyasar" ke periode lain (mis. salah tanggal saat input).
+  const [historyEntries, setHistoryEntries] = useState<CashierLossEntry[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  async function fetchHistoryEntries() {
+    if (!selectedBranch) return
+    setLoadingHistory(true)
+    const { data } = await supabase
+      .from('cashier_loss_entries')
+      .select('*, employees!cashier_loss_entries_employee_id_fkey(full_name, employee_code)')
+      .eq('branch_id', selectedBranch)
+      .order('entry_date', { ascending: false })
+      .limit(50)
+    setHistoryEntries((data as unknown as CashierLossEntry[]) || [])
+    setLoadingHistory(false)
+  }
+
   useEffect(() => { fetchBranches() }, [])
   useEffect(() => { if (selectedBranch) fetchData() }, [selectedBranch, filterMonth, filterYear])
+  useEffect(() => { if (selectedBranch) fetchHistoryEntries() }, [selectedBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchBranches() {
     const { data } = await supabase.from('branches').select('id, name').eq('is_active', true).order('name')
@@ -139,7 +157,7 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
       employee_id: entryForm.employee_id || null
     })
     if (error) showMsg('error', 'Gagal: ' + error.message)
-    else { showMsg('success', 'Entry minus kas berhasil ditambahkan.'); setEntryForm({ date: today.toISOString().split('T')[0], amount: '', notes: '', employee_id: '' }); fetchData() }
+    else { showMsg('success', 'Entry minus kas berhasil ditambahkan.'); setEntryForm({ date: today.toISOString().split('T')[0], amount: '', notes: '', employee_id: '' }); fetchData(); fetchHistoryEntries() }
     setEntrySaving(false)
   }
 
@@ -158,14 +176,14 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
       updated_at: new Date().toISOString()
     }).eq('id', editEntry.id)
     if (error) showMsg('error', 'Gagal: ' + error.message)
-    else { showMsg('success', 'Entry berhasil diupdate.'); setEditEntry(null); fetchData() }
+    else { showMsg('success', 'Entry berhasil diupdate.'); setEditEntry(null); fetchData(); fetchHistoryEntries() }
   }
 
   async function handleDeleteEntry(id: string) {
     if (!confirm('Hapus entry minus kas ini?')) return
     const { error } = await supabase.from('cashier_loss_entries').delete().eq('id', id)
     if (error) showMsg('error', 'Gagal: ' + error.message)
-    else { showMsg('success', 'Entry berhasil dihapus.'); fetchData() }
+    else { showMsg('success', 'Entry berhasil dihapus.'); fetchData(); fetchHistoryEntries() }
   }
 
   const totalKasir = entries.reduce((s, e) => s + Number(e.amount), 0)
@@ -290,6 +308,57 @@ function TabInput({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
               {entrySaving ? 'Menambahkan...' : '+ Tambah Entry'}
             </button>
           </form>
+        </div>
+      </div>
+
+      {/* Riwayat Semua Periode — supaya kelihatan kalau ada entry yang "nyasar" ke periode lain */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-800 text-sm">📜 Riwayat Minus Kas Kasir — Semua Periode</h3>
+            <p className="text-xs text-slate-500 mt-0.5">{branches.find(b=>b.id===selectedBranch)?.name} · tidak dibatasi filter bulan di atas, supaya kelihatan kalau ada entry yang salah masuk periode.</p>
+          </div>
+          <button onClick={fetchHistoryEntries} className="text-xs text-blue-600 hover:underline shrink-0">🔄 Refresh</button>
+        </div>
+        <div className="overflow-x-auto max-h-80 overflow-y-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-white border-b border-slate-200 sticky top-0">
+              <tr>
+                <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Tanggal Input</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Periode Payroll</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right">Nominal</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Karyawan</th>
+                <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase">Catatan</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loadingHistory ? (
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400 text-sm">Memuat...</td></tr>
+              ) : historyEntries.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400 text-sm">Belum ada entry untuk cabang ini.</td></tr>
+              ) : historyEntries.map(h => {
+                const mismatch = h.period_month !== filterMonth || h.period_year !== filterYear
+                return (
+                  <tr key={h.id} className={mismatch ? 'bg-amber-50/60 hover:bg-amber-50' : 'hover:bg-slate-50'}>
+                    <td className="px-4 py-2.5 text-slate-600">{new Date(h.entry_date).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${mismatch ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {MONTHS[h.period_month - 1]} {h.period_year}
+                      </span>
+                      {mismatch && <span className="ml-1 text-[10px] text-amber-600">⚠ beda dari filter di atas</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-red-600">-{fmtRp(h.amount)}</td>
+                    <td className="px-4 py-2.5">
+                      {h.employees
+                        ? <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">{h.employees.full_name}</span>
+                        : <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">Bagi rata</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-400 text-xs max-w-[200px] truncate">{h.notes || '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 
