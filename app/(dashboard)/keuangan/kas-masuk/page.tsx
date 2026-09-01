@@ -68,6 +68,12 @@ export default function KasMasukPage() {
   const [activeSubTab, setActiveSubTab] = useState<'riwayat' | 'revisi' | 'selisih'>('riwayat')
   const [selisihTypeFilter, setSelisihTypeFilter] = useState<'all' | 'plus' | 'minus'>('all')
   const [selisihSortDir, setSelisihSortDir] = useState<'desc' | 'asc'>('desc')
+  // Tab Selisih Kasir punya filter Periode & Cabang SENDIRI, terpisah dari filter di atas
+  // yang dipakai tab Riwayat — supaya bisa lihat bulan lain tanpa mengubah tampilan Riwayat.
+  const [selisihFilterMonth, setSelisihFilterMonth] = useState(thisMonth)
+  const [selisihFilterBranch, setSelisihFilterBranch] = useState('')
+  const [selisihRows, setSelisihRows] = useState<CashIn[]>([])
+  const [loadingSelisih, setLoadingSelisih] = useState(false)
 
   const isSupervisor = role === 'supervisor'
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -94,6 +100,32 @@ export default function KasMasukPage() {
     else setRows((data as unknown as CashIn[]) || [])
     setLoading(false)
   }, [supabase, filterMonth, filterBranch, filterStatus, isAdmin, myBranchId])
+
+  // Fetch khusus tab Selisih Kasir — periode & cabangnya sendiri, tidak terikat filter di atas
+  const fetchSelisihRows = useCallback(async () => {
+    setLoadingSelisih(true)
+    const [year, month] = selisihFilterMonth.split('-').map(Number)
+    const startDate = localDateStr(new Date(year, month - 1, 1))
+    const endDate = localDateStr(new Date(year, month, 0))
+
+    let query = supabase
+      .from('fin_cash_in')
+      .select('id, branch_id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, rejection_reason, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
+      .gte('transaction_date', startDate)
+      .lte('transaction_date', endDate)
+      .neq('cash_adjustment', 0)
+      .order('transaction_date', { ascending: false })
+
+    if (!isAdmin && myBranchId) query = query.eq('branch_id', myBranchId)
+    if (isAdmin && selisihFilterBranch) query = query.eq('branch_id', selisihFilterBranch)
+
+    const { data, error } = await query
+    if (error) console.error('Detail error selisih:', JSON.stringify(error, null, 2))
+    else setSelisihRows((data as unknown as CashIn[]) || [])
+    setLoadingSelisih(false)
+  }, [supabase, selisihFilterMonth, selisihFilterBranch, isAdmin, myBranchId])
+
+  useEffect(() => { if (activeSubTab === 'selisih') fetchSelisihRows() }, [activeSubTab, fetchSelisihRows])
 
   // Terpisah dari tabel utama (yang dibatasi bulan) — supaya entri lama yang ditolak tidak pernah "hilang" dari daftar
   const [needsRevision, setNeedsRevision] = useState<CashIn[]>([])
@@ -489,13 +521,35 @@ export default function KasMasukPage() {
           )}
 
           {activeSubTab === 'selisih' && (() => {
-            const selisihRows = rows.filter(r => r.cash_adjustment !== 0)
             const totalPlus = selisihRows.filter(r => r.cash_adjustment > 0).reduce((s, r) => s + r.cash_adjustment, 0)
             const totalMinus = selisihRows.filter(r => r.cash_adjustment < 0).reduce((s, r) => s + r.cash_adjustment, 0)
             const filtered = selisihRows.filter(r => selisihTypeFilter === 'all' ? true : selisihTypeFilter === 'plus' ? r.cash_adjustment > 0 : r.cash_adjustment < 0)
             const sorted = [...filtered].sort((a, b) => selisihSortDir === 'desc' ? b.cash_adjustment - a.cash_adjustment : a.cash_adjustment - b.cash_adjustment)
             return (
               <div className="space-y-4">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4">
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Periode</label>
+                    <input type="month" value={selisihFilterMonth} onChange={e => setSelisihFilterMonth(e.target.value)}
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none bg-white" />
+                  </div>
+                  {isAdmin && (
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">Cabang</label>
+                      <select value={selisihFilterBranch} onChange={e => setSelisihFilterBranch(e.target.value)}
+                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none bg-white">
+                        <option value="">Semua Cabang</option>
+                        {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-400 self-end pb-2">Filter periode & cabang di sini khusus untuk tab Selisih Kasir, tidak terikat filter tab Riwayat di atas.</p>
+                </div>
+
+                {loadingSelisih ? (
+                  <div className="py-10 text-center text-slate-500 text-sm">Memuat data selisih kasir...</div>
+                ) : (
+                <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                     <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Plus (Kelebihan)</p>
@@ -522,7 +576,7 @@ export default function KasMasukPage() {
                         {t === 'all' ? 'Semua' : t === 'plus' ? 'Plus' : 'Minus'}
                       </button>
                     ))}
-                    <span className="text-xs text-slate-400 ml-2">Ikut periode/cabang/status yang difilter di atas.</span>
+                    <span className="text-xs text-slate-400 ml-2">{selisihRows.length} transaksi ditemukan.</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
@@ -562,6 +616,8 @@ export default function KasMasukPage() {
                     </table>
                   </div>
                 </div>
+                </>
+                )}
               </div>
             )
           })()}
