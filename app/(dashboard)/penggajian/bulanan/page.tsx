@@ -580,7 +580,7 @@ export default function PenggajianBulananPage() {
       supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
-      supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
     ])
 
@@ -592,6 +592,11 @@ export default function PenggajianBulananPage() {
     if (empRes.error) { if (!silent) { showMessage('error', 'Gagal ambil data karyawan: ' + empRes.error.message); setBuildingPreview(false) }; return null }
     if (!sc) { if (!silent) { showMessage('error', 'Komponen gaji belum diisi untuk karyawan ini. Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false) }; return null }
     if (!emp) { if (!silent) { showMessage('error', 'Data karyawan tidak ditemukan.'); setBuildingPreview(false) }; return null }
+
+    // Karyawan flat_salary (mis. pencatatan Owner) — gaji tetap flat sesuai gaji pokok,
+    // tidak ada tambahan/potongan apa pun dari data absensi (lembur, telat, tidak hadir,
+    // kompensasi kurang libur, kehilangan barang/kasir, bonus).
+    const flatSalaryForEmp = (emp as any).flat_salary === true
 
     // ── Hitung kehilangan barang & kerugian kasir dari sumber asli ──
     const branchId = emp.branch_id
@@ -612,7 +617,7 @@ export default function PenggajianBulananPage() {
     const companyPct       = Number(lossConfigRes.data?.[0]?.company_coverage_percent ?? 0)
     const sharePct         = Number(shareRes.data?.[0]?.share_percent ?? 0)
     // share_percent adalah % dari TOTAL kehilangan, bukan dari sisa setelah kantor
-    const invLoss          = Math.round((sharePct / 100) * totalLoss)
+    const invLoss          = flatSalaryForEmp ? 0 : Math.round((sharePct / 100) * totalLoss)
 
     const kasirPositionIds  = (cashierConfigRes.data || []).map((c: any) => c.position_id)
     const isKasir           = kasirPositionIds.includes(positionId)
@@ -623,7 +628,7 @@ export default function PenggajianBulananPage() {
     const kasirUnassigned   = allCashierEntries.filter((e: any) => !e.employee_id).reduce((s: number, e: any) => s + Number(e.amount), 0)
     const kasirCount        = kasirCountRes.count ?? 1
     const kasirSplit        = isKasir && kasirCount > 0 ? kasirUnassigned / kasirCount : 0
-    const cashLoss          = Math.round(kasirAssigned + kasirSplit)
+    const cashLoss          = flatSalaryForEmp ? 0 : Math.round(kasirAssigned + kasirSplit)
 
     const baseRaw  = Number(sc.base_salary ?? 0)
     const posRaw   = Number(sc.position_allowance ?? 0)
@@ -658,14 +663,14 @@ export default function PenggajianBulananPage() {
     // dikecualikan total dari perhitungan ini, terlepas dari checklist/data absensi apa pun.
     const otApplicableForEmp  = (emp as any).overtime_applicable !== false
     const lateApplicableForEmp = (emp as any).late_penalty_applicable !== false
-    const otHours  = !otApplicableForEmp ? 0 : (atts as any[])
+    const otHours  = (!otApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[])
       .filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && (silent ? Number(a.overtime_hours ?? 0) > 0 : validatedOtDates.has(a.date)))
       .reduce((s: number, a: any) => s + (silent ? roundOvertimeHours(Number(a.overtime_hours ?? 0)) : (validatedOtDates.get(a.date) ?? roundOvertimeHours(Number(a.overtime_hours ?? 0)))), 0)
-    const latMins  = !lateApplicableForEmp ? 0 : (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
+    const latMins  = (!lateApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
     const otTotal  = otHours * otRate
     const latDed   = latMins * latRate
-    const kpi      = Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
-    const loyalitas = Number((emp as any).loyalitas_per_month ?? 0)
+    const kpi      = flatSalaryForEmp ? 0 : Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
+    const loyalitas = flatSalaryForEmp ? 0 : Number((emp as any).loyalitas_per_month ?? 0)
     const loyDurasi = Number((emp as any).loyalitas_duration_months ?? 0)
     const saldo    = Number(klRes.data?.current_balance ?? 0)
 
@@ -730,8 +735,8 @@ export default function PenggajianBulananPage() {
     const totalLiburDiambil = emptyDays + leaveRecs.length
     const autoIzin         = Math.max(totalLiburDiambil - kuotaLibur, 0)  // lewat kuota → jadi izin
     const liburDiambil     = Math.min(totalLiburDiambil, kuotaLibur)
-    const kurangLibur      = Math.max(kuotaLibur - liburDiambil, 0)
-    const liburKompensasi  = Math.round(kurangLibur * dailyRate)
+    const kurangLibur      = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - liburDiambil, 0)
+    const liburKompensasi  = flatSalaryForEmp ? 0 : Math.round(kurangLibur * dailyRate)
 
     // Izin: 1× per hari
     const izinCount = izinRecs.length + autoIzin
@@ -748,8 +753,8 @@ export default function PenggajianBulananPage() {
     const sick4Full   = Math.max(0, sickCount - 3)
     const sickDed     = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
 
-    const absentDed        = izinDed + alphaDed + sickDed
-    const absentDays       = izinCount + alphaCount + sickCount  // include autoIzin
+    const absentDed        = flatSalaryForEmp ? 0 : izinDed + alphaDed + sickDed
+    const absentDays       = flatSalaryForEmp ? 0 : izinCount + alphaCount + sickCount  // include autoIzin
     const absentRatePerDay = dailyRate
     const absentBreakdown  = {
       dailyRate,
@@ -783,7 +788,7 @@ export default function PenggajianBulananPage() {
       // biar tidak menyesatkan (bonus ini butuh penilaian manual per kriteria).
       latestCriteria.forEach(c => { latestChecked[c.id] = false })
     }
-    const conditionalBonus = latestCriteria
+    const conditionalBonus = flatSalaryForEmp ? 0 : latestCriteria
       .filter(c => latestChecked[c.id])
       .reduce((s, c) => s + Number(c.nominal_amount), 0)
 

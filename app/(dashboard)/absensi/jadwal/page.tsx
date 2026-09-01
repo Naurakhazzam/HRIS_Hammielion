@@ -30,6 +30,7 @@ export default function JadwalKerjaPage() {
   const [departmentId, setDepartmentId] = useState('')
   const [detectUntil, setDetectUntil] = useState('')
   const [allowOvertime, setAllowOvertime] = useState(true)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const supabase = createClient()
 
@@ -74,24 +75,47 @@ export default function JadwalKerjaPage() {
     const checkOut = checkOutTime.length === 5  ? `${checkOutTime}:00` : checkOutTime
     const detect   = detectUntil ? (detectUntil.length === 5 ? `${detectUntil}:00` : detectUntil) : null
 
-    const { error } = await supabase.from('work_schedules').insert([{
+    const payload = {
       name,
       check_in_time: checkIn,
       check_out_time: checkOut,
       detect_until: detect,
       allow_overtime: allowOvertime,
       applies_to_dept: departmentId
-    }])
+    }
+
+    const { error } = editingId
+      ? await supabase.from('work_schedules').update(payload).eq('id', editingId)
+      : await supabase.from('work_schedules').insert([payload])
 
     if (error) {
-      showMessage('error', 'Gagal menambah jadwal: ' + error.message)
+      showMessage('error', (editingId ? 'Gagal menyimpan perubahan: ' : 'Gagal menambah jadwal: ') + error.message)
     } else {
-      showMessage('success', 'Jadwal kerja berhasil ditambahkan.')
-      setName(''); setCheckInTime(''); setCheckOutTime(''); setDetectUntil(''); setAllowOvertime(true)
+      showMessage('success', editingId ? 'Jadwal kerja berhasil diperbarui.' : 'Jadwal kerja berhasil ditambahkan.')
+      resetForm()
       setShowForm(false)
       fetchData()
     }
     setSubmitting(false)
+  }
+
+  function resetForm() {
+    setName(''); setCheckInTime(''); setCheckOutTime(''); setDetectUntil(''); setAllowOvertime(true)
+    setEditingId(null)
+    if (departments.length > 0) setDepartmentId(departments[0].id)
+  }
+
+  function openEdit(s: WorkSchedule) {
+    setEditingId(s.id)
+    setName(s.name)
+    setCheckInTime(s.check_in_time.substring(0, 5))
+    setCheckOutTime(s.check_out_time.substring(0, 5))
+    setDetectUntil(s.detect_until ? s.detect_until.substring(0, 5) : '')
+    setAllowOvertime(s.allow_overtime)
+    setDepartmentId(s.applies_to_dept)
+    setShowForm(true)
+    setMessage(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   async function handleDelete(schedule: WorkSchedule) {
@@ -119,7 +143,7 @@ export default function JadwalKerjaPage() {
           <p className="text-sm text-slate-500">Setup jadwal & aturan deteksi shift otomatis per departemen.</p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => { if (showForm) resetForm(); setShowForm(!showForm) }}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-sm"
         >
           {showForm ? 'Batal' : '+ Tambah Jadwal'}
@@ -141,7 +165,7 @@ export default function JadwalKerjaPage() {
 
       {showForm && (
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
-          <h2 className="text-lg font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Tambah Jadwal Baru</h2>
+          <h2 className="text-lg font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">{editingId ? 'Edit Jadwal' : 'Tambah Jadwal Baru'}</h2>
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
 
             <div className="space-y-1">
@@ -194,9 +218,15 @@ export default function JadwalKerjaPage() {
             </div>
 
             <div className="md:col-span-2 lg:col-span-3 pt-2 flex justify-end gap-3">
+              {editingId && (
+                <button type="button" onClick={() => { resetForm(); setShowForm(false) }}
+                  className="px-6 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-lg transition">
+                  Batal
+                </button>
+              )}
               <button type="submit" disabled={submitting}
                 className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
-                {submitting ? 'Menyimpan...' : 'Simpan Jadwal'}
+                {submitting ? 'Menyimpan...' : editingId ? 'Simpan Perubahan' : 'Simpan Jadwal'}
               </button>
             </div>
           </form>
@@ -248,10 +278,16 @@ export default function JadwalKerjaPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <button onClick={() => handleDelete(s)}
-                          className="px-2.5 py-1 text-xs font-medium bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded transition">
-                          Hapus
-                        </button>
+                        <div className="flex gap-2 justify-center">
+                          <button onClick={() => openEdit(s)}
+                            className="px-2.5 py-1 text-xs font-medium bg-white border border-blue-200 text-blue-600 hover:bg-blue-50 rounded transition">
+                            Edit
+                          </button>
+                          <button onClick={() => handleDelete(s)}
+                            className="px-2.5 py-1 text-xs font-medium bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded transition">
+                            Hapus
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

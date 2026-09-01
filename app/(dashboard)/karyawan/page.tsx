@@ -42,6 +42,7 @@ type Employee = {
   custom_check_out_time: string | null
   late_penalty_applicable: boolean
   overtime_applicable: boolean
+  flat_salary: boolean
   branches: { id: string; name: string }
   departments: { id: string; name: string }
   positions: { id: string; name: string; department_id: string }
@@ -58,7 +59,7 @@ const emptyForm = {
   emergency_contact_name: '', emergency_contact_phone: '', emergency_contact_relation: '',
   education: '', photo_url: '', fingerprint_id: '',
   custom_check_in_time: '', custom_check_out_time: '',
-  late_penalty_applicable: true, overtime_applicable: true
+  late_penalty_applicable: true, overtime_applicable: true, flat_salary: false
 }
 
 const GENDER_OPTIONS = [{ value: 'male', label: 'Laki-laki' }, { value: 'female', label: 'Perempuan' }]
@@ -200,6 +201,7 @@ export default function KaryawanPage() {
       custom_check_out_time: f.custom_check_out_time || null,
       late_penalty_applicable: f.late_penalty_applicable,
       overtime_applicable: f.overtime_applicable,
+      flat_salary: f.flat_salary,
     }
   }
 
@@ -259,7 +261,8 @@ export default function KaryawanPage() {
       custom_check_in_time: emp.custom_check_in_time ? emp.custom_check_in_time.substring(0,5) : '',
       custom_check_out_time: emp.custom_check_out_time ? emp.custom_check_out_time.substring(0,5) : '',
       late_penalty_applicable: emp.late_penalty_applicable,
-      overtime_applicable: emp.overtime_applicable
+      overtime_applicable: emp.overtime_applicable,
+      flat_salary: emp.flat_salary
     })
   }
 
@@ -414,6 +417,14 @@ export default function KaryawanPage() {
               </label>
             </div>
             <p className="text-xs text-slate-400 mt-1">Kalau dimatikan, potongan telat / upah lembur karyawan ini tidak ikut dihitung saat Buat Slip Gaji — absensi hariannya tetap tercatat normal di Rekap Absensi.</p>
+
+            <label className={`mt-2 flex items-center justify-between gap-2 p-2.5 rounded-lg border cursor-pointer transition ${!f.flat_salary ? 'bg-white border-slate-200' : 'bg-amber-50 border-amber-300'}`}>
+              <span className="text-sm text-slate-700">Gaji Flat (abaikan semua data absensi)</span>
+              <input type="checkbox" checked={f.flat_salary}
+                onChange={e => setF({ ...f, flat_salary: e.target.checked })}
+                className="w-4 h-4 accent-blue-600" />
+            </label>
+            <p className="text-xs text-slate-400 mt-1">Kalau dinyalakan, slip gaji karyawan ini SELALU flat sesuai Gaji Pokok saja — lembur, telat, tidak hadir, kompensasi libur, kehilangan barang/kasir, dan bonus semuanya diabaikan (tidak ikut menambah/mengurangi). Cocok untuk karyawan yang cuma dicatat untuk keperluan administrasi (mis. Owner) dan tidak diabsen harian.</p>
           </div>
         </div>
 
@@ -672,6 +683,7 @@ export default function KaryawanPage() {
                     : 'Ikut jadwal departemen'],
                   ['Potongan Keterlambatan', detailEmployee.late_penalty_applicable ? 'Berlaku' : 'Tidak Berlaku'],
                   ['Perhitungan Lembur', detailEmployee.overtime_applicable ? 'Berlaku' : 'Tidak Berlaku'],
+                  ['Gaji Flat', detailEmployee.flat_salary ? 'Ya — abaikan data absensi' : 'Tidak'],
                 ]},
                 { title: 'Data Pribadi', rows: [
                   ['NIK', detailEmployee.nik || '-'],
