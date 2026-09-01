@@ -370,12 +370,12 @@ export default function RingkasanOwnerPage() {
             <thead>
               <tr className="border-b border-slate-200 bg-white sticky top-0 z-20">
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky top-0 left-0 z-30 bg-white shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap">Gaji Awal</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">Catatan</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap">Total Potongan</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap">Gaji Akhir</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide">Status</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide">Detail</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Gaji Awal</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap bg-white">Catatan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Total Potongan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Gaji Akhir</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide bg-white">Status</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide bg-white">Detail</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
