@@ -65,7 +65,9 @@ export default function KasMasukPage() {
   const [filterMonth, setFilterMonth] = useState(thisMonth)
   const [filterBranch, setFilterBranch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
-  const [activeSubTab, setActiveSubTab] = useState<'riwayat' | 'revisi'>('riwayat')
+  const [activeSubTab, setActiveSubTab] = useState<'riwayat' | 'revisi' | 'selisih'>('riwayat')
+  const [selisihTypeFilter, setSelisihTypeFilter] = useState<'all' | 'plus' | 'minus'>('all')
+  const [selisihSortDir, setSelisihSortDir] = useState<'desc' | 'asc'>('desc')
 
   const isSupervisor = role === 'supervisor'
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -423,6 +425,10 @@ export default function KasMasukPage() {
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeSubTab === 'revisi' ? 'bg-white text-red-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
               ⚠️ Perlu Direvisi {needsRevision.length > 0 && `(${needsRevision.length})`}
             </button>
+            <button onClick={() => setActiveSubTab('selisih')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeSubTab === 'selisih' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              📊 Selisih Kasir
+            </button>
           </div>
 
           {activeSubTab === 'revisi' && (
@@ -481,6 +487,84 @@ export default function KasMasukPage() {
               </div>
             </div>
           )}
+
+          {activeSubTab === 'selisih' && (() => {
+            const selisihRows = rows.filter(r => r.cash_adjustment !== 0)
+            const totalPlus = selisihRows.filter(r => r.cash_adjustment > 0).reduce((s, r) => s + r.cash_adjustment, 0)
+            const totalMinus = selisihRows.filter(r => r.cash_adjustment < 0).reduce((s, r) => s + r.cash_adjustment, 0)
+            const filtered = selisihRows.filter(r => selisihTypeFilter === 'all' ? true : selisihTypeFilter === 'plus' ? r.cash_adjustment > 0 : r.cash_adjustment < 0)
+            const sorted = [...filtered].sort((a, b) => selisihSortDir === 'desc' ? b.cash_adjustment - a.cash_adjustment : a.cash_adjustment - b.cash_adjustment)
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Plus (Kelebihan)</p>
+                    <p className="text-2xl font-bold text-green-700">{formatRupiah(totalPlus)}</p>
+                    <p className="text-xs text-slate-400 mt-1">{selisihRows.filter(r => r.cash_adjustment > 0).length} transaksi</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Minus (Kekurangan)</p>
+                    <p className="text-2xl font-bold text-red-700">{formatRupiah(totalMinus)}</p>
+                    <p className="text-xs text-slate-400 mt-1">{selisihRows.filter(r => r.cash_adjustment < 0).length} transaksi</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                    <p className="text-xs text-slate-500 font-medium uppercase mb-1">Selisih Bersih</p>
+                    <p className={`text-2xl font-bold ${(totalPlus + totalMinus) >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(totalPlus + totalMinus)}</p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center gap-3">
+                    <span className="text-xs font-medium text-slate-500">Tampilkan:</span>
+                    {(['all', 'plus', 'minus'] as const).map(t => (
+                      <button key={t} onClick={() => setSelisihTypeFilter(t)}
+                        className={`px-3 py-1 rounded text-xs font-medium border transition ${selisihTypeFilter === t ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                        {t === 'all' ? 'Semua' : t === 'plus' ? 'Plus' : 'Minus'}
+                      </button>
+                    ))}
+                    <span className="text-xs text-slate-400 ml-2">Ikut periode/cabang/status yang difilter di atas.</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-white border-b border-slate-200">
+                          <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
+                          {isAdmin && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>}
+                          <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Tipe</th>
+                          <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right cursor-pointer select-none hover:text-slate-700"
+                            onClick={() => setSelisihSortDir(d => d === 'desc' ? 'asc' : 'desc')}>
+                            Nominal Selisih {selisihSortDir === 'desc' ? '▼' : '▲'}
+                          </th>
+                          <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Keterangan</th>
+                          <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {sorted.length === 0 ? (
+                          <tr><td colSpan={isAdmin ? 6 : 5} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada selisih kasir untuk filter ini.</td></tr>
+                        ) : sorted.map(r => (
+                          <tr key={r.id} className="hover:bg-slate-50 transition">
+                            <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
+                            {isAdmin && <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name || '—'}</td>}
+                            <td className="px-4 py-3 text-center">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${r.cash_adjustment > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                                {r.cash_adjustment > 0 ? 'Plus' : 'Minus'}
+                              </span>
+                            </td>
+                            <td className={`px-4 py-3 text-sm text-right font-semibold ${r.cash_adjustment > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                              {r.cash_adjustment > 0 ? '+' : '−'}{formatRupiah(Math.abs(r.cash_adjustment))}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-slate-500 max-w-[200px] truncate">{r.description || '—'}</td>
+                            <td className="px-4 py-3 text-center">{statusBadge(r.status)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {activeSubTab === 'riwayat' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
