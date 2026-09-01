@@ -156,6 +156,10 @@ export default function PenggajianBulananPage() {
   const [selectedPayroll, setSelectedPayroll] = useState<Payroll | null>(null)
   const [lateDetails, setLateDetails] = useState<{ date: string; late_minutes: number; deduction: number }[]>([])
   const [lateRate, setLateRate] = useState(0)
+
+  // ── State: absensi tidak lengkap (cuma absen datang atau cuma pulang) ──
+  const [incompleteAtts, setIncompleteAtts] = useState<{ date: string; missing: 'datang' | 'pulang' }[]>([])
+  const [loadingIncomplete, setLoadingIncomplete] = useState(false)
   const [loadingLate, setLoadingLate] = useState(false)
 
   // ── State: detail kehilangan barang di slip ──
@@ -967,6 +971,38 @@ export default function PenggajianBulananPage() {
     setLoadingLate(false)
   }
 
+  // ─── Fetch Absensi Tidak Lengkap (cuma absen datang atau cuma pulang) ──────
+  async function fetchIncompleteAtts(p: Payroll) {
+    setLoadingIncomplete(true)
+    setIncompleteAtts([])
+
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const sm = p.period_month === 1 ? 12 : p.period_month - 1
+    const sy = p.period_month === 1 ? p.period_year - 1 : p.period_year
+    const firstDay = `${sy}-${pad(sm)}-26`
+    const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
+
+    const { data: empRes } = await supabase.from('employees').select('join_date').eq('id', p.employee_id).single()
+    const joinDateVal = empRes?.join_date ?? null
+    const effectiveStart = joinDateVal && joinDateVal > firstDay ? joinDateVal : firstDay
+
+    const { data: atts } = await supabase
+      .from('attendances')
+      .select('date, check_in, check_out, status')
+      .eq('employee_id', p.employee_id)
+      .eq('status', 'present')
+      .gte('date', effectiveStart)
+      .lte('date', lastDay)
+      .order('date')
+
+    const list = (atts || [])
+      .filter(a => (a.check_in && !a.check_out) || (!a.check_in && a.check_out))
+      .map(a => ({ date: a.date, missing: (a.check_in ? 'pulang' : 'datang') as 'datang' | 'pulang' }))
+
+    setIncompleteAtts(list)
+    setLoadingIncomplete(false)
+  }
+
   // ─── Fetch Detail Kehilangan Barang ────────────────────────────────────────
   async function fetchLossDetail(p: Payroll) {
     setLoadingLoss(true)
@@ -1284,6 +1320,12 @@ export default function PenggajianBulananPage() {
           <div class="detail-total">Total: ${lateDetails.reduce((s,d)=>s+d.late_minutes,0)} menit</div>
          </div>` : ''
 
+    // Absensi tidak lengkap — informasional, bukan potongan
+    const incompleteHtml = incompleteAtts.length > 0
+      ? `<tr><td colspan="2" class="incomplete-row">⚠️ Absensi Tidak Lengkap<div class="detail-block">
+          ${incompleteAtts.map(d => `<div class="detail-row"><span>${fmtDate(d.date)}</span><span class="incomplete-label">${d.missing === 'pulang' ? 'TIDAK ABSEN PULANG' : 'TIDAK ABSEN DATANG'}</span></div>`).join('')}
+         </div></td></tr>` : ''
+
     // Detail kehilangan barang
     const invLoss = Number(p.inventory_loss_deduction ?? 0)
     const lossDetailHtml = lossDetail && lossDetail.totalLoss > 0
@@ -1323,6 +1365,9 @@ export default function PenggajianBulananPage() {
   .footer { margin-top: 24px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 10px; }
   .detail-block { margin-top: 4px; padding: 4px 0 2px 10px; border-left: 2px solid #e2e8f0; }
   .detail-row { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; padding: 1px 0; }
+  .incomplete-row { background: #fffbeb; color: #b45309; font-weight: 700; font-size: 10px; padding: 6px 12px; }
+  .incomplete-row .detail-row { color: #b45309; }
+  .incomplete-label { font-weight: 700; }
   .detail-total { font-size: 10px; font-weight: 700; color: #475569; margin-top: 3px; border-top: 1px solid #f1f5f9; padding-top: 2px; }
   .earn { color: #16a34a; }
   .ded-detail { color: #dc2626; }
@@ -1367,6 +1412,7 @@ export default function PenggajianBulananPage() {
       <tr><td>Kompensasi Libur Tidak Diambil (${(p as any).libur_compensation_days??0} hari)</td><td>${Number((p as any).libur_compensation_days??0)>0?fmtR(Number((p as any).libur_compensation_amount??0)):'<span class="zero">—</span>'}</td></tr>
       <tr class="section-label ded"><td colspan="2">Potongan</td></tr>
       <tr><td>Potongan Keterlambatan${lateDetailHtml}</td><td>${lateDed>0?'-'+fmtR(lateDed):'<span class="zero">—</span>'}</td></tr>
+      ${incompleteHtml}
       <tr><td>Potongan Kasbon</td><td class="${Number(p.kasbon_deduction)>0?'ded-val':'zero'}">${Number(p.kasbon_deduction)>0?'-'+fmtR(Number(p.kasbon_deduction)):'—'}</td></tr>
       <tr><td>Tabungan Loyalitas</td><td class="${Number(p.loyalitas_deduction??0)>0?'ded-val':'zero'}">${Number(p.loyalitas_deduction??0)>0?'-'+fmtR(Number(p.loyalitas_deduction??0)):'—'}</td></tr>
       <tr><td>Kerugian Kasir</td><td class="${Number(p.cashier_loss_deduction??0)>0?'ded-val':'zero'}">${Number(p.cashier_loss_deduction??0)>0?'-'+fmtR(Number(p.cashier_loss_deduction??0)):'—'}</td></tr>
@@ -1718,7 +1764,7 @@ export default function PenggajianBulananPage() {
                       <td className="px-4 py-3 text-center whitespace-nowrap print-hide">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p); fetchLossDetail(p); fetchOtDetails(p); fetchAbsentBreakdown(p) }}
+                            onClick={() => { setSelectedPayroll(p); fetchLateDetails(p); fetchLossDetail(p); fetchOtDetails(p); fetchAbsentBreakdown(p); fetchIncompleteAtts(p) }}
                             className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 hover:border-slate-400 transition"
                           >
                             Lihat
@@ -2025,6 +2071,26 @@ export default function PenggajianBulananPage() {
                       {Number(selectedPayroll.late_deduction) > 0 ? `-${formatRupiah(Number(selectedPayroll.late_deduction))}` : <span className="text-slate-300">—</span>}
                     </td>
                   </tr>
+                  {/* Absensi Tidak Lengkap — informasional, bukan potongan */}
+                  {(loadingIncomplete || incompleteAtts.length > 0) && (
+                    <tr className="hover:bg-slate-50 bg-amber-50/40">
+                      <td colSpan={2} className="px-4 py-2.5 text-slate-700">
+                        <div className="text-amber-700 font-medium">⚠️ Absensi Tidak Lengkap</div>
+                        {loadingIncomplete && <div className="text-xs text-slate-400 mt-0.5">Memuat detail...</div>}
+                        {!loadingIncomplete && incompleteAtts.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {incompleteAtts.map(d => (
+                              <div key={d.date} className="text-xs text-amber-600 flex gap-2">
+                                <span>└</span>
+                                <span>{new Date(d.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span>
+                                <span className="font-medium">{d.missing === 'pulang' ? 'TIDAK ABSEN PULANG' : 'TIDAK ABSEN DATANG'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
                   {/* Kasbon dengan info saldo */}
                   <tr className="hover:bg-slate-50">
                     <td className="px-4 py-2.5 text-slate-700">
