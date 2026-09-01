@@ -410,14 +410,14 @@ export default function PembelianSupplierPage() {
               )}
             </div>
             <div className="overflow-auto max-h-[65vh]">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left border-separate border-spacing-0">
                 <thead>
                   <tr className="bg-white border-b border-slate-200">
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Supplier</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Total Utang</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Total Dibayar</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Sisa Utang</th>
-                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10">Aksi</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10 border-b border-slate-200">Supplier</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10 border-b border-slate-200">Total Utang</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10 border-b border-slate-200">Total Dibayar</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10 border-b border-slate-200">Sisa Utang</th>
+                    <th className="px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10 border-b border-slate-200">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">

@@ -366,16 +366,16 @@ export default function RingkasanOwnerPage() {
 
       <div id="ringkasan-print-area" className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:hidden">
         <div className="overflow-auto max-h-[70vh] print:max-h-none print:overflow-visible">
-          <table className="w-full text-left border-collapse text-sm">
+          <table className="w-full text-left border-separate border-spacing-0 text-sm">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky top-0 left-0 z-30 bg-white shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Gaji Awal</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky top-0 z-20 bg-white">Catatan</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Total Potongan</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Gaji Akhir</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide sticky top-0 z-20 bg-white">Status</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide sticky top-0 z-20 bg-white">Detail</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky top-0 left-0 z-30 bg-white border-b border-slate-200 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white border-b border-slate-200">Gaji Awal</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky top-0 z-20 bg-white border-b border-slate-200">Catatan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white border-b border-slate-200">Total Potongan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white border-b border-slate-200">Gaji Akhir</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide sticky top-0 z-20 bg-white border-b border-slate-200">Status</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide sticky top-0 z-20 bg-white border-b border-slate-200">Detail</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

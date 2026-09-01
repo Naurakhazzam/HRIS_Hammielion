@@ -513,18 +513,18 @@ export default function KasMasukPage() {
               </div>
             </div>
             <div className="overflow-auto max-h-[65vh]">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left border-separate border-spacing-0">
                 <thead>
                   <tr className="bg-white border-b border-slate-200">
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Tanggal</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Cabang</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Omzet</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Uang Diterima</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Metode</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Rekening</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Keterangan</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10">Status</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10">Aksi</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10 border-b border-slate-200">Tanggal</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10 border-b border-slate-200">Cabang</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10 border-b border-slate-200">Omzet</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10 border-b border-slate-200">Uang Diterima</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10 border-b border-slate-200">Metode</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10 border-b border-slate-200">Rekening</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10 border-b border-slate-200">Keterangan</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10 border-b border-slate-200">Status</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10 border-b border-slate-200">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
