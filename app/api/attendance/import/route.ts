@@ -14,10 +14,19 @@ function parsePeriod(rawData: string[][]): {
   endMonth: number;   endDay: number;   endYear: number
 } | null {
   // Beberapa mesin fingerprint export dengan format berbeda:
-  //   "Attendance date:05-26-2026~06-25-2026"  → MM-DD-YYYY (pemisah "-")
-  //   "Attendance date:26/06/2026~25/07/2026"  → DD/MM/YYYY (pemisah "/")
+  //   "Attendance date:05-26-2026~06-25-2026"     → MM-DD-YYYY (pemisah "-")
+  //   "Attendance date:26/06/2026~25/07/2026"     → DD/MM/YYYY (pemisah "/")
+  //   "Tanggal Kehadiran:2026-07-26~2026-08-25"   → YYYY-MM-DD (mesin Raja Petshop, label & tahun-duluan beda)
   for (let col = 0; col < (rawData[2]?.length ?? 0); col++) {
     const str = String(rawData[2][col] || '')
+
+    const iso = str.match(/(\d{4})-(\d{2})-(\d{2})~(\d{4})-(\d{2})-(\d{2})/)
+    if (iso) {
+      return {
+        startYear: parseInt(iso[1]), startMonth: parseInt(iso[2]), startDay: parseInt(iso[3]),
+        endYear:   parseInt(iso[4]), endMonth:   parseInt(iso[5]), endDay:   parseInt(iso[6]),
+      }
+    }
 
     const dash = str.match(/(\d{2})-(\d{2})-(\d{4})~(\d{2})-(\d{2})-(\d{4})/)
     if (dash) {
@@ -36,6 +45,13 @@ function parsePeriod(rawData: string[][]): {
     }
   }
   return null
+}
+
+// Beberapa mesin fingerprint pakai tanda baca berbeda untuk label "User ID" (mis. mesin Raja
+// Petshop menulis "User ID.：" — ada titik dan titik-dua lebar-penuh, bukan ":" biasa). Normalisasi
+// dulu (buang semua tanda baca/spasi, huruf kecil) supaya semua variasi tetap cocok.
+function isUserIdLabel(cell: unknown): boolean {
+  return String(cell || '').toLowerCase().replace(/[^a-z0-9]/g, '') === 'userid'
 }
 
 function dayToDate(
@@ -121,7 +137,7 @@ export async function POST(req: NextRequest) {
 
     while (row < rawData.length) {
       const cells = rawData[row]
-      if (String(cells?.[4]) !== 'User ID:') { row++; continue }
+      if (!isUserIdLabel(cells?.[4])) { row++; continue }
 
       const fingerprintId = parseInt(String(cells[5]))
       const nameInFile    = String(cells[11] || '').trim() || '(tanpa nama)'
@@ -130,7 +146,7 @@ export async function POST(req: NextRequest) {
       // Kumpulkan baris data sampai blok berikutnya
       const dataRows: string[][] = []
       let r = row + 2
-      while (r < rawData.length && String(rawData[r]?.[4]) !== 'User ID:') {
+      while (r < rawData.length && !isUserIdLabel(rawData[r]?.[4])) {
         dataRows.push(rawData[r] as string[])
         r++
       }
