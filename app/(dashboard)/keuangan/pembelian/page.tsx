@@ -63,6 +63,11 @@ export default function PembelianSupplierPage() {
   const [payForm, setPayForm] = useState({ amount: '', payment_date: today, account_id: '', notes: '' })
   const [paySubmitting, setPaySubmitting] = useState(false)
 
+  const [activeTab, setActiveTab] = useState<'input' | 'ringkasan-supplier'>('input')
+  const [bulkPaySupplierId, setBulkPaySupplierId] = useState<string | null>(null)
+  const [bulkPayForm, setBulkPayForm] = useState({ amount: '', payment_date: today, account_id: '', notes: '' })
+  const [bulkPaySubmitting, setBulkPaySubmitting] = useState(false)
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     let pQuery = supabase
@@ -148,6 +153,75 @@ export default function PembelianSupplierPage() {
   const totalPembelianBulanIni = purchasesThisMonth.reduce((s, p) => s + Number(p.total_amount), 0)
   const totalSisaUtang = purchases.reduce((s, p) => s + Math.max(0, remainingOf(p)), 0)
   const totalPendingVerifikasi = payments.filter(p => p.status === 'pending').reduce((s, p) => s + Number(p.amount), 0)
+
+  // Rekap per supplier — gabungkan SEMUA transaksi (lintas bulan, tidak ikut filterMonth), karena
+  // hutang tidak peduli dibeli bulan kapan. Ini yang menjawab "saya hutang berapa total ke X".
+  const supplierSummaries = suppliers
+    .map(s => {
+      const rows = purchases.filter(p => p.supplier_id === s.id)
+      if (rows.length === 0) return null
+      const totalUtang = rows.reduce((sum, p) => sum + Number(p.total_amount), 0)
+      const totalDibayar = rows.reduce((sum, p) => sum + paidApproved(p.id), 0)
+      const totalPending = rows.reduce((sum, p) => sum + paidPending(p.id), 0)
+      const totalUnrequested = rows.reduce((sum, p) => sum + unrequestedOf(p), 0)
+      const sisaUtang = totalUtang - totalDibayar
+      return { supplierId: s.id, supplierName: s.name, jumlahTransaksi: rows.length, totalUtang, totalDibayar, totalPending, totalUnrequested, sisaUtang }
+    })
+    .filter((s): s is NonNullable<typeof s> => s !== null && s.sisaUtang !== 0)
+    .sort((a, b) => b.sisaUtang - a.sisaUtang)
+
+  function openBulkPayModal(supplierId: string) {
+    setBulkPaySupplierId(supplierId)
+    setBulkPayForm({ amount: '', payment_date: today, account_id: '', notes: '' })
+  }
+
+  // Bayar sekaligus ke satu supplier — nominal dialokasikan otomatis ke tagihan-tagihan tertua
+  // duluan (FIFO), tanpa harus buka satu-satu. Tetap membuat 1 baris fin_cash_out per tagihan yang
+  // kena alokasi (sama seperti bayar manual), jadi semua perhitungan sisa utang yang sudah ada tetap
+  // akurat dan konsisten — cuma prosesnya yang diotomatisasi.
+  async function handleBulkPaySubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!bulkPaySupplierId || !myUserId) return
+    const amountNum = parseFloat(bulkPayForm.amount)
+    if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Nominal tidak valid.'); return }
+    if (!bulkPayForm.account_id) { showMessage('error', 'Pilih rekening/kas.'); return }
+
+    const supplierName = suppliers.find(s => s.id === bulkPaySupplierId)?.name || 'Supplier'
+    const outstanding = purchases
+      .filter(p => p.supplier_id === bulkPaySupplierId && unrequestedOf(p) > 0)
+      .sort((a, b) => a.purchase_date.localeCompare(b.purchase_date)) // tertua duluan
+
+    if (outstanding.length === 0) { showMessage('error', 'Tidak ada tagihan yang bisa dibayar (semua sudah lunas/menunggu verifikasi).'); return }
+
+    let sisa = amountNum
+    const rows: any[] = []
+    for (const p of outstanding) {
+      if (sisa <= 0) break
+      const portion = Math.min(sisa, unrequestedOf(p))
+      rows.push({
+        branch_id: p.branch_id, category: 'pembayaran_supplier', amount: portion,
+        description: `Cicilan/Bayar ke ${supplierName}${p.description ? ' - ' + p.description : ''} (alokasi otomatis)${bulkPayForm.notes ? ' — ' + bulkPayForm.notes : ''}`,
+        source_table: 'supplier_purchases', source_id: p.id,
+        transaction_date: bulkPayForm.payment_date, account_id: bulkPayForm.account_id,
+        input_by: myUserId, status: 'pending',
+      })
+      sisa -= portion
+    }
+
+    setBulkPaySubmitting(true)
+    const { error } = await supabase.from('fin_cash_out').insert(rows)
+    if (error) {
+      showMessage('error', 'Gagal mencatat pembayaran: ' + error.message)
+    } else {
+      const msg = sisa > 0
+        ? `Pembayaran dicatat ke ${rows.length} tagihan, menunggu verifikasi. Sisa ${formatRupiah(sisa)} tidak dialokasikan karena melebihi total tagihan ${supplierName}.`
+        : `Pembayaran dicatat ke ${rows.length} tagihan (alokasi otomatis dari tertua), menunggu verifikasi.`
+      showMessage('success', msg)
+      setBulkPaySupplierId(null)
+      fetchData()
+    }
+    setBulkPaySubmitting(false)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -295,6 +369,65 @@ export default function PembelianSupplierPage() {
         </div>
       )}
 
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6">
+        <button onClick={() => setActiveTab('input')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'input' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          Catat Pembelian
+        </button>
+        <button onClick={() => setActiveTab('ringkasan-supplier')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'ringkasan-supplier' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          📊 Ringkasan per Supplier
+        </button>
+      </div>
+
+      {activeTab === 'ringkasan-supplier' && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+          <div className="px-5 py-3 border-b border-slate-200 bg-slate-50">
+            <span className="text-sm font-semibold text-slate-700">Total Sisa Utang per Supplier</span>
+            <p className="text-xs text-slate-400 mt-0.5">Digabung dari semua transaksi lintas bulan — tidak ikut filter periode tab Catat Pembelian. Diurutkan dari yang paling besar hutangnya.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-white border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Supplier</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Jml Transaksi</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Total Utang</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Total Dibayar</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Menunggu Verifikasi</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Sisa Utang</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {supplierSummaries.length === 0 ? (
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada supplier dengan sisa/lebih bayar.</td></tr>
+                ) : supplierSummaries.map(s => (
+                  <tr key={s.supplierId} className="hover:bg-slate-50 transition">
+                    <td className="px-4 py-3 font-medium text-slate-800">{s.supplierName}</td>
+                    <td className="px-4 py-3 text-center text-slate-500">{s.jumlahTransaksi}</td>
+                    <td className="px-4 py-3 text-right text-slate-700">{formatRupiah(s.totalUtang)}</td>
+                    <td className="px-4 py-3 text-right text-slate-600">{formatRupiah(s.totalDibayar)}</td>
+                    <td className="px-4 py-3 text-right text-amber-600">{s.totalPending > 0 ? formatRupiah(s.totalPending) : '—'}</td>
+                    <td className={`px-4 py-3 text-right font-bold ${s.sisaUtang > 0 ? 'text-red-600' : 'text-green-600'}`}>{formatRupiah(s.sisaUtang)}</td>
+                    <td className="px-4 py-3 text-center">
+                      {s.totalUnrequested > 0 ? (
+                        <button onClick={() => openBulkPayModal(s.supplierId)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-green-600 border-green-200 hover:bg-green-50">
+                          Bayar Sekaligus
+                        </button>
+                      ) : s.sisaUtang > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">⏳ Menunggu</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'input' && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
           <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Catat Pembelian Baru</h2>
@@ -483,6 +616,7 @@ export default function PembelianSupplierPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Modal Edit Pembelian */}
       {editPurchase && (
@@ -600,6 +734,71 @@ export default function PembelianSupplierPage() {
           </div>
         </div>
       )}
+
+      {/* Modal Bayar Sekaligus (per Supplier, alokasi otomatis FIFO) */}
+      {bulkPaySupplierId && (() => {
+        const s = supplierSummaries.find(x => x.supplierId === bulkPaySupplierId)
+        if (!s) return null
+        return (
+          <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+              <div className="p-6">
+                <h2 className="text-lg font-semibold text-slate-800 mb-1">Bayar Sekaligus ke {s.supplierName}</h2>
+                <p className="text-xs text-slate-500 mb-1">
+                  Sisa utang total <span className="font-bold text-red-600">{formatRupiah(s.sisaUtang)}</span> dari {s.jumlahTransaksi} transaksi
+                </p>
+                {s.totalPending > 0 && (
+                  <p className="text-xs text-yellow-700 mb-1">{formatRupiah(s.totalPending)} sudah diajukan, masih menunggu verifikasi finance.</p>
+                )}
+                <p className="text-xs text-slate-500 mb-4 pb-3 border-b border-slate-100">
+                  Maksimal bisa diajukan sekarang: <span className="font-bold text-slate-700">{formatRupiah(s.totalUnrequested)}</span>. Nominal akan dialokasikan otomatis ke tagihan yang paling lama dulu.
+                </p>
+                <form onSubmit={handleBulkPaySubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
+                    <RupiahInput required value={bulkPayForm.amount} onChange={v => setBulkPayForm({ ...bulkPayForm, amount: v })}
+                      placeholder={`Boleh sebagian, maksimal ${formatRupiah(s.totalUnrequested)}`}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Tanggal Bayar <span className="text-red-500">*</span></label>
+                    <input type="date" required value={bulkPayForm.payment_date} onChange={e => setBulkPayForm({ ...bulkPayForm, payment_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Rekening/Kas <span className="text-red-500">*</span></label>
+                    <select required value={bulkPayForm.account_id} onChange={e => setBulkPayForm({ ...bulkPayForm, account_id: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option value="">-- Pilih Rekening/Kas --</option>
+                      {bankAccounts.map(a => (
+                        <option key={a.id} value={a.id}>
+                          {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Catatan</label>
+                    <input type="text" value={bulkPayForm.notes} onChange={e => setBulkPayForm({ ...bulkPayForm, notes: e.target.value })}
+                      placeholder="Opsional"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button type="button" onClick={() => setBulkPaySupplierId(null)}
+                      className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                      Batal
+                    </button>
+                    <button type="submit" disabled={bulkPaySubmitting}
+                      className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                      {bulkPaySubmitting ? 'Menyimpan...' : 'Simpan Pembayaran'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
