@@ -143,7 +143,8 @@ export default function PenggajianBulananPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
 
   // ── State: modal "Tandai Lunas" — metode & sumber pembayaran ──
-  const [payModalTarget, setPayModalTarget] = useState<Payroll | null>(null)
+  // payTargets kosong = modal tertutup. Diisi 1 slip (aksi satuan) atau banyak (aksi massal).
+  const [payTargets, setPayTargets] = useState<Payroll[]>([])
   const [payDate, setPayDate] = useState('')
   const [paySources, setPaySources] = useState<{ account_id: string; amount: string }[]>([])
   const [payProcessing, setPayProcessing] = useState(false)
@@ -1015,16 +1016,18 @@ export default function PenggajianBulananPage() {
   // Tandai Lunas dipisah dari ajukan/approve — sebelum benar-benar diproses, munculkan
   // modal metode & sumber pembayaran dulu (openPayModal), karena melunaskan slip juga
   // langsung mencatat pengeluaran (Kas Keluar) dari rekening/kas yang dipakai.
-  function openPayModal(p: Payroll) {
-    setPayModalTarget(p)
+  // Dipakai baik untuk satu slip (aksi satuan) maupun banyak slip sekaligus (aksi massal).
+  function openPayModal(targets: Payroll[]) {
+    const total = targets.reduce((s, p) => s + Number(p.net_total), 0)
+    setPayTargets(targets)
     setPayDate(todayLocalStr())
-    setPaySources([{ account_id: '', amount: String(p.net_total) }])
+    setPaySources([{ account_id: '', amount: String(total) }])
   }
 
   async function handleStatusChange(p: Payroll, action: 'ajukan' | 'approve' | 'paid') {
     if (!currentUser) return
 
-    if (action === 'paid') { openPayModal(p); return }
+    if (action === 'paid') { openPayModal([p]); return }
 
     const confirmMap: Record<string, string> = {
       ajukan:  `Ajukan slip gaji ${p.employee?.full_name} ke status Menunggu Approval?`,
@@ -1046,12 +1049,14 @@ export default function PenggajianBulananPage() {
   }
 
   // ─── Modal Tandai Lunas: metode & sumber pembayaran ────────────────────────
+  // Bisa dipakai untuk 1 slip (payTargets.length === 1) atau banyak slip sekaligus (aksi massal).
+  const payTotal = payTargets.reduce((s, p) => s + Number(p.net_total), 0)
   const paySourcesTotal = paySources.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-  const paySourcesValid = payModalTarget != null
+  const paySourcesValid = payTargets.length > 0
     && payDate !== ''
     && paySources.length > 0
     && paySources.every(r => r.account_id && (parseFloat(r.amount) || 0) > 0)
-    && paySourcesTotal === Number(payModalTarget.net_total)
+    && paySourcesTotal === payTotal
 
   function addPaySource() {
     setPaySources(rows => [...rows, { account_id: '', amount: '' }])
@@ -1064,46 +1069,69 @@ export default function PenggajianBulananPage() {
   }
 
   async function confirmPaySlip() {
-    const p = payModalTarget
-    if (!p || !currentUser || !paySourcesValid) return
+    if (payTargets.length === 0 || !currentUser || !paySourcesValid) return
     setPayProcessing(true)
 
-    const result = await applyStatusChange(p, 'paid')
-    if (!result.ok) {
-      showMessage('error', 'Gagal memperbarui status: ' + result.error)
-      setPayProcessing(false)
-      return
+    const failed: string[] = []
+    for (const p of payTargets) {
+      const result = await applyStatusChange(p, 'paid')
+      if (!result.ok) failed.push(p.id)
+    }
+    const succeeded = payTargets.filter(p => !failed.includes(p.id))
+
+    // Catat sebagai pengeluaran (Kas Keluar) — satu baris per (karyawan × sumber rekening/kas)
+    // yang dipakai, langsung berstatus disetujui karena pelunasan hanya bisa dilakukan owner
+    // (sudah sekaligus jadi otorisasi/verifikasi). Tanggal transaksi = tanggal pembayaran yang
+    // diisi user (default hari ini), BUKAN periode gaji — konsisten dengan aturan pencatatan
+    // Kas Keluar lain: dicatat di bulan uang benar-benar keluar, bukan bulan periode gaji.
+    // Kalau sumbernya lebih dari satu, tiap karyawan dialokasikan proporsional ke tiap sumber
+    // sesuai porsi yang diisi user untuk total gabungan — sumber terakhir menampung sisa
+    // pembulatan supaya total per karyawan selalu persis pas.
+    const cashOutRows: any[] = []
+    for (const p of succeeded) {
+      const periodLabel = getPeriodLabel(p.period_month, p.period_year)
+      let remaining = Math.round(Number(p.net_total))
+      paySources.forEach((r, idx) => {
+        const isLast = idx === paySources.length - 1
+        const srcAmount = parseFloat(r.amount) || 0
+        const portion = isLast ? remaining : Math.round(srcAmount * Number(p.net_total) / payTotal)
+        remaining -= portion
+        if (portion > 0) {
+          cashOutRows.push({
+            branch_id: p.employee?.branch_id,
+            category: 'payroll',
+            amount: portion,
+            description: `Gaji ${p.employee?.full_name ?? '—'} — periode ${periodLabel}`,
+            source_table: 'payrolls',
+            source_id: p.id,
+            transaction_date: payDate,
+            account_id: r.account_id,
+            input_by: currentUser.id,
+            status: 'approved',
+            verified_by: currentUser.id,
+            verified_at: new Date().toISOString(),
+          })
+        }
+      })
     }
 
-    // Catat sebagai pengeluaran (Kas Keluar) — satu baris per sumber rekening/kas yang dipakai,
-    // langsung berstatus disetujui karena pelunasan hanya bisa dilakukan owner (sudah sekaligus
-    // jadi otorisasi/verifikasi). Tanggal transaksi = tanggal pembayaran (bukan periode gaji),
-    // supaya konsisten dengan aturan pencatatan Kas Keluar lain: dicatat di bulan uang benar-benar
-    // keluar, bukan bulan periode yang dibayarkan.
-    const periodLabel = getPeriodLabel(p.period_month, p.period_year)
-    const cashOutRows = paySources.map(r => ({
-      branch_id: p.employee?.branch_id,
-      category: 'payroll',
-      amount: parseFloat(r.amount),
-      description: `Gaji ${p.employee?.full_name ?? '—'} — periode ${periodLabel}`,
-      source_table: 'payrolls',
-      source_id: p.id,
-      transaction_date: payDate,
-      account_id: r.account_id,
-      input_by: currentUser.id,
-      status: 'approved',
-      verified_by: currentUser.id,
-      verified_at: new Date().toISOString(),
-    }))
-    const { error: coError } = await supabase.from('fin_cash_out').insert(cashOutRows)
-    if (coError) {
-      showMessage('error', 'Slip ditandai lunas, tapi gagal mencatat pengeluaran Kas Keluar: ' + coError.message)
+    let coError: string | null = null
+    if (cashOutRows.length > 0) {
+      const { error } = await supabase.from('fin_cash_out').insert(cashOutRows)
+      if (error) coError = error.message
+    }
+
+    if (failed.length > 0) {
+      showMessage('error', `${succeeded.length} slip berhasil dilunaskan, ${failed.length} gagal diproses.`)
+    } else if (coError) {
+      showMessage('error', 'Slip ditandai lunas, tapi gagal mencatat pengeluaran Kas Keluar: ' + coError)
     } else {
-      showMessage('success', 'Slip ditandai lunas dan pengeluaran berhasil dicatat di Kas Keluar.')
+      showMessage('success', `${succeeded.length} slip ditandai lunas dan pengeluaran berhasil dicatat di Kas Keluar.`)
     }
 
-    setPayModalTarget(null)
+    setPayTargets([])
     setPayProcessing(false)
+    setSelectedPayrollIds(new Set())
     await fetchPayrolls()
   }
 
@@ -1138,10 +1166,17 @@ export default function PenggajianBulananPage() {
       return
     }
 
+    // Tandai Lunas massal — buka modal metode & sumber pembayaran yang sama seperti aksi
+    // satuan, supaya tetap langsung tercatat di Kas Keluar (bukan confirm() biasa).
+    if (action === 'paid') {
+      if (skipped > 0) showMessage('error', `${skipped} slip dilewati karena statusnya belum "Disetujui".`)
+      openPayModal(eligible)
+      return
+    }
+
     const confirmMsg =
       `${ACTION_LABEL[action]} ${eligible.length} slip gaji terpilih?` +
-      (skipped > 0 ? `\n\n${skipped} slip lain dilewati karena statusnya tidak sesuai.` : '') +
-      (action === 'paid' ? '\n\nSaldo kasbon karyawan akan dikurangi otomatis jika ada potongan kasbon.' : '')
+      (skipped > 0 ? `\n\n${skipped} slip lain dilewati karena statusnya tidak sesuai.` : '')
     if (!confirm(confirmMsg)) return
 
     setBulkActionRunning(true)
@@ -2239,21 +2274,35 @@ export default function PenggajianBulananPage() {
     )}
 
     {/* ─── Modal Tandai Lunas: metode & sumber pembayaran ───────────────────── */}
-    {payModalTarget && (
+    {payTargets.length > 0 && (
       <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto">
         <div className="bg-white rounded-xl shadow-xl w-full max-w-lg my-8">
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
             <div>
               <h2 className="text-base font-bold text-slate-800">Konfirmasi Pelunasan Gaji</h2>
-              <p className="text-xs text-slate-500">{payModalTarget.employee?.full_name} · {getPeriodLabel(payModalTarget.period_month, payModalTarget.period_year)}</p>
+              <p className="text-xs text-slate-500">
+                {payTargets.length === 1
+                  ? `${payTargets[0].employee?.full_name} · ${getPeriodLabel(payTargets[0].period_month, payTargets[0].period_year)}`
+                  : `${payTargets.length} karyawan terpilih`}
+              </p>
             </div>
-            <button onClick={() => setPayModalTarget(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            <button onClick={() => setPayTargets([])} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
           </div>
 
           <div className="px-6 py-4 space-y-4">
+            {payTargets.length > 1 && (
+              <div className="max-h-32 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
+                {payTargets.map(p => (
+                  <div key={p.id} className="px-3 py-1.5 flex items-center justify-between text-xs">
+                    <span className="text-slate-600">{p.employee?.full_name}</span>
+                    <span className="text-slate-500">{formatRupiah(Number(p.net_total))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 flex items-center justify-between">
               <span className="text-sm text-blue-700">Total yang harus dibayar</span>
-              <span className="text-lg font-bold text-blue-800">{formatRupiah(Number(payModalTarget.net_total))}</span>
+              <span className="text-lg font-bold text-blue-800">{formatRupiah(payTotal)}</span>
             </div>
 
             <div>
@@ -2291,14 +2340,14 @@ export default function PenggajianBulananPage() {
               <p className="text-xs text-slate-400 mt-2">Bisa dipecah ke lebih dari satu rekening/kas sekaligus — mis. sebagian cash, sebagian transfer.</p>
             </div>
 
-            <div className={`rounded-lg px-4 py-2.5 flex items-center justify-between text-sm ${paySourcesTotal === Number(payModalTarget.net_total) ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
+            <div className={`rounded-lg px-4 py-2.5 flex items-center justify-between text-sm ${paySourcesTotal === payTotal ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
               <span>Total sumber dimasukkan</span>
-              <span className="font-bold">{formatRupiah(paySourcesTotal)}{paySourcesTotal !== Number(payModalTarget.net_total) && ` (kurang ${formatRupiah(Number(payModalTarget.net_total) - paySourcesTotal)})`}</span>
+              <span className="font-bold">{formatRupiah(paySourcesTotal)}{paySourcesTotal !== payTotal && ` (kurang ${formatRupiah(payTotal - paySourcesTotal)})`}</span>
             </div>
           </div>
 
           <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
-            <button onClick={() => setPayModalTarget(null)} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+            <button onClick={() => setPayTargets([])} className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
             <button onClick={confirmPaySlip} disabled={!paySourcesValid || payProcessing}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50">
               {payProcessing ? 'Memproses...' : 'Konfirmasi Lunas'}
