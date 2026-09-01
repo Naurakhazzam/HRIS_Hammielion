@@ -244,6 +244,9 @@ export default function KasMasukPage() {
 
   const totalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount), 0)
   const totalPhysicalApprovedThisMonth = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount) - Number(r.expense_amount) + Number(r.cash_adjustment), 0)
+  // Label dinamis — ikut bulan yang dipilih di filter Periode tab Riwayat (BUKAN selalu bulan
+  // kalender sekarang), supaya tidak menyesatkan kalau filternya diganti ke bulan lain.
+  const filterMonthLabel = new Date(filterMonth + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
 
   function canEditRow(r: CashIn) {
     if (r.status !== 'pending' && r.status !== 'rejected') return false
@@ -440,14 +443,15 @@ export default function KasMasukPage() {
         <div className="lg:col-span-2 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Omzet Disetujui — Bulan Ini</p>
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Omzet Disetujui — {filterMonthLabel}</p>
               <p className="text-2xl font-bold text-green-700">{formatRupiah(totalApprovedThisMonth)}</p>
             </div>
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Uang Diterima — Bulan Ini</p>
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Uang Diterima — {filterMonthLabel}</p>
               <p className="text-2xl font-bold text-slate-800">{formatRupiah(totalPhysicalApprovedThisMonth)}</p>
             </div>
           </div>
+          <p className="text-[11px] text-slate-400 -mt-2">Kedua angka di atas ikut filter <strong>Periode</strong> & <strong>Cabang</strong> tab Riwayat di bawah — terpisah dari filter tab Selisih Kasir.</p>
 
           <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
             <button onClick={() => setActiveSubTab('riwayat')}
