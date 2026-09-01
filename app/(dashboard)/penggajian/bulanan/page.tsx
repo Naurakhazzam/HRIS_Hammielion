@@ -728,8 +728,9 @@ export default function PenggajianBulananPage() {
       latestCriteria.forEach(c => { latestChecked[c.id] = createBonusChecked[c.id] ?? true })
       setCreateBonusChecked(latestChecked)
     } else {
-      // Preview massal: asumsikan semua kriteria aktif terpenuhi
-      latestCriteria.forEach(c => { latestChecked[c.id] = true })
+      // Preview massal: bonus kondisional TIDAK diasumsikan terpenuhi — dikosongkan,
+      // biar tidak menyesatkan (bonus ini butuh penilaian manual per kriteria).
+      latestCriteria.forEach(c => { latestChecked[c.id] = false })
     }
     const conditionalBonus = latestCriteria
       .filter(c => latestChecked[c.id])
@@ -2721,7 +2722,7 @@ export default function PenggajianBulananPage() {
           <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
             <div>
               <h2 className="text-base font-bold text-slate-700">📊 Preview Semua Karyawan</h2>
-              <p className="text-xs text-slate-500 mt-0.5">{getPeriodLabel(filterMonth, filterYear)} — cuma untuk dilihat, bukan slip resmi. Lembur diasumsikan semuanya valid, kasbon diasumsikan 0, bonus kondisional diasumsikan semua terpenuhi.</p>
+              <p className="text-xs text-slate-500 mt-0.5">{getPeriodLabel(filterMonth, filterYear)} — cuma untuk dilihat, bukan slip resmi. Lembur diasumsikan semuanya valid, kasbon diasumsikan 0, bonus kondisional dikosongkan (butuh penilaian manual).</p>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={openBulkPreview} disabled={bulkPreviewLoading}
