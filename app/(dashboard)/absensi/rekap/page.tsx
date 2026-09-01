@@ -94,6 +94,15 @@ export default function RekapAbsensiPage() {
 
   useEffect(() => { fetchReferenceData(); fetchMyRole() }, [])
   useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
+  // Kalau karyawan yang sedang dipilih jadi tidak termasuk lagi setelah Cabang/Departemen
+  // diganti, kosongkan lagi pilihannya — supaya tidak nyangkut ke karyawan di luar cakupan filter.
+  useEffect(() => {
+    if (filterEmployee && !employees.some(e =>
+      e.id === filterEmployee && (!filterBranch || e.branch_id === filterBranch) && (!filterDept || e.department_id === filterDept)
+    )) {
+      setFilterEmployee('')
+    }
+  }, [filterBranch, filterDept])
 
   async function fetchMyRole() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -384,6 +393,11 @@ export default function RekapAbsensiPage() {
     setEditSaving(false)
   }
 
+  // Daftar pilihan dropdown Karyawan ikut menyempit sesuai filter Cabang/Departemen yang sedang aktif
+  const employeeOptions = employees.filter(e =>
+    (!filterBranch || e.branch_id === filterBranch) && (!filterDept || e.department_id === filterDept)
+  )
+
   // Exclude record "Belum Masuk (Training)" lama & tanggal sebelum join_date dari semua hitungan
   const selectedEmpJoinDate = filterEmployee ? (employees.find(e => e.id === filterEmployee)?.join_date ?? null) : null
   const validAtts = attendances.filter(a => {
@@ -542,7 +556,7 @@ export default function RekapAbsensiPage() {
             <label className="text-xs font-medium text-slate-500 block mb-1">Karyawan</label>
             <select value={filterEmployee} onChange={e=>setFilterEmployee(e.target.value)} className="bg-white border border-slate-300 text-sm rounded-lg outline-none block w-full p-2">
               <option value="">Semua Karyawan</option>
-              {employees.map(e=><option key={e.id} value={e.id}>{e.full_name}</option>)}
+              {employeeOptions.map(e=><option key={e.id} value={e.id}>{e.full_name}</option>)}
             </select>
           </div>
           <div>
