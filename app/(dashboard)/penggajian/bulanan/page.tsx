@@ -2766,7 +2766,16 @@ export default function PenggajianBulananPage() {
               <div className="py-16 text-center text-slate-400 text-sm">Menghitung estimasi semua karyawan, mohon tunggu...</div>
             ) : bulkPreviewRows.length === 0 ? (
               <div className="py-16 text-center text-slate-400 text-sm">Tidak ada karyawan tetap/training aktif.</div>
-            ) : (
+            ) : (() => {
+              const okRows = bulkPreviewRows.filter(r => r.preview)
+              const failedRows = bulkPreviewRows.filter(r => !r.preview)
+              return (
+              <>
+              {failedRows.length > 0 && (
+                <p className="text-xs text-slate-400 mb-2">
+                  {failedRows.length} karyawan dilewati (komponen gaji belum diisi — lengkapi dulu di Data Karyawan → Komponen Gaji kalau perlu ditampilkan).
+                </p>
+              )}
               <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20">
@@ -2788,15 +2797,9 @@ export default function PenggajianBulananPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {bulkPreviewRows.map(row => (
+                  {okRows.map(row => (
                     <tr key={row.employeeId} className="hover:bg-slate-50 transition group">
-                      {!row.preview ? (
-                        <>
-                          <td className="px-3 py-2 text-slate-400 italic sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">(gagal dihitung)</td>
-                          <td colSpan={13} className="px-3 py-2 text-red-500">⚠️ Komponen gaji belum diisi / data karyawan bermasalah</td>
-                          <td className="px-3 py-2"></td>
-                        </>
-                      ) : (
+                      {row.preview && (
                         <>
                           <td className="px-3 py-2 sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">
                             <div className="font-medium text-slate-800">{row.preview.employeeName}</div>
@@ -2829,7 +2832,9 @@ export default function PenggajianBulananPage() {
                   ))}
                 </tbody>
               </table>
-            )}
+              </>
+              )
+            })()}
           </div>
         </div>
       </div>
