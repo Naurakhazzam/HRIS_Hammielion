@@ -66,6 +66,9 @@ export default function RekapAbsensiPage() {
     check_in: '', check_out: '', status: 'present',
     late_minutes: 0, overtime_hours: 0, reason: ''
   })
+  // Jadwal (dept atau Jam Kerja Khusus) yang berlaku untuk baris yang sedang diedit —
+  // dipakai untuk hitung ulang Menit Telat otomatis saat Jam Masuk diubah di modal.
+  const [editSchedule, setEditSchedule] = useState<WorkSchedule | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [editLogs, setEditLogs] = useState<EditLog[]>([])
   const [loadingLogs, setLoadingLogs] = useState(false)
@@ -227,6 +230,16 @@ export default function RekapAbsensiPage() {
     return detected
   }
   function fmtTime(t: string|null|undefined): string { return t?t.substring(0,5):'—' }
+  function timeToMinutes(t: string): number {
+    const [h, m] = t.substring(0, 5).split(':').map(Number)
+    return h * 60 + m
+  }
+  // Hitung menit telat dari jam masuk WIB ("HH:MM") terhadap jadwal yang berlaku
+  // (Jam Kerja Khusus kalau diaktifkan, kalau tidak pakai jadwal departemen).
+  function computeLateMinutes(checkInWIB: string, sched: WorkSchedule | null): number {
+    if (!sched || !checkInWIB) return 0
+    return Math.max(0, timeToMinutes(checkInWIB) - timeToMinutes(sched.check_in_time))
+  }
   // Tampilkan waktu dalam WIB — eksplisit agar tidak bergantung timezone browser
   const fmtTs = (iso: string|null) => iso ? new Date(iso).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Jakarta'}) : '-'
 
@@ -264,12 +277,19 @@ export default function RekapAbsensiPage() {
       const wib = new Date(new Date(iso).getTime() + 7 * 60 * 60 * 1000)
       return `${String(wib.getUTCHours()).padStart(2,'0')}:${String(wib.getUTCMinutes()).padStart(2,'0')}`
     }
+    const checkInWIB = toTime(att.check_in)
+    const deptId = (att.employees as any)?.department_id
+    const sched = getScheduleForAtt(att.check_in, deptId, att.employees)
     setEditModal(att)
+    setEditSchedule(sched)
     setEditForm({
-      check_in: toTime(att.check_in),
+      check_in: checkInWIB,
       check_out: toTime(att.check_out),
       status: att.status,
-      late_minutes: att.late_minutes,
+      // Dihitung ulang dari jadwal yang berlaku SEKARANG (termasuk Jam Kerja Khusus), bukan
+      // dipakai apa adanya dari angka lama — supaya begitu Jam Kerja Khusus diaktifkan/diubah,
+      // membuka & menyimpan entri ini otomatis membawa keterlambatan yang sudah benar.
+      late_minutes: computeLateMinutes(checkInWIB, sched),
       overtime_hours: Number(att.overtime_hours),
       reason: ''
     })
@@ -755,7 +775,10 @@ export default function RekapAbsensiPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Jam Masuk</label>
-                  <input type="time" value={editForm.check_in} onChange={e=>setEditForm({...editForm,check_in:e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <input type="time" value={editForm.check_in} onChange={e=>{
+                    const newCheckIn = e.target.value
+                    setEditForm({...editForm, check_in: newCheckIn, late_minutes: computeLateMinutes(newCheckIn, editSchedule)})
+                  }} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Jam Pulang</label>
@@ -776,6 +799,9 @@ export default function RekapAbsensiPage() {
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Menit Telat</label>
                   <input type="number" min="0" value={editForm.late_minutes} onChange={e=>setEditForm({...editForm,late_minutes:Math.max(0,parseInt(e.target.value)||0)})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    {editSchedule ? `Otomatis dihitung dari jadwal ${editSchedule.name} (masuk ${fmtTime(editSchedule.check_in_time)}). Bisa diubah manual kalau perlu.` : 'Tidak ada jadwal terdeteksi — isi manual.'}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">Lembur (jam)</label>
