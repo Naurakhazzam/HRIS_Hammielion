@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
+import { todayLocalStr } from '@/lib/date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -673,8 +674,13 @@ export default function PenggajianBulananPage() {
       allPeriodDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`)
       cur.setDate(cur.getDate()+1)
     }
+    // Hari yang BELUM TERJADI (masih di masa depan dari hari ini) jangan ikut dihitung sebagai
+    // "kosong/tidak hadir" — kalau tidak, preview untuk periode yang belum selesai berjalan akan
+    // salah besar (hari-hari yang belum dijalani ikut dianggap absen).
+    const today = todayLocalStr()
     const emptyDays   = allPeriodDates.filter(d => {
       if (joinDateVal && d < joinDateVal) return false  // sebelum bergabung — diabaikan
+      if (d > today) return false                        // belum terjadi — diabaikan
       return !recordedDates.has(d)
     }).length
 
@@ -1241,7 +1247,8 @@ export default function PenggajianBulananPage() {
     while (cur <= endD) { allDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`); cur.setDate(cur.getDate()+1) }
     const totalPeriodDays = allDates.length
 
-    const emptyDays  = allDates.filter(d => (!joinDateVal || d >= joinDateVal) && !recordedDates.has(d)).length
+    const todayD = todayLocalStr()
+    const emptyDays  = allDates.filter(d => (!joinDateVal || d >= joinDateVal) && d <= todayD && !recordedDates.has(d)).length
     const leaveDays  = atts.filter((a: any) => a.status === 'leave').length
 
     // Kuota libur ikut di-pro-rata untuk training yang join di tengah periode —
