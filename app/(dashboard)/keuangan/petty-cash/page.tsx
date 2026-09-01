@@ -385,14 +385,14 @@ export default function PettyCashPage() {
                 <div className="overflow-auto max-h-[65vh]">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-white border-b border-slate-200 sticky top-0 z-10">
-                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Tanggal</th>
-                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Keterangan</th>
-                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Kategori</th>
-                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Masuk</th>
-                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Keluar</th>
-                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Saldo</th>
-                        {isViewingSelf && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Aksi</th>}
+                      <tr className="bg-white border-b border-slate-200">
+                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Tanggal</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Keterangan</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Kategori</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Masuk</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Keluar</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Saldo</th>
+                        {isViewingSelf && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10">Aksi</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">

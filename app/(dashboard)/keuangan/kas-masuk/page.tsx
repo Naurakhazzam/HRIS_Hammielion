@@ -515,16 +515,16 @@ export default function KasMasukPage() {
             <div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-white border-b border-slate-200 sticky top-0 z-10">
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Tanggal</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Cabang</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Omzet</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white">Uang Diterima</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Metode</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Rekening</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white">Keterangan</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Status</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white">Aksi</th>
+                  <tr className="bg-white border-b border-slate-200">
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Tanggal</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Cabang</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Omzet</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right bg-white sticky top-0 z-10">Uang Diterima</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Metode</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Rekening</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase bg-white sticky top-0 z-10">Keterangan</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10">Status</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center bg-white sticky top-0 z-10">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">

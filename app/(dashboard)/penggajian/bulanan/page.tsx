@@ -1717,7 +1717,7 @@ export default function PenggajianBulananPage() {
         <div className="overflow-auto max-h-[65vh] print:max-h-none print:overflow-visible">
           <table className="w-full text-left border-collapse text-sm">
             <thead>
-              <tr className="border-b border-slate-200 bg-white sticky top-0 z-20">
+              <tr className="border-b border-slate-200">
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky top-0 left-0 z-30 bg-white shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">
                   <input type="checkbox"
                     checked={payrolls.length > 0 && selectedPayrollIds.size === payrolls.length}
@@ -1726,16 +1726,16 @@ export default function PenggajianBulananPage() {
                   />
                   Karyawan
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap bg-white">Periode</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Gaji Pokok</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Total Tunjangan</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Lembur</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Bonus KPI</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Pot. Kasbon</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Pot. Telat</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap bg-white">Total Bersih</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap bg-white">Status</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide bg-white">Aksi</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap sticky top-0 z-20 bg-white">Periode</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Gaji Pokok</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Total Tunjangan</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Lembur</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Bonus KPI</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Pot. Kasbon</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Pot. Telat</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap sticky top-0 z-20 bg-white">Total Bersih</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap sticky top-0 z-20 bg-white">Status</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center whitespace-nowrap print-hide sticky top-0 z-20 bg-white">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -2785,22 +2785,22 @@ export default function PenggajianBulananPage() {
               )}
               <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20">
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase sticky left-0 z-30 bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Gaji Pokok+Tunjangan</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Menit Telat</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Potongan Telat</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Jam Lembur</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Nominal Lembur</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Bonus KPI+Kondisional</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Tidak Hadir (hari)</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Potongan Tidak Hadir</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Kompensasi Libur</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Kehilangan Barang</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Kerugian Kasir</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Tabungan Loyalitas</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right bg-slate-50">Estimasi Gaji Bersih</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-center bg-slate-50">Aksi</th>
+                  <tr className="border-b border-slate-200">
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase sticky top-0 left-0 z-30 bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Gaji Pokok+Tunjangan</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Menit Telat</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Potongan Telat</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Jam Lembur</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Nominal Lembur</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Bonus KPI+Kondisional</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Tidak Hadir (hari)</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Potongan Tidak Hadir</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Kompensasi Libur</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Kehilangan Barang</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Kerugian Kasir</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Tabungan Loyalitas</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50">Estimasi Gaji Bersih</th>
+                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-center sticky top-0 z-20 bg-slate-50">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
