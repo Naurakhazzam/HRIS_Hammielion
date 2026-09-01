@@ -1072,12 +1072,17 @@ export default function PenggajianBulananPage() {
     if (payTargets.length === 0 || !currentUser || !paySourcesValid) return
     setPayProcessing(true)
 
-    const failed: string[] = []
+    const failedIds: string[] = []
+    const failedDetails: string[] = []
     for (const p of payTargets) {
       const result = await applyStatusChange(p, 'paid')
-      if (!result.ok) failed.push(p.id)
+      if (!result.ok) {
+        failedIds.push(p.id)
+        failedDetails.push(`${p.employee?.full_name ?? p.id}: ${result.error}`)
+        console.error('[Tandai Lunas] gagal:', p.employee?.full_name, result.error)
+      }
     }
-    const succeeded = payTargets.filter(p => !failed.includes(p.id))
+    const succeeded = payTargets.filter(p => !failedIds.includes(p.id))
 
     // Catat sebagai pengeluaran (Kas Keluar) — satu baris per (karyawan × sumber rekening/kas)
     // yang dipakai, langsung berstatus disetujui karena pelunasan hanya bisa dilakukan owner
@@ -1121,8 +1126,8 @@ export default function PenggajianBulananPage() {
       if (error) coError = error.message
     }
 
-    if (failed.length > 0) {
-      showMessage('error', `${succeeded.length} slip berhasil dilunaskan, ${failed.length} gagal diproses.`)
+    if (failedIds.length > 0) {
+      showMessage('error', `${succeeded.length} slip berhasil dilunaskan, ${failedIds.length} gagal: ${failedDetails.join('; ')}`)
     } else if (coError) {
       showMessage('error', 'Slip ditandai lunas, tapi gagal mencatat pengeluaran Kas Keluar: ' + coError)
     } else {
