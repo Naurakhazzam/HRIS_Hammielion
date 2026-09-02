@@ -59,7 +59,17 @@ export default function InputKasKeluarPage() {
   })
 
   // Mode "Bayar ke Supplier" — supaya tidak perlu pindah ke halaman Pembelian & Utang Supplier untuk aktivitas harian
-  const [entryMode, setEntryMode] = useState<'biasa' | 'supplier' | 'kasbon'>('biasa')
+  const [entryMode, setEntryMode] = useState<'biasa' | 'supplier' | 'kasbon' | 'kendaraan'>('biasa')
+
+  // Mode "Sewa Kendaraan" — hari pemakaian disarankan otomatis dari data ritase driver
+  // (delivery_trips, dihitung per hari kalender penuh 1 s.d. akhir bulan), tapi tetap bisa
+  // dikoreksi manual sebelum disimpan.
+  const [vehicleRates, setVehicleRates] = useState<{ id: string; vehicle_id: string; rate_per_day: number; branch_id: string; account_id: string | null; internal_to_branch_id: string | null; internal_to_account_id: string | null; vehicles: { name: string } | null }[]>([])
+  const [vehicleRateId, setVehicleRateId] = useState('')
+  const [vehicleMonth, setVehicleMonth] = useState(todayLocalStr().slice(0, 7))
+  const [vehicleDays, setVehicleDays] = useState('')
+  const [loadingVehicleDays, setLoadingVehicleDays] = useState(false)
+  const [vehicleSuggestedDays, setVehicleSuggestedDays] = useState<number | null>(null)
 
   // Mode "Cairkan Kasbon" — supaya pencairan kasbon otomatis menambah saldo aktif kasbon_limits
   // karyawan yang bersangkutan (dipakai lagi nanti sebagai referensi/pengurang saat potongan gaji),
@@ -125,6 +135,32 @@ export default function InputKasKeluarPage() {
     setKasbonAmount('')
     setKasbonSaldoAktif(null)
   }
+
+  function resetVehicleFields() {
+    setVehicleRateId('')
+    setVehicleDays('')
+    setVehicleSuggestedDays(null)
+  }
+
+  // Saran hari pemakaian dari data ritase driver (delivery_trips) — dihitung dari hari UNIK
+  // (bukan jumlah ritase, karena 1 hari bisa lebih dari 1 kali jalan), sepanjang bulan kalender
+  // penuh (tanggal 1 s.d. akhir bulan) sesuai kesepakatan, bukan periode gaji 26-25.
+  useEffect(() => {
+    if (!vehicleRateId || !vehicleMonth) { setVehicleSuggestedDays(null); return }
+    const rate = vehicleRates.find(r => r.id === vehicleRateId)
+    if (!rate) return
+    setLoadingVehicleDays(true)
+    const [y, m] = vehicleMonth.split('-').map(Number)
+    const startDate = `${vehicleMonth}-01`
+    const endDate = new Date(y, m, 0).toISOString().slice(0, 10)
+    supabase.from('delivery_trips').select('trip_date').eq('vehicle_id', rate.vehicle_id).gte('trip_date', startDate).lte('trip_date', endDate)
+      .then(({ data }) => {
+        const uniqueDays = new Set((data || []).map(d => d.trip_date)).size
+        setVehicleSuggestedDays(uniqueDays)
+        setVehicleDays(String(uniqueDays))
+        setLoadingVehicleDays(false)
+      })
+  }, [vehicleRateId, vehicleMonth, vehicleRates, supabase])
 
   // Tampilkan saldo kasbon aktif karyawan terpilih, biar kelihatan berapa yang sudah berjalan
   // sebelum nambah pencairan baru (bukan wajib nol — bisa nambah kasbon di atas kasbon lama).
@@ -278,18 +314,20 @@ export default function InputKasKeluarPage() {
         }
       }
 
-      const [bRes, cRes, baRes, sRes, eRes] = await Promise.all([
+      const [bRes, cRes, baRes, sRes, eRes, vRes] = await Promise.all([
         supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
         supabase.from('fin_cash_out_categories').select('code, label, affects_net_profit').eq('is_active', true).order('label'),
         supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name'),
         supabase.from('suppliers').select('id, name').eq('is_active', true).order('name'),
         supabase.from('employees').select('id, full_name, employee_code').eq('is_active', true).order('full_name'),
+        supabase.from('fin_vehicle_rental_rates').select('id, vehicle_id, rate_per_day, branch_id, account_id, internal_to_branch_id, internal_to_account_id, vehicles(name)').eq('is_active', true),
       ])
       if (bRes.data) setBranches(bRes.data)
       if (cRes.data) setCategories(cRes.data)
       if (baRes.data) setBankAccounts(baRes.data)
       if (sRes.data) setSuppliers(sRes.data)
       if (eRes.data) setKasbonEmployees(eRes.data)
+      if (vRes.data) setVehicleRates(vRes.data as any)
 
       await refreshMine(user.id)
       setLoading(false)
@@ -308,7 +346,56 @@ export default function InputKasKeluarPage() {
     if (!myUserId) return
 
     const branchId = isSupervisor ? myBranchId : formData.branch_id
-    if (!branchId) { showMessage('error', 'Cabang wajib dipilih.'); return }
+    // Mode "kendaraan" tidak pakai dropdown Cabang biasa — cabang & rekeningnya sudah ditentukan
+    // dari konfigurasi tarif kendaraan yang dipilih, jadi lewati pengecekan ini untuk mode itu.
+    if (entryMode !== 'kendaraan' && !branchId) { showMessage('error', 'Cabang wajib dipilih.'); return }
+
+    if (entryMode === 'kendaraan') {
+      const rate = vehicleRates.find(r => r.id === vehicleRateId)
+      if (!rate) { showMessage('error', 'Kendaraan wajib dipilih.'); return }
+      const daysNum = parseFloat(vehicleDays)
+      if (isNaN(daysNum) || daysNum <= 0) { showMessage('error', 'Jumlah hari pemakaian tidak valid.'); return }
+
+      setSubmitting(true)
+      const vehicleName = rate.vehicles?.name || 'Kendaraan'
+      const total = rate.rate_per_day * daysNum
+      const [y, m] = vehicleMonth.split('-').map(Number)
+      const endDate = new Date(y, m, 0).toISOString().slice(0, 10)
+      const monthLabel = new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+
+      const { error: outErr } = await supabase.from('fin_cash_out').insert({
+        branch_id: rate.branch_id, category: 'sewa', amount: total,
+        description: `Sewa ${vehicleName} ${daysNum} hari (internal, ke Logistik) - ${monthLabel}`,
+        transaction_date: endDate, account_id: rate.account_id,
+        input_by: myUserId, status: 'pending',
+      })
+      if (outErr) {
+        showMessage('error', 'Gagal mencatat: ' + outErr.message)
+        setSubmitting(false)
+        return
+      }
+
+      if (rate.internal_to_branch_id) {
+        const branchName = branches.find(b => b.id === rate.branch_id)?.name || 'Cabang'
+        const { error: inErr } = await supabase.from('fin_cash_in').insert({
+          branch_id: rate.internal_to_branch_id, transaction_date: endDate, amount: total,
+          expense_amount: 0, cash_adjustment: 0, payment_method: 'transfer',
+          description: `Sewa ${vehicleName} dari ${branchName} (internal), ${daysNum} hari - ${monthLabel}`,
+          account_id: rate.internal_to_account_id, input_by: myUserId, status: 'pending',
+        })
+        if (inErr) {
+          showMessage('error', 'Pengeluaran tersimpan, tapi gagal mencatat pemasangan pemasukan internal: ' + inErr.message)
+          setSubmitting(false)
+          return
+        }
+      }
+
+      showMessage('success', `Sewa ${vehicleName} ${monthLabel} (${daysNum} hari, ${formatRupiah(total)}) berhasil dicatat, menunggu verifikasi.`)
+      resetVehicleFields()
+      refreshMine(myUserId)
+      setSubmitting(false)
+      return
+    }
 
     if (entryMode === 'kasbon') {
       if (!kasbonEmployeeId) { showMessage('error', 'Karyawan wajib dipilih.'); return }
@@ -488,32 +575,34 @@ export default function InputKasKeluarPage() {
         <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
           <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Form Kas Keluar</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
-              {isSupervisor ? (
-                <div className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-slate-50 text-slate-600">{myBranchName || '—'}</div>
-              ) : (
-                <select
-                  required
-                  value={formData.branch_id}
-                  onChange={e => setFormData({ ...formData, branch_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                >
-                  <option value="">-- Pilih Cabang --</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              )}
-            </div>
+            {entryMode !== 'kendaraan' && (
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
+                {isSupervisor ? (
+                  <div className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-slate-50 text-slate-600">{myBranchName || '—'}</div>
+                ) : (
+                  <select
+                    required
+                    value={formData.branch_id}
+                    onChange={e => setFormData({ ...formData, branch_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                  >
+                    <option value="">-- Pilih Cabang --</option>
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Jenis Pengeluaran <span className="text-red-500">*</span></label>
-              <div className="flex gap-2">
-                {(['biasa', 'supplier', 'kasbon'] as const).map(m => (
-                  <button key={m} type="button" onClick={() => { setEntryMode(m); resetSupplierFields(); resetKasbonFields() }}
-                    className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${
+              <div className="flex flex-wrap gap-2">
+                {(['biasa', 'supplier', 'kasbon', 'kendaraan'] as const).map(m => (
+                  <button key={m} type="button" onClick={() => { setEntryMode(m); resetSupplierFields(); resetKasbonFields(); resetVehicleFields() }}
+                    className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition whitespace-nowrap ${
                       entryMode === m ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                     }`}>
-                    {m === 'biasa' ? 'Pengeluaran Biasa' : m === 'supplier' ? '🏭 Bayar ke Supplier' : '💵 Cairkan Kasbon'}
+                    {m === 'biasa' ? 'Pengeluaran Biasa' : m === 'supplier' ? '🏭 Bayar ke Supplier' : m === 'kasbon' ? '💵 Cairkan Kasbon' : '🚚 Sewa Kendaraan'}
                   </button>
                 ))}
               </div>
@@ -534,15 +623,52 @@ export default function InputKasKeluarPage() {
               </div>
             )}
 
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal <span className="text-red-500">*</span></label>
-              <input
-                type="date" required
-                value={formData.transaction_date}
-                onChange={e => setFormData({ ...formData, transaction_date: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
+            {entryMode !== 'kendaraan' && (
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal <span className="text-red-500">*</span></label>
+                <input
+                  type="date" required
+                  value={formData.transaction_date}
+                  onChange={e => setFormData({ ...formData, transaction_date: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+            )}
+
+            {entryMode === 'kendaraan' && (
+              <div className="space-y-4 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Kendaraan <span className="text-red-500">*</span></label>
+                  <select required value={vehicleRateId} onChange={e => setVehicleRateId(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                    <option value="">-- Pilih Kendaraan --</option>
+                    {vehicleRates.map(r => <option key={r.id} value={r.id}>{r.vehicles?.name} ({formatRupiah(r.rate_per_day)}/hari)</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Bulan <span className="text-red-500">*</span></label>
+                  <input type="month" required value={vehicleMonth} onChange={e => setVehicleMonth(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Jumlah Hari Pemakaian <span className="text-red-500">*</span></label>
+                  <RupiahInput required value={vehicleDays} onChange={setVehicleDays}
+                    placeholder="Contoh: 22"
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {loadingVehicleDays ? 'Menghitung dari data ritase driver...' : vehicleSuggestedDays !== null
+                      ? `Saran otomatis dari data ritase driver: ${vehicleSuggestedDays} hari (1 bulan kalender penuh) — bisa dikoreksi manual kalau ada pemakaian di luar rute pengiriman.`
+                      : 'Pilih kendaraan & bulan untuk melihat saran hari pemakaian otomatis.'}
+                  </p>
+                </div>
+                {vehicleRateId && vehicleDays && !isNaN(parseFloat(vehicleDays)) && (
+                  <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-sm text-blue-700">
+                    Total: <strong>{formatRupiah((vehicleRates.find(r => r.id === vehicleRateId)?.rate_per_day || 0) * parseFloat(vehicleDays))}</strong>
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-400">Otomatis tercatat sebagai pengeluaran cabang pemakai <strong>dan</strong> pemasukan cabang internal (Logistik) — tidak perlu diisi manual.</p>
+              </div>
+            )}
 
             {(entryMode === 'biasa' || entryMode === 'kasbon' || supplierSubMode === 'existing' || payNow) && (
               <div>
