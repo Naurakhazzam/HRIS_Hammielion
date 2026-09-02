@@ -135,6 +135,8 @@ export default function RiwayatKasKeluarPage() {
   const totalAll = rows.reduce((acc, r) => acc + Number(r.amount), 0)
   const totalApproved = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.amount), 0)
   const countPending = rows.filter(r => r.status === 'pending').length
+  const rejectedRows = rows.filter(r => r.status === 'rejected')
+  const totalRejected = rejectedRows.reduce((acc, r) => acc + Number(r.amount), 0)
 
   function canEditRow(r: CashOutRow) {
     if (r.status !== 'pending') return false
@@ -201,7 +203,7 @@ export default function RiwayatKasKeluarPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-4">
         <div>
           <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Entri</p>
           <p className="text-xl font-bold text-slate-800">{rows.length}</p>
@@ -209,6 +211,7 @@ export default function RiwayatKasKeluarPage() {
         <div>
           <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Nominal</p>
           <p className="text-xl font-bold text-slate-800">{formatRupiah(totalAll)}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">Termasuk yang ditolak — bukan angka pengeluaran riil</p>
         </div>
         <div>
           <p className="text-xs text-slate-500 font-medium uppercase mb-1">Disetujui</p>
@@ -217,6 +220,11 @@ export default function RiwayatKasKeluarPage() {
         <div>
           <p className="text-xs text-slate-500 font-medium uppercase mb-1">Menunggu</p>
           <p className="text-xl font-bold text-yellow-700">{countPending} entri</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500 font-medium uppercase mb-1">Ditolak</p>
+          <p className="text-xl font-bold text-red-700">{formatRupiah(totalRejected)}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">{rejectedRows.length} entri</p>
         </div>
       </div>
 
