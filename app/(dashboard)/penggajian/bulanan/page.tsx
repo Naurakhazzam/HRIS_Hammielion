@@ -285,16 +285,25 @@ export default function PenggajianBulananPage() {
 
   async function fetchLateHistory() {
     setLoadingLateHistory(true)
-    let query = supabase
+    // Fetch payrolls dan employees terpisah lalu join manual di JS — payrolls punya 2 relasi ke
+    // employees (employee_id dan approved_by), jadi embed langsung (employees!inner(...)) ambigu
+    // dan gagal tanpa nama constraint eksplisit. Cara ini menghindari ambiguitas itu sepenuhnya.
+    const { data, error } = await supabase
       .from('payrolls')
-      .select('period_month, period_year, late_deduction, employee:employees!inner(branch_id)')
+      .select('employee_id, period_month, period_year, late_deduction')
       .order('period_year', { ascending: false })
       .order('period_month', { ascending: false })
-    if (filterBranch) query = query.eq('employee.branch_id', filterBranch)
-    const { data, error } = await query
     if (error) { console.error('Detail error riwayat telat:', JSON.stringify(error, null, 2)); setLoadingLateHistory(false); return }
+
+    let branchByEmployee: Record<string, string> = {}
+    if (filterBranch) {
+      const { data: empData } = await supabase.from('employees').select('id, branch_id')
+      branchByEmployee = Object.fromEntries((empData || []).map(e => [e.id, e.branch_id]))
+    }
+
     const grouped: Record<string, { month: number; year: number; total: number; count: number }> = {}
     ;(data || []).forEach((row: any) => {
+      if (filterBranch && branchByEmployee[row.employee_id] !== filterBranch) return
       const key = `${row.period_year}-${row.period_month}`
       if (!grouped[key]) grouped[key] = { month: row.period_month, year: row.period_year, total: 0, count: 0 }
       grouped[key].total += Number(row.late_deduction)
