@@ -59,7 +59,15 @@ export default function InputKasKeluarPage() {
   })
 
   // Mode "Bayar ke Supplier" — supaya tidak perlu pindah ke halaman Pembelian & Utang Supplier untuk aktivitas harian
-  const [entryMode, setEntryMode] = useState<'biasa' | 'supplier'>('biasa')
+  const [entryMode, setEntryMode] = useState<'biasa' | 'supplier' | 'kasbon'>('biasa')
+
+  // Mode "Cairkan Kasbon" — supaya pencairan kasbon otomatis menambah saldo aktif kasbon_limits
+  // karyawan yang bersangkutan (dipakai lagi nanti sebagai referensi/pengurang saat potongan gaji),
+  // bukan cuma tercatat sebagai baris pengeluaran lepas tanpa nyambung ke siapa pun.
+  const [kasbonEmployees, setKasbonEmployees] = useState<{ id: string; full_name: string; employee_code: string }[]>([])
+  const [kasbonEmployeeId, setKasbonEmployeeId] = useState('')
+  const [kasbonAmount, setKasbonAmount] = useState('')
+  const [kasbonSaldoAktif, setKasbonSaldoAktif] = useState<number | null>(null)
   const [activeSubTab, setActiveSubTab] = useState<'riwayat' | 'revisi'>('riwayat')
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [supplierId, setSupplierId] = useState('')
@@ -111,6 +119,20 @@ export default function InputKasKeluarPage() {
     setPayNow(false)
     setPayNowAmount('')
   }
+
+  function resetKasbonFields() {
+    setKasbonEmployeeId('')
+    setKasbonAmount('')
+    setKasbonSaldoAktif(null)
+  }
+
+  // Tampilkan saldo kasbon aktif karyawan terpilih, biar kelihatan berapa yang sudah berjalan
+  // sebelum nambah pencairan baru (bukan wajib nol — bisa nambah kasbon di atas kasbon lama).
+  useEffect(() => {
+    if (!kasbonEmployeeId) { setKasbonSaldoAktif(null); return }
+    supabase.from('kasbon_limits').select('current_balance').eq('employee_id', kasbonEmployeeId).maybeSingle()
+      .then(({ data }) => setKasbonSaldoAktif(Number(data?.current_balance ?? 0)))
+  }, [kasbonEmployeeId, supabase])
 
   const openPurchases = supplierPurchases.filter(p => unrequestedFor(p.total_amount, p.id, supplierPayments) > 0)
 
@@ -256,16 +278,18 @@ export default function InputKasKeluarPage() {
         }
       }
 
-      const [bRes, cRes, baRes, sRes] = await Promise.all([
+      const [bRes, cRes, baRes, sRes, eRes] = await Promise.all([
         supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
         supabase.from('fin_cash_out_categories').select('code, label, affects_net_profit').eq('is_active', true).order('label'),
         supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name'),
         supabase.from('suppliers').select('id, name').eq('is_active', true).order('name'),
+        supabase.from('employees').select('id, full_name, employee_code').eq('is_active', true).order('full_name'),
       ])
       if (bRes.data) setBranches(bRes.data)
       if (cRes.data) setCategories(cRes.data)
       if (baRes.data) setBankAccounts(baRes.data)
       if (sRes.data) setSuppliers(sRes.data)
+      if (eRes.data) setKasbonEmployees(eRes.data)
 
       await refreshMine(user.id)
       setLoading(false)
@@ -285,6 +309,43 @@ export default function InputKasKeluarPage() {
 
     const branchId = isSupervisor ? myBranchId : formData.branch_id
     if (!branchId) { showMessage('error', 'Cabang wajib dipilih.'); return }
+
+    if (entryMode === 'kasbon') {
+      if (!kasbonEmployeeId) { showMessage('error', 'Karyawan wajib dipilih.'); return }
+      if (!formData.account_id) { showMessage('error', 'Rekening/kas sumber wajib dipilih.'); return }
+      const amountNum = parseFloat(kasbonAmount)
+      if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Nominal tidak valid.'); return }
+
+      setSubmitting(true)
+      const empName = kasbonEmployees.find(e => e.id === kasbonEmployeeId)?.full_name || 'Karyawan'
+      const { error } = await supabase.from('fin_cash_out').insert({
+        branch_id: branchId, category: 'kasbon_cair', amount: amountNum,
+        description: `Pencairan kasbon - ${empName}${formData.description ? ' - ' + formData.description : ''}`,
+        transaction_date: formData.transaction_date, account_id: formData.account_id,
+        input_by: myUserId, status: 'pending',
+      })
+      if (error) {
+        showMessage('error', 'Gagal mencatat: ' + error.message)
+        setSubmitting(false)
+        return
+      }
+
+      // Tambah saldo kasbon aktif karyawan — inilah yang nanti jadi acuan potongan gaji
+      // (Penggajian Bulanan sudah baca kasbon_limits.current_balance sebagai "Saldo Kasbon").
+      const { data: existing } = await supabase.from('kasbon_limits').select('id, current_balance').eq('employee_id', kasbonEmployeeId).maybeSingle()
+      if (existing) {
+        await supabase.from('kasbon_limits').update({ current_balance: Number(existing.current_balance) + amountNum, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      } else {
+        await supabase.from('kasbon_limits').insert({ employee_id: kasbonEmployeeId, max_limit: amountNum, current_balance: amountNum })
+      }
+
+      showMessage('success', `Pencairan kasbon untuk ${empName} berhasil dicatat, menunggu verifikasi. Saldo kasbon aktifnya otomatis bertambah.`)
+      setFormData(f => ({ ...f, description: '', account_id: '' }))
+      resetKasbonFields()
+      refreshMine(myUserId)
+      setSubmitting(false)
+      return
+    }
 
     if (entryMode === 'biasa') {
       if (!formData.category) { showMessage('error', 'Kategori wajib dipilih.'); return }
@@ -447,12 +508,12 @@ export default function InputKasKeluarPage() {
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Jenis Pengeluaran <span className="text-red-500">*</span></label>
               <div className="flex gap-2">
-                {(['biasa', 'supplier'] as const).map(m => (
-                  <button key={m} type="button" onClick={() => { setEntryMode(m); resetSupplierFields() }}
+                {(['biasa', 'supplier', 'kasbon'] as const).map(m => (
+                  <button key={m} type="button" onClick={() => { setEntryMode(m); resetSupplierFields(); resetKasbonFields() }}
                     className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${
                       entryMode === m ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                     }`}>
-                    {m === 'biasa' ? 'Pengeluaran Biasa' : '🏭 Bayar ke Supplier'}
+                    {m === 'biasa' ? 'Pengeluaran Biasa' : m === 'supplier' ? '🏭 Bayar ke Supplier' : '💵 Cairkan Kasbon'}
                   </button>
                 ))}
               </div>
@@ -483,7 +544,7 @@ export default function InputKasKeluarPage() {
               />
             </div>
 
-            {(entryMode === 'biasa' || supplierSubMode === 'existing' || payNow) && (
+            {(entryMode === 'biasa' || entryMode === 'kasbon' || supplierSubMode === 'existing' || payNow) && (
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
                 <select
@@ -512,6 +573,29 @@ export default function InputKasKeluarPage() {
                   placeholder="Contoh: 500.000"
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
+              </div>
+            )}
+
+            {entryMode === 'kasbon' && (
+              <div className="space-y-4 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Karyawan <span className="text-red-500">*</span></label>
+                  <select required value={kasbonEmployeeId} onChange={e => setKasbonEmployeeId(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                    <option value="">-- Pilih Karyawan --</option>
+                    {kasbonEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name} ({e.employee_code})</option>)}
+                  </select>
+                  {kasbonEmployeeId && kasbonSaldoAktif !== null && kasbonSaldoAktif > 0 && (
+                    <p className="text-[11px] text-amber-600 mt-1">Sudah punya saldo kasbon aktif {formatRupiah(kasbonSaldoAktif)} — pencairan ini akan ditambahkan ke saldo itu.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dicairkan (Rp) <span className="text-red-500">*</span></label>
+                  <RupiahInput required value={kasbonAmount} onChange={setKasbonAmount}
+                    placeholder="Contoh: 500.000"
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <p className="text-[11px] text-slate-400 mt-1">Otomatis tercatat sebagai piutang karyawan (tidak masuk laba/rugi) dan menambah saldo kasbon aktifnya — nanti jadi acuan potongan gaji di Penggajian Bulanan.</p>
+                </div>
               </div>
             )}
 
@@ -630,7 +714,7 @@ export default function InputKasKeluarPage() {
               </div>
             )}
 
-            {(entryMode === 'biasa' || supplierSubMode === 'existing') && (
+            {(entryMode === 'biasa' || entryMode === 'kasbon' || supplierSubMode === 'existing') && (
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Keterangan</label>
                 <textarea

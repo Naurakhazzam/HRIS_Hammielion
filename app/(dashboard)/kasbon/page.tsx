@@ -362,7 +362,7 @@ function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', m
 function TabLimit({ showMessage }: { showMessage: (t: 'success' | 'error', msg: string) => void }) {
   const supabase = createClient()
   const [employees, setEmployees] = useState<Employee[]>([])
-  const [activeRequests, setActiveRequests] = useState<{employee_id:string;amount_requested:number;total_deducted:number}[]>([])
+  const [balances, setBalances] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState<string>('')
@@ -379,19 +379,16 @@ function TabLimit({ showMessage }: { showMessage: (t: 'success' | 'error', msg: 
       .order('full_name')
     if (empData) setEmployees(empData as unknown as Employee[])
 
-    const { data: reqData } = await supabase
-      .from('kasbon_requests')
-      .select('employee_id, amount_requested, total_deducted')
-      .eq('status', 'approved')
-    if (reqData) setActiveRequests(reqData as any)
+    // Saldo aktif = kasbon_limits.current_balance — sumber yang sama dipakai Penggajian Bulanan
+    // (potongan gaji) dan Input Kas Keluar (pencairan), supaya angkanya selalu sinkron di mana pun
+    // ditampilkan. Bukan dihitung dari kasbon_requests, karena alur pengajuan formal itu tidak
+    // dipakai — pencairan & potongan kasbon selama ini lewat Kas Keluar & Payroll langsung.
+    const { data: klData } = await supabase.from('kasbon_limits').select('employee_id, current_balance')
+    if (klData) setBalances(Object.fromEntries(klData.map(r => [r.employee_id, Number(r.current_balance)])))
     setLoading(false)
   }
 
-  const activeSaldo = (employeeId: string) => {
-    return activeRequests
-      .filter(r => r.employee_id === employeeId)
-      .reduce((sum, r) => sum + (r.amount_requested - r.total_deducted), 0)
-  }
+  const activeSaldo = (employeeId: string) => balances[employeeId] ?? 0
 
   async function handleSaveLimit(id: string) {
     const val = Number(editValue)
