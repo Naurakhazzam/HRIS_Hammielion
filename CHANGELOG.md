@@ -433,6 +433,34 @@ Klik "Tandai Lunas" (satuan maupun massal) sekarang membuka modal: tanggal pemba
 
 **Update lanjutan — index dihapus total:** Ternyata `(source_table, source_id, account_id)` masih terlalu ketat juga: satu slip gaji bisa punya LEBIH dari satu peristiwa pembayaran nyata dari rekening yang SAMA (mis. gaji pokok dibayar dari Kas Tunai, lalu belakangan ada Bonus Tambahan yang juga dibayar dari Kas Tunai untuk slip yang sama) — kena block lagi dengan error yang sama. Karena proteksi anti-dobel-post ini awalnya dibuat khusus untuk jaga-jaga trigger auto-post lama (item #16, sudah dihapus total), dan sekarang tidak ada lagi mekanisme otomatis yang bisa menyebabkan dobel post, index `fin_cash_out_source_unique` **dihapus total** (bukan diubah lagi) — tidak ada lagi pembatasan unik pada source_table/source_id/account_id.
 
+### 18. Fitur: Biaya Tetap Berkala Diperluas — Flat/Bulan vs Tarif Harian, dan Sewa Internal ke Logistik
+
+Halaman "Biaya Tetap Berkala" (sudah ada sebelumnya tapi belum pernah dipakai — 0 baris) diperluas: setiap item sekarang punya `billing_type` (`flat` = nominal tetap per bulan, mis. sewa toko/gudang; `daily` = tarif harian × jumlah hari dalam bulan kalender, mis. sewa motor/parkir). Ditambahkan juga `account_id` (dibayar dari rekening/kas mana) dan `internal_to_branch_id` + `internal_to_account_id` — untuk item yang uangnya masuk ke cabang lain secara internal (lihat konsep "Logistik sebagai perusahaan dalam perusahaan" di bawah), generator otomatis (`fin_generate_recurring_costs`, dijalankan pg_cron tiap tanggal 28) sekarang juga insert baris `fin_cash_in` pasangannya di cabang penerima, bukan cuma `fin_cash_out` di cabang pembayar.
+
+### 19. Fitur: Sewa Kendaraan Berbasis Ritase — Kas Keluar Mode "Kendaraan"
+
+**Konsep bisnis baru yang dikonfirmasi user:** Logistik adalah "perusahaan dalam perusahaan" — sewa toko, motor, mobil, dan parkir yang dibayar cabang-cabang lain ke Logistik adalah **transfer uang beneran antar rekening**, bukan sekadar alokasi pembukuan. Tabel baru `fin_vehicle_rental_rates` menyimpan tarif per-hari per kendaraan (Engkel Box, Grand Max Box, L300) + cabang/rekening pembayar dan cabang/rekening penerima (Logistik).
+
+Karena jumlah hari pakai kendaraan bervariasi per bulan (beda dengan sewa toko/motor yang flat), dibuatkan mode input manual "🚚 Sewa Kendaraan" di Kas Keluar: pilih kendaraan + bulan, sistem otomatis menyarankan jumlah hari pakai dengan menghitung `COUNT(DISTINCT trip_date)` dari data Ritase Driver (`delivery_trips`) pada bulan itu — validasi empiris menunjukkan angka ini mendekati laporan manual user. Angka saran selalu bisa diedit manual. Submit akan insert pasangan `fin_cash_out` (cabang pembayar) + `fin_cash_in` (Logistik), status `pending` (butuh approval, beda dari Biaya Tetap Berkala yang langsung `approved`).
+
+### 20. Fix: Mekanisme Kasbon Terputus dari Pencairan — `kasbon_limits` Tidak Pernah Terupdate dari Kas Keluar
+
+**Ditemukan:** Tabel `kasbon_requests`/`kasbon_deductions`/`kasbon_limits` (backing tab "Pengajuan"/"Riwayat Potongan" di halaman Kasbon) kosong total, padahal 14 slip gaji nyata sudah punya `kasbon_deduction` (potongan kasbon ditulis manual di slip, tanpa ledger). Terpisah, kategori Kas Keluar `kasbon_cair` (Pencairan Kasbon) sudah punya 30 entri nyata — tapi **tidak pernah** mengupdate `kasbon_limits.current_balance`, padahal itu yang dibaca Penggajian Bulanan sebagai referensi "Saldo Kasbon" saat slip dilunaskan. Akibatnya saldo kasbon di sistem selalu salah/kosong.
+
+**Fix:** Mode entri baru "💵 Cairkan Kasbon" di Kas Keluar — insert baris Kas Keluar (`kasbon_cair`) **dan** upsert `kasbon_limits.current_balance` sekaligus. Tab Limit di halaman Kasbon (`app/(dashboard)/kasbon/page.tsx`) diperbaiki membaca "Saldo Aktif" dari `kasbon_limits.current_balance`, bukan dari `kasbon_requests` yang selalu kosong.
+
+### 21. Fitur: Halaman Logistik — Laporan Penuh Pendapatan & Pengeluaran
+
+Halaman baru `keuangan/logistik` — laporan gabungan Pendapatan (Kas Masuk) dan Pengeluaran (Kas Keluar) khusus cabang Logistik plus Sisa Saldo, supaya uang Logistik kelihatan terpisah dari cabang lain (konsekuensi langsung dari konsep "perusahaan dalam perusahaan" di item #18–19). Default tampil **semua periode** (laporan full), dengan toggle opsional ke tampilan per bulan.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/biaya-tetap/page.tsx` | Toggle Flat/Tarif Harian, field rekening, sewa internal |
+| `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Mode "Cairkan Kasbon" & "Sewa Kendaraan" |
+| `app/(dashboard)/kasbon/page.tsx` | Saldo Aktif dari `kasbon_limits` |
+| `app/(dashboard)/keuangan/logistik/page.tsx` | Halaman baru — laporan Pendapatan/Pengeluaran/Sisa Saldo Logistik |
+| **DB** | Tabel baru `fin_vehicle_rental_rates`; kolom baru `fin_recurring_costs.billing_type/account_id/internal_to_branch_id/internal_to_account_id` |
+
 ---
 
-*Terakhir diupdate: Sesi 3 (2026-09-01)*
+*Terakhir diupdate: Sesi 3 (2026-09-04)*
