@@ -66,6 +66,7 @@ const adminNavItems: NavNode[] = [
         ]
       },
       { name: 'Pembelian & Utang Supplier', href: '/keuangan/pembelian' },
+      { name: 'Logistik', href: '/keuangan/logistik' },
       {
         name: 'Modal & Aset',
         href: '/keuangan/modal',
