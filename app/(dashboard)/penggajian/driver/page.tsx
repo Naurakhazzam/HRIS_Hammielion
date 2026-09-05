@@ -647,6 +647,8 @@ export default function PenggajianDriverPage() {
 
   const groupedByHelper = trips.reduce((acc, trip) => {
     if (!trip.has_helper || !trip.helper?.full_name || !trip.helper_id) return acc
+    // Trip dengan upah kenek Rp0 secara teknis tidak dibayar ke kenek — jangan tampil di slip/rekap upah kenek.
+    if (Number(trip.helper_earning) === 0) return acc
     const helperName = trip.helper.full_name
     if (!acc[helperName]) acc[helperName] = { trips: [], helperId: trip.helper_id }
     acc[helperName].trips.push(trip)
