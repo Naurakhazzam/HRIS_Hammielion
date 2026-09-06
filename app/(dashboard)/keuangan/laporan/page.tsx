@@ -88,6 +88,7 @@ export default function LaporanResmiPage() {
   const [prevConsolidated, setPrevConsolidated] = useState<GroupTotals | null>(null)
   const [branches, setBranches] = useState<Branch[]>([])
   const [exporting, setExporting] = useState(false)
+  const [saldoAwalReal, setSaldoAwalReal] = useState<number | null>(null)
 
   useEffect(() => {
     async function init() {
@@ -211,16 +212,24 @@ export default function LaporanResmiPage() {
       prevPeriod = [pm, py]
     }
 
-    const [cur, prev] = await Promise.all([
+    const [cur, prev, saldoAwalRes] = await Promise.all([
       computeTotals(curStart, curEnd, curPeriod?.[0], curPeriod?.[1]),
       computeTotals(prevStart, prevEnd, prevPeriod?.[0], prevPeriod?.[1]),
+      // Saldo Awal (Real) cuma valid kalau ada rekening yang opening_balance_date-nya PERSIS di tanggal 1 periode ini —
+      // artinya periode ini punya anchor saldo fisik yang benar-benar dihitung, bukan diperkirakan.
+      supabase.from('fin_bank_accounts').select('opening_balance').eq('is_active', true).eq('opening_balance_date', curStart),
     ])
     setGroups(cur.groups)
     setConsolidated(cur.consolidated)
     setPrevGroups(prev.groups)
     setPrevConsolidated(prev.consolidated)
+    setSaldoAwalReal(
+      (saldoAwalRes.data && saldoAwalRes.data.length > 0)
+        ? saldoAwalRes.data.reduce((s, r) => s + Number(r.opening_balance), 0)
+        : null
+    )
     setLoading(false)
-  }, [tab, week, month, computeTotals])
+  }, [tab, week, month, computeTotals, supabase])
 
   useEffect(() => { if (!roleLoading) fetchData() }, [roleLoading, fetchData])
 
@@ -452,6 +461,25 @@ export default function LaporanResmiPage() {
                     </p>
                   </div>
                 </div>
+
+                {saldoAwalReal !== null && (
+                  <div className="mt-4 pt-4 border-t border-dashed border-slate-200">
+                    <p className="text-xs font-medium text-slate-500 mb-2 flex items-center">Dijembatani dengan Saldo Awal Real (per {new Date(month + '-01').toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })})
+                      <InfoTooltip text="Rekening/kas Anda punya Saldo Awal fisik (hasil hitung nyata) tepat di tanggal 1 bulan ini — dipakai sebagai anchor untuk hitung Saldo Akhir Seharusnya. Kalau nanti Anda hitung fisik lagi di akhir bulan, bandingkan dengan angka ini untuk mengecek kelengkapan pencatatan." />
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <div>
+                        <p className="text-xs text-slate-500 uppercase mb-1">Saldo Awal (Real)</p>
+                        <p className="text-base font-semibold text-slate-800">{formatRupiah(saldoAwalReal)}</p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <p className="text-xs text-slate-500 uppercase mb-1">Saldo Akhir Seharusnya (akhir periode ini)</p>
+                        <p className="text-base font-bold text-blue-700">{formatRupiah(saldoAwalReal + selisihKecukupanKas)}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Saldo Awal + Selisih Kecukupan Kas di atas. Cocokkan dengan hitung fisik akhir bulan untuk validasi.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             )
