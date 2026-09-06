@@ -385,11 +385,16 @@ export default function LaporanResmiPage() {
             </div>
           )}
 
-          {isAdmin && tab === 'bulanan' && consolidated && consolidated.omsetSistem > 0 && (
+          {isAdmin && tab === 'bulanan' && consolidated && consolidated.omsetSistem > 0 && (() => {
+            const labaKotorSistem = consolidated.omsetSistem - consolidated.hpp
+            const labaBersihSistem = labaKotorSistem - consolidated.biayaOperasional - consolidated.kasbonRealisasi
+            const sisaKasSeharusnya = consolidated.kasMasuk - consolidated.pembayaranSupplierReal
+            const selisihKecukupanKas = sisaKasSeharusnya - consolidated.biayaOperasional
+            return (
             <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-purple-200">
               <h2 className="text-lg font-bold text-slate-800 mb-1">Omset &amp; HPP Sistem Kasir vs Kas Real</h2>
-              <p className="text-xs text-slate-500 mb-3">Dari input di <Link href="/keuangan/hpp" className="text-blue-600 hover:underline">HPP &amp; Omset (Sistem)</Link>. Laba Kotor (Sistem) lebih dipercaya daripada Laba Kotor di atas (yang berbasis Kas Masuk), karena langsung dari sistem kasir — tidak terpengaruh piutang/uang yang belum cair.</p>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <p className="text-xs text-slate-500 mb-3">Dari input di <Link href="/keuangan/hpp" className="text-blue-600 hover:underline">HPP &amp; Omset (Sistem)</Link>. Laba Kotor/Bersih (Sistem) lebih dipercaya daripada di panel atas (yang berbasis Kas Masuk), karena langsung dari sistem kasir — tidak terpengaruh piutang/uang yang belum cair.</p>
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Omset (Sistem)</p>
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.omsetSistem)}</p>
@@ -400,7 +405,13 @@ export default function LaporanResmiPage() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1">Laba Kotor (Sistem)</p>
-                  <p className={`text-lg font-bold ${consolidated.omsetSistem - consolidated.hpp >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(consolidated.omsetSistem - consolidated.hpp)}</p>
+                  <p className={`text-lg font-bold ${labaKotorSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaKotorSistem)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Laba Bersih (Sistem)
+                    <InfoTooltip text="Laba Kotor (Sistem) dikurangi Biaya Operasional (Real) & Realisasi Kasbon — angka bottom line yang paling bisa dipercaya bulan ini." />
+                  </p>
+                  <p className={`text-lg font-bold ${labaBersihSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaBersihSistem)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Uang Diterima (Real)
@@ -418,8 +429,33 @@ export default function LaporanResmiPage() {
                   <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.pembayaranSupplierReal)}</p>
                 </div>
               </div>
+
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <h3 className="text-sm font-bold text-slate-700 mb-1 flex items-center">Cek Kecukupan Kas
+                  <InfoTooltip text="Uang Diterima (Real) dikurangi Pembayaran Supplier (Real) = sisa kas yang seharusnya ada untuk menutup Biaya Operasional. Ini cek likuiditas bulan ini, BUKAN cek untung/rugi — bisa saja untung (Laba Bersih Sistem positif) tapi kasnya sedang defisit karena momentum bayar supplier." />
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase mb-1">Sisa Kas Seharusnya Ada</p>
+                    <p className="text-base font-semibold text-slate-800">{formatRupiah(sisaKasSeharusnya)}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Uang Diterima − Pembayaran Supplier</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase mb-1">Biaya Operasional (Real)</p>
+                    <p className="text-base font-semibold text-slate-800">{formatRupiah(consolidated.biayaOperasional)}</p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-slate-500 uppercase mb-1">Selisih (Surplus/Defisit)</p>
+                    <p className={`text-base font-bold ${selisihKecukupanKas >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(selisihKecukupanKas)}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {selisihKecukupanKas >= 0 ? 'Cukup — kas bulan ini menutup Biaya Operasional.' : 'Defisit — kekurangannya ditutup dari saldo kas yang sudah ada sebelumnya, bukan dari hasil bulan ini.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
+            )
+          })()}
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50">
