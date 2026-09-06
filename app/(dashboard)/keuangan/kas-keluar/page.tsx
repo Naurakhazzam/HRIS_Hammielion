@@ -32,6 +32,10 @@ type MyCashOut = {
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
+// Kategori yang seharusnya lahir dari slip gaji resmi (Tandai Lunas), bukan diketik bebas di sini —
+// setiap kali ada input manual untuk kategori ini, riwayatnya selalu berujung salah cabang atau dobel.
+const PAYROLL_CATEGORIES = ['payroll', 'gaji_', 'driver_wage', 'helper_wage', 'borongan_wage']
+
 export default function InputKasKeluarPage() {
   const supabase = createClient()
 
@@ -60,6 +64,9 @@ export default function InputKasKeluarPage() {
 
   // Mode "Bayar ke Supplier" — supaya tidak perlu pindah ke halaman Pembelian & Utang Supplier untuk aktivitas harian
   const [entryMode, setEntryMode] = useState<'biasa' | 'supplier' | 'kasbon' | 'kendaraan'>('biasa')
+
+  // Peringatan kategori "Gaji" — cegah input manual untuk karyawan yang sudah terdaftar (harus lewat Tandai Lunas)
+  const [gajiConfirmed, setGajiConfirmed] = useState<'unregistered' | 'registered' | null>(null)
 
   // Mode "Sewa Kendaraan" — hari pemakaian disarankan otomatis dari data ritase driver
   // (delivery_trips, dihitung per hari kalender penuh 1 s.d. akhir bulan), tapi tetap bisa
@@ -436,6 +443,10 @@ export default function InputKasKeluarPage() {
 
     if (entryMode === 'biasa') {
       if (!formData.category) { showMessage('error', 'Kategori wajib dipilih.'); return }
+      if (PAYROLL_CATEGORIES.includes(formData.category) && gajiConfirmed !== 'unregistered') {
+        showMessage('error', 'Konfirmasi dulu apakah karyawan ini terdaftar di sistem — kalau terdaftar, gajinya wajib lewat Tandai Lunas, bukan input manual di sini.')
+        return
+      }
       if (!formData.account_id) { showMessage('error', 'Rekening/kas sumber wajib dipilih.'); return }
       const amountNum = parseFloat(formData.amount)
       if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
@@ -457,6 +468,7 @@ export default function InputKasKeluarPage() {
       } else {
         showMessage('success', 'Kas keluar berhasil dicatat, menunggu verifikasi tim finance pusat.')
         setFormData(f => ({ ...f, amount: '', description: '', account_id: '' }))
+        setGajiConfirmed(null)
         refreshMine(myUserId)
       }
       setSubmitting(false)
@@ -614,12 +626,41 @@ export default function InputKasKeluarPage() {
                 <select
                   required
                   value={formData.category}
-                  onChange={e => setFormData({ ...formData, category: e.target.value })}
+                  onChange={e => { setFormData({ ...formData, category: e.target.value }); setGajiConfirmed(null) }}
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                 >
                   <option value="">-- Pilih Kategori --</option>
                   {categories.map(c => <option key={c.code} value={c.code}>{c.label}{!c.affects_net_profit ? ' (tidak masuk laba/rugi)' : ''}</option>)}
                 </select>
+
+                {PAYROLL_CATEGORIES.includes(formData.category) && (
+                  <div className="mt-2 p-3 rounded-lg border bg-amber-50 border-amber-200">
+                    <p className="text-xs font-medium text-amber-800 mb-2">⚠ Apakah karyawan ini terdaftar di sistem (staff/driver/kenek tetap)?</p>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setGajiConfirmed('unregistered')}
+                        className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${gajiConfirmed === 'unregistered' ? 'bg-green-600 text-white border-green-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                        Tidak — freelance/lepas
+                      </button>
+                      <button type="button" onClick={() => setGajiConfirmed('registered')}
+                        className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${gajiConfirmed === 'registered' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                        Ya — terdaftar
+                      </button>
+                    </div>
+                    {gajiConfirmed === 'registered' && (
+                      <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
+                        <p className="font-medium mb-1">Jangan input manual di sini — gajinya harus lewat Tandai Lunas supaya cabang &amp; nominalnya otomatis benar. Buka sesuai perannya:</p>
+                        <div className="flex flex-wrap gap-x-3 gap-y-1">
+                          <Link href="/penggajian/bulanan" className="underline">Gaji Staff</Link>
+                          <Link href="/penggajian/driver" className="underline">Gaji Driver</Link>
+                          <Link href="/penggajian/borongan" className="underline">Gajian Bongkar Muat</Link>
+                        </div>
+                      </div>
+                    )}
+                    {gajiConfirmed === 'unregistered' && (
+                      <p className="mt-2 text-xs text-green-700">Oke, boleh dilanjutkan sebagai input manual (freelance/lepas).</p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
