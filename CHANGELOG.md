@@ -501,6 +501,19 @@ Diverifikasi: total Biaya Operasional hasil hitung ulang dari rincian kategori u
 | `app/(dashboard)/penggajian/driver/page.tsx` | Tombol & modal Tandai Lunas Driver; hapus jalur bulk lunas lama |
 | **DB** | Koreksi nominal 15 baris `fin_cash_out` kategori `driver_wage` |
 
+### 25. Fix: "Nota Rekap Bayar Sendiri" — Utang Supplier Dobel Hitung di Markas Petshop & Raja Petshop, + Fitur "Bayar Sekaligus" di Kas Keluar
+
+**Ditemukan:** 5 baris `supplier_purchases` (Markas Petshop/Hammielion x2, Raja Petshop/Hammielion x2, Raja Petshop/Gudang x1) ternyata bukan nota belanja asli — isinya rekap pembayaran ("Pembayaran Supplier tanggal 21,22,23,24") yang dibuat lewat mode "Catat Tagihan Baru" di Kas Keluar, lalu langsung dibayar lunas sendiri. Akibatnya nota-nota ASLI yang seharusnya dilunasi tetap tercatat Rp0 terbayar — utang dobel hitung (nota asli + nota rekap).
+
+**Fix data:** Untuk Markas/Hammielion & Raja/Hammielion (rekap ≈ menutup semua nota terbuka, selisih kecil/wajar) — nota rekap dihapus, pembayarannya dialokasikan ulang FIFO ke nota asli (kelebihan kecil ditaruh di nota terakhir supaya total uang keluar tidak berubah). Untuk Raja/Gudang (rekap jauh lebih kecil dari total terbuka, tidak bisa dipastikan nota mana) — dialokasikan FIFO best-effort, sisanya tetap tercatat sebagai utang belum tertagih.
+
+**Fix struktural:** Ditambahkan mode **"💰 Bayar Sekaligus"** di Kas Keluar → Bayar ke Supplier — port logika bulk-pay yang sudah ada di Pembelian & Utang Supplier (Ringkasan per Supplier), alokasi otomatis FIFO ke nota tertua, lintas cabang (cabang tiap baris ikut nota aslinya). Dijadikan mode default & urutan pertama, dengan peringatan di mode "Catat Tagihan Baru" mengarahkan ke sini — supaya tidak ada alasan lagi bikin nota rekap palsu.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Mode "Bayar Sekaligus" (auto-FIFO lintas cabang) |
+| **DB** | Hapus 5 nota rekap + realokasi 19 baris `fin_cash_out` pembayaran supplier |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07)*
