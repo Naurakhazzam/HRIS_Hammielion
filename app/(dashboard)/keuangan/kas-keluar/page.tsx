@@ -11,7 +11,7 @@ type Branch = { id: string; name: string }
 type Category = { code: string; label: string; affects_net_profit: boolean }
 type BankAccount = { id: string; bank_name: string; account_number: string | null; account_type: string }
 type Supplier = { id: string; name: string }
-type SupplierPurchaseOpt = { id: string; total_amount: number; description: string | null; purchase_date: string }
+type SupplierPurchaseOpt = { id: string; branch_id: string; total_amount: number; description: string | null; purchase_date: string }
 type SupplierPaymentRow = { source_id: string; amount: number; status: string }
 type MyCashOut = {
   id: string
@@ -91,13 +91,18 @@ export default function InputKasKeluarPage() {
   const [supplierPurchases, setSupplierPurchases] = useState<SupplierPurchaseOpt[]>([])
   const [supplierPayments, setSupplierPayments] = useState<SupplierPaymentRow[]>([])
   const [loadingSupplierData, setLoadingSupplierData] = useState(false)
-  const [supplierSubMode, setSupplierSubMode] = useState<'existing' | 'new'>('new')
+  const [supplierSubMode, setSupplierSubMode] = useState<'existing' | 'new' | 'lump'>('lump')
   const [selectedPurchaseId, setSelectedPurchaseId] = useState('')
   const [payAmount, setPayAmount] = useState('')
   const [newTotalAmount, setNewTotalAmount] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [payNow, setPayNow] = useState(false)
   const [payNowAmount, setPayNowAmount] = useState('')
+  // "Bayar Sekaligus" — satu nominal dialokasikan otomatis FIFO ke tagihan-tagihan tertua supplier itu,
+  // lintas cabang, supaya tidak perlu lagi bikin "nota baru" cuma untuk merekap pembayaran beberapa nota lama.
+  const [lumpAmount, setLumpAmount] = useState('')
+  const [lumpAccountId, setLumpAccountId] = useState('')
+  const [lumpNotes, setLumpNotes] = useState('')
 
   const isSupervisor = role === 'supervisor'
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -106,7 +111,7 @@ export default function InputKasKeluarPage() {
     setLoadingSupplierData(true)
     const { data: pData } = await supabase
       .from('supplier_purchases')
-      .select('id, total_amount, description, purchase_date')
+      .select('id, branch_id, total_amount, description, purchase_date')
       .eq('supplier_id', sId)
       .order('purchase_date', { ascending: false })
     const list = (pData as SupplierPurchaseOpt[]) || []
@@ -128,13 +133,16 @@ export default function InputKasKeluarPage() {
     setSupplierId('')
     setSupplierPurchases([])
     setSupplierPayments([])
-    setSupplierSubMode('new')
+    setSupplierSubMode('lump')
     setSelectedPurchaseId('')
     setPayAmount('')
     setNewTotalAmount('')
     setNewDescription('')
     setPayNow(false)
     setPayNowAmount('')
+    setLumpAmount('')
+    setLumpAccountId('')
+    setLumpNotes('')
   }
 
   function resetKasbonFields() {
@@ -355,7 +363,10 @@ export default function InputKasKeluarPage() {
     const branchId = isSupervisor ? myBranchId : formData.branch_id
     // Mode "kendaraan" tidak pakai dropdown Cabang biasa — cabang & rekeningnya sudah ditentukan
     // dari konfigurasi tarif kendaraan yang dipilih, jadi lewati pengecekan ini untuk mode itu.
-    if (entryMode !== 'kendaraan' && !branchId) { showMessage('error', 'Cabang wajib dipilih.'); return }
+    // Mode "lump" (Bayar Sekaligus) juga dilewati — satu supplier bisa punya tagihan di banyak
+    // cabang sekaligus, jadi cabang tiap baris Kas Keluar diambil dari nota masing-masing, bukan dropdown ini.
+    const skipBranchCheck = entryMode === 'kendaraan' || (entryMode === 'supplier' && supplierSubMode === 'lump')
+    if (!skipBranchCheck && !branchId) { showMessage('error', 'Cabang wajib dipilih.'); return }
 
     if (entryMode === 'kendaraan') {
       const rate = vehicleRates.find(r => r.id === vehicleRateId)
@@ -509,6 +520,47 @@ export default function InputKasKeluarPage() {
       return
     }
 
+    if (supplierSubMode === 'lump') {
+      const lumpNum = parseFloat(lumpAmount)
+      if (isNaN(lumpNum) || lumpNum <= 0) { showMessage('error', 'Nominal tidak valid.'); return }
+      if (!lumpAccountId) { showMessage('error', 'Rekening/kas sumber wajib dipilih.'); return }
+
+      const outstanding = supplierPurchases
+        .filter(p => unrequestedFor(p.total_amount, p.id, supplierPayments) > 0)
+        .sort((a, b) => a.purchase_date.localeCompare(b.purchase_date)) // tertua duluan (FIFO)
+      if (outstanding.length === 0) { showMessage('error', `Tidak ada tagihan ${supplierName} yang bisa dibayar (semua sudah lunas/menunggu verifikasi).`); return }
+
+      let sisa = lumpNum
+      const rows: { branch_id: string; category: string; amount: number; description: string; source_table: string; source_id: string; transaction_date: string; account_id: string; input_by: string; status: string }[] = []
+      for (const p of outstanding) {
+        if (sisa <= 0) break
+        const portion = Math.min(sisa, unrequestedFor(p.total_amount, p.id, supplierPayments))
+        rows.push({
+          branch_id: p.branch_id, category: 'pembayaran_supplier', amount: portion,
+          description: `Cicilan/Bayar ke ${supplierName}${p.description ? ' - ' + p.description : ''} (alokasi otomatis)${lumpNotes ? ' — ' + lumpNotes : ''}`,
+          source_table: 'supplier_purchases', source_id: p.id,
+          transaction_date: formData.transaction_date, account_id: lumpAccountId,
+          input_by: myUserId, status: 'pending',
+        })
+        sisa -= portion
+      }
+
+      setSubmitting(true)
+      const { error } = await supabase.from('fin_cash_out').insert(rows)
+      if (error) {
+        showMessage('error', 'Gagal mencatat pembayaran: ' + error.message)
+      } else {
+        const msg = sisa > 0
+          ? `Pembayaran dicatat ke ${rows.length} tagihan, menunggu verifikasi. Sisa ${formatRupiah(sisa)} tidak dialokasikan karena melebihi total tagihan ${supplierName}.`
+          : `Pembayaran ${formatRupiah(lumpNum)} dialokasikan otomatis ke ${rows.length} tagihan ${supplierName} (tertua duluan), menunggu verifikasi.`
+        showMessage('success', msg)
+        resetSupplierFields()
+        refreshMine(myUserId)
+      }
+      setSubmitting(false)
+      return
+    }
+
     // supplierSubMode === 'new'
     const totalNum = parseFloat(newTotalAmount)
     if (isNaN(totalNum) || totalNum <= 0) { showMessage('error', 'Total tagihan tidak valid.'); return }
@@ -587,7 +639,7 @@ export default function InputKasKeluarPage() {
         <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
           <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Form Kas Keluar</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {entryMode !== 'kendaraan' && (
+            {entryMode !== 'kendaraan' && !(entryMode === 'supplier' && supplierSubMode === 'lump') && (
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
                 {isSupervisor ? (
@@ -604,6 +656,9 @@ export default function InputKasKeluarPage() {
                   </select>
                 )}
               </div>
+            )}
+            {entryMode === 'supplier' && supplierSubMode === 'lump' && (
+              <p className="text-[11px] text-slate-400 -mb-2">Cabang tidak perlu dipilih — otomatis ikut cabang masing-masing tagihan yang kena alokasi.</p>
             )}
 
             <div>
@@ -791,11 +846,17 @@ export default function InputKasKeluarPage() {
                 {supplierId && (
                   <>
                     <div className="flex gap-2">
+                      <button type="button" onClick={() => setSupplierSubMode('lump')} disabled={openPurchases.length === 0}
+                        className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                          supplierSubMode === 'lump' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                        }`}>
+                        💰 Bayar Sekaligus {openPurchases.length > 0 ? `(${openPurchases.length})` : ''}
+                      </button>
                       <button type="button" onClick={() => setSupplierSubMode('existing')} disabled={openPurchases.length === 0}
                         className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed ${
                           supplierSubMode === 'existing' ? 'bg-green-600 text-white border-green-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                         }`}>
-                        Bayar Tagihan Lama {openPurchases.length > 0 ? `(${openPurchases.length})` : ''}
+                        Bayar 1 Tagihan
                       </button>
                       <button type="button" onClick={() => setSupplierSubMode('new')}
                         className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${
@@ -804,9 +865,41 @@ export default function InputKasKeluarPage() {
                         Catat Tagihan Baru
                       </button>
                     </div>
+                    {supplierSubMode === 'new' && (
+                      <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">⚠ Cuma untuk transaksi belanja baru yang belum pernah tercatat. Kalau ini untuk melunasi beberapa tagihan LAMA sekaligus, pakai &quot;💰 Bayar Sekaligus&quot; supaya tidak dobel catat.</p>
+                    )}
 
                     {loadingSupplierData ? (
                       <p className="text-xs text-slate-400">Memuat data supplier...</p>
+                    ) : supplierSubMode === 'lump' ? (
+                      openPurchases.length === 0 ? (
+                        <p className="text-xs text-slate-400">Tidak ada tagihan terbuka untuk supplier ini — pakai &quot;Catat Tagihan Baru&quot;.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          <p className="text-[11px] text-slate-500 bg-slate-50 rounded px-2 py-1.5">Nominal akan dialokasikan otomatis ke {openPurchases.length} tagihan {suppliers.find(s => s.id === supplierId)?.name} yang tertua duluan (FIFO) sampai habis — bisa lintas cabang, cabang tiap baris otomatis ikut tagihan aslinya.</p>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Total Dibayar (Rp) <span className="text-red-500">*</span></label>
+                            <RupiahInput required value={lumpAmount} onChange={setLumpAmount}
+                              placeholder="Contoh: 6.000.000"
+                              className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
+                            <select required value={lumpAccountId} onChange={e => setLumpAccountId(e.target.value)}
+                              className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                              <option value="">-- Pilih Rekening/Kas --</option>
+                              {bankAccounts.map(a => (
+                                <option key={a.id} value={a.id}>{a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Catatan</label>
+                            <input type="text" value={lumpNotes} onChange={e => setLumpNotes(e.target.value)} placeholder="Opsional"
+                              className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                          </div>
+                        </div>
+                      )
                     ) : supplierSubMode === 'existing' ? (
                       <>
                         {openPurchases.length === 0 ? (
