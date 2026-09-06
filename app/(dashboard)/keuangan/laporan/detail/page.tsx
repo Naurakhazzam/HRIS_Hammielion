@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr, todayLocalStr } from '@/lib/date'
 import Link from 'next/link'
-import { remainingFor, type SupplierPaymentRow } from '@/lib/supplierPurchases'
+import { remainingFor, paidApprovedFor, type SupplierPaymentRow } from '@/lib/supplierPurchases'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
@@ -41,7 +41,16 @@ type CashierLossRow = {
   branches?: { name: string } | null
   employees?: { full_name: string } | null
 }
-type SupplierPurchaseRow = { id: string; branch_id: string; total_amount: number; suppliers?: { name: string } | null }
+type SupplierPurchaseRow = {
+  id: string
+  branch_id: string
+  supplier_id: string
+  total_amount: number
+  purchase_date: string
+  description: string | null
+  suppliers?: { name: string } | null
+}
+type SupplierDebt = { supplierId: string; name: string; totalBeli: number; totalDibayar: number; sisa: number; purchases: (SupplierPurchaseRow & { dibayar: number; sisaPurchase: number })[] }
 type AssetBaselineRow = { branch_id: string; inventory_value: number; baseline_date: string }
 
 // Kategori Kas Keluar yang berasal dari penggajian — dikelompokkan jadi satu bagian tersendiri
@@ -75,6 +84,9 @@ export default function LaporanDetailPage() {
   // Kondisi saat ini (bukan berdasarkan periode/bulan yang dipilih) — Sisa Utang Supplier itu saldo
   // berjalan real-time, dan Aset Barang cuma ada 1 snapshot (baseline), bukan data bulanan.
   const [sisaUtangSupplier, setSisaUtangSupplier] = useState(0)
+  const [sisaUtangSupplierBulanIni, setSisaUtangSupplierBulanIni] = useState(0)
+  const [supplierDebtList, setSupplierDebtList] = useState<SupplierDebt[]>([])
+  const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set())
   const [totalAsetBarang, setTotalAsetBarang] = useState(0)
   const [asetBaselineDate, setAsetBaselineDate] = useState<string | null>(null)
   const [loadingKondisi, setLoadingKondisi] = useState(true)
@@ -157,40 +169,64 @@ export default function LaporanDetailPage() {
   useEffect(() => { if (!roleLoading && isAdmin) fetchData() }, [roleLoading, isAdmin, fetchData])
 
   // Sisa Utang Supplier & Aset Barang — kondisi SAAT INI (bukan per bulan yang difilter di atas),
-  // jadi diambil terpisah, cuma bergantung pada cabang yang dipilih.
+  // jadi diambil terpisah, cuma bergantung pada cabang yang dipilih. Tambahan: sisa utang per akhir
+  // bulan yang difilter juga dihitung, supaya catatan bulanannya lengkap (bukan cuma "saat ini").
   const fetchKondisi = useCallback(async () => {
     if (!selectedGroup) { setLoadingKondisi(false); return }
     setLoadingKondisi(true)
     const branchIds = Array.from(branchToGroup.entries()).filter(([, label]) => label === selectedGroup).map(([id]) => id)
     if (branchIds.length === 0) {
-      setSisaUtangSupplier(0); setTotalAsetBarang(0); setAsetBaselineDate(null); setLoadingKondisi(false)
+      setSisaUtangSupplier(0); setSisaUtangSupplierBulanIni(0); setTotalAsetBarang(0); setAsetBaselineDate(null); setLoadingKondisi(false)
       return
     }
+    const [year, m] = month.split('-').map(Number)
+    const endDate = localDateStr(new Date(year, m, 0))
 
     const [purchasesRes, baselineRes] = await Promise.all([
-      supabase.from('supplier_purchases').select('id, branch_id, total_amount').in('branch_id', branchIds),
+      supabase.from('supplier_purchases').select('id, branch_id, supplier_id, total_amount, purchase_date, description, suppliers(name)').in('branch_id', branchIds),
       supabase.from('fin_branch_capital_baseline').select('branch_id, inventory_value, baseline_date').eq('status', 'approved').in('branch_id', branchIds),
     ])
     if (purchasesRes.error) console.error('Detail error supplier_purchases:', JSON.stringify(purchasesRes.error, null, 2))
     if (baselineRes.error) console.error('Detail error baseline:', JSON.stringify(baselineRes.error, null, 2))
 
-    const purchases = (purchasesRes.data as SupplierPurchaseRow[]) || []
-    let payments: SupplierPaymentRow[] = []
+    const purchases = (purchasesRes.data as unknown as SupplierPurchaseRow[]) || []
+    let payments: (SupplierPaymentRow & { transaction_date: string })[] = []
     if (purchases.length > 0) {
       const { data: paymentsData, error: paymentsErr } = await supabase
-        .from('fin_cash_out').select('source_id, amount, status')
+        .from('fin_cash_out').select('source_id, amount, status, transaction_date')
         .eq('source_table', 'supplier_purchases').in('source_id', purchases.map(p => p.id))
       if (paymentsErr) console.error('Detail error supplier payments:', JSON.stringify(paymentsErr, null, 2))
-      payments = (paymentsData as SupplierPaymentRow[]) || []
+      payments = (paymentsData as (SupplierPaymentRow & { transaction_date: string })[]) || []
     }
     const sisaUtang = purchases.reduce((s, p) => s + remainingFor(p.total_amount, p.id, payments), 0)
     setSisaUtangSupplier(sisaUtang)
+
+    // Per akhir bulan yang difilter: cuma hitung pembelian & pembayaran yang tanggalnya sudah lewat sampai akhir bulan itu.
+    const purchasesUpToMonth = purchases.filter(p => p.purchase_date <= endDate)
+    const paymentsUpToMonth = payments.filter(p => p.transaction_date <= endDate)
+    const sisaUtangBulanIni = purchasesUpToMonth.reduce((s, p) => s + remainingFor(p.total_amount, p.id, paymentsUpToMonth), 0)
+    setSisaUtangSupplierBulanIni(sisaUtangBulanIni)
+
+    const bySupplier = new Map<string, SupplierDebt>()
+    for (const p of purchases) {
+      const dibayar = paidApprovedFor(p.id, payments)
+      const sisaPurchase = remainingFor(p.total_amount, p.id, payments)
+      const key = p.supplier_id
+      if (!bySupplier.has(key)) bySupplier.set(key, { supplierId: key, name: p.suppliers?.name || '(Tanpa nama)', totalBeli: 0, totalDibayar: 0, sisa: 0, purchases: [] })
+      const entry = bySupplier.get(key)!
+      entry.totalBeli += Number(p.total_amount)
+      entry.totalDibayar += dibayar
+      entry.sisa += sisaPurchase
+      entry.purchases.push({ ...p, dibayar, sisaPurchase })
+    }
+    setSupplierDebtList(Array.from(bySupplier.values()).filter(s => s.sisa !== 0).sort((a, b) => b.sisa - a.sisa))
+    setExpandedSuppliers(new Set())
 
     const baselines = (baselineRes.data as AssetBaselineRow[]) || []
     setTotalAsetBarang(baselines.reduce((s, b) => s + Number(b.inventory_value), 0))
     setAsetBaselineDate(baselines.length > 0 ? baselines.map(b => b.baseline_date).sort().reverse()[0] : null)
     setLoadingKondisi(false)
-  }, [supabase, selectedGroup, branchToGroup])
+  }, [supabase, selectedGroup, month, branchToGroup])
 
   useEffect(() => { if (!roleLoading && isAdmin) fetchKondisi() }, [roleLoading, isAdmin, fetchKondisi])
 
@@ -214,6 +250,14 @@ export default function LaporanDetailPage() {
         )}
       </div>
     )
+  }
+
+  function toggleSupplier(id: string) {
+    setExpandedSuppliers(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
   }
 
   function toggleCategory(code: string) {
@@ -360,11 +404,16 @@ export default function LaporanDetailPage() {
             {loadingKondisi ? (
               <div className="text-sm text-slate-400 py-2">Memuat...</div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Sisa Utang ke Supplier (Saat Ini)</p>
                   <p className={`text-lg font-bold whitespace-nowrap ${sisaUtangSupplier > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatRupiah(sisaUtangSupplier)}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">Total pembelian dikurangi yang sudah dibayar &amp; disetujui, akumulasi sejak awal — lihat rinciannya di Pembelian &amp; Utang Supplier.</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Sisa Utang ke Supplier (per akhir {monthLabel})</p>
+                  <p className={`text-lg font-bold whitespace-nowrap ${sisaUtangSupplierBulanIni > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatRupiah(sisaUtangSupplierBulanIni)}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Cuma menghitung pembelian &amp; pembayaran yang tanggalnya sampai akhir {monthLabel} — catatan historis bulan ini.</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Total Aset Barang</p>
@@ -374,6 +423,53 @@ export default function LaporanDetailPage() {
                       ? `Snapshot per ${new Date(asetBaselineDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })} (Modal Cabang) — bukan angka bulan ${monthLabel}.`
                       : 'Belum ada data Modal Cabang untuk kelompok ini.'}
                   </p>
+                </div>
+              </div>
+            )}
+
+            {!loadingKondisi && supplierDebtList.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <p className="text-xs font-medium text-slate-500 mb-2">Rincian per Supplier — klik nama supplier untuk lihat daftar pembeliannya</p>
+                <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden">
+                  {supplierDebtList.map(s => (
+                    <div key={s.supplierId}>
+                      <button onClick={() => toggleSupplier(s.supplierId)}
+                        className="w-full px-3 py-2 flex items-center justify-between hover:bg-slate-50 transition text-left">
+                        <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                          <span className={`text-xs transition-transform ${expandedSuppliers.has(s.supplierId) ? 'rotate-90' : ''}`}>▶</span>
+                          {s.name}
+                          <span className="text-xs text-slate-400">({s.purchases.length} transaksi)</span>
+                        </span>
+                        <span className={`text-sm font-semibold whitespace-nowrap ${s.sisa > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatRupiah(s.sisa)}</span>
+                      </button>
+                      {expandedSuppliers.has(s.supplierId) && (
+                        <div className="bg-slate-50 border-t border-slate-100">
+                          <table className="w-full text-left">
+                            <thead>
+                              <tr className="text-xs text-slate-500 uppercase">
+                                <th className="px-4 pl-9 py-2">Tanggal</th>
+                                <th className="px-4 py-2">Keterangan</th>
+                                <th className="px-4 py-2 text-right">Total Beli</th>
+                                <th className="px-4 py-2 text-right">Dibayar</th>
+                                <th className="px-4 py-2 text-right">Sisa</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200">
+                              {s.purchases.map(p => (
+                                <tr key={p.id} className="text-sm">
+                                  <td className="px-4 pl-9 py-2 text-slate-600 whitespace-nowrap">{new Date(p.purchase_date).toLocaleDateString('id-ID')}</td>
+                                  <td className="px-4 py-2 text-slate-500">{p.description || '—'}</td>
+                                  <td className="px-4 py-2 text-right text-slate-700 whitespace-nowrap">{formatRupiah(p.total_amount)}</td>
+                                  <td className="px-4 py-2 text-right text-green-700 whitespace-nowrap">{formatRupiah(p.dibayar)}</td>
+                                  <td className={`px-4 py-2 text-right font-medium whitespace-nowrap ${p.sisaPurchase > 0 ? 'text-red-700' : 'text-slate-400'}`}>{formatRupiah(p.sisaPurchase)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
