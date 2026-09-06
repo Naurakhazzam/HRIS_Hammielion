@@ -519,14 +519,22 @@ export default function LaporanResmiPage() {
                       </span>
                     </th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Bersih (vs periode lalu)</th>
+                    {showSistem && (
+                      <th className="px-4 py-3 text-xs font-semibold text-purple-600 uppercase text-right">
+                        <span className="inline-flex items-center justify-end">Laba Bersih (Sistem)
+                          <InfoTooltip text="Laba Kotor (Sistem) dikurangi Biaya Operasional & Realisasi Kasbon — angka bottom line per kelompok yang paling bisa dipercaya." />
+                        </span>
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {groups.length === 0 ? (
-                    <tr><td colSpan={showSistem ? 9 : 7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
+                    <tr><td colSpan={showSistem ? 10 : 7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
                   ) : groups.map(g => {
                     const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 }
                     const labaKotorSistemGroup = g.omsetSistem - g.hpp
+                    const labaBersihSistemGroup = labaKotorSistemGroup - g.biayaOperasional - g.kasbonRealisasi
                     return (
                       <tr key={g.label} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{g.label}</td>
@@ -549,6 +557,11 @@ export default function LaporanResmiPage() {
                           <div className={`text-sm font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</div>
                           <VarianceBadge cur={g.labaBersih} prev={prev.labaBersih} />
                         </td>
+                        {showSistem && (
+                          <td className={`px-4 py-3 text-sm text-right font-bold whitespace-nowrap ${g.omsetSistem > 0 ? (labaBersihSistemGroup >= 0 ? 'text-green-700' : 'text-red-700') : 'text-slate-300'}`}>
+                            {g.omsetSistem > 0 ? formatRupiah(labaBersihSistemGroup) : '—'}
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
