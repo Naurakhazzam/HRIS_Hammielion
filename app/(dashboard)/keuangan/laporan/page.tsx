@@ -485,6 +485,9 @@ export default function LaporanResmiPage() {
             )
           })()}
 
+          {(() => {
+            const showSistem = !!(consolidated && consolidated.omsetSistem > 0)
+            return (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50">
               <h2 className="text-sm font-semibold text-slate-600 uppercase">Per Kelompok Laporan</h2>
@@ -494,9 +497,17 @@ export default function LaporanResmiPage() {
                 <thead>
                   <tr className="bg-white border-b border-slate-200">
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kelompok</th>
+                    {showSistem && <th className="px-4 py-3 text-xs font-semibold text-purple-600 uppercase text-right">Omset (Sistem)</th>}
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Masuk</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">HPP</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Kotor</th>
+                    {showSistem && (
+                      <th className="px-4 py-3 text-xs font-semibold text-purple-600 uppercase text-right">
+                        <span className="inline-flex items-center justify-end">Laba Kotor (Sistem)
+                          <InfoTooltip text="Omset (Sistem) dikurangi HPP — lebih bisa dipercaya daripada Laba Kotor di sebelahnya (berbasis Kas Masuk), karena tidak terpengaruh piutang/uang yang belum cair." />
+                        </span>
+                      </th>
+                    )}
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">
                       <span className="inline-flex items-center justify-end">Biaya Operasional
                         <InfoTooltip text="Tidak termasuk pembelian stok/restock ke supplier — sudah dihitung di HPP, supaya tidak dobel." />
@@ -512,15 +523,26 @@ export default function LaporanResmiPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {groups.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
+                    <tr><td colSpan={showSistem ? 9 : 7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
                   ) : groups.map(g => {
                     const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 }
+                    const labaKotorSistemGroup = g.omsetSistem - g.hpp
                     return (
                       <tr key={g.label} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{g.label}</td>
+                        {showSistem && (
+                          <td className="px-4 py-3 text-sm text-right text-purple-700 whitespace-nowrap">
+                            {g.omsetSistem > 0 ? formatRupiah(g.omsetSistem) : <span className="text-slate-300">—</span>}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.kasMasuk)}</td>
                         <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.hpp)}</td>
                         <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700 whitespace-nowrap">{formatRupiah(g.labaKotor)}</td>
+                        {showSistem && (
+                          <td className={`px-4 py-3 text-sm text-right font-semibold whitespace-nowrap ${g.omsetSistem > 0 ? (labaKotorSistemGroup >= 0 ? 'text-green-700' : 'text-red-700') : 'text-slate-300'}`}>
+                            {g.omsetSistem > 0 ? formatRupiah(labaKotorSistemGroup) : '—'}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.biayaOperasional)}</td>
                         <td className="px-4 py-3 text-sm text-right text-amber-700 whitespace-nowrap">{formatRupiah(g.kasbonRealisasi)}</td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -534,6 +556,8 @@ export default function LaporanResmiPage() {
               </table>
             </div>
           </div>
+            )
+          })()}
 
           <p className="text-xs text-slate-400 mt-3">Hanya menghitung entri berstatus &quot;Disetujui&quot;. Ekspor CSV omzet per cabang (tab Bulanan) memakai data per cabang asli, bukan per kelompok laporan gabungan — sesuai kebutuhan pelaporan pajak.</p>
         </>
