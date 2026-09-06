@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr, todayLocalStr } from '@/lib/date'
 import Link from 'next/link'
+import { remainingFor, type SupplierPaymentRow } from '@/lib/supplierPurchases'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
@@ -40,6 +41,8 @@ type CashierLossRow = {
   branches?: { name: string } | null
   employees?: { full_name: string } | null
 }
+type SupplierPurchaseRow = { id: string; branch_id: string; total_amount: number; suppliers?: { name: string } | null }
+type AssetBaselineRow = { branch_id: string; inventory_value: number; baseline_date: string }
 
 // Kategori Kas Keluar yang berasal dari penggajian — dikelompokkan jadi satu bagian tersendiri
 // ("Rincian Penggajian"), bukan tercampur di daftar kategori umum.
@@ -68,6 +71,13 @@ export default function LaporanDetailPage() {
   const [showPemasukan, setShowPemasukan] = useState(false)
   const [showPenggajian, setShowPenggajian] = useState(false)
   const [showKehilangan, setShowKehilangan] = useState(false)
+
+  // Kondisi saat ini (bukan berdasarkan periode/bulan yang dipilih) — Sisa Utang Supplier itu saldo
+  // berjalan real-time, dan Aset Barang cuma ada 1 snapshot (baseline), bukan data bulanan.
+  const [sisaUtangSupplier, setSisaUtangSupplier] = useState(0)
+  const [totalAsetBarang, setTotalAsetBarang] = useState(0)
+  const [asetBaselineDate, setAsetBaselineDate] = useState<string | null>(null)
+  const [loadingKondisi, setLoadingKondisi] = useState(true)
 
   useEffect(() => {
     async function init() {
@@ -145,6 +155,44 @@ export default function LaporanDetailPage() {
   }, [supabase, selectedGroup, month, branchToGroup])
 
   useEffect(() => { if (!roleLoading && isAdmin) fetchData() }, [roleLoading, isAdmin, fetchData])
+
+  // Sisa Utang Supplier & Aset Barang — kondisi SAAT INI (bukan per bulan yang difilter di atas),
+  // jadi diambil terpisah, cuma bergantung pada cabang yang dipilih.
+  const fetchKondisi = useCallback(async () => {
+    if (!selectedGroup) { setLoadingKondisi(false); return }
+    setLoadingKondisi(true)
+    const branchIds = Array.from(branchToGroup.entries()).filter(([, label]) => label === selectedGroup).map(([id]) => id)
+    if (branchIds.length === 0) {
+      setSisaUtangSupplier(0); setTotalAsetBarang(0); setAsetBaselineDate(null); setLoadingKondisi(false)
+      return
+    }
+
+    const [purchasesRes, baselineRes] = await Promise.all([
+      supabase.from('supplier_purchases').select('id, branch_id, total_amount').in('branch_id', branchIds),
+      supabase.from('fin_branch_capital_baseline').select('branch_id, inventory_value, baseline_date').eq('status', 'approved').in('branch_id', branchIds),
+    ])
+    if (purchasesRes.error) console.error('Detail error supplier_purchases:', JSON.stringify(purchasesRes.error, null, 2))
+    if (baselineRes.error) console.error('Detail error baseline:', JSON.stringify(baselineRes.error, null, 2))
+
+    const purchases = (purchasesRes.data as SupplierPurchaseRow[]) || []
+    let payments: SupplierPaymentRow[] = []
+    if (purchases.length > 0) {
+      const { data: paymentsData, error: paymentsErr } = await supabase
+        .from('fin_cash_out').select('source_id, amount, status')
+        .eq('source_table', 'supplier_purchases').in('source_id', purchases.map(p => p.id))
+      if (paymentsErr) console.error('Detail error supplier payments:', JSON.stringify(paymentsErr, null, 2))
+      payments = (paymentsData as SupplierPaymentRow[]) || []
+    }
+    const sisaUtang = purchases.reduce((s, p) => s + remainingFor(p.total_amount, p.id, payments), 0)
+    setSisaUtangSupplier(sisaUtang)
+
+    const baselines = (baselineRes.data as AssetBaselineRow[]) || []
+    setTotalAsetBarang(baselines.reduce((s, b) => s + Number(b.inventory_value), 0))
+    setAsetBaselineDate(baselines.length > 0 ? baselines.map(b => b.baseline_date).sort().reverse()[0] : null)
+    setLoadingKondisi(false)
+  }, [supabase, selectedGroup, branchToGroup])
+
+  useEffect(() => { if (!roleLoading && isAdmin) fetchKondisi() }, [roleLoading, isAdmin, fetchKondisi])
 
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
@@ -301,6 +349,31 @@ export default function LaporanDetailPage() {
                 <div>
                   <p className="text-xs text-purple-600 uppercase mb-1 min-h-[2rem]">Laba Bersih (Sistem)</p>
                   <p className={`text-lg font-bold whitespace-nowrap ${labaBersihSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaBersihSistem)}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-amber-200">
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Kondisi Cabang Saat Ini</h2>
+            <p className="text-xs text-slate-500 mb-3">Berbeda dari angka di atas — ini bukan angka per bulan, tapi kondisi terkini (neraca), supaya kelihatan jelas posisi cabang ini: apa yang masih dipunya (aset barang) dan apa yang masih ditanggung (utang supplier).</p>
+            {loadingKondisi ? (
+              <div className="text-sm text-slate-400 py-2">Memuat...</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Sisa Utang ke Supplier (Saat Ini)</p>
+                  <p className={`text-lg font-bold whitespace-nowrap ${sisaUtangSupplier > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatRupiah(sisaUtangSupplier)}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Total pembelian dikurangi yang sudah dibayar &amp; disetujui, akumulasi sejak awal — lihat rinciannya di Pembelian &amp; Utang Supplier.</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Total Aset Barang</p>
+                  <p className="text-lg font-bold text-slate-800 whitespace-nowrap">{formatRupiah(totalAsetBarang)}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    {asetBaselineDate
+                      ? `Snapshot per ${new Date(asetBaselineDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })} (Modal Cabang) — bukan angka bulan ${monthLabel}.`
+                      : 'Belum ada data Modal Cabang untuk kelompok ini.'}
+                  </p>
                 </div>
               </div>
             )}
