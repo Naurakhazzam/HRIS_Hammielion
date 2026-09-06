@@ -52,7 +52,7 @@ const adminNavItems: NavNode[] = [
         href: '/keuangan/kas-masuk',
         submenu: [
           { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
-          { name: 'HPP Manual', href: '/keuangan/hpp' },
+          { name: 'HPP & Omset (Sistem)', href: '/keuangan/hpp' },
         ]
       },
       {
@@ -138,7 +138,7 @@ const employeeNavItems: NavNode[] = [
         href: '/keuangan/kas-masuk',
         submenu: [
           { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
-          { name: 'HPP Manual', href: '/keuangan/hpp' },
+          { name: 'HPP & Omset (Sistem)', href: '/keuangan/hpp' },
         ]
       },
       {

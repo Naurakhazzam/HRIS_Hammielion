@@ -18,6 +18,8 @@ type GroupTotals = {
   kasbonRealisasi: number
   labaKotor: number
   labaBersih: number
+  omsetSistem: number
+  pembayaranSupplierReal: number
 }
 
 type Tab = 'mingguan' | 'bulanan'
@@ -107,11 +109,13 @@ export default function LaporanResmiPage() {
   }, [supabase])
 
   const computeTotals = useCallback(async (startDate: string, endDate: string, periodMonth?: number, periodYear?: number): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
-    const [groupsRes, cashInRes, hppRes, cashOutRes, kasbonRes] = await Promise.all([
+    const [groupsRes, cashInRes, hppRes, omsetSistemRes, cashOutRes, supplierRes, kasbonRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
-      supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').gte('entry_date', startDate).lte('entry_date', endDate),
+      supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'hpp').gte('entry_date', startDate).lte('entry_date', endDate),
+      supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'omset').gte('entry_date', startDate).lte('entry_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount, fin_cash_out_categories(affects_net_profit)').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
+      supabase.from('fin_cash_out').select('branch_id, amount').eq('status', 'approved').eq('category', 'pembayaran_supplier').gte('transaction_date', startDate).lte('transaction_date', endDate),
       // Realisasi kasbon cuma berlaku untuk tampilan bulanan (periodMonth/periodYear diisi) —
       // tidak diikutkan untuk mingguan karena periode gaji tidak selaras dengan minggu.
       periodMonth && periodYear
@@ -121,15 +125,17 @@ export default function LaporanResmiPage() {
     if (groupsRes.error) console.error('Detail error report_groups:', JSON.stringify(groupsRes.error, null, 2))
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
     if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
+    if (omsetSistemRes.error) console.error('Detail error omset_sistem:', JSON.stringify(omsetSistemRes.error, null, 2))
     if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
+    if (supplierRes.error) console.error('Detail error supplier:', JSON.stringify(supplierRes.error, null, 2))
     if (kasbonRes.error) console.error('Detail error kasbon:', JSON.stringify(kasbonRes.error, null, 2))
 
     const branchToGroup = new Map<string, string>()
     for (const g of (groupsRes.data as ReportGroup[]) || []) branchToGroup.set(g.branch_id, g.report_group_label)
 
-    const totalsByGroup = new Map<string, { kasMasuk: number; hpp: number; biayaOperasional: number; kasbonRealisasi: number }>()
+    const totalsByGroup = new Map<string, { kasMasuk: number; hpp: number; biayaOperasional: number; kasbonRealisasi: number; omsetSistem: number; pembayaranSupplierReal: number }>()
     function ensure(label: string) {
-      if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0 })
+      if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0 })
       return totalsByGroup.get(label)!
     }
     for (const row of (cashInRes.data as { branch_id: string; amount: number }[]) || []) {
@@ -140,10 +146,18 @@ export default function LaporanResmiPage() {
       const label = branchToGroup.get(row.branch_id)
       if (label) ensure(label).hpp += Number(row.hpp_amount)
     }
+    for (const row of (omsetSistemRes.data as { branch_id: string; hpp_amount: number }[]) || []) {
+      const label = branchToGroup.get(row.branch_id)
+      if (label) ensure(label).omsetSistem += Number(row.hpp_amount)
+    }
     for (const row of (cashOutRes.data as unknown as { branch_id: string; amount: number; fin_cash_out_categories: { affects_net_profit: boolean } | null }[]) || []) {
       const label = branchToGroup.get(row.branch_id)
       if (!label) continue
       if (row.fin_cash_out_categories?.affects_net_profit !== false) ensure(label).biayaOperasional += Number(row.amount)
+    }
+    for (const row of (supplierRes.data as { branch_id: string; amount: number }[]) || []) {
+      const label = branchToGroup.get(row.branch_id)
+      if (label) ensure(label).pembayaranSupplierReal += Number(row.amount)
     }
     for (const row of (kasbonRes.data as unknown as { kasbon_deduction: number; employees: { branch_id: string } | null }[]) || []) {
       const branchId = row.employees?.branch_id
@@ -154,6 +168,7 @@ export default function LaporanResmiPage() {
 
     let groupList: GroupTotals[] = Array.from(totalsByGroup.entries()).map(([label, t]) => ({
       label, kasMasuk: t.kasMasuk, hpp: t.hpp, biayaOperasional: t.biayaOperasional, kasbonRealisasi: t.kasbonRealisasi,
+      omsetSistem: t.omsetSistem, pembayaranSupplierReal: t.pembayaranSupplierReal,
       labaKotor: t.kasMasuk - t.hpp, labaBersih: t.kasMasuk - t.hpp - t.biayaOperasional - t.kasbonRealisasi,
     }))
 
@@ -167,8 +182,9 @@ export default function LaporanResmiPage() {
       label: 'Total Konsolidasi',
       kasMasuk: acc.kasMasuk + g.kasMasuk, hpp: acc.hpp + g.hpp, biayaOperasional: acc.biayaOperasional + g.biayaOperasional,
       kasbonRealisasi: acc.kasbonRealisasi + g.kasbonRealisasi,
+      omsetSistem: acc.omsetSistem + g.omsetSistem, pembayaranSupplierReal: acc.pembayaranSupplierReal + g.pembayaranSupplierReal,
       labaKotor: acc.labaKotor + g.labaKotor, labaBersih: acc.labaBersih + g.labaBersih,
-    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, labaKotor: 0, labaBersih: 0 })
+    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 })
 
     return { groups: groupList, consolidated: total }
   }, [supabase, isAdmin, myBranchId])
@@ -369,6 +385,42 @@ export default function LaporanResmiPage() {
             </div>
           )}
 
+          {isAdmin && tab === 'bulanan' && consolidated && consolidated.omsetSistem > 0 && (
+            <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-purple-200">
+              <h2 className="text-lg font-bold text-slate-800 mb-1">Omset &amp; HPP Sistem Kasir vs Kas Real</h2>
+              <p className="text-xs text-slate-500 mb-3">Dari input di <Link href="/keuangan/hpp" className="text-blue-600 hover:underline">HPP &amp; Omset (Sistem)</Link>. Laba Kotor (Sistem) lebih dipercaya daripada Laba Kotor di atas (yang berbasis Kas Masuk), karena langsung dari sistem kasir — tidak terpengaruh piutang/uang yang belum cair.</p>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1">Omset (Sistem)</p>
+                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.omsetSistem)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1">HPP (Sistem)</p>
+                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.hpp)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1">Laba Kotor (Sistem)</p>
+                  <p className={`text-lg font-bold ${consolidated.omsetSistem - consolidated.hpp >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(consolidated.omsetSistem - consolidated.hpp)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Uang Diterima (Real)
+                    <InfoTooltip text="Kas Masuk yang benar-benar terkumpul (dari entri harian HRIS). Selisih dengan Omset Sistem itu wajar untuk cabang yang punya piutang atau alur uang antar-cabang (mis. Gudang, Toko Pusat) — bukan berarti ada kesalahan." />
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.kasMasuk)}</p>
+                  <p className={`text-xs mt-0.5 ${consolidated.omsetSistem - consolidated.kasMasuk >= 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                    Selisih: {formatRupiah(consolidated.omsetSistem - consolidated.kasMasuk)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Pembayaran Supplier (Real)
+                    <InfoTooltip text="Uang yang benar-benar dibayarkan ke supplier bulan ini. Tidak dibandingkan langsung dengan HPP — bisa termasuk pelunasan utang lama, bukan cerminan HPP bulan ini." />
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.pembayaranSupplierReal)}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50">
               <h2 className="text-sm font-semibold text-slate-600 uppercase">Per Kelompok Laporan</h2>
@@ -398,7 +450,7 @@ export default function LaporanResmiPage() {
                   {groups.length === 0 ? (
                     <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
                   ) : groups.map(g => {
-                    const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, labaKotor: 0, labaBersih: 0 }
+                    const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 }
                     return (
                       <tr key={g.label} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm font-medium text-slate-800">{g.label}</td>

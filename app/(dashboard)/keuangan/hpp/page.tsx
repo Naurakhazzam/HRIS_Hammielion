@@ -6,15 +6,19 @@ import { localDateStr, todayLocalStr } from '@/lib/date'
 import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
+type EntryType = 'hpp' | 'omset'
 type HppEntry = {
   id: string
   branch_id: string
   entry_date: string
   hpp_amount: number
+  entry_type: EntryType
   notes: string | null
   status: string
   branches?: { name: string } | null
 }
+
+const ENTRY_TYPE_LABEL: Record<EntryType, string> = { hpp: 'HPP', omset: 'Omset (Sistem Kasir)' }
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
@@ -38,11 +42,12 @@ export default function HppPage() {
   const [editRowNotes, setEditRowNotes] = useState<string>('')
 
   const today = todayLocalStr()
-  const [form, setForm] = useState({ branch_id: '', entry_date: today, hpp_amount: '', notes: '' })
+  const [form, setForm] = useState({ branch_id: '', entry_date: today, hpp_amount: '', notes: '', entry_type: 'hpp' as EntryType })
 
   const thisMonth = today.slice(0, 7)
   const [filterMonth, setFilterMonth] = useState(thisMonth)
   const [filterBranch, setFilterBranch] = useState('')
+  const [filterType, setFilterType] = useState<'all' | EntryType>('all')
 
   const isSupervisor = role === 'supervisor'
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -56,10 +61,11 @@ export default function HppPage() {
 
     let hppQuery = supabase
       .from('fin_hpp_entries')
-      .select('id, branch_id, entry_date, hpp_amount, notes, status, branches(name)')
+      .select('id, branch_id, entry_date, hpp_amount, entry_type, notes, status, branches(name)')
       .gte('entry_date', startDate).lte('entry_date', endDate)
       .order('entry_date', { ascending: false })
     if (branchScope) hppQuery = hppQuery.eq('branch_id', branchScope)
+    if (filterType !== 'all') hppQuery = hppQuery.eq('entry_type', filterType)
 
     let cashInQuery = supabase
       .from('fin_cash_in')
@@ -74,7 +80,7 @@ export default function HppPage() {
     else setRows((hppRes.data as unknown as HppEntry[]) || [])
     if (cashInRes.data) setCashInRows(cashInRes.data)
     setLoading(false)
-  }, [supabase, filterMonth, filterBranch, isAdmin, myBranchId])
+  }, [supabase, filterMonth, filterBranch, filterType, isAdmin, myBranchId])
 
   useEffect(() => {
     async function init() {
@@ -120,11 +126,11 @@ export default function HppPage() {
     setSubmitting(true)
     const { error } = await supabase.from('fin_hpp_entries').insert({
       branch_id: branchId, entry_date: form.entry_date, hpp_amount: hppNum,
-      notes: form.notes || null, input_by: myUserId, status: 'pending',
+      entry_type: form.entry_type, notes: form.notes || null, input_by: myUserId, status: 'pending',
     })
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
     else {
-      showMessage('success', 'HPP harian berhasil dicatat, menunggu verifikasi.')
+      showMessage('success', `${ENTRY_TYPE_LABEL[form.entry_type]} berhasil dicatat, menunggu verifikasi.`)
       setForm(f => ({ ...f, hpp_amount: '', notes: '' }))
       fetchRows()
     }
@@ -161,17 +167,18 @@ export default function HppPage() {
     return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-slate-100 text-slate-700'}`}>{label[status] || status}</span>
   }
 
-  const totalHppApproved = rows.filter(r => r.status === 'approved').reduce((acc, r) => acc + Number(r.hpp_amount), 0)
+  const totalHppApproved = rows.filter(r => r.status === 'approved' && r.entry_type === 'hpp').reduce((acc, r) => acc + Number(r.hpp_amount), 0)
+  const totalOmsetSistemApproved = rows.filter(r => r.status === 'approved' && r.entry_type === 'omset').reduce((acc, r) => acc + Number(r.hpp_amount), 0)
   const totalCashInApproved = cashInRows.reduce((acc, r) => acc + Number(r.amount), 0)
-  const labaKotor = totalCashInApproved - totalHppApproved
+  const labaKotorSistem = totalOmsetSistemApproved - totalHppApproved
 
   if (loading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
 
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">HPP Manual (Harga Pokok Penjualan)</h1>
-        <p className="text-sm text-slate-500">Input HPP per cabang, sumber dari sistem HPP eksternal. Bisa lebih dari satu entri per cabang per hari. Menunggu verifikasi tim finance pusat sebelum masuk laporan resmi.</p>
+        <h1 className="text-2xl font-bold text-slate-800 mb-1">HPP &amp; Omset (Sistem Kasir)</h1>
+        <p className="text-sm text-slate-500">Input HPP dan Omset per cabang, sumber dari sistem kasir eksternal (biasanya diisi total sebulan sekali). Menunggu verifikasi tim finance pusat sebelum masuk Laporan Resmi.</p>
       </div>
 
       {message && (
@@ -182,9 +189,22 @@ export default function HppPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
-          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Input HPP Harian</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Input Data Sistem</h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Jenis Data <span className="text-red-500">*</span></label>
+              <div className="flex gap-2">
+                {(['hpp', 'omset'] as EntryType[]).map(t => (
+                  <button key={t} type="button" onClick={() => setForm({ ...form, entry_type: t })}
+                    className={`flex-1 px-2 py-1.5 rounded text-xs font-medium border transition ${
+                      form.entry_type === t ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                    }`}>
+                    {ENTRY_TYPE_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
               {isSupervisor ? (
@@ -203,7 +223,7 @@ export default function HppPage() {
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Total HPP (Rp) <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Total {ENTRY_TYPE_LABEL[form.entry_type]} (Rp) <span className="text-red-500">*</span></label>
               <RupiahInput required value={form.hpp_amount} onChange={v => setForm({ ...form, hpp_amount: v })}
                 placeholder="Contoh: 6.000.000"
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -221,18 +241,22 @@ export default function HppPage() {
         </div>
 
         <div className="lg:col-span-2 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Kas Masuk Disetujui</p>
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Kas Masuk (Real)</p>
               <p className="text-lg font-bold text-slate-800">{formatRupiah(totalCashInApproved)}</p>
             </div>
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <p className="text-xs text-slate-500 font-medium uppercase mb-1">HPP Disetujui</p>
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Omset (Sistem)</p>
+              <p className="text-lg font-bold text-slate-800">{formatRupiah(totalOmsetSistemApproved)}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">HPP (Sistem)</p>
               <p className="text-lg font-bold text-slate-800">{formatRupiah(totalHppApproved)}</p>
             </div>
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Laba Kotor (Bulan Ini)</p>
-              <p className={`text-lg font-bold ${labaKotor >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaKotor)}</p>
+              <p className="text-xs text-slate-500 font-medium uppercase mb-1">Laba Kotor (Sistem)</p>
+              <p className={`text-lg font-bold ${labaKotorSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaKotorSistem)}</p>
             </div>
           </div>
 
@@ -253,6 +277,15 @@ export default function HppPage() {
                   </select>
                 </div>
               )}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Jenis</label>
+                <select value={filterType} onChange={e => setFilterType(e.target.value as 'all' | EntryType)}
+                  className="w-40 px-2 py-1.5 border border-slate-300 rounded text-sm outline-none bg-white">
+                  <option value="all">Semua Jenis</option>
+                  <option value="hpp">HPP</option>
+                  <option value="omset">Omset (Sistem Kasir)</option>
+                </select>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -260,7 +293,8 @@ export default function HppPage() {
                   <tr className="bg-white border-b border-slate-200">
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">HPP</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Jenis</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Nominal</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Catatan</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
@@ -268,11 +302,16 @@ export default function HppPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {rows.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
                   ) : rows.map(r => (
                     <tr key={r.id} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3 text-sm text-slate-600">{new Date(r.entry_date).toLocaleDateString('id-ID')}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{r.branches?.name}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${r.entry_type === 'omset' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
+                          {ENTRY_TYPE_LABEL[r.entry_type]}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
                         {editingRowId === r.id ? (
                           <RupiahInput value={editRowAmount} onChange={setEditRowAmount}
