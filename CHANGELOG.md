@@ -488,6 +488,19 @@ Diverifikasi: total Biaya Operasional hasil hitung ulang dari rincian kategori u
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Nama Kelompok di tabel jadi link ke halaman detail |
 | `components/sidebar.tsx` | Menu baru "Detail Laporan per Cabang" |
 
+### 24. Fix Kritis: Penggajian Driver — Kasbon Tidak Pernah Benar-Benar Mengurangi Gaji, dan Tidak Ada Jalur Otomatis ke Kas Keluar
+
+**Ditemukan:** Beda dari Gaji Staff (yang sudah lewat Tandai Lunas otomatis sejak item #15), Penggajian Driver `markAsPaid()` cuma mengubah `delivery_trips.payment_status` — **tidak pernah** membuat baris `fin_cash_out`. Semua entri "Gaji driver [Nama] minggu [tanggal]..." selama ini diketik manual, dan pola konsisten sejak Juni: nominalnya = Gross − Denda saja, **kasbon tidak pernah ikut dikurangi** (deskripsinya bahkan eksplisit menulis "tidak mengurangi gaji" di setiap entri). Di sisi lain, tabel `driver_kasbon`/`driver_kasbon_deductions` tetap mencatat kasbon itu sebagai "Lunas" — padahal secara riil driver tetap menerima gaji penuh. Setelah dikonfirmasi ke Owner: kasbon **seharusnya** memang memotong uang yang diterima driver.
+
+**Fix data:** 15 baris `fin_cash_out` (kategori `driver_wage`, Juni–Agustus) dikoreksi nominalnya turun sebesar kasbon yang seharusnya dipotong (total Rp3.300.000), deskripsinya diperbarui.
+
+**Fix struktural:** Ditambahkan tombol "💰 Tandai Lunas & Catat Kas Keluar" di modal Detail Upah Driver — menghitung otomatis (upah trip belum lunas − denda tersimpan − kasbon tersimpan), cabang diambil dari data karyawan asli (bukan diketik), insert satu baris `fin_cash_out` berstatus `approved`. Jalur lama (`selectedIds`/bulk "Lunasi X Trip" yang cuma menandai lunas tanpa insert Kas Keluar sama sekali) **dihapus total** — sekarang satu-satunya jalur adalah lewat modal ini.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/penggajian/driver/page.tsx` | Tombol & modal Tandai Lunas Driver; hapus jalur bulk lunas lama |
+| **DB** | Koreksi nominal 15 baris `fin_cash_out` kategori `driver_wage` |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07)*
