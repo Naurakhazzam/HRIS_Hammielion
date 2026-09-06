@@ -6,8 +6,10 @@ import Link from 'next/link'
 import RupiahInput from '@/components/RupiahInput'
 
 type Employee = { id: string; full_name: string }
+type DriverEmployee = { id: string; full_name: string; branch_id: string | null }
 type Vehicle = { id: string; name: string; plate_number: string | null }
 type Route = { id: string; name: string }
+type BankAccount = { id: string; bank_name: string; account_number: string | null; account_type: string }
 
 type DeliveryTrip = {
   id: string
@@ -47,10 +49,11 @@ type DriverFineForm = { tempId: string; amount: string; reason: string }
 
 export default function PenggajianDriverPage() {
   const [trips, setTrips] = useState<DeliveryTrip[]>([])
-  const [drivers, setDrivers] = useState<Employee[]>([])
+  const [drivers, setDrivers] = useState<DriverEmployee[]>([])
   const [helpers, setHelpers] = useState<Employee[]>([])
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
 
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -62,7 +65,13 @@ export default function PenggajianDriverPage() {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'kenek' | 'input'>('overview')
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [myUserId, setMyUserId] = useState<string | null>(null)
+
+  // Tandai Lunas & Catat Kas Keluar (driver) — supaya tidak ada lagi entri manual yang salah cabang/dobel/gross-vs-net
+  const [payDriverOpen, setPayDriverOpen] = useState(false)
+  const [payDriverDate, setPayDriverDate] = useState('')
+  const [payDriverAccountId, setPayDriverAccountId] = useState('')
+  const [payDriverSubmitting, setPayDriverSubmitting] = useState(false)
 
   const [detailDriver, setDetailDriver] = useState<{
     driverName: string
@@ -138,14 +147,18 @@ export default function PenggajianDriverPage() {
   async function fetchMyUser() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
+      setMyUserId(user.id)
       const { data } = await supabase.from('users').select('employee_id').eq('id', user.id).single()
       if (data) setMyEmployeeId(data.employee_id)
     }
   }
 
   async function fetchMasterData() {
-    const { data: drvData } = await supabase.from('employees').select('id, full_name').eq('employee_type', 'driver').eq('is_active', true)
+    const { data: drvData } = await supabase.from('employees').select('id, full_name, branch_id').eq('employee_type', 'driver').eq('is_active', true)
     if (drvData) setDrivers(drvData)
+
+    const { data: baData } = await supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name')
+    if (baData) setBankAccounts(baData)
 
     const { data: allPerm } = await supabase
       .from('employees')
@@ -265,25 +278,6 @@ export default function PenggajianDriverPage() {
     setSubmitting(false)
   }
 
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) setSelectedIds(trips.filter(t => t.payment_status === 'unpaid').map(t => t.id))
-    else setSelectedIds([])
-  }
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-  }
-
-  async function markAsPaid() {
-    if (selectedIds.length === 0 || !myEmployeeId) return
-    if (!confirm(`Lunasi ${selectedIds.length} trip pengiriman?`)) return
-    setSubmitting(true)
-    const { error } = await supabase.from('delivery_trips').update({ payment_status: 'paid' }).in('id', selectedIds)
-    if (error) showMessage('error', 'Gagal memproses pembayaran: ' + error.message)
-    else { showMessage('success', `${selectedIds.length} trip pengiriman berhasil dilunasi.`); setSelectedIds([]); fetchTrips() }
-    setSubmitting(false)
-  }
-
   async function handleDeleteTrip(tripId: string) {
     if (!confirm('Hapus trip ini? Data tidak dapat dikembalikan.')) return
     setSubmitting(true)
@@ -382,6 +376,62 @@ export default function PenggajianDriverPage() {
     }
     await supabase.from('driver_kasbon_deductions').delete().eq('id', dedId)
     await openDetailDriver(detailDriver.driverName, detailDriver.driverId)
+  }
+
+  function openPayDriverModal() {
+    if (!detailDriver) return
+    setPayDriverDate(new Date().toISOString().slice(0, 10))
+    setPayDriverAccountId('')
+    setPayDriverOpen(true)
+  }
+
+  // Tandai Lunas & Catat Kas Keluar — satu-satunya jalur resmi untuk mencatat gaji driver ke Kas Keluar,
+  // supaya cabangnya otomatis benar (dari data karyawan) dan nominalnya otomatis net (upah - denda - kasbon),
+  // tidak lagi diketik manual yang berisiko salah cabang / dobel / lupa kurangi kasbon.
+  async function confirmPayDriver() {
+    if (!detailDriver || !myUserId) return
+    if (!payDriverAccountId) { showMessage('error', 'Pilih rekening/kas sumber dulu.'); return }
+    if (!payDriverDate) { showMessage('error', 'Tanggal wajib diisi.'); return }
+
+    const unpaidTrips = detailDriver.trips.filter(t => t.payment_status === 'unpaid')
+    if (unpaidTrips.length === 0) { showMessage('error', 'Tidak ada trip yang belum lunas minggu ini.'); return }
+
+    const totalUpahUnpaid = unpaidTrips.reduce((acc, t) => acc + Number(t.driver_earning), 0)
+    const totalKasbon = detailDriver.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
+    const totalDenda = detailDriver.savedFines.reduce((s, f) => s + Number(f.amount), 0)
+    const netAmount = totalUpahUnpaid - totalKasbon - totalDenda
+    if (netAmount <= 0) { showMessage('error', 'Gaji bersih harus lebih besar dari Rp0. Cek potongan minggu ini.'); return }
+
+    const driverBranchId = drivers.find(d => d.id === detailDriver.driverId)?.branch_id
+    if (!driverBranchId) { showMessage('error', 'Cabang driver ini tidak ditemukan di data karyawan. Perbaiki data karyawan dulu.'); return }
+
+    setPayDriverSubmitting(true)
+    const { error: updErr } = await supabase.from('delivery_trips').update({ payment_status: 'paid' }).in('id', unpaidTrips.map(t => t.id))
+    if (updErr) { showMessage('error', 'Gagal menandai trip lunas: ' + updErr.message); setPayDriverSubmitting(false); return }
+
+    const potonganNote = (totalKasbon > 0 || totalDenda > 0)
+      ? ` (upah ${formatRupiah(totalUpahUnpaid)}${totalDenda > 0 ? ` - denda ${formatRupiah(totalDenda)}` : ''}${totalKasbon > 0 ? ` - kasbon ${formatRupiah(totalKasbon)}` : ''})`
+      : ''
+    const { error: coErr } = await supabase.from('fin_cash_out').insert({
+      branch_id: driverBranchId,
+      category: 'driver_wage',
+      amount: netAmount,
+      description: `Gaji driver ${detailDriver.driverName} minggu ${detailDriver.weekStart}${potonganNote}`,
+      transaction_date: payDriverDate,
+      account_id: payDriverAccountId,
+      input_by: myUserId,
+      verified_by: myUserId,
+      status: 'approved',
+    })
+    if (coErr) {
+      showMessage('error', 'Trip sudah ditandai lunas, tapi gagal mencatat Kas Keluar: ' + coErr.message)
+    } else {
+      showMessage('success', `Gaji driver ${detailDriver.driverName} berhasil dilunasi dan tercatat di Kas Keluar (${formatRupiah(netAmount)}).`)
+      setPayDriverOpen(false)
+      await openDetailDriver(detailDriver.driverName, detailDriver.driverId)
+      fetchTrips()
+    }
+    setPayDriverSubmitting(false)
   }
 
   function handlePrintSlip() {
@@ -703,11 +753,6 @@ export default function PenggajianDriverPage() {
             {weekOptions.map(w => <option key={w.value} value={w.value}>{w.label}</option>)}
           </select>
         </div>
-        {selectedIds.length > 0 && (
-          <button onClick={markAsPaid} disabled={submitting} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition whitespace-nowrap">
-            Lunasi ({selectedIds.length}) Trip
-          </button>
-        )}
       </div>
 
       {/* Summary Cards */}
@@ -768,7 +813,6 @@ export default function PenggajianDriverPage() {
                 const paidCount = driverTrips.filter(t => t.payment_status === 'paid').length
                 const unpaidCount = driverTrips.length - paidCount
                 const allPaid = unpaidCount === 0
-                const unpaidTrips = driverTrips.filter(t => t.payment_status === 'unpaid')
 
                 return (
                   <div key={driverName} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col gap-3">
@@ -793,7 +837,7 @@ export default function PenggajianDriverPage() {
                       </button>
                       {unpaidCount > 0 && (
                         <button
-                          onClick={() => setSelectedIds(unpaidTrips.map(t => t.id))}
+                          onClick={() => openDetailDriver(driverName, driverId)}
                           className="flex-1 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition">
                           Tandai Lunas
                         </button>
@@ -913,14 +957,20 @@ export default function PenggajianDriverPage() {
       const totalPotongan = totalKasbon + totalDenda
       const gajiB = totalUpah - totalPotongan
       const hasSavedDeductions = detailDriver.savedKasbonDeductions.length > 0 || detailDriver.savedFines.length > 0
+      const unpaidCount = detailDriver.trips.filter(t => t.payment_status === 'unpaid').length
 
       return (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4">
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200 flex-wrap gap-2">
               <h2 className="text-base font-bold text-slate-700">Detail Upah Driver</h2>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                {unpaidCount > 0 && (
+                  <button onClick={openPayDriverModal} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg transition">
+                    💰 Tandai Lunas &amp; Catat Kas Keluar
+                  </button>
+                )}
                 <button onClick={handlePrintSlip} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium rounded-lg transition">
                   🖨️ Cetak Slip
                 </button>
@@ -1146,6 +1196,62 @@ export default function PenggajianDriverPage() {
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+
+    {/* Modal Tandai Lunas & Catat Kas Keluar (Driver) */}
+    {payDriverOpen && detailDriver && (() => {
+      const unpaidTrips = detailDriver.trips.filter(t => t.payment_status === 'unpaid')
+      const totalUpahUnpaid = unpaidTrips.reduce((acc, t) => acc + Number(t.driver_earning), 0)
+      const totalKasbon = detailDriver.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
+      const totalDenda = detailDriver.savedFines.reduce((s, f) => s + Number(f.amount), 0)
+      const netAmount = totalUpahUnpaid - totalKasbon - totalDenda
+      return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+              <h2 className="text-base font-bold text-slate-700">Tandai Lunas: Metode &amp; Sumber Pembayaran</h2>
+              <button onClick={() => setPayDriverOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-sm text-slate-600">{detailDriver.driverName} — {detailDriver.weekLabel} ({unpaidTrips.length} trip belum lunas)</p>
+
+              <div className="bg-slate-50 rounded-xl p-3 space-y-1 text-sm">
+                <div className="flex justify-between"><span className="text-slate-500">Upah (belum lunas)</span><span className="font-medium">{formatRupiah(totalUpahUnpaid)}</span></div>
+                {totalDenda > 0 && <div className="flex justify-between text-red-600"><span>Denda</span><span>-{formatRupiah(totalDenda)}</span></div>}
+                {totalKasbon > 0 && <div className="flex justify-between text-red-600"><span>Potongan Kasbon</span><span>-{formatRupiah(totalKasbon)}</span></div>}
+                <div className="flex justify-between font-bold text-green-700 pt-1 border-t border-slate-200"><span>Gaji Bersih (Kas Keluar)</span><span>{formatRupiah(netAmount)}</span></div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Pembayaran <span className="text-red-500">*</span></label>
+                <input type="date" required value={payDriverDate} onChange={e => setPayDriverDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
+                <select required value={payDriverAccountId} onChange={e => setPayDriverAccountId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                  <option value="">-- Pilih Rekening/Kas --</option>
+                  {bankAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setPayDriverOpen(false)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-lg transition">
+                  Batal
+                </button>
+                <button onClick={confirmPayDriver} disabled={payDriverSubmitting || !payDriverAccountId || netAmount <= 0}
+                  className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                  {payDriverSubmitting ? 'Memproses...' : 'Konfirmasi Lunas'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400">Nominal Kas Keluar otomatis dihitung net (upah − denda − kasbon) dan cabangnya otomatis ikut data karyawan — tidak bisa diketik manual.</p>
             </div>
           </div>
         </div>
