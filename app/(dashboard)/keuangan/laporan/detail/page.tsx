@@ -31,6 +31,19 @@ type CashOutRow = {
 }
 type CashOutCategory = { code: string; label: string; affects_net_profit: boolean }
 type HppRow = { branch_id: string; hpp_amount: number; entry_type: 'hpp' | 'omset' }
+type CashierLossRow = {
+  id: string
+  branch_id: string
+  entry_date: string
+  amount: number
+  notes: string | null
+  branches?: { name: string } | null
+  employees?: { full_name: string } | null
+}
+
+// Kategori Kas Keluar yang berasal dari penggajian — dikelompokkan jadi satu bagian tersendiri
+// ("Rincian Penggajian"), bukan tercampur di daftar kategori umum.
+const PAYROLL_CATEGORIES = ['payroll', 'gaji_', 'driver_wage', 'helper_wage', 'borongan_wage', 'gaji_freelance']
 
 export default function LaporanDetailPage() {
   const supabase = createClient()
@@ -50,8 +63,11 @@ export default function LaporanDetailPage() {
   const [cashInRows, setCashInRows] = useState<CashInRow[]>([])
   const [cashOutRows, setCashOutRows] = useState<CashOutRow[]>([])
   const [hppRows, setHppRows] = useState<HppRow[]>([])
+  const [cashierLossRows, setCashierLossRows] = useState<CashierLossRow[]>([])
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [showPemasukan, setShowPemasukan] = useState(false)
+  const [showPenggajian, setShowPenggajian] = useState(false)
+  const [showKehilangan, setShowKehilangan] = useState(false)
 
   useEffect(() => {
     async function init() {
@@ -91,33 +107,39 @@ export default function LaporanDetailPage() {
     if (!selectedGroup) { setLoading(false); return }
     setLoading(true)
     const branchIds = Array.from(branchToGroup.entries()).filter(([, label]) => label === selectedGroup).map(([id]) => id)
-    if (branchIds.length === 0) { setCashInRows([]); setCashOutRows([]); setHppRows([]); setLoading(false); return }
+    if (branchIds.length === 0) { setCashInRows([]); setCashOutRows([]); setHppRows([]); setCashierLossRows([]); setLoading(false); return }
 
     const [year, m] = month.split('-').map(Number)
     const startDate = localDateStr(new Date(year, m - 1, 1))
     const endDate = localDateStr(new Date(year, m, 0))
 
-    const [cashInRes, cashOutRes, hppRes] = await Promise.all([
+    const [cashInRes, cashOutRes, hppRes, cashierLossRes] = await Promise.all([
       supabase.from('fin_cash_in')
         .select('id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, branch_id, branches(name)')
         .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
-        .order('transaction_date', { ascending: false }),
+        .order('transaction_date', { ascending: true }),
       supabase.from('fin_cash_out')
         .select('id, transaction_date, amount, category, description, status, branch_id, branches(name)')
         .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
-        .order('transaction_date', { ascending: false }),
+        .order('transaction_date', { ascending: true }),
       supabase.from('fin_hpp_entries')
         .select('branch_id, hpp_amount, entry_type').eq('status', 'approved')
         .in('branch_id', branchIds).gte('entry_date', startDate).lte('entry_date', endDate),
+      supabase.from('cashier_loss_entries')
+        .select('id, branch_id, entry_date, amount, notes, branches(name), employees!cashier_loss_entries_employee_id_fkey(full_name)')
+        .in('branch_id', branchIds).gte('entry_date', startDate).lte('entry_date', endDate)
+        .order('entry_date', { ascending: true }),
     ])
 
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
     if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
     if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
+    if (cashierLossRes.error) console.error('Detail error cashier_loss:', JSON.stringify(cashierLossRes.error, null, 2))
 
     setCashInRows((cashInRes.data as unknown as CashInRow[]) || [])
     setCashOutRows((cashOutRes.data as unknown as CashOutRow[]) || [])
     setHppRows((hppRes.data as HppRow[]) || [])
+    setCashierLossRows((cashierLossRes.data as unknown as CashierLossRow[]) || [])
     setExpandedCategories(new Set())
     setLoading(false)
   }, [supabase, selectedGroup, month, branchToGroup])
@@ -154,10 +176,15 @@ export default function LaporanDetailPage() {
   const hasSistemData = omsetSistem > 0 || hppSistem > 0
   const labaKotorSistem = omsetSistem - hppSistem
   const labaBersihSistem = labaKotorSistem - biayaOperasional
+  // Uang Masuk (Real) dikurangi Total Kas Keluar (SEMUA kategori) — Biaya Operasional TIDAK dikurangkan lagi
+  // di sini karena sudah termasuk di dalam Total Kas Keluar (kalau dikurangi dua kali, hasilnya jadi salah).
+  const perkiraanKasSeharusnya = totalUangDiterima - totalKasKeluar
 
-  // Kelompok kategori pengeluaran
+  // Kelompok kategori pengeluaran (di luar penggajian — penggajian punya bagian tersendiri di bawah)
   const byCategory = new Map<string, { label: string; rows: CashOutRow[]; total: number; affectsNetProfit: boolean }>()
+  const payrollRows: CashOutRow[] = []
   for (const r of cashOutRows) {
+    if (PAYROLL_CATEGORIES.includes(r.category)) { payrollRows.push(r); continue }
     const cat = catMap.get(r.category)
     const label = cat?.label || r.category
     if (!byCategory.has(r.category)) byCategory.set(r.category, { label, rows: [], total: 0, affectsNetProfit: cat?.affects_net_profit !== false })
@@ -166,6 +193,8 @@ export default function LaporanDetailPage() {
     if (r.status === 'approved') entry.total += Number(r.amount)
   }
   const categoryList = Array.from(byCategory.entries()).sort((a, b) => b[1].total - a[1].total)
+  const totalPenggajian = payrollRows.filter(r => r.status === 'approved').reduce((s, r) => s + Number(r.amount), 0)
+  const totalKehilangan = cashierLossRows.reduce((s, r) => s + Number(r.amount), 0)
 
   const monthLabel = new Date(month + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
 
@@ -184,7 +213,7 @@ export default function LaporanDetailPage() {
       <div className="mb-6">
         <Link href="/keuangan/laporan" className="text-sm text-blue-600 hover:underline">&larr; Kembali ke Laporan Resmi</Link>
         <h1 className="text-2xl font-bold text-slate-800 mt-2 mb-1">Detail Laporan per Cabang</h1>
-        <p className="text-sm text-slate-500">Rincian lengkap pemasukan &amp; pengeluaran per kelompok laporan — klik kategori pengeluaran untuk lihat daftar transaksinya.</p>
+        <p className="text-sm text-slate-500">Rincian lengkap pemasukan &amp; pengeluaran per kelompok laporan, diurutkan dari tanggal 1 — klik kategori pengeluaran untuk lihat daftar transaksinya.</p>
       </div>
 
       <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end justify-between">
@@ -218,7 +247,7 @@ export default function LaporanDetailPage() {
         <>
           <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200">
             <h2 className="text-lg font-bold text-slate-800 mb-3">{selectedGroup} — {monthLabel}</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <div>
                 <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Omzet Dilaporkan (Kas Masuk)</p>
                 <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(totalOmzetDilaporkan)}</p>
@@ -234,6 +263,11 @@ export default function LaporanDetailPage() {
               <div>
                 <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Biaya Operasional</p>
                 <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(biayaOperasional)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Perkiraan Uang Kas yang Harus Ada</p>
+                <p className={`text-lg font-bold whitespace-nowrap ${perkiraanKasSeharusnya >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(perkiraanKasSeharusnya)}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Uang Diterima − Total Kas Keluar (Biaya Operasional sudah termasuk di dalamnya, tidak dikurangi dua kali)</p>
               </div>
             </div>
 
@@ -308,6 +342,88 @@ export default function LaporanDetailPage() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+            <button onClick={() => setShowPenggajian(v => !v)}
+              className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition text-left border-b border-slate-200 bg-slate-50">
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-600 uppercase">
+                <span className={`text-xs transition-transform ${showPenggajian ? 'rotate-90' : ''}`}>▶</span>
+                Rincian Penggajian
+                <span className="text-xs text-slate-400 normal-case">({payrollRows.length} entri)</span>
+              </span>
+              <span className="text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(totalPenggajian)}</span>
+            </button>
+            {showPenggajian && (
+              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">
+                      <th className="px-4 py-2">Tanggal</th>
+                      <th className="px-4 py-2">Cabang</th>
+                      <th className="px-4 py-2">Kategori</th>
+                      <th className="px-4 py-2 text-right">Nominal</th>
+                      <th className="px-4 py-2">Keterangan</th>
+                      <th className="px-4 py-2 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {payrollRows.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada penggajian untuk periode ini. Ingat: gajian periode bulan lalu biasanya baru tercatat di bulan ini (jeda pembayaran ~1 bulan).</td></tr>
+                    ) : payrollRows.map(r => (
+                      <tr key={r.id} className="text-sm hover:bg-slate-50">
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
+                        <td className="px-4 py-2 text-slate-600">{r.branches?.name || '—'}</td>
+                        <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{catMap.get(r.category)?.label || r.category}</td>
+                        <td className="px-4 py-2 text-right font-medium text-slate-800 whitespace-nowrap">{formatRupiah(r.amount)}</td>
+                        <td className="px-4 py-2 text-slate-500">{r.description || '—'}</td>
+                        <td className="px-4 py-2 text-center">{statusBadge(r.status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+            <button onClick={() => setShowKehilangan(v => !v)}
+              className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition text-left border-b border-slate-200 bg-slate-50">
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-600 uppercase">
+                <span className={`text-xs transition-transform ${showKehilangan ? 'rotate-90' : ''}`}>▶</span>
+                Rincian Kehilangan Barang/Kasir
+                <span className="text-xs text-slate-400 normal-case">({cashierLossRows.length} entri)</span>
+              </span>
+              <span className="text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(totalKehilangan)}</span>
+            </button>
+            {showKehilangan && (
+              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">
+                      <th className="px-4 py-2">Tanggal</th>
+                      <th className="px-4 py-2">Cabang</th>
+                      <th className="px-4 py-2">Karyawan</th>
+                      <th className="px-4 py-2 text-right">Nominal</th>
+                      <th className="px-4 py-2">Catatan</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {cashierLossRows.length === 0 ? (
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kehilangan barang/kasir untuk periode ini.</td></tr>
+                    ) : cashierLossRows.map(r => (
+                      <tr key={r.id} className="text-sm hover:bg-slate-50">
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{new Date(r.entry_date).toLocaleDateString('id-ID')}</td>
+                        <td className="px-4 py-2 text-slate-600">{r.branches?.name || '—'}</td>
+                        <td className="px-4 py-2 text-slate-600">{r.employees?.full_name || '—'}</td>
+                        <td className="px-4 py-2 text-right font-medium text-slate-800 whitespace-nowrap">{formatRupiah(r.amount)}</td>
+                        <td className="px-4 py-2 text-slate-500">{r.notes || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
