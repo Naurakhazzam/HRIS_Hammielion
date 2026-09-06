@@ -1,0 +1,355 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { localDateStr, todayLocalStr } from '@/lib/date'
+import Link from 'next/link'
+
+const ADMIN_ROLES = ['owner', 'hr', 'finance']
+
+type CashInRow = {
+  id: string
+  transaction_date: string
+  amount: number
+  expense_amount: number
+  cash_adjustment: number
+  payment_method: string
+  description: string | null
+  status: string
+  branch_id: string
+  branches?: { name: string } | null
+}
+type CashOutRow = {
+  id: string
+  transaction_date: string
+  amount: number
+  category: string
+  description: string | null
+  status: string
+  branch_id: string
+  branches?: { name: string } | null
+}
+type CashOutCategory = { code: string; label: string; affects_net_profit: boolean }
+type HppRow = { branch_id: string; hpp_amount: number; entry_type: 'hpp' | 'omset' }
+
+export default function LaporanDetailPage() {
+  const supabase = createClient()
+
+  const [role, setRole] = useState('')
+  const [roleLoading, setRoleLoading] = useState(true)
+  const isAdmin = ADMIN_ROLES.includes(role)
+
+  const today = todayLocalStr()
+  const [groupLabels, setGroupLabels] = useState<string[]>([])
+  const [branchToGroup, setBranchToGroup] = useState<Map<string, string>>(new Map())
+  const [selectedGroup, setSelectedGroup] = useState('')
+  const [month, setMonth] = useState(today.slice(0, 7))
+  const [categories, setCategories] = useState<CashOutCategory[]>([])
+
+  const [loading, setLoading] = useState(true)
+  const [cashInRows, setCashInRows] = useState<CashInRow[]>([])
+  const [cashOutRows, setCashOutRows] = useState<CashOutRow[]>([])
+  const [hppRows, setHppRows] = useState<HppRow[]>([])
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
+  const [showPemasukan, setShowPemasukan] = useState(false)
+
+  useEffect(() => {
+    async function init() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).single()
+        if (userRow) setRole(userRow.role)
+      }
+
+      const { data: groupsRes } = await supabase.from('fin_branch_report_groups').select('branch_id, report_group_label')
+      const map = new Map<string, string>()
+      const labelSet = new Set<string>()
+      for (const g of groupsRes || []) {
+        map.set(g.branch_id, g.report_group_label)
+        labelSet.add(g.report_group_label)
+      }
+      setBranchToGroup(map)
+      const labels = Array.from(labelSet).sort()
+      setGroupLabels(labels)
+
+      const { data: catRes } = await supabase.from('fin_cash_out_categories').select('code, label, affects_net_profit')
+      if (catRes) setCategories(catRes)
+
+      // Prefill dari query string kalau ada (link deep dari Laporan Resmi), tanpa pakai hook useSearchParams
+      const params = new URLSearchParams(window.location.search)
+      const qGroup = params.get('group')
+      const qMonth = params.get('month')
+      setSelectedGroup(qGroup && labels.includes(qGroup) ? qGroup : labels[0] || '')
+      if (qMonth) setMonth(qMonth)
+
+      setRoleLoading(false)
+    }
+    init()
+  }, [supabase])
+
+  const fetchData = useCallback(async () => {
+    if (!selectedGroup) { setLoading(false); return }
+    setLoading(true)
+    const branchIds = Array.from(branchToGroup.entries()).filter(([, label]) => label === selectedGroup).map(([id]) => id)
+    if (branchIds.length === 0) { setCashInRows([]); setCashOutRows([]); setHppRows([]); setLoading(false); return }
+
+    const [year, m] = month.split('-').map(Number)
+    const startDate = localDateStr(new Date(year, m - 1, 1))
+    const endDate = localDateStr(new Date(year, m, 0))
+
+    const [cashInRes, cashOutRes, hppRes] = await Promise.all([
+      supabase.from('fin_cash_in')
+        .select('id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, branch_id, branches(name)')
+        .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
+        .order('transaction_date', { ascending: false }),
+      supabase.from('fin_cash_out')
+        .select('id, transaction_date, amount, category, description, status, branch_id, branches(name)')
+        .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
+        .order('transaction_date', { ascending: false }),
+      supabase.from('fin_hpp_entries')
+        .select('branch_id, hpp_amount, entry_type').eq('status', 'approved')
+        .in('branch_id', branchIds).gte('entry_date', startDate).lte('entry_date', endDate),
+    ])
+
+    if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
+    if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
+    if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
+
+    setCashInRows((cashInRes.data as unknown as CashInRow[]) || [])
+    setCashOutRows((cashOutRes.data as unknown as CashOutRow[]) || [])
+    setHppRows((hppRes.data as HppRow[]) || [])
+    setExpandedCategories(new Set())
+    setLoading(false)
+  }, [supabase, selectedGroup, month, branchToGroup])
+
+  useEffect(() => { if (!roleLoading && isAdmin) fetchData() }, [roleLoading, isAdmin, fetchData])
+
+  const formatRupiah = (angka: number) =>
+    new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, string> = { pending: 'bg-yellow-100 text-yellow-800', approved: 'bg-green-100 text-green-800', rejected: 'bg-red-100 text-red-800', revisi: 'bg-blue-100 text-blue-800' }
+    const label: Record<string, string> = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Ditolak', revisi: 'Revisi' }
+    return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-slate-100 text-slate-700'}`}>{label[status] || status}</span>
+  }
+
+  function toggleCategory(code: string) {
+    setExpandedCategories(prev => {
+      const next = new Set(prev)
+      if (next.has(code)) next.delete(code); else next.add(code)
+      return next
+    })
+  }
+
+  // Ringkasan
+  const cashInApproved = cashInRows.filter(r => r.status === 'approved')
+  const totalOmzetDilaporkan = cashInApproved.reduce((s, r) => s + Number(r.amount), 0)
+  const totalUangDiterima = cashInApproved.reduce((s, r) => s + Number(r.amount) - Number(r.expense_amount || 0) + Number(r.cash_adjustment || 0), 0)
+  const cashOutApproved = cashOutRows.filter(r => r.status === 'approved')
+  const totalKasKeluar = cashOutApproved.reduce((s, r) => s + Number(r.amount), 0)
+  const catMap = new Map(categories.map(c => [c.code, c]))
+  const biayaOperasional = cashOutApproved.filter(r => catMap.get(r.category)?.affects_net_profit !== false).reduce((s, r) => s + Number(r.amount), 0)
+  const omsetSistem = hppRows.filter(r => r.entry_type === 'omset').reduce((s, r) => s + Number(r.hpp_amount), 0)
+  const hppSistem = hppRows.filter(r => r.entry_type === 'hpp').reduce((s, r) => s + Number(r.hpp_amount), 0)
+  const hasSistemData = omsetSistem > 0 || hppSistem > 0
+  const labaKotorSistem = omsetSistem - hppSistem
+  const labaBersihSistem = labaKotorSistem - biayaOperasional
+
+  // Kelompok kategori pengeluaran
+  const byCategory = new Map<string, { label: string; rows: CashOutRow[]; total: number; affectsNetProfit: boolean }>()
+  for (const r of cashOutRows) {
+    const cat = catMap.get(r.category)
+    const label = cat?.label || r.category
+    if (!byCategory.has(r.category)) byCategory.set(r.category, { label, rows: [], total: 0, affectsNetProfit: cat?.affects_net_profit !== false })
+    const entry = byCategory.get(r.category)!
+    entry.rows.push(r)
+    if (r.status === 'approved') entry.total += Number(r.amount)
+  }
+  const categoryList = Array.from(byCategory.entries()).sort((a, b) => b[1].total - a[1].total)
+
+  const monthLabel = new Date(month + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+
+  if (roleLoading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
+
+  if (!isAdmin) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+        <p className="text-slate-600">Anda tidak memiliki akses ke halaman Detail Laporan per Cabang.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="mb-6">
+        <Link href="/keuangan/laporan" className="text-sm text-blue-600 hover:underline">&larr; Kembali ke Laporan Resmi</Link>
+        <h1 className="text-2xl font-bold text-slate-800 mt-2 mb-1">Detail Laporan per Cabang</h1>
+        <p className="text-sm text-slate-500">Rincian lengkap pemasukan &amp; pengeluaran per kelompok laporan — klik kategori pengeluaran untuk lihat daftar transaksinya.</p>
+      </div>
+
+      <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end">
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Kelompok / Cabang</label>
+          <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)}
+            className="w-56 px-3 py-2 border border-slate-300 rounded text-sm outline-none bg-white">
+            {groupLabels.length === 0 && <option value="">-- Belum ada kelompok --</option>}
+            {groupLabels.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Bulan</label>
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+            className="px-3 py-2 border border-slate-300 rounded text-sm outline-none bg-white" />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-10 text-center text-slate-500">Memuat data...</div>
+      ) : !selectedGroup ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center text-slate-500 text-sm">Pilih kelompok/cabang dulu.</div>
+      ) : (
+        <>
+          <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200">
+            <h2 className="text-lg font-bold text-slate-800 mb-3">{selectedGroup} — {monthLabel}</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Omzet Dilaporkan (Kas Masuk)</p>
+                <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(totalOmzetDilaporkan)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Uang Diterima (Real)</p>
+                <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(totalUangDiterima)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Total Kas Keluar (Semua Kategori)</p>
+                <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(totalKasKeluar)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Biaya Operasional</p>
+                <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(biayaOperasional)}</p>
+              </div>
+            </div>
+
+            {hasSistemData && (
+              <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-xs text-purple-600 uppercase mb-1 min-h-[2rem]">Omset (Sistem)</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(omsetSistem)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-purple-600 uppercase mb-1 min-h-[2rem]">HPP (Sistem)</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(hppSistem)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-purple-600 uppercase mb-1 min-h-[2rem]">Laba Kotor (Sistem)</p>
+                  <p className={`text-lg font-bold whitespace-nowrap ${labaKotorSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaKotorSistem)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-purple-600 uppercase mb-1 min-h-[2rem]">Laba Bersih (Sistem)</p>
+                  <p className={`text-lg font-bold whitespace-nowrap ${labaBersihSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaBersihSistem)}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+            <div className="p-4 border-b border-slate-200 bg-slate-50">
+              <h2 className="text-sm font-semibold text-slate-600 uppercase">Rincian Pengeluaran per Kategori</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Klik baris kategori untuk buka daftar transaksinya (tanggal, nominal, keterangan). Total di sini cuma menghitung entri berstatus &quot;Disetujui&quot;.</p>
+            </div>
+            {categoryList.length === 0 ? (
+              <div className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pengeluaran untuk periode ini.</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {categoryList.map(([code, info]) => (
+                  <div key={code}>
+                    <button onClick={() => toggleCategory(code)}
+                      className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition text-left">
+                      <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                        <span className={`text-xs transition-transform ${expandedCategories.has(code) ? 'rotate-90' : ''}`}>▶</span>
+                        {info.label}
+                        {!info.affectsNetProfit && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">di luar P&amp;L</span>}
+                        <span className="text-xs text-slate-400">({info.rows.length} entri)</span>
+                      </span>
+                      <span className="text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(info.total)}</span>
+                    </button>
+                    {expandedCategories.has(code) && (
+                      <div className="bg-slate-50 border-t border-slate-100">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="text-xs text-slate-500 uppercase">
+                              <th className="px-4 pl-10 py-2">Tanggal</th>
+                              <th className="px-4 py-2">Cabang</th>
+                              <th className="px-4 py-2 text-right">Nominal</th>
+                              <th className="px-4 py-2">Keterangan</th>
+                              <th className="px-4 py-2 text-center">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {info.rows.map(r => (
+                              <tr key={r.id} className="text-sm">
+                                <td className="px-4 pl-10 py-2 text-slate-600 whitespace-nowrap">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
+                                <td className="px-4 py-2 text-slate-600">{r.branches?.name || '—'}</td>
+                                <td className="px-4 py-2 text-right font-medium text-slate-800 whitespace-nowrap">{formatRupiah(r.amount)}</td>
+                                <td className="px-4 py-2 text-slate-500">{r.description || '—'}</td>
+                                <td className="px-4 py-2 text-center">{statusBadge(r.status)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <button onClick={() => setShowPemasukan(v => !v)}
+              className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition text-left border-b border-slate-200 bg-slate-50">
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-600 uppercase">
+                <span className={`text-xs transition-transform ${showPemasukan ? 'rotate-90' : ''}`}>▶</span>
+                Rincian Pemasukan (Kas Masuk)
+                <span className="text-xs text-slate-400 normal-case">({cashInRows.length} entri)</span>
+              </span>
+              <span className="text-sm font-semibold text-green-700 whitespace-nowrap">{formatRupiah(totalUangDiterima)}</span>
+            </button>
+            {showPemasukan && (
+              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">
+                      <th className="px-4 py-2">Tanggal</th>
+                      <th className="px-4 py-2">Cabang</th>
+                      <th className="px-4 py-2 text-right">Omzet</th>
+                      <th className="px-4 py-2 text-right">Uang Diterima</th>
+                      <th className="px-4 py-2">Keterangan</th>
+                      <th className="px-4 py-2 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {cashInRows.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pemasukan untuk periode ini.</td></tr>
+                    ) : cashInRows.map(r => (
+                      <tr key={r.id} className="text-sm hover:bg-slate-50">
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{new Date(r.transaction_date).toLocaleDateString('id-ID')}</td>
+                        <td className="px-4 py-2 text-slate-600">{r.branches?.name || '—'}</td>
+                        <td className="px-4 py-2 text-right text-slate-700 whitespace-nowrap">{formatRupiah(r.amount)}</td>
+                        <td className="px-4 py-2 text-right font-medium text-green-700 whitespace-nowrap">{formatRupiah(Number(r.amount) - Number(r.expense_amount || 0) + Number(r.cash_adjustment || 0))}</td>
+                        <td className="px-4 py-2 text-slate-500">{r.description || '—'}</td>
+                        <td className="px-4 py-2 text-center">{statusBadge(r.status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <p className="text-xs text-slate-400 mt-3">Semua total di halaman ini hanya menghitung entri berstatus &quot;Disetujui&quot; — entri Menunggu/Ditolak tetap ditampilkan di daftar supaya kelihatan.</p>
+        </>
+      )}
+    </div>
+  )
+}

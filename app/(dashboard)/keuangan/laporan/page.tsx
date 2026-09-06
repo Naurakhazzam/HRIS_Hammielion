@@ -537,7 +537,11 @@ export default function LaporanResmiPage() {
                     const labaBersihSistemGroup = labaKotorSistemGroup - g.biayaOperasional - g.kasbonRealisasi
                     return (
                       <tr key={g.label} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{g.label}</td>
+                        <td className="px-4 py-3 text-sm font-medium whitespace-nowrap">
+                          <Link href={`/keuangan/laporan/detail?group=${encodeURIComponent(g.label)}&month=${month}`} className="text-blue-700 hover:underline">
+                            {g.label} <span className="text-xs">🔍</span>
+                          </Link>
+                        </td>
                         {showSistem && (
                           <td className="px-4 py-3 text-sm text-right text-purple-700 whitespace-nowrap">
                             {g.omsetSistem > 0 ? formatRupiah(g.omsetSistem) : <span className="text-slate-300">—</span>}
