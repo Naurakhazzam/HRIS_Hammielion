@@ -155,6 +155,19 @@ export default function LaporanDetailPage() {
     return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-slate-100 text-slate-700'}`}>{label[status] || status}</span>
   }
 
+  // Entri yang bukan "Disetujui" tetap ditampilkan (transparan, data apa adanya) tapi TIDAK ikut ke
+  // total manapun di halaman ini — beri keterangan langsung menempel di barisnya supaya tidak disangka salah hitung.
+  function statusCell(status: string) {
+    return (
+      <div className="text-center">
+        {statusBadge(status)}
+        {status !== 'approved' && (
+          <div className="text-[10px] text-amber-600 mt-0.5 whitespace-nowrap">tidak dihitung ke total</div>
+        )}
+      </div>
+    )
+  }
+
   function toggleCategory(code: string) {
     setExpandedCategories(prev => {
       const next = new Set(prev)
@@ -333,7 +346,7 @@ export default function LaporanDetailPage() {
                                 <td className="px-4 py-2 text-slate-600">{r.branches?.name || '—'}</td>
                                 <td className="px-4 py-2 text-right font-medium text-slate-800 whitespace-nowrap">{formatRupiah(r.amount)}</td>
                                 <td className="px-4 py-2 text-slate-500">{r.description || '—'}</td>
-                                <td className="px-4 py-2 text-center">{statusBadge(r.status)}</td>
+                                <td className="px-4 py-2">{statusCell(r.status)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -379,7 +392,7 @@ export default function LaporanDetailPage() {
                         <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{catMap.get(r.category)?.label || r.category}</td>
                         <td className="px-4 py-2 text-right font-medium text-slate-800 whitespace-nowrap">{formatRupiah(r.amount)}</td>
                         <td className="px-4 py-2 text-slate-500">{r.description || '—'}</td>
-                        <td className="px-4 py-2 text-center">{statusBadge(r.status)}</td>
+                        <td className="px-4 py-2">{statusCell(r.status)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -461,7 +474,7 @@ export default function LaporanDetailPage() {
                         <td className="px-4 py-2 text-right text-slate-700 whitespace-nowrap">{formatRupiah(r.amount)}</td>
                         <td className="px-4 py-2 text-right font-medium text-green-700 whitespace-nowrap">{formatRupiah(Number(r.amount) - Number(r.expense_amount || 0) + Number(r.cash_adjustment || 0))}</td>
                         <td className="px-4 py-2 text-slate-500">{r.description || '—'}</td>
-                        <td className="px-4 py-2 text-center">{statusBadge(r.status)}</td>
+                        <td className="px-4 py-2">{statusCell(r.status)}</td>
                       </tr>
                     ))}
                   </tbody>
