@@ -461,6 +461,21 @@ Halaman baru `keuangan/logistik` — laporan gabungan Pendapatan (Kas Masuk) dan
 | `app/(dashboard)/keuangan/logistik/page.tsx` | Halaman baru — laporan Pendapatan/Pengeluaran/Sisa Saldo Logistik |
 | **DB** | Tabel baru `fin_vehicle_rental_rates`; kolom baru `fin_recurring_costs.billing_type/account_id/internal_to_branch_id/internal_to_account_id` |
 
+### 22. Fitur: Omset (Sistem Kasir) Disandingkan dengan HPP & Kas Real di Laporan Resmi
+
+**Latar belakang:** Bisnis punya sistem kasir eksternal yang akurat untuk Omset & HPP (akrual — barang terjual, terlepas uangnya sudah cair atau belum), terpisah dari HRIS yang mencatat arus kas real-time (Kas Masuk/Kas Keluar). Keduanya tidak boleh dipaksa jadi satu angka — gap di antaranya (piutang, uang antar-cabang yang "nyasar", pembayaran supplier yang menutup utang lama) itu wajar, bukan kesalahan pencatatan.
+
+**Perubahan:** Halaman "HPP Manual" diperluas jadi "HPP & Omset (Sistem)" — `fin_hpp_entries` dapat kolom `entry_type` (`hpp` / `omset`), form & tabelnya mendukung dua jenis entri. Laporan Resmi (tab Bulanan) dapat panel baru "Omset & HPP Sistem Kasir vs Kas Real": Omset(sistem), HPP(sistem), Laba Kotor(sistem) — dianggap lebih dipercaya daripada Laba Kotor berbasis Kas Masuk yang lama — disandingkan dengan Uang Diterima (real) dan Pembayaran Supplier (real, ditampilkan terpisah karena bisa berisi pelunasan utang lama, bukan cerminan HPP bulan berjalan). Panel ini otomatis tersembunyi untuk periode yang belum ada data Omset-sistemnya.
+
+**Verifikasi data Agustus 2026:** Ditemukan 1 dari 5 entri HPP yang sempat salah (Toko Depan tercatat Rp91.773.521, seharusnya Rp88.541.520 sesuai konfirmasi Owner) — sudah diperbaiki. Omset-sistem Agustus per cabang di-backfill dari angka yang diberikan Owner (Gudang Rp2.126.465.500, Toko Pusat Rp435.359.297, Toko Depan Rp102.890.285, Raja Petshop Rp99.684.476, Markas Petshop Rp37.472.992) — total Laba Kotor (sistem) Agustus = Rp160.526.477 (~5,7% margin), semua cabang untung.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/hpp/page.tsx` | Toggle Jenis Data (HPP/Omset), filter Jenis, kolom Jenis di tabel |
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Panel perbandingan Omset/HPP Sistem vs Kas Real (tab Bulanan) |
+| `components/sidebar.tsx` | Label menu "HPP Manual" → "HPP & Omset (Sistem)" |
+| **DB** | Kolom baru `fin_hpp_entries.entry_type` |
+
 ---
 
-*Terakhir diupdate: Sesi 3 (2026-09-04)*
+*Terakhir diupdate: Sesi 3 (2026-09-06)*
