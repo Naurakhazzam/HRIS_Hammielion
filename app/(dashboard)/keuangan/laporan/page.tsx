@@ -356,38 +356,38 @@ export default function LaporanResmiPage() {
               <h2 className="text-lg font-bold text-slate-800 mb-3">Total Konsolidasi (Seluruh Bisnis)</h2>
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Kas Masuk</p>
-                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.kasMasuk)}</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Kas Masuk</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.kasMasuk)}</p>
                   <VarianceBadge cur={consolidated.kasMasuk} prev={prevConsolidated.kasMasuk} />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">HPP</p>
-                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.hpp)}</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">HPP</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.hpp)}</p>
                   <VarianceBadge cur={consolidated.hpp} prev={prevConsolidated.hpp} />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Laba Kotor</p>
-                  <p className="text-lg font-semibold text-blue-700">{formatRupiah(consolidated.labaKotor)}</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Laba Kotor</p>
+                  <p className="text-lg font-semibold text-blue-700 whitespace-nowrap">{formatRupiah(consolidated.labaKotor)}</p>
                   <VarianceBadge cur={consolidated.labaKotor} prev={prevConsolidated.labaKotor} />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Biaya Operasional
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-start min-h-[2rem]">Biaya Operasional
                     <InfoTooltip text="Tidak termasuk pembelian stok/restock ke supplier (Gudang/Hammielion) — itu sudah dihitung di HPP, supaya tidak dihitung dobel." />
                   </p>
-                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.biayaOperasional)}</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.biayaOperasional)}</p>
                   <VarianceBadge cur={consolidated.biayaOperasional} prev={prevConsolidated.biayaOperasional} />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Realisasi Kasbon
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-start min-h-[2rem]">Realisasi Kasbon
                     <InfoTooltip text="Uang kasbon sudah keluar duluan saat dicairkan ke karyawan. Di sini dihitung SEBAGAI BIAYA baru saat gajinya benar-benar lunas dan potongannya jalan — bukan dihitung dua kali, cuma waktu pengakuannya beda." />
                   </p>
-                  <p className="text-lg font-semibold text-amber-700">{formatRupiah(consolidated.kasbonRealisasi)}</p>
+                  <p className="text-lg font-semibold text-amber-700 whitespace-nowrap">{formatRupiah(consolidated.kasbonRealisasi)}</p>
                   <VarianceBadge cur={consolidated.kasbonRealisasi} prev={prevConsolidated.kasbonRealisasi} />
                   {tab === 'mingguan' && <p className="text-[10px] text-slate-400 mt-0.5">Cuma dihitung di tampilan bulanan</p>}
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Laba Bersih</p>
-                  <p className={`text-lg font-bold ${consolidated.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(consolidated.labaBersih)}</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Laba Bersih</p>
+                  <p className={`text-lg font-bold whitespace-nowrap ${consolidated.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(consolidated.labaBersih)}</p>
                   <VarianceBadge cur={consolidated.labaBersih} prev={prevConsolidated.labaBersih} />
                 </div>
               </div>
@@ -405,37 +405,37 @@ export default function LaporanResmiPage() {
               <p className="text-xs text-slate-500 mb-3">Dari input di <Link href="/keuangan/hpp" className="text-blue-600 hover:underline">HPP &amp; Omset (Sistem)</Link>. Laba Kotor/Bersih (Sistem) lebih dipercaya daripada di panel atas (yang berbasis Kas Masuk), karena langsung dari sistem kasir — tidak terpengaruh piutang/uang yang belum cair.</p>
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Omset (Sistem)</p>
-                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.omsetSistem)}</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Omset (Sistem)</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.omsetSistem)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">HPP (Sistem)</p>
-                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.hpp)}</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">HPP (Sistem)</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.hpp)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1">Laba Kotor (Sistem)</p>
-                  <p className={`text-lg font-bold ${labaKotorSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaKotorSistem)}</p>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Laba Kotor (Sistem)</p>
+                  <p className={`text-lg font-bold whitespace-nowrap ${labaKotorSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaKotorSistem)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Laba Bersih (Sistem)
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-start min-h-[2rem]">Laba Bersih (Sistem)
                     <InfoTooltip text="Laba Kotor (Sistem) dikurangi Biaya Operasional (Real) & Realisasi Kasbon — angka bottom line yang paling bisa dipercaya bulan ini." />
                   </p>
-                  <p className={`text-lg font-bold ${labaBersihSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaBersihSistem)}</p>
+                  <p className={`text-lg font-bold whitespace-nowrap ${labaBersihSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaBersihSistem)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Uang Diterima (Real)
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-start min-h-[2rem]">Uang Diterima (Real)
                     <InfoTooltip text="Kas Masuk yang benar-benar terkumpul (dari entri harian HRIS). Selisih dengan Omset Sistem itu wajar untuk cabang yang punya piutang atau alur uang antar-cabang (mis. Gudang, Toko Pusat) — bukan berarti ada kesalahan." />
                   </p>
-                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.kasMasuk)}</p>
-                  <p className={`text-xs mt-0.5 ${consolidated.omsetSistem - consolidated.kasMasuk >= 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.kasMasuk)}</p>
+                  <p className={`text-xs mt-0.5 whitespace-nowrap ${consolidated.omsetSistem - consolidated.kasMasuk >= 0 ? 'text-amber-600' : 'text-slate-400'}`}>
                     Selisih: {formatRupiah(consolidated.omsetSistem - consolidated.kasMasuk)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-center">Pembayaran Supplier (Real)
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-start min-h-[2rem]">Pembayaran Supplier (Real)
                     <InfoTooltip text="Uang yang benar-benar dibayarkan ke supplier bulan ini. Tidak dibandingkan langsung dengan HPP — bisa termasuk pelunasan utang lama, bukan cerminan HPP bulan ini." />
                   </p>
-                  <p className="text-lg font-semibold text-slate-800">{formatRupiah(consolidated.pembayaranSupplierReal)}</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.pembayaranSupplierReal)}</p>
                 </div>
               </div>
 
@@ -445,17 +445,17 @@ export default function LaporanResmiPage() {
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
                   <div>
-                    <p className="text-xs text-slate-500 uppercase mb-1">Sisa Kas Seharusnya Ada</p>
-                    <p className="text-base font-semibold text-slate-800">{formatRupiah(sisaKasSeharusnya)}</p>
+                    <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Sisa Kas Seharusnya Ada</p>
+                    <p className="text-base font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(sisaKasSeharusnya)}</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">Uang Diterima − Pembayaran Supplier</p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500 uppercase mb-1">Biaya Operasional (Real)</p>
-                    <p className="text-base font-semibold text-slate-800">{formatRupiah(consolidated.biayaOperasional)}</p>
+                    <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Biaya Operasional (Real)</p>
+                    <p className="text-base font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.biayaOperasional)}</p>
                   </div>
                   <div className="md:col-span-2">
-                    <p className="text-xs text-slate-500 uppercase mb-1">Selisih (Surplus/Defisit)</p>
-                    <p className={`text-base font-bold ${selisihKecukupanKas >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(selisihKecukupanKas)}</p>
+                    <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Selisih (Surplus/Defisit)</p>
+                    <p className={`text-base font-bold whitespace-nowrap ${selisihKecukupanKas >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(selisihKecukupanKas)}</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
                       {selisihKecukupanKas >= 0 ? 'Cukup — kas bulan ini menutup Biaya Operasional.' : 'Defisit — kekurangannya ditutup dari saldo kas yang sudah ada sebelumnya, bukan dari hasil bulan ini.'}
                     </p>
@@ -464,17 +464,17 @@ export default function LaporanResmiPage() {
 
                 {saldoAwalReal !== null && (
                   <div className="mt-4 pt-4 border-t border-dashed border-slate-200">
-                    <p className="text-xs font-medium text-slate-500 mb-2 flex items-center">Dijembatani dengan Saldo Awal Real (per {new Date(month + '-01').toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })})
+                    <p className="text-xs font-medium text-slate-500 mb-2 flex items-start">Dijembatani dengan Saldo Awal Real (per {new Date(month + '-01').toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })})
                       <InfoTooltip text="Rekening/kas Anda punya Saldo Awal fisik (hasil hitung nyata) tepat di tanggal 1 bulan ini — dipakai sebagai anchor untuk hitung Saldo Akhir Seharusnya. Kalau nanti Anda hitung fisik lagi di akhir bulan, bandingkan dengan angka ini untuk mengecek kelengkapan pencatatan." />
                     </p>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       <div>
-                        <p className="text-xs text-slate-500 uppercase mb-1">Saldo Awal (Real)</p>
-                        <p className="text-base font-semibold text-slate-800">{formatRupiah(saldoAwalReal)}</p>
+                        <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Saldo Awal (Real)</p>
+                        <p className="text-base font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(saldoAwalReal)}</p>
                       </div>
                       <div className="md:col-span-2">
-                        <p className="text-xs text-slate-500 uppercase mb-1">Saldo Akhir Seharusnya (akhir periode ini)</p>
-                        <p className="text-base font-bold text-blue-700">{formatRupiah(saldoAwalReal + selisihKecukupanKas)}</p>
+                        <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Saldo Akhir Seharusnya (akhir periode ini)</p>
+                        <p className="text-base font-bold text-blue-700 whitespace-nowrap">{formatRupiah(saldoAwalReal + selisihKecukupanKas)}</p>
                         <p className="text-[11px] text-slate-400 mt-0.5">Saldo Awal + Selisih Kecukupan Kas di atas. Cocokkan dengan hitung fisik akhir bulan untuk validasi.</p>
                       </div>
                     </div>
@@ -517,13 +517,13 @@ export default function LaporanResmiPage() {
                     const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 }
                     return (
                       <tr key={g.label} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-3 text-sm font-medium text-slate-800">{g.label}</td>
-                        <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.kasMasuk)}</td>
-                        <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.hpp)}</td>
-                        <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700">{formatRupiah(g.labaKotor)}</td>
-                        <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(g.biayaOperasional)}</td>
-                        <td className="px-4 py-3 text-sm text-right text-amber-700">{formatRupiah(g.kasbonRealisasi)}</td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-800 whitespace-nowrap">{g.label}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.kasMasuk)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.hpp)}</td>
+                        <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700 whitespace-nowrap">{formatRupiah(g.labaKotor)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.biayaOperasional)}</td>
+                        <td className="px-4 py-3 text-sm text-right text-amber-700 whitespace-nowrap">{formatRupiah(g.kasbonRealisasi)}</td>
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
                           <div className={`text-sm font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</div>
                           <VarianceBadge cur={g.labaBersih} prev={prev.labaBersih} />
                         </td>
