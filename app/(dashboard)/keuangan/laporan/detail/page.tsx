@@ -187,14 +187,21 @@ export default function LaporanDetailPage() {
         <p className="text-sm text-slate-500">Rincian lengkap pemasukan &amp; pengeluaran per kelompok laporan — klik kategori pengeluaran untuk lihat daftar transaksinya.</p>
       </div>
 
-      <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end">
+      <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end justify-between">
         <div>
-          <label className="block text-xs text-slate-500 mb-1">Kelompok / Cabang</label>
-          <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)}
-            className="w-56 px-3 py-2 border border-slate-300 rounded text-sm outline-none bg-white">
-            {groupLabels.length === 0 && <option value="">-- Belum ada kelompok --</option>}
-            {groupLabels.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
+          <label className="block text-xs text-slate-500 mb-2">Pilih Cabang</label>
+          {groupLabels.length === 0 ? (
+            <p className="text-sm text-slate-400">-- Belum ada kelompok --</p>
+          ) : (
+            <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+              {groupLabels.map(l => (
+                <button key={l} onClick={() => setSelectedGroup(l)}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${selectedGroup === l ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-xs text-slate-500 mb-1">Bulan</label>
