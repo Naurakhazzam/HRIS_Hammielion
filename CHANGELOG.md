@@ -476,6 +476,18 @@ Halaman baru `keuangan/logistik` — laporan gabungan Pendapatan (Kas Masuk) dan
 | `components/sidebar.tsx` | Label menu "HPP Manual" → "HPP & Omset (Sistem)" |
 | **DB** | Kolom baru `fin_hpp_entries.entry_type` |
 
+### 23. Fitur: Halaman Detail Laporan per Cabang
+
+Halaman baru `keuangan/laporan/detail` — pilih Kelompok/Cabang & Bulan lewat dropdown, tampil ringkasan sistem-vs-real yang sama seperti di Laporan Resmi, lalu **rincian Pengeluaran per kategori** (tiap kategori bisa diklik untuk buka daftar transaksinya: tanggal, cabang, nominal, keterangan, status) dan **rincian Pemasukan (Kas Masuk)** dalam bentuk daftar. Dijangkau lewat link di nama Kelompok pada tabel "Per Kelompok Laporan" (bawa `group` & `month` lewat query string, dibaca manual dari `window.location.search` supaya tidak perlu hook `useSearchParams` + `Suspense`), juga lewat menu sidebar.
+
+Diverifikasi: total Biaya Operasional hasil hitung ulang dari rincian kategori untuk "Gudang & Back Office" Agustus (Rp69.775.827) persis cocok dengan angka yang sudah tampil di Laporan Resmi — logikanya konsisten.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Halaman baru |
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Nama Kelompok di tabel jadi link ke halaman detail |
+| `components/sidebar.tsx` | Menu baru "Detail Laporan per Cabang" |
+
 ---
 
-*Terakhir diupdate: Sesi 3 (2026-09-06)*
+*Terakhir diupdate: Sesi 3 (2026-09-07)*
