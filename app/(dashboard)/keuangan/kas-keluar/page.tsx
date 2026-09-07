@@ -73,22 +73,26 @@ export default function InputKasKeluarPage() {
   const [loadingVehicleDays, setLoadingVehicleDays] = useState(false)
   const [vehicleSuggestedDays, setVehicleSuggestedDays] = useState<number | null>(null)
 
-  // Mode "Cairkan Kasbon" — supaya pencairan kasbon otomatis menambah saldo aktif kasbon_limits
-  // karyawan yang bersangkutan (dipakai lagi nanti sebagai referensi/pengurang saat potongan gaji),
-  // bukan cuma tercatat sebagai baris pengeluaran lepas tanpa nyambung ke siapa pun.
-  const [kasbonEmployees, setKasbonEmployees] = useState<{ id: string; full_name: string; employee_code: string }[]>([])
-  const [kasbonEmployeeId, setKasbonEmployeeId] = useState('')
-  const [kasbonAmount, setKasbonAmount] = useState('')
-  const [kasbonSaldoAktif, setKasbonSaldoAktif] = useState<number | null>(null)
+  // Mode "Cairkan Kasbon" — cuma boleh cairkan pengajuan yang SUDAH disetujui Owner (lihat
+  // /kasbon dan /keuangan/approval), bukan input bebas lagi. Nominal ikut nominal yang disetujui,
+  // tidak bisa diubah di sini, supaya tidak ada lagi kasbon yang cair tanpa persetujuan.
+  const [kasbonApprovedRequests, setKasbonApprovedRequests] = useState<{ id: string; employee_id: string; amount_requested: number; employees: { full_name: string; employee_code: string } | null }[]>([])
+  const [kasbonRequestId, setKasbonRequestId] = useState('')
   const [activeSubTab, setActiveSubTab] = useState<'riwayat' | 'revisi'>('riwayat')
 
   const isSupervisor = role === 'supervisor'
   const isAdmin = ADMIN_ROLES.includes(role)
 
   function resetKasbonFields() {
-    setKasbonEmployeeId('')
-    setKasbonAmount('')
-    setKasbonSaldoAktif(null)
+    setKasbonRequestId('')
+  }
+
+  async function fetchKasbonApprovedRequests() {
+    const { data } = await supabase.from('kasbon_requests')
+      .select('id, employee_id, amount_requested, employees(full_name, employee_code)')
+      .eq('status', 'approved').is('disbursed_at', null)
+      .order('approved_at', { ascending: true })
+    setKasbonApprovedRequests((data as unknown as { id: string; employee_id: string; amount_requested: number; employees: { full_name: string; employee_code: string } | null }[]) || [])
   }
 
   function resetVehicleFields() {
@@ -117,13 +121,6 @@ export default function InputKasKeluarPage() {
       })
   }, [vehicleRateId, vehicleMonth, vehicleRates, supabase])
 
-  // Tampilkan saldo kasbon aktif karyawan terpilih, biar kelihatan berapa yang sudah berjalan
-  // sebelum nambah pencairan baru (bukan wajib nol — bisa nambah kasbon di atas kasbon lama).
-  useEffect(() => {
-    if (!kasbonEmployeeId) { setKasbonSaldoAktif(null); return }
-    supabase.from('kasbon_limits').select('current_balance').eq('employee_id', kasbonEmployeeId).maybeSingle()
-      .then(({ data }) => setKasbonSaldoAktif(Number(data?.current_balance ?? 0)))
-  }, [kasbonEmployeeId, supabase])
 
   const fetchRecent = useCallback(async (userId: string) => {
     const { data } = await supabase
@@ -267,18 +264,17 @@ export default function InputKasKeluarPage() {
         }
       }
 
-      const [bRes, cRes, baRes, eRes, vRes] = await Promise.all([
+      const [bRes, cRes, baRes, vRes] = await Promise.all([
         supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
         supabase.from('fin_cash_out_categories').select('code, label, affects_net_profit').eq('is_active', true).order('label'),
         supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name'),
-        supabase.from('employees').select('id, full_name, employee_code').eq('is_active', true).order('full_name'),
         supabase.from('fin_vehicle_rental_rates').select('id, vehicle_id, rate_per_day, branch_id, account_id, internal_to_branch_id, internal_to_account_id, vehicles(name)').eq('is_active', true),
       ])
       if (bRes.data) setBranches(bRes.data)
       if (cRes.data) setCategories(cRes.data)
       if (baRes.data) setBankAccounts(baRes.data)
-      if (eRes.data) setKasbonEmployees(eRes.data)
       if (vRes.data) setVehicleRates(vRes.data as any)
+      await fetchKasbonApprovedRequests()
 
       await refreshMine(user.id)
       setLoading(false)
@@ -350,16 +346,17 @@ export default function InputKasKeluarPage() {
     }
 
     if (entryMode === 'kasbon') {
-      if (!kasbonEmployeeId) { showMessage('error', 'Karyawan wajib dipilih.'); return }
+      if (!kasbonRequestId) { showMessage('error', 'Pilih pengajuan kasbon yang mau dicairkan.'); return }
+      const req = kasbonApprovedRequests.find(r => r.id === kasbonRequestId)
+      if (!req) { showMessage('error', 'Pengajuan tidak ditemukan, coba pilih ulang.'); return }
       if (!formData.account_id) { showMessage('error', 'Rekening/kas sumber wajib dipilih.'); return }
-      const amountNum = parseFloat(kasbonAmount)
-      if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Nominal tidak valid.'); return }
 
       setSubmitting(true)
-      const empName = kasbonEmployees.find(e => e.id === kasbonEmployeeId)?.full_name || 'Karyawan'
+      const empName = req.employees?.full_name || 'Karyawan'
       const { error } = await supabase.from('fin_cash_out').insert({
-        branch_id: branchId, category: 'kasbon_cair', amount: amountNum,
+        branch_id: branchId, category: 'kasbon_cair', amount: req.amount_requested,
         description: `Pencairan kasbon - ${empName}${formData.description ? ' - ' + formData.description : ''}`,
+        source_table: 'kasbon_requests', source_id: req.id,
         transaction_date: formData.transaction_date, account_id: formData.account_id,
         input_by: myUserId, status: 'pending',
       })
@@ -369,18 +366,23 @@ export default function InputKasKeluarPage() {
         return
       }
 
-      // Tambah saldo kasbon aktif karyawan — inilah yang nanti jadi acuan potongan gaji
-      // (Penggajian Bulanan sudah baca kasbon_limits.current_balance sebagai "Saldo Kasbon").
-      const { data: existing } = await supabase.from('kasbon_limits').select('id, current_balance').eq('employee_id', kasbonEmployeeId).maybeSingle()
-      if (existing) {
-        await supabase.from('kasbon_limits').update({ current_balance: Number(existing.current_balance) + amountNum, updated_at: new Date().toISOString() }).eq('id', existing.id)
-      } else {
-        await supabase.from('kasbon_limits').insert({ employee_id: kasbonEmployeeId, max_limit: amountNum, current_balance: amountNum })
+      // Tandai pengajuan sudah dicairkan (RLS kasbon_req_disburse) — inilah yang jadi acuan
+      // "Saldo Kasbon" & potongan gaji di Penggajian Bulanan, bukan input bebas lagi.
+      const { error: disburseErr } = await supabase.from('kasbon_requests')
+        .update({ disbursed_at: new Date().toISOString(), disbursed_by: myUserId })
+        .eq('id', req.id)
+      if (disburseErr) {
+        showMessage('error', 'Pencairan tercatat di Kas Keluar, tapi gagal menandai pengajuan sebagai dicairkan: ' + disburseErr.message)
+        setSubmitting(false)
+        fetchKasbonApprovedRequests()
+        refreshMine(myUserId)
+        return
       }
 
-      showMessage('success', `Pencairan kasbon untuk ${empName} berhasil dicatat, menunggu verifikasi. Saldo kasbon aktifnya otomatis bertambah.`)
+      showMessage('success', `Pencairan kasbon untuk ${empName} (${formatRupiah(req.amount_requested)}) berhasil dicatat, menunggu verifikasi.`)
       setFormData(f => ({ ...f, description: '', account_id: '' }))
       resetKasbonFields()
+      fetchKasbonApprovedRequests()
       refreshMine(myUserId)
       setSubmitting(false)
       return
@@ -618,22 +620,21 @@ export default function InputKasKeluarPage() {
             {entryMode === 'kasbon' && (
               <div className="space-y-4 pt-2 border-t border-slate-100">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Karyawan <span className="text-red-500">*</span></label>
-                  <select required value={kasbonEmployeeId} onChange={e => setKasbonEmployeeId(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                    <option value="">-- Pilih Karyawan --</option>
-                    {kasbonEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name} ({e.employee_code})</option>)}
-                  </select>
-                  {kasbonEmployeeId && kasbonSaldoAktif !== null && kasbonSaldoAktif > 0 && (
-                    <p className="text-[11px] text-amber-600 mt-1">Sudah punya saldo kasbon aktif {formatRupiah(kasbonSaldoAktif)} — pencairan ini akan ditambahkan ke saldo itu.</p>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Pengajuan yang Disetujui <span className="text-red-500">*</span></label>
+                  {kasbonApprovedRequests.length === 0 ? (
+                    <p className="text-xs text-slate-400 bg-slate-50 rounded px-2 py-1.5">Tidak ada pengajuan kasbon yang sudah disetujui dan belum dicairkan. Ajukan &amp; setujui dulu lewat <Link href="/kasbon" className="text-blue-600 hover:underline">Kasbon Karyawan</Link> / <Link href="/keuangan/approval" className="text-blue-600 hover:underline">Verifikasi Keuangan</Link>.</p>
+                  ) : (
+                    <select required value={kasbonRequestId} onChange={e => setKasbonRequestId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                      <option value="">-- Pilih Pengajuan --</option>
+                      {kasbonApprovedRequests.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.employees?.full_name} ({r.employees?.employee_code}) — {formatRupiah(r.amount_requested)}
+                        </option>
+                      ))}
+                    </select>
                   )}
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dicairkan (Rp) <span className="text-red-500">*</span></label>
-                  <RupiahInput required value={kasbonAmount} onChange={setKasbonAmount}
-                    placeholder="Contoh: 500.000"
-                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                  <p className="text-[11px] text-slate-400 mt-1">Otomatis tercatat sebagai piutang karyawan (tidak masuk laba/rugi) dan menambah saldo kasbon aktifnya — nanti jadi acuan potongan gaji di Penggajian Bulanan.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Nominal ikut yang sudah disetujui — tidak bisa diketik bebas lagi, supaya tidak ada kasbon cair tanpa persetujuan.</p>
                 </div>
               </div>
             )}

@@ -477,7 +477,9 @@ export default function PenggajianBulananPage() {
     result.forEach(p => { initKasbon[p.id] = String(p.kasbon_deduction ?? 0) })
     setKasbonEdit(initKasbon)
 
-    // Fetch saldo kasbon aktif per karyawan
+    // Fetch saldo kasbon aktif per karyawan — cuma yang sudah DICAIRKAN (uang sudah keluar
+    // lewat Kas Keluar), bukan sekadar disetujui, supaya "Saldo" yang tampil di sini selalu
+    // sama dengan yang benar-benar dipotong (lihat applyKasbonDeductionFifo).
     if (result.length > 0) {
       const empIds = result.map(p => p.employee_id)
       const { data: kasbonData } = await supabase
@@ -485,6 +487,7 @@ export default function PenggajianBulananPage() {
         .select('employee_id, amount_requested, total_deducted')
         .in('employee_id', empIds)
         .eq('status', 'approved')
+        .not('disbursed_at', 'is', null)
       const saldoMap: Record<string, number> = {}
       ;(kasbonData || []).forEach((k: any) => {
         const saldo = Number(k.amount_requested) - Number(k.total_deducted)
@@ -496,22 +499,70 @@ export default function PenggajianBulananPage() {
     setLoading(false)
   }
 
-  async function handleDeletePayroll(payrollId: string, employeeName: string, employeeId: string, kasbonDed: number) {
-    if (!confirm(`Hapus slip gaji "${employeeName}"?\n\nData slip akan dihapus permanen. Jika ada potongan kasbon, saldo kasbon akan dikembalikan otomatis.`)) return
+  // Terapkan potongan kasbon FIFO ke kasbon_deductions milik karyawan (cicilan dari pengajuan
+  // yang sudah disetujui & DICAIRKAN), sampai nominal yang diketik admin di slip gaji habis —
+  // cuma menandai baris cicilan yang utuh pas dengan sisa nominal, tidak memotong sebagian
+  // baris. Dipanggil saat slip ditandai 'paid', menggantikan ledger kasbon_limits yang lama
+  // (terputus dari kasbon_requests yang ditampilkan sebagai "Saldo").
+  async function applyKasbonDeductionFifo(employeeId: string, amount: number, payrollId: string) {
+    if (amount <= 0) return
+    const { data: pending } = await supabase
+      .from('kasbon_deductions')
+      .select('id, kasbon_request_id, amount')
+      .eq('employee_id', employeeId)
+      .eq('status', 'pending')
+      .order('deduction_year', { ascending: true })
+      .order('deduction_month', { ascending: true })
+    let sisa = amount
+    const requestTotals: Record<string, number> = {}
+    for (const d of pending || []) {
+      if (sisa < Number(d.amount)) break
+      await supabase.from('kasbon_deductions').update({
+        status: 'deducted', deducted_at: new Date().toISOString(), payroll_id: payrollId,
+      }).eq('id', d.id)
+      sisa -= Number(d.amount)
+      requestTotals[d.kasbon_request_id] = (requestTotals[d.kasbon_request_id] || 0) + Number(d.amount)
+    }
+    for (const [requestId, total] of Object.entries(requestTotals)) {
+      const { data: req } = await supabase.from('kasbon_requests').select('total_deducted, amount_requested').eq('id', requestId).single()
+      if (!req) continue
+      const newTotal = Number(req.total_deducted) + total
+      const updates: Record<string, unknown> = { total_deducted: newTotal }
+      if (newTotal >= Number(req.amount_requested)) updates.status = 'lunas'
+      await supabase.from('kasbon_requests').update(updates).eq('id', requestId)
+    }
+  }
+
+  // Kebalikan dari applyKasbonDeductionFifo — dipanggil saat slip gaji dihapus. Cuma
+  // mengembalikan cicilan yang memang ditandai oleh slip ini (payroll_id match), bukan
+  // lump-sum berdasar nominal kasbon_deduction di slip, supaya tidak salah kembalikan kalau
+  // slipnya dihapus SEBELUM sempat 'paid' (sebelum ini, kasbon_limits lama selalu dikembalikan
+  // penuh tanpa cek status, jadi bisa menggelembungkan saldo kalau slip draft dihapus).
+  async function reverseKasbonDeductionForPayroll(payrollId: string) {
+    const { data: rows } = await supabase
+      .from('kasbon_deductions')
+      .select('id, kasbon_request_id, amount')
+      .eq('payroll_id', payrollId)
+    if (!rows || rows.length === 0) return
+    await supabase.from('kasbon_deductions').update({ status: 'pending', deducted_at: null, payroll_id: null }).eq('payroll_id', payrollId)
+    const requestTotals: Record<string, number> = {}
+    for (const d of rows) requestTotals[d.kasbon_request_id] = (requestTotals[d.kasbon_request_id] || 0) + Number(d.amount)
+    for (const [requestId, total] of Object.entries(requestTotals)) {
+      const { data: req } = await supabase.from('kasbon_requests').select('total_deducted').eq('id', requestId).single()
+      if (!req) continue
+      const newTotal = Math.max(0, Number(req.total_deducted) - total)
+      await supabase.from('kasbon_requests').update({ total_deducted: newTotal, status: 'approved' }).eq('id', requestId)
+    }
+  }
+
+  async function handleDeletePayroll(payrollId: string, employeeName: string, kasbonDed: number) {
+    if (!confirm(`Hapus slip gaji "${employeeName}"?\n\nData slip akan dihapus permanen. Jika ada potongan kasbon yang sudah dipotong, cicilan itu akan dikembalikan ke status belum dipotong.`)) return
     setSubmitting(payrollId)
 
-    // Kasbon reversal: kembalikan saldo jika ada potongan kasbon
+    // Kasbon reversal: kembalikan cicilan yang memang ditandai oleh slip ini (no-op kalau
+    // slip belum pernah 'paid', karena belum ada cicilan yang ditandai olehnya)
     if (kasbonDed > 0) {
-      const { data: kl } = await supabase
-        .from('kasbon_limits')
-        .select('id, current_balance')
-        .eq('employee_id', employeeId)
-        .single()
-      if (kl) {
-        await supabase.from('kasbon_limits')
-          .update({ current_balance: Number(kl.current_balance) + kasbonDed, updated_at: new Date().toISOString() })
-          .eq('id', kl.id)
-      }
+      await reverseKasbonDeductionForPayroll(payrollId)
     }
 
     const { error } = await supabase.from('payrolls').delete().eq('id', payrollId)
@@ -982,17 +1033,7 @@ export default function PenggajianBulananPage() {
     if (action === 'paid') {
       // Kasbon
       if (Number(p.kasbon_deduction) > 0) {
-        const { data: kl, error: klErr } = await supabase
-          .from('kasbon_limits')
-          .select('id, current_balance')
-          .eq('employee_id', p.employee_id)
-          .single()
-        if (!klErr && kl) {
-          const newBalance = Math.max(0, Number(kl.current_balance) - Number(p.kasbon_deduction))
-          await supabase.from('kasbon_limits')
-            .update({ current_balance: newBalance, updated_at: new Date().toISOString() })
-            .eq('id', kl.id)
-        }
+        await applyKasbonDeductionFifo(p.employee_id, Number(p.kasbon_deduction), p.id)
       }
       // Tabungan Loyalitas
       const loyalitasDed    = Number((p as any).loyalitas_deduction ?? 0)
@@ -2189,7 +2230,7 @@ export default function PenggajianBulananPage() {
 
                           {p.status === 'draft' && (
                             <button
-                              onClick={() => handleDeletePayroll(p.id, p.employee?.full_name ?? '', p.employee_id, Number(p.kasbon_deduction))}
+                              onClick={() => handleDeletePayroll(p.id, p.employee?.full_name ?? '', Number(p.kasbon_deduction))}
                               disabled={submitting === p.id}
                               className="px-2.5 py-1.5 text-xs font-medium bg-white border border-red-200 rounded-lg text-red-500 hover:bg-red-50 transition disabled:opacity-50"
                             >

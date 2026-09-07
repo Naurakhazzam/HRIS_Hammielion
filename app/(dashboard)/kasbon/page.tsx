@@ -465,7 +465,6 @@ function TabRiwayat({ showMessage }: { showMessage: (t: 'success' | 'error', msg
   const [filterYear, setFilterYear] = useState(today.getFullYear())
   const [deductions, setDeductions] = useState<KasbonDeduction[]>([])
   const [loading, setLoading] = useState(true)
-  const [processing, setProcessing] = useState<string | null>(null)
 
   const yearOptions = Array.from({ length: 4 }, (_, i) => today.getFullYear() - i + 1)
 
@@ -482,29 +481,6 @@ function TabRiwayat({ showMessage }: { showMessage: (t: 'success' | 'error', msg
     if (error) showMessage('error', 'Gagal memuat: ' + error.message)
     else setDeductions((data as unknown as KasbonDeduction[]) || [])
     setLoading(false)
-  }
-
-  async function handleMarkDeducted(d: KasbonDeduction & { kasbon_requests: any }) {
-    if (!confirm(`Tandai potongan ${fmtRp(d.amount)} untuk ${d.kasbon_requests?.employees?.full_name} sudah dipotong?`)) return
-    setProcessing(d.id)
-
-    const { error: dErr } = await supabase.from('kasbon_deductions').update({
-      status: 'deducted', deducted_at: new Date().toISOString()
-    }).eq('id', d.id)
-
-    if (dErr) { showMessage('error', 'Gagal update: ' + dErr.message); setProcessing(null); return }
-
-    const req = d.kasbon_requests
-    if (req) {
-      const newTotal = Number(req.total_deducted) + Number(d.amount)
-      const updates: any = { total_deducted: newTotal }
-      if (newTotal >= Number(req.amount_requested)) updates.status = 'lunas'
-      await supabase.from('kasbon_requests').update(updates).eq('id', req.id)
-    }
-
-    showMessage('success', 'Potongan berhasil ditandai sudah dipotong.')
-    fetchDeductions()
-    setProcessing(null)
   }
 
   const totalPending = deductions.filter(d => d.status === 'pending').reduce((s,d) => s + Number(d.amount), 0)
@@ -550,7 +526,9 @@ function TabRiwayat({ showMessage }: { showMessage: (t: 'success' | 'error', msg
         </div>
       </div>
 
-      {/* Tabel */}
+      {/* Tabel — hanya baca. Cicilan ditandai "Sudah Dipotong" otomatis saat slip gaji
+          karyawan itu ditandai lunas di Penggajian Bulanan, bukan diklik manual di sini —
+          supaya tidak ada dua tempat yang bisa saling tidak sinkron. */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-10 text-center text-slate-500">Memuat data...</div>
@@ -561,7 +539,7 @@ function TabRiwayat({ showMessage }: { showMessage: (t: 'success' | 'error', msg
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  {['Karyawan','Kode','Nominal Potongan','Status','Aksi'].map(h => (
+                  {['Karyawan','Kode','Nominal Potongan','Status'].map(h => (
                     <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -580,14 +558,6 @@ function TabRiwayat({ showMessage }: { showMessage: (t: 'success' | 'error', msg
                           ? <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">Belum Dipotong</span>
                           : <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">Sudah Dipotong</span>
                         }
-                      </td>
-                      <td className="px-4 py-3">
-                        {d.status === 'pending' && (
-                          <button onClick={() => handleMarkDeducted(dd)} disabled={processing === d.id}
-                            className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50">
-                            {processing === d.id ? 'Memproses...' : 'Tandai Sudah Dipotong'}
-                          </button>
-                        )}
                       </td>
                     </tr>
                   )
