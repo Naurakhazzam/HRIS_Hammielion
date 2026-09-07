@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
+import Link from 'next/link'
 
 type KasbonRequest = {
   id: string
@@ -78,7 +79,7 @@ export default function KasbonPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Kasbon Karyawan</h1>
-        <p className="text-sm text-slate-500">Kelola pengajuan, limit, dan riwayat potongan kasbon.</p>
+        <p className="text-sm text-slate-500">Ajukan kasbon, atur limit, dan lihat riwayat potongan. Persetujuan pengajuan dilakukan di <Link href="/keuangan/approval" className="text-blue-600 hover:underline">Verifikasi Keuangan</Link>.</p>
       </div>
 
       {message && (
@@ -132,20 +133,7 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
   const [requests, setRequests] = useState<KasbonRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<string>('all')
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-
-  // Modal state
-  const [modalApprove, setModalApprove] = useState<KasbonRequest | null>(null)
-  const [modalReject, setModalReject] = useState<KasbonRequest | null>(null)
   const [submitting, setSubmitting] = useState(false)
-
-  const today = new Date()
-  const [approveForm, setApproveForm] = useState({
-    deduction_per_month: '',
-    deduction_start_month: today.getMonth() + 1,
-    deduction_start_year: today.getFullYear()
-  })
-  const [rejectReason, setRejectReason] = useState('')
 
   // Ajukan Kasbon Baru — Admin/HR input atas nama karyawan (karyawan minta langsung/lisan),
   // supaya ada satu jalur resmi untuk membuat baris kasbon_requests (sebelum ini tidak ada
@@ -155,9 +143,6 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
   const [ajukanForm, setAjukanForm] = useState({ employee_id: '', amount_requested: '', reason: '' })
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id)
-    })
     fetchRequests()
     fetchEmployees()
   }, [])
@@ -213,55 +198,6 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
   }
 
   const filtered = filterStatus === 'all' ? requests : requests.filter(r => r.status === filterStatus)
-
-  async function handleApprove(e: React.FormEvent) {
-    e.preventDefault()
-    if (!modalApprove || !currentUserId) return
-    const dpm = Number(approveForm.deduction_per_month)
-    if (!dpm || dpm <= 0) { showMessage('error', 'Masukkan cicilan yang valid.'); return }
-    setSubmitting(true)
-
-    const { error } = await supabase.from('kasbon_requests').update({
-      status: 'approved',
-      approved_by: currentUserId,
-      approved_at: new Date().toISOString(),
-      deduction_per_month: dpm,
-      deduction_start_month: approveForm.deduction_start_month,
-      deduction_start_year: approveForm.deduction_start_year
-    }).eq('id', modalApprove.id)
-
-    if (error) { showMessage('error', 'Gagal menyetujui: ' + error.message); setSubmitting(false); return }
-
-    // Auto-generate kasbon_deductions
-    const totalCicilan = Math.ceil(modalApprove.amount_requested / dpm)
-    const inserts = []
-    for (let i = 0; i < totalCicilan; i++) {
-      const bulan = ((approveForm.deduction_start_month - 1 + i) % 12) + 1
-      const tahun = approveForm.deduction_start_year + Math.floor((approveForm.deduction_start_month - 1 + i) / 12)
-      const isLast = i === totalCicilan - 1
-      const amount = isLast ? modalApprove.amount_requested - (dpm * (totalCicilan - 1)) : dpm
-      inserts.push({ kasbon_request_id: modalApprove.id, employee_id: modalApprove.employee_id, deduction_month: bulan, deduction_year: tahun, amount, status: 'pending' })
-    }
-    await supabase.from('kasbon_deductions').insert(inserts)
-
-    showMessage('success', `Kasbon disetujui. ${totalCicilan} cicilan otomatis dibuat.`)
-    setModalApprove(null)
-    setApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() })
-    fetchRequests()
-    setSubmitting(false)
-  }
-
-  async function handleReject(e: React.FormEvent) {
-    e.preventDefault()
-    if (!modalReject) return
-    setSubmitting(true)
-    const { error } = await supabase.from('kasbon_requests').update({
-      status: 'rejected', rejection_reason: rejectReason
-    }).eq('id', modalReject.id)
-    if (error) showMessage('error', 'Gagal menolak: ' + error.message)
-    else { showMessage('success', 'Pengajuan ditolak.'); setModalReject(null); setRejectReason(''); fetchRequests() }
-    setSubmitting(false)
-  }
 
   async function handleLunas(id: string) {
     if (!confirm('Tandai kasbon ini sebagai LUNAS?')) return
@@ -331,18 +267,10 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex gap-2">
                           {r.status === 'pending' && (
-                            canApprove ? (
-                              <>
-                                <button onClick={() => { setModalApprove(r); setApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() }) }}
-                                  className="px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition">Setujui</button>
-                                <button onClick={() => { setModalReject(r); setRejectReason('') }}
-                                  className="px-3 py-1.5 text-xs font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition">Tolak</button>
-                              </>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">
-                                ⏳ Menunggu Owner
-                              </span>
-                            )
+                            <Link href="/keuangan/approval"
+                              className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap hover:bg-amber-100 transition">
+                              ⏳ Proses di Verifikasi Keuangan
+                            </Link>
                           )}
                           {r.status === 'approved' && canApprove && (
                             <button onClick={() => handleLunas(r.id)}
@@ -417,79 +345,6 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
         </div>
       )}
 
-      {/* Modal Setujui */}
-      {modalApprove && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold text-slate-800 mb-1">Setujui Pengajuan Kasbon</h2>
-            <p className="text-sm text-slate-500 mb-4">{modalApprove.employees?.full_name} — {fmtRp(modalApprove.amount_requested)}</p>
-            <form onSubmit={handleApprove} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Potongan Gaji per Bulan (Rp) *</label>
-                <RupiahInput required value={approveForm.deduction_per_month}
-                  onChange={v => setApproveForm({...approveForm, deduction_per_month: v})}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="Contoh: 500000" />
-                {approveForm.deduction_per_month && (
-                  <p className="text-xs text-slate-500 mt-1">
-                    Estimasi: {Math.ceil(modalApprove.amount_requested / Number(approveForm.deduction_per_month))} cicilan
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Mulai Bulan *</label>
-                  <select required value={approveForm.deduction_start_month}
-                    onChange={e => setApproveForm({...approveForm, deduction_start_month: Number(e.target.value)})}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                    {MONTH_NAMES.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Mulai Tahun *</label>
-                  <input required type="number" value={approveForm.deduction_start_year}
-                    onChange={e => setApproveForm({...approveForm, deduction_start_year: Number(e.target.value)})}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setModalApprove(null)}
-                  className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                <button type="submit" disabled={submitting}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
-                  {submitting ? 'Memproses...' : 'Konfirmasi Setujui'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Tolak */}
-      {modalReject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold text-slate-800 mb-1">Tolak Pengajuan Kasbon</h2>
-            <p className="text-sm text-slate-500 mb-4">{modalReject.employees?.full_name} — {fmtRp(modalReject.amount_requested)}</p>
-            <form onSubmit={handleReject} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Alasan Penolakan *</label>
-                <textarea required rows={3} value={rejectReason} onChange={e => setRejectReason(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                  placeholder="Jelaskan alasan penolakan..." />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setModalReject(null)}
-                  className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                <button type="submit" disabled={submitting}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
-                  {submitting ? 'Memproses...' : 'Konfirmasi Tolak'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

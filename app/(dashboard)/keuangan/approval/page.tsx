@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RupiahInput from '@/components/RupiahInput'
 
 type PendingCashOut = {
   id: string
@@ -63,10 +64,20 @@ type PendingAset = {
   input_user: { email: string } | null
 }
 type BranchOpt = { id: string; name: string }
+type PendingKasbon = {
+  id: string
+  employee_id: string
+  amount_requested: number
+  reason: string | null
+  created_at: string
+  employees: { full_name: string; employee_code: string; departments: { name: string } | null }
+}
 
-type Tab = 'kas_keluar' | 'kas_masuk' | 'hpp' | 'modal_cabang' | 'aset'
+type Tab = 'kas_keluar' | 'kas_masuk' | 'hpp' | 'modal_cabang' | 'aset' | 'kasbon'
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Tunai', transfer: 'Transfer', campuran: 'Campuran' }
+const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni',
+  'Juli','Agustus','September','Oktober','November','Desember']
 
 export default function ApprovalKasKeluarPage() {
   const supabase = createClient()
@@ -81,6 +92,7 @@ export default function ApprovalKasKeluarPage() {
   const [hpp, setHpp] = useState<PendingHpp[]>([])
   const [modalItems, setModalItems] = useState<PendingModal[]>([])
   const [asetItems, setAsetItems] = useState<PendingAset[]>([])
+  const [kasbonItems, setKasbonItems] = useState<PendingKasbon[]>([])
 
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
@@ -92,11 +104,26 @@ export default function ApprovalKasKeluarPage() {
   const [rejectModal, setRejectModal] = useState<{ ids: string[] } | null>(null)
   const [rejectReasonText, setRejectReasonText] = useState('')
 
+  // Kasbon: beda dari tab lain, approve butuh input tambahan (cicilan per bulan) jadi pakai
+  // modal sendiri, bukan bulk approve satu-klik — dan persetujuan dibatasi ke role owner saja
+  // (ditegakkan juga lewat RLS kasbon_req_update), sesuai keputusan pemisahan tugas: admin/HR
+  // yang mengajukan (di halaman Kasbon Karyawan), owner yang menyetujui di sini.
+  const canApproveKasbon = role === 'owner'
+  const today = new Date()
+  const [kasbonApproveModal, setKasbonApproveModal] = useState<PendingKasbon | null>(null)
+  const [kasbonApproveForm, setKasbonApproveForm] = useState({
+    deduction_per_month: '',
+    deduction_start_month: today.getMonth() + 1,
+    deduction_start_year: today.getFullYear(),
+  })
+  const [kasbonRejectModal, setKasbonRejectModal] = useState<PendingKasbon | null>(null)
+  const [kasbonRejectReason, setKasbonRejectReason] = useState('')
+
   const isAdmin = ADMIN_ROLES.includes(role)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [coRes, ciRes, hpRes, baseRes, snapRes, assetRes, contractRes] = await Promise.all([
+    const [coRes, ciRes, hpRes, baseRes, snapRes, assetRes, contractRes, kasbonRes] = await Promise.all([
       supabase.from('fin_cash_out')
         .select('id, branch_id, status, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
         .in('status', ['pending', 'revisi']).order('transaction_date', { ascending: false }),
@@ -118,6 +145,9 @@ export default function ApprovalKasKeluarPage() {
       supabase.from('fin_asset_contracts')
         .select('id, contract_type, rent_amount, notes, fin_assets(name, branch_id, branches(name)), input_user:users!fin_asset_contracts_input_by_fkey(email)')
         .eq('approval_status', 'pending').order('created_at', { ascending: false }),
+      supabase.from('kasbon_requests')
+        .select('id, employee_id, amount_requested, reason, created_at, employees(full_name, employee_code, departments(name))')
+        .eq('status', 'pending').order('created_at', { ascending: false }),
     ])
     if (coRes.error) console.error('Detail error kas_keluar:', JSON.stringify(coRes.error, null, 2))
     else setCashOut((coRes.data as unknown as PendingCashOut[]) || [])
@@ -149,6 +179,9 @@ export default function ApprovalKasKeluarPage() {
       return { id: row.id, branch_id: row.fin_assets?.branch_id || null, jenis: 'Kontrak Sewa', table: 'fin_asset_contracts', nama: `${row.contract_type} — ${row.fin_assets?.name || ''}`, branchName: row.fin_assets?.branches?.name || null, jumlah: row.rent_amount, notes: row.notes, input_user: row.input_user }
     })
     setAsetItems([...assetItemsList, ...contractItemsList])
+
+    if (kasbonRes.error) console.error('Detail error kasbon:', JSON.stringify(kasbonRes.error, null, 2))
+    else setKasbonItems((kasbonRes.data as unknown as PendingKasbon[]) || [])
 
     setLoading(false)
   }, [supabase])
@@ -196,7 +229,7 @@ export default function ApprovalKasKeluarPage() {
     setSelectedIds([])
   }
 
-  const LABEL_BY_TAB: Record<Tab, string> = { kas_keluar: 'Kas Keluar', kas_masuk: 'Kas Masuk', hpp: 'HPP', modal_cabang: 'Modal Cabang', aset: 'Aset & Kontrak' }
+  const LABEL_BY_TAB: Record<Tab, string> = { kas_keluar: 'Kas Keluar', kas_masuk: 'Kas Masuk', hpp: 'HPP', modal_cabang: 'Modal Cabang', aset: 'Aset & Kontrak', kasbon: 'Kasbon' }
   // Tabel & kolom status per tab sederhana (single-table)
   const SIMPLE_TABLE_BY_TAB: Partial<Record<Tab, string>> = { kas_keluar: 'fin_cash_out', kas_masuk: 'fin_cash_in', hpp: 'fin_hpp_entries' }
 
@@ -253,6 +286,55 @@ export default function ApprovalKasKeluarPage() {
     setProcessing(false)
   }
 
+  async function handleKasbonApprove(e: React.FormEvent) {
+    e.preventDefault()
+    if (!kasbonApproveModal || !myUserId) return
+    const dpm = Number(kasbonApproveForm.deduction_per_month)
+    if (!dpm || dpm <= 0) { showMessage('error', 'Masukkan cicilan yang valid.'); return }
+    setProcessing(true)
+
+    const { error } = await supabase.from('kasbon_requests').update({
+      status: 'approved',
+      approved_by: myUserId,
+      approved_at: new Date().toISOString(),
+      deduction_per_month: dpm,
+      deduction_start_month: kasbonApproveForm.deduction_start_month,
+      deduction_start_year: kasbonApproveForm.deduction_start_year,
+    }).eq('id', kasbonApproveModal.id)
+
+    if (error) { showMessage('error', 'Gagal menyetujui: ' + error.message); setProcessing(false); return }
+
+    // Auto-generate kasbon_deductions, satu baris per cicilan
+    const totalCicilan = Math.ceil(kasbonApproveModal.amount_requested / dpm)
+    const inserts = []
+    for (let i = 0; i < totalCicilan; i++) {
+      const bulan = ((kasbonApproveForm.deduction_start_month - 1 + i) % 12) + 1
+      const tahun = kasbonApproveForm.deduction_start_year + Math.floor((kasbonApproveForm.deduction_start_month - 1 + i) / 12)
+      const isLast = i === totalCicilan - 1
+      const amount = isLast ? kasbonApproveModal.amount_requested - (dpm * (totalCicilan - 1)) : dpm
+      inserts.push({ kasbon_request_id: kasbonApproveModal.id, employee_id: kasbonApproveModal.employee_id, deduction_month: bulan, deduction_year: tahun, amount, status: 'pending' })
+    }
+    await supabase.from('kasbon_deductions').insert(inserts)
+
+    showMessage('success', `Kasbon disetujui. ${totalCicilan} cicilan otomatis dibuat.`)
+    setKasbonApproveModal(null)
+    setKasbonApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() })
+    fetchAll()
+    setProcessing(false)
+  }
+
+  async function handleKasbonReject(e: React.FormEvent) {
+    e.preventDefault()
+    if (!kasbonRejectModal || !kasbonRejectReason.trim()) return
+    setProcessing(true)
+    const { error } = await supabase.from('kasbon_requests').update({
+      status: 'rejected', rejection_reason: kasbonRejectReason.trim(),
+    }).eq('id', kasbonRejectModal.id)
+    if (error) showMessage('error', 'Gagal menolak: ' + error.message)
+    else { showMessage('success', 'Pengajuan kasbon ditolak.'); setKasbonRejectModal(null); setKasbonRejectReason(''); fetchAll() }
+    setProcessing(false)
+  }
+
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
@@ -274,13 +356,17 @@ export default function ApprovalKasKeluarPage() {
   const filteredAset = asetItems.filter(en =>
     matchesBranch(en.branch_id) && (!q || `${en.nama} ${en.notes || ''}`.toLowerCase().includes(q))
   )
+  const filteredKasbon = kasbonItems.filter(en =>
+    !q || `${en.employees?.full_name} ${en.reason || ''}`.toLowerCase().includes(q)
+  )
 
   const currentList: { id: string }[] =
     tab === 'kas_keluar' ? filteredCashOut :
     tab === 'kas_masuk' ? filteredCashIn :
     tab === 'hpp' ? filteredHpp :
     tab === 'modal_cabang' ? filteredModal :
-    filteredAset
+    tab === 'aset' ? filteredAset :
+    filteredKasbon
   const currentIds = currentList.map((en) => en.id)
   const hasActiveFilter = q.length > 0 || filterBranch.length > 0
 
@@ -315,7 +401,7 @@ export default function ApprovalKasKeluarPage() {
       )}
 
       <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6 flex-wrap">
-        {(['kas_keluar', 'kas_masuk', 'hpp', 'modal_cabang', 'aset'] as Tab[]).map(t => (
+        {(['kas_keluar', 'kas_masuk', 'hpp', 'modal_cabang', 'aset', 'kasbon'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab === t ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             {LABEL_BY_TAB[t]} ({
@@ -323,7 +409,8 @@ export default function ApprovalKasKeluarPage() {
               t === 'kas_masuk' ? cashIn.length :
               t === 'hpp' ? hpp.length :
               t === 'modal_cabang' ? modalItems.length :
-              asetItems.length
+              t === 'aset' ? asetItems.length :
+              kasbonItems.length
             })
           </button>
         ))}
@@ -338,49 +425,62 @@ export default function ApprovalKasKeluarPage() {
             placeholder="Cari berdasarkan keterangan..."
             className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <select
-            value={filterBranch}
-            onChange={(e) => setFilterBranch(e.target.value)}
-            className="w-full sm:w-48 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-          >
-            <option value="">Semua Cabang</option>
-            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        </div>
-        <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center gap-4">
-          <span className="text-sm text-slate-500">{selectedIds.length > 0 ? `${selectedIds.length} dipilih` : 'Pilih entri untuk memproses massal'}</span>
-          {selectedIds.length > 0 && (
-            <div className="flex gap-2">
-              <button onClick={() => processEntries(selectedIds, 'approved')} disabled={processing}
-                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50">
-                Setujui ({selectedIds.length})
-              </button>
-              <button onClick={() => handleRejectClick(selectedIds)} disabled={processing}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50">
-                Tolak ({selectedIds.length})
-              </button>
-            </div>
+          {tab !== 'kasbon' && (
+            <select
+              value={filterBranch}
+              onChange={(e) => setFilterBranch(e.target.value)}
+              className="w-full sm:w-48 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">Semua Cabang</option>
+              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
           )}
         </div>
+        {tab === 'kasbon' ? (
+          <div className="p-4 border-b border-slate-200 bg-slate-50">
+            <span className="text-sm text-slate-500">
+              {canApproveKasbon ? 'Setujui/Tolak per pengajuan — butuh rencana cicilan, jadi tidak bisa diproses massal.' : 'Persetujuan kasbon dibatasi untuk role Owner.'}
+            </span>
+          </div>
+        ) : (
+          <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center gap-4">
+            <span className="text-sm text-slate-500">{selectedIds.length > 0 ? `${selectedIds.length} dipilih` : 'Pilih entri untuk memproses massal'}</span>
+            {selectedIds.length > 0 && (
+              <div className="flex gap-2">
+                <button onClick={() => processEntries(selectedIds, 'approved')} disabled={processing}
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50">
+                  Setujui ({selectedIds.length})
+                </button>
+                <button onClick={() => handleRejectClick(selectedIds)} disabled={processing}
+                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50">
+                  Tolak ({selectedIds.length})
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-white border-b border-slate-200">
-                <th className="px-4 py-3 w-10 text-center">
-                  <input type="checkbox" onChange={handleSelectAll}
-                    checked={selectedIds.length > 0 && selectedIds.length === currentIds.length}
-                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                </th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">{tab === 'aset' ? 'Nama/Aset' : 'Tanggal'}</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>
+                {tab !== 'kasbon' && (
+                  <th className="px-4 py-3 w-10 text-center">
+                    <input type="checkbox" onChange={handleSelectAll}
+                      checked={selectedIds.length > 0 && selectedIds.length === currentIds.length}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  </th>
+                )}
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">{tab === 'aset' ? 'Nama/Aset' : tab === 'kasbon' ? 'Karyawan' : 'Tanggal'}</th>
+                {tab !== 'kasbon' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>}
+                {tab === 'kasbon' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Departemen</th>}
                 {tab === 'kas_keluar' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kategori</th>}
                 {tab === 'kas_masuk' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Metode</th>}
                 {tab === 'modal_cabang' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Jenis</th>}
                 {tab === 'aset' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Jenis</th>}
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Jumlah</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Keterangan</th>
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Input Oleh</th>
+                {tab !== 'kasbon' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Input Oleh</th>}
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
               </tr>
             </thead>
@@ -503,7 +603,7 @@ export default function ApprovalKasKeluarPage() {
                     </div>
                   </td>
                 </tr>
-              )) : filteredAset.map(en => (
+              )) : tab === 'aset' ? filteredAset.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox" checked={selectedIds.includes(en.id)} onChange={() => toggleSelect(en.id)}
@@ -520,6 +620,28 @@ export default function ApprovalKasKeluarPage() {
                       <button onClick={() => processEntries([en.id], 'approved')} disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
                       <button onClick={() => handleRejectClick([en.id])} disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                     </div>
+                  </td>
+                </tr>
+              )) : filteredKasbon.map(en => (
+                <tr key={en.id} className="hover:bg-slate-50 transition">
+                  <td className="px-4 py-3 text-sm">
+                    <p className="font-medium text-slate-800">{en.employees?.full_name}</p>
+                    <p className="text-xs text-slate-500">{en.employees?.employee_code} · diajukan {new Date(en.created_at).toLocaleDateString('id-ID')}</p>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{en.employees?.departments?.name || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(en.amount_requested)}</td>
+                  <td className="px-4 py-3 text-sm text-slate-500">{en.reason || '—'}</td>
+                  <td className="px-4 py-3 text-center">
+                    {canApproveKasbon ? (
+                      <div className="flex gap-1 justify-center">
+                        <button onClick={() => { setKasbonApproveModal(en); setKasbonApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() }) }}
+                          disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
+                        <button onClick={() => { setKasbonRejectModal(en); setKasbonRejectReason('') }}
+                          disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">⏳ Menunggu Owner</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -556,6 +678,80 @@ export default function ApprovalKasKeluarPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Setujui Kasbon — butuh rencana cicilan, jadi tidak ikut alur bulk approve generik */}
+      {kasbonApproveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Setujui Pengajuan Kasbon</h2>
+            <p className="text-sm text-slate-500 mb-4">{kasbonApproveModal.employees?.full_name} — {formatRupiah(kasbonApproveModal.amount_requested)}</p>
+            <form onSubmit={handleKasbonApprove} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Potongan Gaji per Bulan (Rp) *</label>
+                <RupiahInput required value={kasbonApproveForm.deduction_per_month}
+                  onChange={v => setKasbonApproveForm({ ...kasbonApproveForm, deduction_per_month: v })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="Contoh: 500000" />
+                {kasbonApproveForm.deduction_per_month && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Estimasi: {Math.ceil(kasbonApproveModal.amount_requested / Number(kasbonApproveForm.deduction_per_month))} cicilan
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Mulai Bulan *</label>
+                  <select required value={kasbonApproveForm.deduction_start_month}
+                    onChange={e => setKasbonApproveForm({ ...kasbonApproveForm, deduction_start_month: Number(e.target.value) })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                    {MONTH_NAMES.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Mulai Tahun *</label>
+                  <input required type="number" value={kasbonApproveForm.deduction_start_year}
+                    onChange={e => setKasbonApproveForm({ ...kasbonApproveForm, deduction_start_year: Number(e.target.value) })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setKasbonApproveModal(null)}
+                  className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                <button type="submit" disabled={processing}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                  {processing ? 'Memproses...' : 'Konfirmasi Setujui'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Tolak Kasbon */}
+      {kasbonRejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Tolak Pengajuan Kasbon</h2>
+            <p className="text-sm text-slate-500 mb-4">{kasbonRejectModal.employees?.full_name} — {formatRupiah(kasbonRejectModal.amount_requested)}</p>
+            <form onSubmit={handleKasbonReject} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Alasan Penolakan *</label>
+                <textarea required rows={3} value={kasbonRejectReason} onChange={e => setKasbonRejectReason(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                  placeholder="Jelaskan alasan penolakan..." />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setKasbonRejectModal(null)}
+                  className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                <button type="submit" disabled={processing}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                  {processing ? 'Memproses...' : 'Konfirmasi Tolak'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
