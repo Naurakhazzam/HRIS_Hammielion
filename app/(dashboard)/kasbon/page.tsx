@@ -54,8 +54,19 @@ const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni',
   'Juli','Agustus','September','Oktober','November','Desember']
 
 export default function KasbonPage() {
+  const supabase = createClient()
   const [activeTab, setActiveTab] = useState<'pengajuan' | 'limit' | 'riwayat' | 'driver' | 'kenek'>('pengajuan')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [role, setRole] = useState<string>('')
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('users').select('role').eq('id', user.id).single().then(({ data }) => {
+        if (data) setRole(data.role)
+      })
+    })
+  }, [])
 
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
@@ -93,7 +104,7 @@ export default function KasbonPage() {
         ))}
       </div>
 
-      {activeTab === 'pengajuan' && <TabPengajuan showMessage={showMessage} />}
+      {activeTab === 'pengajuan' && <TabPengajuan showMessage={showMessage} role={role} />}
       {activeTab === 'limit' && <TabLimit showMessage={showMessage} />}
       {activeTab === 'riwayat' && <TabRiwayat showMessage={showMessage} />}
       {activeTab === 'driver' && <TabKasbonDriver showMessage={showMessage} />}
@@ -111,8 +122,13 @@ const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
 }
 
 // ─── TAB 1: PENGAJUAN ────────────────────────────────────────────────────────
-function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', msg: string) => void }) {
+function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'error', msg: string) => void; role: string }) {
   const supabase = createClient()
+  // Persetujuan (Setujui/Tolak/Tandai Lunas) sengaja dibatasi ke owner saja — ditegakkan juga
+  // lewat RLS kasbon_req_update, bukan cuma sembunyi tombol di UI.
+  const canApprove = role === 'owner'
+  // Match RLS kasbon_req_insert: owner/hr boleh mengajukan atas nama karyawan.
+  const canSubmit = role === 'owner' || role === 'hr'
   const [requests, setRequests] = useState<KasbonRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<string>('all')
@@ -256,12 +272,14 @@ function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', m
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <button onClick={() => setModalAjukan(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition">
-          <span className="text-base leading-none">+</span> Ajukan Kasbon Baru
-        </button>
-      </div>
+      {canSubmit && (
+        <div className="flex justify-end">
+          <button onClick={() => setModalAjukan(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition">
+            <span className="text-base leading-none">+</span> Ajukan Kasbon Baru
+          </button>
+        </div>
+      )}
 
       {/* Filter pills */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
@@ -313,14 +331,20 @@ function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', m
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex gap-2">
                           {r.status === 'pending' && (
-                            <>
-                              <button onClick={() => { setModalApprove(r); setApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() }) }}
-                                className="px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition">Setujui</button>
-                              <button onClick={() => { setModalReject(r); setRejectReason('') }}
-                                className="px-3 py-1.5 text-xs font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition">Tolak</button>
-                            </>
+                            canApprove ? (
+                              <>
+                                <button onClick={() => { setModalApprove(r); setApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() }) }}
+                                  className="px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition">Setujui</button>
+                                <button onClick={() => { setModalReject(r); setRejectReason('') }}
+                                  className="px-3 py-1.5 text-xs font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition">Tolak</button>
+                              </>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">
+                                ⏳ Menunggu Owner
+                              </span>
+                            )
                           )}
-                          {r.status === 'approved' && (
+                          {r.status === 'approved' && canApprove && (
                             <button onClick={() => handleLunas(r.id)}
                               className="px-3 py-1.5 text-xs font-medium bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition">Tandai Lunas</button>
                           )}
