@@ -576,6 +576,25 @@ Diverifikasi: total Biaya Operasional hasil hitung ulang dari rincian kategori u
 | `app/(dashboard)/keuangan/approval/page.tsx` | Tab "Kasbon" baru — modal Setujui (cicilan) & Tolak (alasan), owner-only |
 | `app/(dashboard)/kasbon/page.tsx` | Hapus tombol/modal Setujui-Tolak dari tab Pengajuan, ganti link ke Verifikasi Keuangan |
 
+### 31. Fitur: Kunci Pencairan Kasbon ke Pengajuan yang Disetujui + Sinkronkan Potongan Gaji (Langkah 3/3)
+
+Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
+
+**Kas Keluar → Cairkan Kasbon:** Tidak lagi input bebas (pilih karyawan + ketik nominal). Sekarang wajib pilih dari pengajuan yang **sudah disetujui Owner dan belum dicairkan**, nominal ikut yang disetujui (tidak bisa diubah). Saat disimpan, `kasbon_requests.disbursed_at` ditandai — ditegakkan lewat RLS baru (`kasbon_req_disburse`: owner/hr/finance, cuma untuk baris `status='approved' AND disbursed_at IS NULL`).
+
+**Penggajian Bulanan:** Potongan kasbon yang sebelumnya mengurangi ledger `kasbon_limits` (terputus dari `kasbon_requests` yang ditampilkan sebagai "Saldo") sekarang dialokasikan FIFO ke baris `kasbon_deductions` milik karyawan saat slip gaji ditandai "paid" (`applyKasbonDeductionFifo`), memperbarui `kasbon_requests.total_deducted` dan otomatis jadi `lunas` kalau sudah penuh. Hapus slip sekarang cuma mengembalikan cicilan yang memang ditandai oleh slip itu (link baru `kasbon_deductions.payroll_id`), bukan lump-sum berdasar nominal — sekalian memperbaiki bug lama: hapus slip draft/belum-paid yang ada nominal kasbon ketikan dulu salah menggelembungkan saldo karena reversal tidak pernah cek status.
+
+**Kasbon Karyawan → Riwayat Potongan:** Tombol manual "Tandai Sudah Dipotong" dihapus (jadi murni tampilan baca) — sekarang cuma Penggajian Bulanan yang boleh menandai cicilan sebagai dipotong, supaya tidak ada dua jalur yang bisa saling tidak sinkron.
+
+`kasbon_limits` tidak lagi ditulis/dibaca di mana pun (tabelnya sudah kosong dari awal, jadi tidak ada migrasi data yang diperlukan) — dibiarkan ada di database, tidak dihapus.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Mode Cairkan Kasbon pilih dari pengajuan approved, tandai `disbursed_at` |
+| `app/(dashboard)/penggajian/bulanan/page.tsx` | FIFO potongan ke `kasbon_deductions`; reversal presisi lewat `payroll_id` |
+| `app/(dashboard)/kasbon/page.tsx` | Tab Riwayat Potongan jadi read-only |
+| **DB** | Kolom baru `kasbon_requests.disbursed_at/disbursed_by`, `kasbon_deductions.payroll_id`; RLS `kasbon_req_disburse` |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
