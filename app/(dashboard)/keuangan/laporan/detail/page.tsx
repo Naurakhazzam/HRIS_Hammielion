@@ -147,9 +147,13 @@ export default function LaporanDetailPage() {
       supabase.from('fin_hpp_entries')
         .select('branch_id, hpp_amount, entry_type').eq('status', 'approved')
         .in('branch_id', branchIds).gte('entry_date', startDate).lte('entry_date', endDate),
+      // Cuma yang employee_id-nya kosong — itu kehilangan yang DITANGGUNG KANTOR (biaya riil perusahaan).
+      // Kalau employee_id terisi, itu dipotong dari gaji karyawan yang bersangkutan (bukan biaya perusahaan,
+      // sudah pulih lewat potongan gaji), jadi tidak ikut dihitung di laporan keuangan cabang ini.
       supabase.from('cashier_loss_entries')
         .select('id, branch_id, entry_date, amount, notes, branches(name), employees!cashier_loss_entries_employee_id_fkey(full_name)')
         .in('branch_id', branchIds).gte('entry_date', startDate).lte('entry_date', endDate)
+        .is('employee_id', null)
         .order('entry_date', { ascending: true }),
     ])
 
@@ -575,31 +579,30 @@ export default function LaporanDetailPage() {
               className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition text-left border-b border-slate-200 bg-slate-50">
               <span className="flex items-center gap-2 text-sm font-semibold text-slate-600 uppercase">
                 <span className={`text-xs transition-transform ${showKehilangan ? 'rotate-90' : ''}`}>▶</span>
-                Rincian Kehilangan Barang/Kasir
+                Rincian Kehilangan Barang/Kasir (Ditanggung Kantor)
                 <span className="text-xs text-slate-400 normal-case">({cashierLossRows.length} entri)</span>
               </span>
               <span className="text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(totalKehilangan)}</span>
             </button>
             {showKehilangan && (
               <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+                <p className="px-4 pt-3 text-[11px] text-slate-400">Cuma kehilangan yang tidak dipotong dari gaji karyawan manapun (ditanggung kantor sendiri) — kehilangan yang dipotong dari gaji karyawan tidak dihitung di sini karena sudah pulih lewat potongan gaji, bukan biaya perusahaan.</p>
                 <table className="w-full text-left">
                   <thead>
                     <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">
                       <th className="px-4 py-2">Tanggal</th>
                       <th className="px-4 py-2">Cabang</th>
-                      <th className="px-4 py-2">Karyawan</th>
                       <th className="px-4 py-2 text-right">Nominal</th>
                       <th className="px-4 py-2">Catatan</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {cashierLossRows.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kehilangan barang/kasir untuk periode ini.</td></tr>
+                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kehilangan yang ditanggung kantor untuk periode ini.</td></tr>
                     ) : cashierLossRows.map(r => (
                       <tr key={r.id} className="text-sm hover:bg-slate-50">
                         <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{new Date(r.entry_date).toLocaleDateString('id-ID')}</td>
                         <td className="px-4 py-2 text-slate-600">{r.branches?.name || '—'}</td>
-                        <td className="px-4 py-2 text-slate-600">{r.employees?.full_name || '—'}</td>
                         <td className="px-4 py-2 text-right font-medium text-slate-800 whitespace-nowrap">{formatRupiah(r.amount)}</td>
                         <td className="px-4 py-2 text-slate-500">{r.notes || '—'}</td>
                       </tr>
