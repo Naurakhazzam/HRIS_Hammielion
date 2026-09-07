@@ -131,11 +131,19 @@ function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', m
   })
   const [rejectReason, setRejectReason] = useState('')
 
+  // Ajukan Kasbon Baru — Admin/HR input atas nama karyawan (karyawan minta langsung/lisan),
+  // supaya ada satu jalur resmi untuk membuat baris kasbon_requests (sebelum ini tidak ada
+  // form input sama sekali, jadi tabelnya selalu kosong).
+  const [modalAjukan, setModalAjukan] = useState(false)
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [ajukanForm, setAjukanForm] = useState({ employee_id: '', amount_requested: '', reason: '' })
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) setCurrentUserId(user.id)
     })
     fetchRequests()
+    fetchEmployees()
   }, [])
 
   async function fetchRequests() {
@@ -147,6 +155,45 @@ function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', m
     if (error) { showMessage('error', 'Gagal memuat data: ' + error.message) }
     else { setRequests((data as unknown as KasbonRequest[]) || []) }
     setLoading(false)
+  }
+
+  async function fetchEmployees() {
+    const { data } = await supabase
+      .from('employees')
+      .select('id, full_name, employee_code, kasbon_limit, departments(name)')
+      .eq('is_active', true)
+      .order('full_name')
+    if (data) setEmployees(data as unknown as Employee[])
+  }
+
+  // Outstanding = semua pengajuan approved yang belum lunas — dipakai untuk peringatan
+  // (bukan blokir keras) kalau pengajuan baru bakal melebihi limit kasbon karyawan itu.
+  function outstandingFor(employeeId: string) {
+    return requests
+      .filter(r => r.employee_id === employeeId && r.status === 'approved')
+      .reduce((s, r) => s + (Number(r.amount_requested) - Number(r.total_deducted)), 0)
+  }
+
+  async function handleAjukan(e: React.FormEvent) {
+    e.preventDefault()
+    const amt = Number(ajukanForm.amount_requested)
+    if (!ajukanForm.employee_id) { showMessage('error', 'Pilih karyawan dulu.'); return }
+    if (!amt || amt <= 0) { showMessage('error', 'Nominal pengajuan tidak valid.'); return }
+    setSubmitting(true)
+    const { error } = await supabase.from('kasbon_requests').insert({
+      employee_id: ajukanForm.employee_id,
+      amount_requested: amt,
+      reason: ajukanForm.reason || null,
+      status: 'pending',
+    })
+    if (error) { showMessage('error', 'Gagal mengajukan: ' + error.message) }
+    else {
+      showMessage('success', 'Pengajuan kasbon berhasil dibuat, menunggu persetujuan.')
+      setModalAjukan(false)
+      setAjukanForm({ employee_id: '', amount_requested: '', reason: '' })
+      fetchRequests()
+    }
+    setSubmitting(false)
   }
 
   const filtered = filterStatus === 'all' ? requests : requests.filter(r => r.status === filterStatus)
@@ -209,6 +256,13 @@ function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', m
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={() => setModalAjukan(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition">
+          <span className="text-base leading-none">+</span> Ajukan Kasbon Baru
+        </button>
+      </div>
+
       {/* Filter pills */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
         <div className="flex flex-wrap gap-2">
@@ -280,6 +334,64 @@ function TabPengajuan({ showMessage }: { showMessage: (t: 'success' | 'error', m
           </div>
         )}
       </div>
+
+      {/* Modal Ajukan Kasbon Baru */}
+      {modalAjukan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Ajukan Kasbon Baru</h2>
+            <p className="text-sm text-slate-500 mb-4">Diinput oleh Admin/HR atas permintaan karyawan.</p>
+            <form onSubmit={handleAjukan} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Karyawan <span className="text-red-500">*</span></label>
+                <select required value={ajukanForm.employee_id}
+                  onChange={e => setAjukanForm({ ...ajukanForm, employee_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                  <option value="">-- Pilih Karyawan --</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.employee_code})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Diajukan (Rp) <span className="text-red-500">*</span></label>
+                <RupiahInput required value={ajukanForm.amount_requested}
+                  onChange={v => setAjukanForm({ ...ajukanForm, amount_requested: v })}
+                  placeholder="Contoh: 1.000.000"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                {ajukanForm.employee_id && (() => {
+                  const emp = employees.find(e => e.id === ajukanForm.employee_id)
+                  const outstanding = outstandingFor(ajukanForm.employee_id)
+                  const limit = Number(emp?.kasbon_limit || 0)
+                  const amt = Number(ajukanForm.amount_requested) || 0
+                  const overLimit = limit > 0 && outstanding + amt > limit
+                  return (
+                    <p className={`text-xs mt-1 ${overLimit ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
+                      Limit kasbon: {fmtRp(limit)} · Sisa kasbon aktif: {fmtRp(outstanding)}
+                      {overLimit && ' — melebihi limit!'}
+                    </p>
+                  )
+                })()}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Alasan</label>
+                <textarea rows={2} value={ajukanForm.reason}
+                  onChange={e => setAjukanForm({ ...ajukanForm, reason: e.target.value })}
+                  placeholder="Opsional"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setModalAjukan(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                <button type="submit" disabled={submitting}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                  {submitting ? 'Menyimpan...' : 'Ajukan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal Setujui */}
       {modalApprove && (
