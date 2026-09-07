@@ -514,6 +514,40 @@ Diverifikasi: total Biaya Operasional hasil hitung ulang dari rincian kategori u
 | `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Mode "Bayar Sekaligus" (auto-FIFO lintas cabang) |
 | **DB** | Hapus 5 nota rekap + realokasi 19 baris `fin_cash_out` pembayaran supplier |
 
+### 26. Fix Data: 14 Baris Gaji Duplikat Salah Cabang (Selalu Tercatat "Gudang")
+
+**Ditemukan:** Owner curiga kenapa gaji karyawan yang bukan ditempatkan di Gudang (contoh: Fikri, Ridwan Iyay) muncul di bawah cabang Gudang. Ditelusuri: ada 14 baris `fin_cash_out` kategori `payroll` berstatus `pending`, deskripsi cuma nama depan tanpa periode (mis. "Gaji Fikri"), dan `branch_id` selalu Gudang — ini duplikat dari baris ASLI yang sudah benar (nama lengkap + "periode 26 Juli – 25 Agustus 2026" + `branch_id` sesuai cabang asli karyawan + status `approved`), dibuat lewat mekanisme Tandai Lunas.
+
+**Fix data:** 14 baris duplikat dihapus. Aman dilakukan tanpa realokasi karena semuanya berstatus `pending` (belum pernah mempengaruhi kas real).
+
+| File | Perubahan |
+|---|---|
+| **DB** | Hapus 14 baris `fin_cash_out` kategori `payroll` (duplikat, pending, salah cabang) |
+
+### 27. Fix: Rincian Kehilangan per Cabang di Detail Laporan — Sumber Data Salah
+
+**Ditemukan (2 tahap):** (1) Panel "Rincian Kehilangan" di Detail Laporan per Cabang awalnya tidak memfilter kehilangan yang sudah ditanggung karyawan (dipotong dari gajinya) — sempat diperbaiki dengan filter `cashier_loss_entries.employee_id IS NULL`, tapi (2) ternyata itu masih salah: angka acuan yang benar bukan dari `cashier_loss_entries`, melainkan dari tabel `loss_monthly_inputs` (diisi manual per cabang/bulan lewat kartu "📦 Kehilangan Barang" di halaman Kehilangan Kasir) — `cashier_loss_entries` cuma mencatat rincian siapa yang menanggung, bukan total kehilangannya.
+
+**Fix:** Formula yang benar: **Kehilangan Ditanggung Kantor = `loss_monthly_inputs.total_loss_amount` (per cabang/periode) − jumlah `cashier_loss_entries.amount` yang employee_id-nya terisi (periode sama)**. Panel diubah menampilkan breakdown Total Kehilangan Barang / − Ditanggung Karyawan / = Ditanggung Kantor, plus rincian tabel yang ditanggung karyawan untuk transparansi. Diverifikasi cocok persis dengan angka di kartu sumbernya (Toko Pusat Juli 2026: total Rp2.261.893 − karyawan Rp334.144 = kantor Rp1.927.749) dan universal di 16 kombinasi cabang/bulan lain.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Rincian Kehilangan pakai `loss_monthly_inputs` sebagai sumber total, dikurangi bagian karyawan dari `cashier_loss_entries` |
+
+### 28. Fitur: Sederhanakan Alur Pembayaran Supplier — Satu Tempat, Satu Tombol "Bayar"
+
+**Latar belakang:** Owner bingung karena pencatatan hutang/pembayaran supplier tersebar di 2 halaman berbeda (Kas Keluar mode "Bayar ke Supplier" dengan 3 sub-mode, dan Pembelian & Utang Supplier) — 2 implementasi terpisah untuk logika yang sama, berisiko saling tidak konsisten. Tampilan tab "Catat Pembelian" juga membingungkan karena satu supplier internal (mis. "Gudang") wajar tampil berkali-kali (satu baris per nota, bukan per supplier) — beda dari tab "Ringkasan per Supplier" yang sudah benar dikelompokkan.
+
+**Fix struktural:**
+- Halaman Pembelian & Utang Supplier sekarang default ke tab "Ringkasan per Supplier" (bukan "Catat Pembelian"), dengan tombol besar "+ Pembelian Baru" yang membuka modal (Supplier, Cabang, Tanggal, Total Tagihan, Keterangan, opsional sudah dibayar berapa) — form yang sama dipakai juga di tab riwayat, jadi cuma satu implementasi form.
+- Aksi per baris supplier di Ringkasan disederhanakan jadi satu tombol **"Bayar"** (sebelumnya "Bayar Sekaligus") — alokasi FIFO otomatis yang sudah ada secara alami menangani kasus 1 nota maupun banyak nota dengan kode yang sama, jadi tidak perlu tombol/mode terpisah.
+- Mode "Bayar ke Supplier" di Kas Keluar (beserta 3 sub-mode "Bayar Sekaligus"/"Bayar 1 Tagihan"/"Catat Tagihan Baru" dari item #25) **dihapus total** — diganti tombol pintasan yang mengarahkan ke halaman Pembelian & Utang Supplier, supaya cuma ada satu jalur pencatatan.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/pembelian/page.tsx` | Default tab Ringkasan per Supplier; modal "+ Pembelian Baru"; tombol "Bayar" tunggal per supplier |
+| `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Hapus mode "Bayar ke Supplier" & semua state/logika terkait; ganti dengan link pintasan ke halaman Pembelian |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07)*

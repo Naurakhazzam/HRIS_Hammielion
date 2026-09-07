@@ -54,6 +54,7 @@ export default function PembelianSupplierPage() {
     supplier_id: '', branch_id: '', purchase_date: today, total_amount: '', description: '',
     pay_now: false, pay_now_amount: '', account_id: '',
   })
+  const [showNewPurchaseModal, setShowNewPurchaseModal] = useState(false)
 
   const [editPurchase, setEditPurchase] = useState<Purchase | null>(null)
   const [editForm, setEditForm] = useState({ supplier_id: '', branch_id: '', purchase_date: '', total_amount: '', description: '' })
@@ -274,6 +275,7 @@ export default function PembelianSupplierPage() {
 
     showMessage('success', 'Pembelian berhasil dicatat, pembayaran (jika ada) menunggu verifikasi.')
     setForm(f => ({ ...f, total_amount: '', description: '', pay_now: false, pay_now_amount: '', account_id: '' }))
+    setShowNewPurchaseModal(false)
     fetchData()
     setSubmitting(false)
   }
@@ -384,7 +386,12 @@ export default function PembelianSupplierPage() {
       </div>
 
       {activeTab === 'ringkasan-supplier' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+        <div className="mb-6">
+          <button onClick={() => setShowNewPurchaseModal(true)}
+            className="mb-4 w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition">
+            <span className="text-lg leading-none">+</span> Pembelian Baru
+          </button>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-200 bg-slate-50">
             <span className="text-sm font-semibold text-slate-700">Total Sisa Utang per Supplier</span>
             <p className="text-xs text-slate-400 mt-0.5">Digabung dari semua transaksi lintas bulan — tidak ikut filter periode tab Catat Pembelian. Diurutkan dari yang paling besar hutangnya.</p>
@@ -416,7 +423,7 @@ export default function PembelianSupplierPage() {
                     <td className="px-4 py-3 text-center">
                       {s.totalUnrequested > 0 ? (
                         <button onClick={() => openBulkPayModal(s.supplierId)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-green-600 border-green-200 hover:bg-green-50">
-                          Bayar Sekaligus
+                          Bayar
                         </button>
                       ) : s.sisaUtang > 0 ? (
                         <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">⏳ Menunggu</span>
@@ -428,90 +435,17 @@ export default function PembelianSupplierPage() {
             </table>
           </div>
         </div>
+        </div>
       )}
 
       {activeTab === 'input' && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
-          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Catat Pembelian Baru</h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Supplier <span className="text-red-500">*</span></label>
-              <select required value={form.supplier_id} onChange={e => setForm({ ...form, supplier_id: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                <option value="">-- Pilih Supplier --</option>
-                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-              <p className="text-[11px] text-slate-400 mt-1">Belum ada di daftar? Tambah dulu lewat "Master Supplier".</p>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
-              {isSupervisor ? (
-                <div className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-slate-50 text-slate-600">{myBranchName || '—'}</div>
-              ) : (
-                <select required value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                  <option value="">-- Pilih Cabang --</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              )}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Pembelian <span className="text-red-500">*</span></label>
-              <input type="date" required value={form.purchase_date} onChange={e => setForm({ ...form, purchase_date: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Total Tagihan (Rp) <span className="text-red-500">*</span></label>
-              <RupiahInput required value={form.total_amount} onChange={v => setForm({ ...form, total_amount: v })}
-                placeholder="Contoh: 5.000.000"
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Keterangan Barang</label>
-              <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-                placeholder="Contoh: Pakan kucing 50 karung"
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-            </div>
-
-            <div className="pt-2 border-t border-slate-100">
-              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
-                <input type="checkbox" checked={form.pay_now} onChange={e => setForm({ ...form, pay_now: e.target.checked })}
-                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                Sudah dibayar (sebagian/lunas) sekarang
-              </label>
-              {form.pay_now && (
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
-                    <RupiahInput value={form.pay_now_amount} onChange={v => setForm({ ...form, pay_now_amount: v })}
-                      placeholder="Boleh sebagian saja"
-                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas <span className="text-red-500">*</span></label>
-                    <select value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                      <option value="">-- Pilih Rekening/Kas --</option>
-                      {bankAccounts.map(a => (
-                        <option key={a.id} value={a.id}>
-                          {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button type="submit" disabled={submitting}
-              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded shadow-sm transition disabled:opacity-50">
-              {submitting ? 'Menyimpan...' : 'Simpan Pembelian'}
-            </button>
-          </form>
+      <div className="space-y-4">
+        <div className="flex justify-end">
+          <button onClick={() => setShowNewPurchaseModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition">
+            <span className="text-base leading-none">+</span> Pembelian Baru
+          </button>
         </div>
-
-        <div className="lg:col-span-2 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <p className="text-xs text-slate-500 font-medium uppercase mb-1">Total Pembelian Bulan Ini</p>
@@ -617,8 +551,99 @@ export default function PembelianSupplierPage() {
               </table>
             </div>
           </div>
-        </div>
       </div>
+      )}
+
+      {/* Modal Pembelian Baru */}
+      {showNewPurchaseModal && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Pembelian Baru</h2>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Supplier <span className="text-red-500">*</span></label>
+                  <select required value={form.supplier_id} onChange={e => setForm({ ...form, supplier_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                    <option value="">-- Pilih Supplier --</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <p className="text-[11px] text-slate-400 mt-1">Belum ada di daftar? Tambah dulu lewat &quot;Master Supplier&quot;.</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
+                  {isSupervisor ? (
+                    <div className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-slate-50 text-slate-600">{myBranchName || '—'}</div>
+                  ) : (
+                    <select required value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                      <option value="">-- Pilih Cabang --</option>
+                      {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Pembelian <span className="text-red-500">*</span></label>
+                  <input type="date" required value={form.purchase_date} onChange={e => setForm({ ...form, purchase_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Total Tagihan (Rp) <span className="text-red-500">*</span></label>
+                  <RupiahInput required value={form.total_amount} onChange={v => setForm({ ...form, total_amount: v })}
+                    placeholder="Contoh: 5.000.000"
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Keterangan Barang</label>
+                  <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                    placeholder="Contoh: Pakan kucing 50 karung"
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
+                    <input type="checkbox" checked={form.pay_now} onChange={e => setForm({ ...form, pay_now: e.target.checked })}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                    Sudah dibayar (sebagian/lunas) sekarang — kalau belum, biarkan tidak dicentang (tercatat sebagai utang)
+                  </label>
+                  {form.pay_now && (
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Nominal Dibayar (Rp) <span className="text-red-500">*</span></label>
+                        <RupiahInput value={form.pay_now_amount} onChange={v => setForm({ ...form, pay_now_amount: v })}
+                          placeholder="Boleh sebagian saja"
+                          className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas <span className="text-red-500">*</span></label>
+                        <select value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                          <option value="">-- Pilih Rekening/Kas --</option>
+                          {bankAccounts.map(a => (
+                            <option key={a.id} value={a.id}>
+                              {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button type="button" onClick={() => setShowNewPurchaseModal(false)}
+                    className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                    Batal
+                  </button>
+                  <button type="submit" disabled={submitting}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                    {submitting ? 'Menyimpan...' : 'Simpan Pembelian'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal Edit Pembelian */}
