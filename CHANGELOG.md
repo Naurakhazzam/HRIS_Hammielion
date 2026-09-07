@@ -548,6 +548,23 @@ Diverifikasi: total Biaya Operasional hasil hitung ulang dari rincian kategori u
 | `app/(dashboard)/keuangan/pembelian/page.tsx` | Default tab Ringkasan per Supplier; modal "+ Pembelian Baru"; tombol "Bayar" tunggal per supplier |
 | `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Hapus mode "Bayar ke Supplier" & semua state/logika terkait; ganti dengan link pintasan ke halaman Pembelian |
 
+### 29. Fitur: Aktifkan Alur Formal Pengajuan Kasbon (Admin Ajukan, Owner Approve) — Langkah 1 & 2
+
+**Ditemukan:** Audit menyeluruh tab Keuangan (diminta Owner) menemukan `kasbon_requests` (alur "Pengajuan" formal di halaman Kasbon Karyawan) kosong total sejak awal — bukan cuma jarang dipakai, tapi memang tidak ada form "Ajukan Baru" di mana pun di aplikasi. Yang benar-benar jalan selama ini: pencairan instan tanpa approval lewat Kas Keluar → `kasbon_limits`, dipotong manual di Penggajian Bulanan. Ditambah, "Saldo" yang ditampilkan sebagai panduan admin di Penggajian Bulanan ternyata diambil dari `kasbon_requests` (kosong/tidak sinkron), bukan dari `kasbon_limits` yang sungguhan dipotong.
+
+**Keputusan Owner:** Aktifkan alur formal sebagai satu-satunya sumber kebenaran (bukan hapus) — Admin/HR yang input pengajuan atas nama karyawan, tapi **persetujuan (Setujui/Tolak/Tandai Lunas) khusus role Owner**, supaya keputusan uang keluar tetap satu pintu.
+
+**Langkah 1 — Form pengajuan:** Ditambahkan tombol "+ Ajukan Kasbon Baru" di tab Pengajuan (pilih karyawan, nominal, alasan → `kasbon_requests` status `pending`), dengan peringatan kalau melebihi `employees.kasbon_limit`.
+
+**Langkah 2 — Kunci persetujuan ke Owner:** Tombol Setujui/Tolak/Tandai Lunas cuma tampil untuk role `owner`; role lain (hr) yang statusnya `pending` melihat badge "⏳ Menunggu Owner". Ditegakkan juga di level database — RLS `kasbon_req_update` sebelumnya mengizinkan owner **dan** hr, diperketat jadi owner-saja, supaya pembatasan bukan cuma sembunyi tombol di UI.
+
+**Belum selesai (langkah 3, menyusul):** Mengunci pencairan Kas Keluar supaya hanya bisa cair dari pengajuan yang sudah disetujui (bukan input bebas), lalu sinkronkan potongan gaji di Penggajian Bulanan ke `kasbon_requests`/`kasbon_deductions` yang benar.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/kasbon/page.tsx` | Form "Ajukan Kasbon Baru"; gating role submit (owner/hr) vs approve (owner) |
+| **DB** | RLS `kasbon_requests` update policy diperketat ke role owner saja |
+
 ---
 
-*Terakhir diupdate: Sesi 3 (2026-09-07)*
+*Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
