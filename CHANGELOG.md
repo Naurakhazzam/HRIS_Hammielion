@@ -565,6 +565,17 @@ Diverifikasi: total Biaya Operasional hasil hitung ulang dari rincian kategori u
 | `app/(dashboard)/kasbon/page.tsx` | Form "Ajukan Kasbon Baru"; gating role submit (owner/hr) vs approve (owner) |
 | **DB** | RLS `kasbon_requests` update policy diperketat ke role owner saja |
 
+### 30. Fitur: Pindahkan Persetujuan Kasbon ke Verifikasi Keuangan (Satu Pintu Approval)
+
+**Permintaan Owner:** Semua approval sebaiknya ada di satu tempat (Verifikasi Keuangan), bukan tersebar — pengajuan kasbon sebelumnya punya tombol Setujui/Tolak sendiri di halaman Kasbon Karyawan.
+
+**Perubahan:** Ditambahkan tab "Kasbon" di Verifikasi Keuangan — Setujui (dengan input rencana cicilan: nominal/bulan, mulai kapan) dan Tolak (dengan alasan) diproses per-baris di sana, tetap owner-only (sesuai item #29). Halaman Kasbon Karyawan → tab Pengajuan tetap jadi tempat Admin/HR mengajukan dan melihat daftar, tapi baris `pending` sekarang cuma jadi link ke Verifikasi Keuangan, bukan tombol approve/reject duplikat.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/approval/page.tsx` | Tab "Kasbon" baru — modal Setujui (cicilan) & Tolak (alasan), owner-only |
+| `app/(dashboard)/kasbon/page.tsx` | Hapus tombol/modal Setujui-Tolak dari tab Pengajuan, ganti link ke Verifikasi Keuangan |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
