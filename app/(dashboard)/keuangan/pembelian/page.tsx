@@ -63,7 +63,10 @@ export default function PembelianSupplierPage() {
   const [payForm, setPayForm] = useState({ amount: '', payment_date: today, account_id: '', notes: '' })
   const [paySubmitting, setPaySubmitting] = useState(false)
 
-  const [activeTab, setActiveTab] = useState<'input' | 'ringkasan-supplier'>('input')
+  // Default ke Ringkasan per Supplier — itu yang paling sering ditanya ("saya hutang berapa ke X"),
+  // sementara Catat Pembelian adalah daftar transaksi mentah per nota (bisa berulang-ulang nama
+  // supplier yang sama, terutama Gudang/Hammielion yang punya banyak nota per cabang).
+  const [activeTab, setActiveTab] = useState<'input' | 'ringkasan-supplier'>('ringkasan-supplier')
   const [bulkPaySupplierId, setBulkPaySupplierId] = useState<string | null>(null)
   const [bulkPayForm, setBulkPayForm] = useState({ amount: '', payment_date: today, account_id: '', notes: '' })
   const [bulkPaySubmitting, setBulkPaySubmitting] = useState(false)
@@ -370,13 +373,13 @@ export default function PembelianSupplierPage() {
       )}
 
       <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6">
-        <button onClick={() => setActiveTab('input')}
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'input' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-          Catat Pembelian
-        </button>
         <button onClick={() => setActiveTab('ringkasan-supplier')}
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'ringkasan-supplier' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
           📊 Ringkasan per Supplier
+        </button>
+        <button onClick={() => setActiveTab('input')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${activeTab === 'input' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          Catat Pembelian (Riwayat Transaksi)
         </button>
       </div>
 
