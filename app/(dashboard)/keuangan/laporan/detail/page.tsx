@@ -38,9 +38,11 @@ type CashierLossRow = {
   entry_date: string
   amount: number
   notes: string | null
+  employee_id: string | null
   branches?: { name: string } | null
   employees?: { full_name: string } | null
 }
+type LossMonthlyInputRow = { branch_id: string; total_loss_amount: number }
 type SupplierPurchaseRow = {
   id: string
   branch_id: string
@@ -76,6 +78,8 @@ export default function LaporanDetailPage() {
   const [cashOutRows, setCashOutRows] = useState<CashOutRow[]>([])
   const [hppRows, setHppRows] = useState<HppRow[]>([])
   const [cashierLossRows, setCashierLossRows] = useState<CashierLossRow[]>([])
+  const [totalKehilanganBarang, setTotalKehilanganBarang] = useState(0)
+  const [hasLossMonthlyInput, setHasLossMonthlyInput] = useState(false)
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [showPemasukan, setShowPemasukan] = useState(false)
   const [showPenggajian, setShowPenggajian] = useState(false)
@@ -135,7 +139,10 @@ export default function LaporanDetailPage() {
     const startDate = localDateStr(new Date(year, m - 1, 1))
     const endDate = localDateStr(new Date(year, m, 0))
 
-    const [cashInRes, cashOutRes, hppRes, cashierLossRes] = await Promise.all([
+    // Kehilangan Barang: total_loss_amount (loss_monthly_inputs, per cabang per bulan — angka resmi yang
+    // diinput di halaman Kehilangan Barang & Kerugian Kasir) dikurangi bagian yang dipotong dari gaji
+    // karyawan (cashier_loss_entries dengan employee_id terisi) = sisanya itu yang DITANGGUNG KANTOR.
+    const [cashInRes, cashOutRes, hppRes, cashierLossRes, lossMonthlyRes] = await Promise.all([
       supabase.from('fin_cash_in')
         .select('id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, branch_id, branches(name)')
         .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
@@ -147,25 +154,28 @@ export default function LaporanDetailPage() {
       supabase.from('fin_hpp_entries')
         .select('branch_id, hpp_amount, entry_type').eq('status', 'approved')
         .in('branch_id', branchIds).gte('entry_date', startDate).lte('entry_date', endDate),
-      // Cuma yang employee_id-nya kosong — itu kehilangan yang DITANGGUNG KANTOR (biaya riil perusahaan).
-      // Kalau employee_id terisi, itu dipotong dari gaji karyawan yang bersangkutan (bukan biaya perusahaan,
-      // sudah pulih lewat potongan gaji), jadi tidak ikut dihitung di laporan keuangan cabang ini.
       supabase.from('cashier_loss_entries')
-        .select('id, branch_id, entry_date, amount, notes, branches(name), employees!cashier_loss_entries_employee_id_fkey(full_name)')
-        .in('branch_id', branchIds).gte('entry_date', startDate).lte('entry_date', endDate)
-        .is('employee_id', null)
+        .select('id, branch_id, entry_date, amount, notes, employee_id, branches(name), employees!cashier_loss_entries_employee_id_fkey(full_name)')
+        .in('branch_id', branchIds).eq('period_month', m).eq('period_year', year)
         .order('entry_date', { ascending: true }),
+      supabase.from('loss_monthly_inputs')
+        .select('branch_id, total_loss_amount')
+        .in('branch_id', branchIds).eq('period_month', m).eq('period_year', year),
     ])
 
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
     if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
     if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
+    if (lossMonthlyRes.error) console.error('Detail error loss_monthly:', JSON.stringify(lossMonthlyRes.error, null, 2))
     if (cashierLossRes.error) console.error('Detail error cashier_loss:', JSON.stringify(cashierLossRes.error, null, 2))
 
     setCashInRows((cashInRes.data as unknown as CashInRow[]) || [])
     setCashOutRows((cashOutRes.data as unknown as CashOutRow[]) || [])
     setHppRows((hppRes.data as HppRow[]) || [])
     setCashierLossRows((cashierLossRes.data as unknown as CashierLossRow[]) || [])
+    const lossMonthlyRows = (lossMonthlyRes.data as LossMonthlyInputRow[]) || []
+    setTotalKehilanganBarang(lossMonthlyRows.reduce((s, r) => s + Number(r.total_loss_amount), 0))
+    setHasLossMonthlyInput(lossMonthlyRows.length > 0)
     setExpandedCategories(new Set())
     setLoading(false)
   }, [supabase, selectedGroup, month, branchToGroup])
@@ -303,7 +313,9 @@ export default function LaporanDetailPage() {
   }
   const categoryList = Array.from(byCategory.entries()).sort((a, b) => b[1].total - a[1].total)
   const totalPenggajian = payrollRows.filter(r => r.status === 'approved').reduce((s, r) => s + Number(r.amount), 0)
-  const totalKehilangan = cashierLossRows.reduce((s, r) => s + Number(r.amount), 0)
+  const kehilanganKaryawanRows = cashierLossRows.filter(r => r.employee_id)
+  const totalKehilanganKaryawan = kehilanganKaryawanRows.reduce((s, r) => s + Number(r.amount), 0)
+  const totalKehilanganKantor = totalKehilanganBarang - totalKehilanganKaryawan
 
   const monthLabel = new Date(month + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
 
@@ -579,36 +591,56 @@ export default function LaporanDetailPage() {
               className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition text-left border-b border-slate-200 bg-slate-50">
               <span className="flex items-center gap-2 text-sm font-semibold text-slate-600 uppercase">
                 <span className={`text-xs transition-transform ${showKehilangan ? 'rotate-90' : ''}`}>▶</span>
-                Rincian Kehilangan Barang/Kasir (Ditanggung Kantor)
-                <span className="text-xs text-slate-400 normal-case">({cashierLossRows.length} entri)</span>
+                Kehilangan Barang/Kasir (Ditanggung Kantor)
               </span>
-              <span className="text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(totalKehilangan)}</span>
+              <span className="text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(Math.max(0, totalKehilanganKantor))}</span>
             </button>
             {showKehilangan && (
-              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
-                <p className="px-4 pt-3 text-[11px] text-slate-400">Cuma kehilangan yang tidak dipotong dari gaji karyawan manapun (ditanggung kantor sendiri) — kehilangan yang dipotong dari gaji karyawan tidak dihitung di sini karena sudah pulih lewat potongan gaji, bukan biaya perusahaan.</p>
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">
-                      <th className="px-4 py-2">Tanggal</th>
-                      <th className="px-4 py-2">Cabang</th>
-                      <th className="px-4 py-2 text-right">Nominal</th>
-                      <th className="px-4 py-2">Catatan</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {cashierLossRows.length === 0 ? (
-                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kehilangan yang ditanggung kantor untuk periode ini.</td></tr>
-                    ) : cashierLossRows.map(r => (
-                      <tr key={r.id} className="text-sm hover:bg-slate-50">
-                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{new Date(r.entry_date).toLocaleDateString('id-ID')}</td>
-                        <td className="px-4 py-2 text-slate-600">{r.branches?.name || '—'}</td>
-                        <td className="px-4 py-2 text-right font-medium text-slate-800 whitespace-nowrap">{formatRupiah(r.amount)}</td>
-                        <td className="px-4 py-2 text-slate-500">{r.notes || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="px-4 py-4 space-y-4">
+                {!hasLossMonthlyInput ? (
+                  <p className="text-sm text-slate-500 text-center py-4">Belum ada input Total Kehilangan Barang untuk periode/cabang ini di halaman <Link href="/penggajian/kehilangan" className="text-blue-600 hover:underline">Kehilangan Barang &amp; Kerugian Kasir</Link>.</p>
+                ) : (
+                  <div className="bg-slate-50 rounded-lg p-3 text-sm space-y-1">
+                    <div className="flex justify-between"><span className="text-slate-500">Total Kehilangan Barang (diinput di halaman Kehilangan)</span><span className="font-medium">{formatRupiah(totalKehilanganBarang)}</span></div>
+                    <div className="flex justify-between text-amber-700"><span>− Ditanggung Karyawan (dipotong dari gaji)</span><span>-{formatRupiah(totalKehilanganKaryawan)}</span></div>
+                    <div className={`flex justify-between font-bold pt-1 border-t border-slate-200 ${totalKehilanganKantor >= 0 ? 'text-red-700' : 'text-amber-600'}`}>
+                      <span>= Ditanggung Kantor</span><span>{formatRupiah(totalKehilanganKantor)}</span>
+                    </div>
+                    {totalKehilanganKantor < 0 && (
+                      <p className="text-[11px] text-amber-600 pt-1">⚠ Hasilnya minus — potongan karyawan yang tercatat lebih besar dari Total Kehilangan Barang yang diinput. Cek ulang datanya di halaman Kehilangan.</p>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-xs font-medium text-slate-500 mb-2">Rincian yang ditanggung karyawan (dipotong gaji, {kehilanganKaryawanRows.length} entri) — ditampilkan untuk transparansi, sudah dikurangkan dari total di atas</p>
+                  <div className="overflow-x-auto max-h-[40vh] overflow-y-auto border border-slate-200 rounded-lg">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">
+                          <th className="px-4 py-2">Tanggal</th>
+                          <th className="px-4 py-2">Cabang</th>
+                          <th className="px-4 py-2">Karyawan</th>
+                          <th className="px-4 py-2 text-right">Nominal</th>
+                          <th className="px-4 py-2">Catatan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {kehilanganKaryawanRows.length === 0 ? (
+                          <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500 text-sm">Tidak ada kehilangan yang dipotong dari gaji karyawan periode ini.</td></tr>
+                        ) : kehilanganKaryawanRows.map(r => (
+                          <tr key={r.id} className="text-sm hover:bg-slate-50">
+                            <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{new Date(r.entry_date).toLocaleDateString('id-ID')}</td>
+                            <td className="px-4 py-2 text-slate-600">{r.branches?.name || '—'}</td>
+                            <td className="px-4 py-2 text-slate-600">{r.employees?.full_name || '—'}</td>
+                            <td className="px-4 py-2 text-right font-medium text-slate-800 whitespace-nowrap">{formatRupiah(r.amount)}</td>
+                            <td className="px-4 py-2 text-slate-500">{r.notes || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             )}
           </div>
