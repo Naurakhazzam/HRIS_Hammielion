@@ -633,6 +633,16 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 | `app/(dashboard)/keuangan/pembelian/input/page.tsx` | Rute baru, wrapper tipis, `defaultTab="input"` |
 | `app/(dashboard)/keuangan/kas-keluar/page.tsx` | 2 link ke Pembelian diarahkan ke `/keuangan/pembelian/input` |
 
+### 35. Fix: Rincian per Supplier di Detail Laporan Bocor Data Bulan Depan
+
+**Ditemukan:** Owner filter bulan Agustus di Detail Laporan per Cabang, tapi nota pembelian 1 September ikut muncul di "Rincian per Supplier". Kartu ringkasan "Sisa Utang ke Supplier (per akhir {bulan})" di atasnya sebenarnya SUDAH benar (sudah difilter sampai akhir bulan terpilih) — tapi daftar rinciannya di bawah masih dibangun dari data pembelian & pembayaran ALL-TIME (tidak difilter), jadi dua angka itu tidak sinkron.
+
+**Fix:** Rincian per Supplier sekarang dibangun dari data yang sama (`purchasesUpToMonth`/`paymentsUpToMonth`) yang sudah dipakai kartu ringkasan, dan labelnya ditambah "(per akhir {bulan})" supaya jelas cakupannya.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Rincian per Supplier ikut filter bulan, bukan data all-time |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
