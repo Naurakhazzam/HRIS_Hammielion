@@ -617,6 +617,22 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 |---|---|
 | `components/sidebar.tsx` | Grup baru "Laporan"; reorder Petty Cash & Verifikasi Keuangan |
 
+### 34. Fitur: Pisah Menu Keuangan Jadi "Keuangan" (Input) vs "Laporan Keuangan" (Baca-Saja)
+
+**Permintaan Owner:** Submenu "Laporan" (item #33) dijadikan tab sendiri sejajar Keuangan, bukan nested — supaya jelas mana yang input, mana yang laporan. Riwayat Kas Keluar juga dipindah ke Laporan Keuangan (sifatnya browse/audit lintas cabang, bukan input). Verifikasi Keuangan tetap di tab Keuangan (bukan input maupun laporan, tapi antrean tugas harian, lebih dekat ke sisi proses).
+
+**Kasus khusus — Pembelian & Utang Supplier:** halaman ini sengaja SATU halaman berisi dua hal (form input pembelian + Ringkasan per Supplier, hasil penggabungan item #28). Daripada duplikat jadi dua halaman terpisah (menghidupkan lagi masalah dua implementasi), komponennya diekstrak ke `PembelianPageContent.tsx` yang menerima prop `defaultTab`, dengan dua rute tipis: `/keuangan/pembelian` (menu Laporan Keuangan → default Ringkasan) dan `/keuangan/pembelian/input` (menu Keuangan → default Catat Pembelian). Satu implementasi, dua pintu masuk.
+
+**Fix sampingan:** logika highlight menu level-atas diperbaiki dari cek prefix URL (`pathname.startsWith(item.href)`) jadi cek rekursif ke leaf href masing-masing (`hasActiveDescendant`) — perlu karena Keuangan & Laporan Keuangan sekarang berbagi awalan `/keuangan/*` yang sama, jadi cek prefix lama bisa membuat DUA grup ke-highlight sekaligus.
+
+| File | Perubahan |
+|---|---|
+| `components/sidebar.tsx` | Grup "Laporan" jadi tab top-level "Laporan Keuangan"; pindah Riwayat Kas Keluar & Ringkasan Supplier ke sana; fix highlight rekursif |
+| `app/(dashboard)/keuangan/pembelian/PembelianPageContent.tsx` | File baru — komponen asli, sekarang terima prop `defaultTab` |
+| `app/(dashboard)/keuangan/pembelian/page.tsx` | Jadi wrapper tipis, `defaultTab="ringkasan-supplier"` |
+| `app/(dashboard)/keuangan/pembelian/input/page.tsx` | Rute baru, wrapper tipis, `defaultTab="input"` |
+| `app/(dashboard)/keuangan/kas-keluar/page.tsx` | 2 link ke Pembelian diarahkan ke `/keuangan/pembelian/input` |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
