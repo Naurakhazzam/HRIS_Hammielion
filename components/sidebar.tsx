@@ -66,7 +66,7 @@ const adminNavItems: NavNode[] = [
         ]
       },
       { name: 'Pembelian & Utang Supplier', href: '/keuangan/pembelian' },
-      { name: 'Logistik', href: '/keuangan/logistik' },
+      { name: 'Petty Cash', href: '/keuangan/petty-cash' },
       {
         name: 'Modal & Aset',
         href: '/keuangan/modal',
@@ -75,12 +75,18 @@ const adminNavItems: NavNode[] = [
           { name: 'Aset & Kontrak Sewa', href: '/keuangan/aset' },
         ]
       },
-      { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
-      { name: 'Detail Laporan per Cabang', href: '/keuangan/laporan/detail' },
-      { name: 'Cash Flow per Rekening', href: '/keuangan/cashflow' },
-      { name: 'Laporan Resmi', href: '/keuangan/laporan' },
+      {
+        name: 'Laporan',
+        href: '/keuangan/dashboard',
+        submenu: [
+          { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
+          { name: 'Detail Laporan per Cabang', href: '/keuangan/laporan/detail' },
+          { name: 'Cash Flow per Rekening', href: '/keuangan/cashflow' },
+          { name: 'Laporan Resmi', href: '/keuangan/laporan' },
+          { name: 'Logistik', href: '/keuangan/logistik' },
+        ]
+      },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
-      { name: 'Petty Cash', href: '/keuangan/petty-cash' },
     ]
   },
   {
@@ -208,6 +214,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'Pembelian & Utang Supplier': pathname.startsWith('/keuangan/pembelian'),
     'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
+    'Laporan': pathname.startsWith('/keuangan/dashboard') || pathname.startsWith('/keuangan/laporan') || pathname.startsWith('/keuangan/cashflow') || pathname.startsWith('/keuangan/logistik'),
     'KPI':        pathname.startsWith('/kpi'),
     'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional') || pathname.startsWith('/keuangan/rekening') || pathname.startsWith('/keuangan/pembelian/supplier'),
     'Portal Saya': pathname.startsWith('/portal'),
