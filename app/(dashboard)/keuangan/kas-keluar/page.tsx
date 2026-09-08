@@ -410,7 +410,7 @@ export default function InputKasKeluarPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Input Kas Keluar</h1>
-        <p className="text-sm text-slate-500">Catat pengeluaran manual (sewa, operasional, dll). Untuk pembayaran ke supplier, buka <Link href="/keuangan/pembelian" className="text-blue-600 hover:underline">Pembelian &amp; Utang Supplier</Link>. Entri akan berstatus &quot;Menunggu&quot; sampai diverifikasi tim finance pusat.</p>
+        <p className="text-sm text-slate-500">Catat pengeluaran manual (sewa, operasional, dll). Untuk pembayaran ke supplier, buka <Link href="/keuangan/pembelian/input" className="text-blue-600 hover:underline">Pembelian &amp; Utang Supplier</Link>. Entri akan berstatus &quot;Menunggu&quot; sampai diverifikasi tim finance pusat.</p>
       </div>
 
       {message && (
@@ -454,7 +454,7 @@ export default function InputKasKeluarPage() {
                   </button>
                 ))}
               </div>
-              <Link href="/keuangan/pembelian"
+              <Link href="/keuangan/pembelian/input"
                 className="mt-2 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-xs font-medium border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 transition">
                 🏭 Bayar ke Supplier — buka Pembelian &amp; Utang Supplier →
               </Link>

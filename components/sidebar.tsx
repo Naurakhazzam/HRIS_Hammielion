@@ -12,6 +12,19 @@ type NavNode = {
   submenu?: NavNode[]
 }
 
+// Cek aktif lewat leaf href sesungguhnya (rekursif ke dalam submenu), bukan prefix item.href —
+// beberapa grup top-level sekarang berbagi prefix URL yang sama (mis. Keuangan & Laporan
+// Keuangan sama-sama /keuangan/*), jadi prefix-match di level grup saja bisa salah kena dua grup.
+function hasActiveDescendant(item: NavNode, pathname: string): boolean {
+  if (item.submenu && item.submenu.length > 0) {
+    return item.submenu.some(sub => hasActiveDescendant(sub, pathname))
+  }
+  // Match persis, sama seperti highlight leaf-link yang sudah ada di render (bukan prefix) —
+  // supaya /keuangan/pembelian (Ringkasan, grup Laporan Keuangan) tidak ikut ke-anggap aktif
+  // saat di /keuangan/pembelian/input (grup Keuangan), dua rute beda yang kebetulan mirip.
+  return pathname === item.href
+}
+
 // Menu untuk HR, Owner, Finance, Supervisor
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
@@ -60,12 +73,11 @@ const adminNavItems: NavNode[] = [
         href: '/keuangan/kas-keluar',
         submenu: [
           { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
-          { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
           { name: 'Kategori Kas Keluar', href: '/keuangan/kategori' },
           { name: 'Biaya Tetap Berkala', href: '/keuangan/biaya-tetap' },
         ]
       },
-      { name: 'Pembelian & Utang Supplier', href: '/keuangan/pembelian' },
+      { name: 'Pembelian & Utang Supplier', href: '/keuangan/pembelian/input' },
       { name: 'Petty Cash', href: '/keuangan/petty-cash' },
       {
         name: 'Modal & Aset',
@@ -75,18 +87,21 @@ const adminNavItems: NavNode[] = [
           { name: 'Aset & Kontrak Sewa', href: '/keuangan/aset' },
         ]
       },
-      {
-        name: 'Laporan',
-        href: '/keuangan/dashboard',
-        submenu: [
-          { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
-          { name: 'Detail Laporan per Cabang', href: '/keuangan/laporan/detail' },
-          { name: 'Cash Flow per Rekening', href: '/keuangan/cashflow' },
-          { name: 'Laporan Resmi', href: '/keuangan/laporan' },
-          { name: 'Logistik', href: '/keuangan/logistik' },
-        ]
-      },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
+    ]
+  },
+  {
+    name: 'Laporan Keuangan',
+    href: '/keuangan/dashboard',
+    icon: '📈',
+    submenu: [
+      { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
+      { name: 'Detail Laporan per Cabang', href: '/keuangan/laporan/detail' },
+      { name: 'Cash Flow per Rekening', href: '/keuangan/cashflow' },
+      { name: 'Laporan Resmi', href: '/keuangan/laporan' },
+      { name: 'Ringkasan Supplier', href: '/keuangan/pembelian' },
+      { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
+      { name: 'Logistik', href: '/keuangan/logistik' },
     ]
   },
   {
@@ -160,7 +175,7 @@ const employeeNavItems: NavNode[] = [
         name: 'Pembelian & Utang Supplier',
         href: '/keuangan/pembelian',
         submenu: [
-          { name: 'Catat & Bayar', href: '/keuangan/pembelian' },
+          { name: 'Catat & Bayar', href: '/keuangan/pembelian/input' },
           { name: 'Master Supplier', href: '/keuangan/pembelian/supplier' },
         ]
       },
@@ -209,12 +224,20 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const defaultOpen: Record<string, boolean> = {
     'Absensi':    pathname.startsWith('/absensi'),
     'Penggajian': pathname.startsWith('/penggajian'),
-    'Keuangan':   pathname.startsWith('/keuangan'),
+    // Keuangan (input) & Laporan Keuangan (baca-saja) sama-sama di bawah URL /keuangan/*, dan
+    // /keuangan/pembelian dipakai DUA rute berbeda (bare = ringkasan/laporan, /input = catat) —
+    // jadi keduanya harus saling mengecualikan rute satu sama lain, supaya cuma satu yang
+    // auto-expand, bukan dua-duanya sekaligus, saat membuka salah satu halaman.
+    'Keuangan':   pathname.startsWith('/keuangan')
+      && !pathname.startsWith('/keuangan/dashboard') && !pathname.startsWith('/keuangan/laporan')
+      && !pathname.startsWith('/keuangan/cashflow') && !pathname.startsWith('/keuangan/logistik')
+      && !pathname.startsWith('/keuangan/riwayat') && pathname !== '/keuangan/pembelian',
     'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
-    'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
-    'Pembelian & Utang Supplier': pathname.startsWith('/keuangan/pembelian'),
+    'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
-    'Laporan': pathname.startsWith('/keuangan/dashboard') || pathname.startsWith('/keuangan/laporan') || pathname.startsWith('/keuangan/cashflow') || pathname.startsWith('/keuangan/logistik'),
+    'Laporan Keuangan': pathname.startsWith('/keuangan/dashboard') || pathname.startsWith('/keuangan/laporan')
+      || pathname.startsWith('/keuangan/cashflow') || pathname.startsWith('/keuangan/logistik')
+      || pathname.startsWith('/keuangan/riwayat') || pathname === '/keuangan/pembelian',
     'KPI':        pathname.startsWith('/kpi'),
     'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional') || pathname.startsWith('/keuangan/rekening') || pathname.startsWith('/keuangan/pembelian/supplier'),
     'Portal Saya': pathname.startsWith('/portal'),
@@ -247,8 +270,11 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
       <div className="py-4">
         <ul className="space-y-1 px-3">
           {navItems.map((item) => {
+            // Grup dicek lewat leaf href-nya sendiri (rekursif), bukan prefix item.href —
+            // beberapa grup (Keuangan vs Laporan Keuangan) sekarang berbagi prefix /keuangan/*
+            // yang sama, jadi prefix-match saja bikin dua grup ke-highlight sekaligus.
             const isActive = ('submenu' in item && item.submenu)
-              ? pathname.startsWith(item.href) && item.href !== '/portal'
+              ? hasActiveDescendant(item, pathname)
               : pathname.startsWith(item.href)
 
             return (
