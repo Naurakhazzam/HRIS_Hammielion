@@ -653,6 +653,8 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 |---|---|
 | `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Fetch data bulan lalu; indikator panah/persen/selisih per kategori & Rincian Penggajian |
 
+**Susulan:** indikator yang sama diterapkan juga ke total "Rincian Pemasukan (Kas Masuk)" — arahnya dibalik dari pengeluaran (`higherIsBetter`): untuk pemasukan, naik = hijau (bagus), turun = merah.
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
