@@ -221,10 +221,13 @@ export default function LaporanDetailPage() {
     const sisaUtangBulanIni = purchasesUpToMonth.reduce((s, p) => s + remainingFor(p.total_amount, p.id, paymentsUpToMonth), 0)
     setSisaUtangSupplierBulanIni(sisaUtangBulanIni)
 
+    // Rincian per Supplier ikut "per akhir bulan yang difilter" (bukan "saat ini") — supaya
+    // konsisten dengan filter Bulan di atas, tidak bocor pembelian/pembayaran bulan
+    // sebelum/sesudahnya seperti yang sempat terjadi (nota September ikut muncul saat filter Agustus).
     const bySupplier = new Map<string, SupplierDebt>()
-    for (const p of purchases) {
-      const dibayar = paidApprovedFor(p.id, payments)
-      const sisaPurchase = remainingFor(p.total_amount, p.id, payments)
+    for (const p of purchasesUpToMonth) {
+      const dibayar = paidApprovedFor(p.id, paymentsUpToMonth)
+      const sisaPurchase = remainingFor(p.total_amount, p.id, paymentsUpToMonth)
       const key = p.supplier_id
       if (!bySupplier.has(key)) bySupplier.set(key, { supplierId: key, name: p.suppliers?.name || '(Tanpa nama)', totalBeli: 0, totalDibayar: 0, sisa: 0, purchases: [] })
       const entry = bySupplier.get(key)!
@@ -445,7 +448,7 @@ export default function LaporanDetailPage() {
 
             {!loadingKondisi && supplierDebtList.length > 0 && (
               <div className="mt-4 pt-4 border-t border-slate-200">
-                <p className="text-xs font-medium text-slate-500 mb-2">Rincian per Supplier — klik nama supplier untuk lihat daftar pembeliannya</p>
+                <p className="text-xs font-medium text-slate-500 mb-2">Rincian per Supplier (per akhir {monthLabel}) — klik nama supplier untuk lihat daftar pembeliannya</p>
                 <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden">
                   {supplierDebtList.map(s => (
                     <div key={s.supplierId}>
