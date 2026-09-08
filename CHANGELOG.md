@@ -595,6 +595,18 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 | `app/(dashboard)/kasbon/page.tsx` | Tab Riwayat Potongan jadi read-only |
 | **DB** | Kolom baru `kasbon_requests.disbursed_at/disbursed_by`, `kasbon_deductions.payroll_id`; RLS `kasbon_req_disburse` |
 
+### 32. Fix: Satukan Aturan Edit/Hapus Kas Keluar & Riwayat Kas Keluar
+
+**Ditemukan (lanjutan audit tab Keuangan, temuan #2):** Kas Keluar ("10 Input Terakhir"/"Perlu Direvisi", entri milik sendiri) dan Riwayat Kas Keluar (semua cabang/bulan, admin) masing-masing punya `canEditRow`/`canDeleteRow`/`saveEditRow` sendiri untuk tabel `fin_cash_out` yang sama, dan sudah telanjur beda: Riwayat tidak bisa edit entri `rejected` (tidak ada jalur ajukan-ulang) dan tidak bisa perbaiki nominal salah ketik pembayaran supplier — dua kemampuan yang sudah ada di Kas Keluar. Akibatnya admin yang mau perbaiki entri `rejected` milik ADMIN LAIN (mustahil dari Kas Keluar karena scope-nya "punya saya sendiri") juga mentok di Riwayat.
+
+**Fix:** Aturan & logika simpan diekstrak ke `lib/finCashOut.ts` (`canEditCashOut`, `canDeleteCashOut`, `saveCashOutEdit` — termasuk cek sisa utang supplier, pakai ulang `unrequestedFor` yang sudah ada), dipakai bareng oleh kedua halaman. Riwayat sekarang juga mendukung alur ajukan-ulang (`rejected` → `revisi`) dan menampilkan badge/filter status Revisi, sama seperti Kas Keluar.
+
+| File | Perubahan |
+|---|---|
+| `lib/finCashOut.ts` | Modul baru — aturan & logika simpan edit `fin_cash_out` |
+| `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Pakai `lib/finCashOut.ts` |
+| `app/(dashboard)/keuangan/riwayat/page.tsx` | Pakai `lib/finCashOut.ts`; tambah alur revisi & badge/filter status |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
