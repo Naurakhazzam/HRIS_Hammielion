@@ -643,6 +643,16 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 |---|---|
 | `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Rincian per Supplier ikut filter bulan, bukan data all-time |
 
+### 36. Fitur: Indikator Naik/Turun vs Bulan Lalu di Rincian Pengeluaran per Kategori
+
+**Permintaan Owner:** setiap baris kategori di "Rincian Pengeluaran per Kategori" (dan total Rincian Penggajian) diberi indikator naik/turun dibanding bulan lalu — panah, persentase, dan selisih nominalnya.
+
+**Fix:** Ditambahkan fetch ringan (category, amount, status saja) untuk `fin_cash_out` bulan sebelumnya, dijumlah per kategori (entri disetujui saja, sama seperti total bulan berjalan), lalu ditampilkan di bawah nominal tiap baris: 🔺 merah kalau naik (nominal bertambah — kurang bagus), 🔻 hijau kalau turun, atau "🆕 baru bulan ini" kalau kategori itu nol di bulan lalu (menghindari persentase tak terhingga).
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Fetch data bulan lalu; indikator panah/persen/selisih per kategori & Rincian Penggajian |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
