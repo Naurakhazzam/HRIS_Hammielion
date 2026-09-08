@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr } from '@/lib/date'
+import { canEditCashOut, canDeleteCashOut, saveCashOutEdit } from '@/lib/finCashOut'
 import RupiahInput from '@/components/RupiahInput'
 import Link from 'next/link'
 
@@ -159,22 +160,13 @@ export default function InputKasKeluarPage() {
   const [editRowSourceTable, setEditRowSourceTable] = useState<string | null>(null)
   const [editRowSourceId, setEditRowSourceId] = useState<string | null>(null)
 
-  // Entri otomatis (payroll/driver/kasbon/dll) tetap tidak boleh diubah manual — kecuali
-  // pembayaran supplier, yang sengaja dibuka supaya nominal salah ketik (mis. kasus FRONTERA:
-  // tercatat Rp131jt padahal maksudnya Rp50jt) bisa diperbaiki dari sini, bukan lewat database.
+  // Aturan siapa-boleh-apa ada di lib/finCashOut.ts, dipakai bareng dengan Riwayat Kas Keluar.
   function canEditRow(r: MyCashOut) {
-    if (r.status !== 'pending' && r.status !== 'rejected') return false
-    if (r.source_table && r.source_table !== 'supplier_purchases') return false
-    return isAdmin
+    return isAdmin && canEditCashOut(r)
   }
 
   function canDeleteRow(r: MyCashOut) {
-    if (r.status !== 'pending' && r.status !== 'rejected') return false
-    // Beda dari canEditRow: hapus entri pembayaran supplier TIDAK diizinkan sama sekali,
-    // termasuk di database (RLS fin_cash_out_delete_admin mensyaratkan source_table IS NULL)
-    // — sengaja, supaya jejak pembayaran tidak bisa hilang, cuma bisa diperbaiki nominalnya.
-    if (r.source_table) return false
-    return isAdmin
+    return isAdmin && canDeleteCashOut(r)
   }
 
   function startEditRow(r: MyCashOut) {
@@ -198,41 +190,15 @@ export default function InputKasKeluarPage() {
     if (!editRowCategory) { showMessage('error', 'Pilih kategori dulu.'); return }
     if (!editRowBranchId) { showMessage('error', 'Pilih cabang dulu.'); return }
 
-    // Entri pembayaran supplier: nominal baru tidak boleh melebihi sisa utang yang bisa
-    // diajukan (dicek ulang ke database saat ini, bukan pakai data lama di layar).
-    if (editRowSourceTable === 'supplier_purchases' && editRowSourceId) {
-      const [{ data: purchase }, { data: otherPayments }] = await Promise.all([
-        supabase.from('supplier_purchases').select('total_amount').eq('id', editRowSourceId).single(),
-        supabase.from('fin_cash_out').select('amount, status').eq('source_table', 'supplier_purchases').eq('source_id', editRowSourceId).neq('id', id),
-      ])
-      if (purchase) {
-        const approved = (otherPayments || []).filter(p => p.status === 'approved').reduce((s, p) => s + Number(p.amount), 0)
-        const pendingIsh = (otherPayments || []).filter(p => p.status === 'pending' || p.status === 'revisi').reduce((s, p) => s + Number(p.amount), 0)
-        const maxAllowed = Number(purchase.total_amount) - approved - pendingIsh
-        if (amountNum > maxAllowed) {
-          showMessage('error', `Nominal melebihi sisa utang yang bisa diajukan untuk tagihan ini (${formatRupiah(maxAllowed)}).`)
-          return
-        }
-      }
-    }
+    const result = await saveCashOutEdit(supabase, {
+      id, branch_id: editRowBranchId, transaction_date: editRowDate, category: editRowCategory,
+      amount: amountNum, description: editRowDescription || null, account_id: editRowAccountId,
+      originalStatus: editingRowOriginalStatus, sourceTable: editRowSourceTable, sourceId: editRowSourceId,
+    }, formatRupiah)
 
-    const wasRejected = editingRowOriginalStatus === 'rejected'
-    const { error } = await supabase.from('fin_cash_out')
-      .update({
-        branch_id: editRowBranchId,
-        transaction_date: editRowDate,
-        category: editRowCategory,
-        amount: amountNum,
-        description: editRowDescription || null,
-        account_id: editRowAccountId,
-        ...(wasRejected ? { status: 'revisi', rejection_reason: null, verified_by: null, verified_at: null } : {}),
-      })
-      .eq('id', id)
-    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-    else {
-      showMessage('success', wasRejected ? 'Entri berhasil diperbaiki dan diajukan ulang untuk verifikasi.' : 'Entri berhasil diperbarui.')
-      setEditingRowId(null); refreshMine(myUserId)
-    }
+    if (!result.ok) { showMessage('error', result.error); return }
+    showMessage('success', result.wasRejected ? 'Entri berhasil diperbaiki dan diajukan ulang untuk verifikasi.' : 'Entri berhasil diperbarui.')
+    setEditingRowId(null); refreshMine(myUserId)
   }
 
   async function handleDeleteRow(r: MyCashOut) {

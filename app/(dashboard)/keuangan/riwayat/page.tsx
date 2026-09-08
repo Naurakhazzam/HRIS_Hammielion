@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr } from '@/lib/date'
+import { canEditCashOut, canDeleteCashOut, saveCashOutEdit } from '@/lib/finCashOut'
 import RupiahInput from '@/components/RupiahInput'
 
 type Branch = { id: string; name: string }
@@ -17,6 +18,7 @@ type CashOutRow = {
   category: string
   status: string
   source_table: string | null
+  source_id: string | null
   account_id: string | null
   branches: { name: string } | null
   fin_cash_out_categories: { label: string } | null
@@ -39,6 +41,9 @@ export default function RiwayatKasKeluarPage() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
+  const [editingRowOriginalStatus, setEditingRowOriginalStatus] = useState<string>('')
+  const [editRowSourceTable, setEditRowSourceTable] = useState<string | null>(null)
+  const [editRowSourceId, setEditRowSourceId] = useState<string | null>(null)
   const [editRowAccountId, setEditRowAccountId] = useState<string>('')
   const [editRowDate, setEditRowDate] = useState<string>('')
   const [editRowCategory, setEditRowCategory] = useState<string>('')
@@ -65,7 +70,7 @@ export default function RiwayatKasKeluarPage() {
 
     let query = supabase
       .from('fin_cash_out')
-      .select('id, branch_id, amount, description, transaction_date, category, status, source_table, account_id, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
+      .select('id, branch_id, amount, description, transaction_date, category, status, source_table, source_id, account_id, branches(name), fin_cash_out_categories(label), fin_bank_accounts(bank_name, account_number, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
@@ -127,8 +132,9 @@ export default function RiwayatKasKeluarPage() {
       pending: 'bg-yellow-100 text-yellow-800',
       approved: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800',
+      revisi: 'bg-blue-100 text-blue-800',
     }
-    const label: Record<string, string> = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Ditolak' }
+    const label: Record<string, string> = { pending: 'Menunggu', approved: 'Disetujui', rejected: 'Ditolak', revisi: '🔄 Revisi' }
     return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-slate-100 text-slate-700'}`}>{label[status] || status}</span>
   }
 
@@ -138,18 +144,17 @@ export default function RiwayatKasKeluarPage() {
   const rejectedRows = rows.filter(r => r.status === 'rejected')
   const totalRejected = rejectedRows.reduce((acc, r) => acc + Number(r.amount), 0)
 
+  // Aturan siapa-boleh-apa ada di lib/finCashOut.ts, dipakai bareng dengan Kas Keluar — supaya
+  // admin yang membuka Riwayat (bukan cuma "entri saya sendiri" di Kas Keluar) juga bisa
+  // memperbaiki entri rejected/pembayaran supplier siapa pun, dengan aturan yang sama persis.
+  // Catatan: saat ini hanya owner/hr/finance yang punya izin UPDATE di fin_cash_out (RLS).
+  // Supervisor belum diberi izin edit di sini (beda dengan Kas Masuk) - lihat CHANGELOG Sesi 19/20.
   function canEditRow(r: CashOutRow) {
-    if (r.status !== 'pending') return false
-    if (r.source_table) return false // entri otomatis (payroll/driver/kasbon/dll) tidak boleh diubah manual
-    // Catatan: saat ini hanya owner/hr/finance yang punya izin UPDATE di fin_cash_out (RLS).
-    // Supervisor belum diberi izin edit di sini (beda dengan Kas Masuk) - lihat CHANGELOG Sesi 19/20.
-    return isAdmin
+    return isAdmin && canEditCashOut(r)
   }
 
   function canDeleteRow(r: CashOutRow) {
-    if (r.status !== 'pending' && r.status !== 'rejected') return false
-    if (r.source_table) return false
-    return isAdmin
+    return isAdmin && canDeleteCashOut(r)
   }
 
   async function handleDeleteRow(r: CashOutRow) {
@@ -162,6 +167,9 @@ export default function RiwayatKasKeluarPage() {
 
   function startEditRow(r: CashOutRow) {
     setEditingRowId(r.id)
+    setEditingRowOriginalStatus(r.status)
+    setEditRowSourceTable(r.source_table)
+    setEditRowSourceId(r.source_id)
     setEditRowAccountId(r.account_id || '')
     setEditRowDate(r.transaction_date)
     setEditRowCategory(r.category)
@@ -176,18 +184,16 @@ export default function RiwayatKasKeluarPage() {
     if (!editRowAccountId) { showMessage('error', 'Pilih rekening/kas dulu.'); return }
     if (!editRowCategory) { showMessage('error', 'Pilih kategori dulu.'); return }
     if (!editRowBranchId) { showMessage('error', 'Pilih cabang dulu.'); return }
-    const { error } = await supabase.from('fin_cash_out')
-      .update({
-        branch_id: editRowBranchId,
-        transaction_date: editRowDate,
-        category: editRowCategory,
-        amount: amountNum,
-        description: editRowDescription || null,
-        account_id: editRowAccountId,
-      })
-      .eq('id', id)
-    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-    else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
+
+    const result = await saveCashOutEdit(supabase, {
+      id, branch_id: editRowBranchId, transaction_date: editRowDate, category: editRowCategory,
+      amount: amountNum, description: editRowDescription || null, account_id: editRowAccountId,
+      originalStatus: editingRowOriginalStatus, sourceTable: editRowSourceTable, sourceId: editRowSourceId,
+    }, formatRupiah)
+
+    if (!result.ok) { showMessage('error', result.error); return }
+    showMessage('success', result.wasRejected ? 'Entri berhasil diperbaiki dan diajukan ulang untuk verifikasi.' : 'Entri berhasil diperbarui.')
+    setEditingRowId(null); fetchRows()
   }
 
   return (
@@ -263,6 +269,7 @@ export default function RiwayatKasKeluarPage() {
               <option value="pending">Menunggu</option>
               <option value="approved">Disetujui</option>
               <option value="rejected">Ditolak</option>
+              <option value="revisi">🔄 Revisi</option>
             </select>
           </div>
         </div>
