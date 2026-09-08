@@ -607,6 +607,16 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 | `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Pakai `lib/finCashOut.ts` |
 | `app/(dashboard)/keuangan/riwayat/page.tsx` | Pakai `lib/finCashOut.ts`; tambah alur revisi & badge/filter status |
 
+### 33. Fix: Rapikan Menu Sidebar Keuangan
+
+**Ditemukan:** Owner merasa menu Keuangan berantakan — 11 item level-atas (3 grup + 8 link datar), termasuk 5 halaman laporan (Dashboard Keuangan, Detail Laporan per Cabang, Cash Flow per Rekening, Laporan Resmi, Logistik) yang tersebar tanpa dikelompokkan.
+
+**Fix:** 5 halaman laporan digabung jadi satu grup baru "Laporan". Petty Cash dipindah ke sebelah Pembelian & Utang Supplier. Verifikasi Keuangan tetap sendiri di akhir (bukan laporan, tapi antrean tugas harian). Total jadi 7 item level-atas. Cuma menyentuh menu admin (owner/hr/finance/supervisor) — menu karyawan sudah punya daftar sendiri yang lebih pendek, tidak termasuk keluhan ini.
+
+| File | Perubahan |
+|---|---|
+| `components/sidebar.tsx` | Grup baru "Laporan"; reorder Petty Cash & Verifikasi Keuangan |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
