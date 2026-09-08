@@ -76,6 +76,9 @@ export default function LaporanDetailPage() {
   const [loading, setLoading] = useState(true)
   const [cashInRows, setCashInRows] = useState<CashInRow[]>([])
   const [cashOutRows, setCashOutRows] = useState<CashOutRow[]>([])
+  // Cuma buat pembanding "vs bulan lalu" di Rincian Pengeluaran per Kategori & Penggajian —
+  // tidak perlu detail baris, jadi query-nya sengaja ringan (category, amount, status saja).
+  const [prevMonthCashOutRows, setPrevMonthCashOutRows] = useState<{ category: string; amount: number; status: string }[]>([])
   const [hppRows, setHppRows] = useState<HppRow[]>([])
   const [cashierLossRows, setCashierLossRows] = useState<CashierLossRow[]>([])
   const [totalKehilanganBarang, setTotalKehilanganBarang] = useState(0)
@@ -138,11 +141,15 @@ export default function LaporanDetailPage() {
     const [year, m] = month.split('-').map(Number)
     const startDate = localDateStr(new Date(year, m - 1, 1))
     const endDate = localDateStr(new Date(year, m, 0))
+    // Bulan lalu — buat pembanding "vs bulan lalu" di Rincian Pengeluaran per Kategori.
+    const prevMonthDate = new Date(year, m - 2, 1)
+    const prevStartDate = localDateStr(prevMonthDate)
+    const prevEndDate = localDateStr(new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0))
 
     // Kehilangan Barang: total_loss_amount (loss_monthly_inputs, per cabang per bulan — angka resmi yang
     // diinput di halaman Kehilangan Barang & Kerugian Kasir) dikurangi bagian yang dipotong dari gaji
     // karyawan (cashier_loss_entries dengan employee_id terisi) = sisanya itu yang DITANGGUNG KANTOR.
-    const [cashInRes, cashOutRes, hppRes, cashierLossRes, lossMonthlyRes] = await Promise.all([
+    const [cashInRes, cashOutRes, hppRes, cashierLossRes, lossMonthlyRes, prevCashOutRes] = await Promise.all([
       supabase.from('fin_cash_in')
         .select('id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, branch_id, branches(name)')
         .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
@@ -161,6 +168,9 @@ export default function LaporanDetailPage() {
       supabase.from('loss_monthly_inputs')
         .select('branch_id, total_loss_amount')
         .in('branch_id', branchIds).eq('period_month', m).eq('period_year', year),
+      supabase.from('fin_cash_out')
+        .select('category, amount, status')
+        .in('branch_id', branchIds).gte('transaction_date', prevStartDate).lte('transaction_date', prevEndDate),
     ])
 
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
@@ -168,11 +178,13 @@ export default function LaporanDetailPage() {
     if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
     if (lossMonthlyRes.error) console.error('Detail error loss_monthly:', JSON.stringify(lossMonthlyRes.error, null, 2))
     if (cashierLossRes.error) console.error('Detail error cashier_loss:', JSON.stringify(cashierLossRes.error, null, 2))
+    if (prevCashOutRes.error) console.error('Detail error prev cash_out:', JSON.stringify(prevCashOutRes.error, null, 2))
 
     setCashInRows((cashInRes.data as unknown as CashInRow[]) || [])
     setCashOutRows((cashOutRes.data as unknown as CashOutRow[]) || [])
     setHppRows((hppRes.data as HppRow[]) || [])
     setCashierLossRows((cashierLossRes.data as unknown as CashierLossRow[]) || [])
+    setPrevMonthCashOutRows(prevCashOutRes.data || [])
     const lossMonthlyRows = (lossMonthlyRes.data as LossMonthlyInputRow[]) || []
     setTotalKehilanganBarang(lossMonthlyRows.reduce((s, r) => s + Number(r.total_loss_amount), 0))
     setHasLossMonthlyInput(lossMonthlyRows.length > 0)
@@ -269,6 +281,31 @@ export default function LaporanDetailPage() {
     )
   }
 
+  // Indikator naik/turun vs bulan lalu — merah+naik kalau pengeluaran bertambah (kurang bagus),
+  // hijau+turun kalau berkurang. Kalau bulan lalu-nya nol, persentase tidak berarti (bisa jadi
+  // Infinity), jadi cukup tandai "Baru" tanpa persentase. Dipanggil sebagai fungsi biasa (bukan
+  // <MonthDelta .../>), sama seperti statusCell — supaya tidak dianggap definisi komponen baru
+  // di dalam render induknya.
+  function monthDelta({ current, previous }: { current: number; previous: number }) {
+    if (previous === 0 && current === 0) return null
+    if (previous === 0) {
+      return <span className="text-[11px] text-slate-400 whitespace-nowrap">🆕 baru bulan ini</span>
+    }
+    const diff = current - previous
+    const pct = (diff / previous) * 100
+    if (diff === 0) {
+      return <span className="text-[11px] text-slate-400 whitespace-nowrap">▬ sama dengan bulan lalu</span>
+    }
+    const isUp = diff > 0
+    const color = isUp ? 'text-red-600' : 'text-green-600'
+    const arrow = isUp ? '▲' : '▼'
+    return (
+      <span className={`text-[11px] ${color} whitespace-nowrap`}>
+        {arrow} {Math.abs(pct).toFixed(0)}% ({isUp ? '+' : '-'}{formatRupiah(Math.abs(diff))}) vs bulan lalu
+      </span>
+    )
+  }
+
   function toggleSupplier(id: string) {
     setExpandedSuppliers(prev => {
       const next = new Set(prev)
@@ -316,6 +353,15 @@ export default function LaporanDetailPage() {
   }
   const categoryList = Array.from(byCategory.entries()).sort((a, b) => b[1].total - a[1].total)
   const totalPenggajian = payrollRows.filter(r => r.status === 'approved').reduce((s, r) => s + Number(r.amount), 0)
+
+  // Total per kategori bulan lalu (cuma entri disetujui) — buat indikator naik/turun vs bulan lalu.
+  const prevCategoryTotal = new Map<string, number>()
+  let prevTotalPenggajian = 0
+  for (const r of prevMonthCashOutRows) {
+    if (r.status !== 'approved') continue
+    if (PAYROLL_CATEGORIES.includes(r.category)) { prevTotalPenggajian += Number(r.amount); continue }
+    prevCategoryTotal.set(r.category, (prevCategoryTotal.get(r.category) || 0) + Number(r.amount))
+  }
   const kehilanganKaryawanRows = cashierLossRows.filter(r => r.employee_id)
   const totalKehilanganKaryawan = kehilanganKaryawanRows.reduce((s, r) => s + Number(r.amount), 0)
   const totalKehilanganKantor = totalKehilanganBarang - totalKehilanganKaryawan
@@ -513,7 +559,10 @@ export default function LaporanDetailPage() {
                         {!info.affectsNetProfit && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">di luar P&amp;L</span>}
                         <span className="text-xs text-slate-400">({info.rows.length} entri)</span>
                       </span>
-                      <span className="text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(info.total)}</span>
+                      <span className="text-right">
+                        <span className="block text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(info.total)}</span>
+                        {monthDelta({ current: info.total, previous: prevCategoryTotal.get(code) || 0 })}
+                      </span>
                     </button>
                     {expandedCategories.has(code) && (
                       <div className="bg-slate-50 border-t border-slate-100">
@@ -555,7 +604,10 @@ export default function LaporanDetailPage() {
                 Rincian Penggajian
                 <span className="text-xs text-slate-400 normal-case">({payrollRows.length} entri)</span>
               </span>
-              <span className="text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(totalPenggajian)}</span>
+              <span className="text-right">
+                <span className="block text-sm font-semibold text-red-700 whitespace-nowrap">{formatRupiah(totalPenggajian)}</span>
+                {monthDelta({ current: totalPenggajian, previous: prevTotalPenggajian })}
+              </span>
             </button>
             {showPenggajian && (
               <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
