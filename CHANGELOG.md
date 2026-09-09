@@ -679,6 +679,18 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 | `app/(dashboard)/absensi/rekap/page.tsx` | Alasan wajib untuk input manual status hadir; link foto absen HP |
 | **DB** | Kolom baru `branches.latitude/longitude/checkin_radius_meters`, `attendances.source` + kolom foto/lokasi; RLS mobile check-in; bucket storage publik `attendance-photos` |
 
+### 38. Fitur: Daftar Akun Mandiri untuk Karyawan (Self-Service Signup)
+
+**Ditemukan:** Cuma 4 dari 25 karyawan aktif yang punya akun login — sisanya harus dibuatkan satu-satu lewat Manajemen User. Ini jadi penghalang nyata buat fitur Absen HP (item #37) yang baru dibuat, karena semua karyawan butuh akun sendiri untuk pakai Portal Absensi.
+
+**Fix:** Halaman publik baru `/signup` (tanpa login) — karyawan input Kode Karyawan-nya, verifikasi identitas pakai Nomor HP ATAU Tanggal Lahir (sesuai data HR, pilih salah satu), lalu pilih email & password sendiri. Endpoint `/api/signup` (pola sama seperti `/api/users` yang sudah ada — pakai service_role di server): role akun baru **selalu** `employee`, dipaksa di server, tidak pernah diambil dari input klien; kalau karyawan itu sudah punya akun, ditolak (tidak bisa dobel/bajak akun orang lain); pesan error digeneralisir supaya tidak memudahkan orang menebak-nebak Kode Karyawan aktif satu-satu. Promosi ke role lain (supervisor/HR/dst) tetap lewat Manajemen User seperti biasa.
+
+| File | Perubahan |
+|---|---|
+| `app/(auth)/signup/page.tsx` | Halaman daftar akun baru |
+| `app/api/signup/route.ts` | Endpoint publik — verifikasi & buat akun |
+| `app/(auth)/login/page.tsx` | Link ke halaman daftar |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
