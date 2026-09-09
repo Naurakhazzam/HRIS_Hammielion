@@ -655,6 +655,30 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 
 **Susulan:** indikator yang sama diterapkan juga ke total "Rincian Pemasukan (Kas Masuk)" — arahnya dibalik dari pengeluaran (`higherIsBetter`): untuk pemasukan, naik = hijau (bagus), turun = merah.
 
+### 37. Fitur: Absen Mandiri via HP (Kamera + Radius GPS) — Test Drive, Fingerprint Tetap Jalan
+
+**Latar belakang:** Owner ingin coba alternatif fingerprint karena proses impor datanya (export dari mesin → upload manual) merepotkan, dan sebagian cabang malah belum punya mesin sama sekali. Diputuskan: bukan pengganti, tapi test drive per-cabang yang berjalan BARENGAN dengan fingerprint yang sudah ada.
+
+**Cara kerja:** Karyawan buka Portal Absensi → kartu "Absen Sekarang" (cuma muncul kalau cabangnya sudah diaktifkan). Urutannya: cek jarak GPS ke cabang dulu (ditolak halus dengan pesan jarak kalau di luar radius, kamera belum dibuka) → baru buka kamera **di dalam halaman** (bukan aplikasi kamera HP, jadi tidak pernah ada opsi pilih dari galeri) → foto dapat watermark nama/waktu/jarak otomatis → dikirim, langsung tercatat sebagai absen masuk/pulang.
+
+**Keamanan berlapis:** RLS baru membatasi karyawan cuma boleh tulis baris absensi miliknya sendiri, tanggal hari ini saja, dan cuma yang ditandai `source='mobile'` — tidak bisa sentuh data fingerprint/manual. Kalau HP/GPS/kamera bermasalah, HR/Owner tetap bisa input manual di Rekap Absensi, tapi sekarang **wajib isi alasan** (dulu opsional) dan otomatis ditandai `source='manual'` — supaya ada jejak jelas kenapa tidak lewat HP.
+
+**Konsistensi hitungan:** Logika "telat berapa menit"/lembur yang tadinya cuma ada di kode Import Fingerprint, diekstrak ke `lib/attendanceSchedule.ts` dan dipakai bareng oleh jalur HP — supaya hasil hitungnya sama persis, tidak ada rumus dobel yang bisa diam-diam beda.
+
+**Setup per cabang:** Halaman Manajemen Cabang punya kolom Latitude/Longitude/Radius baru (tombol "Pakai lokasi saya sekarang" buat isi cepat) — dikosongkan = cabang itu belum ikut test drive, karyawannya tetap pakai fingerprint seperti biasa, tidak ada yang berubah.
+
+**Verifikasi:** Rekap Absensi (admin) sekarang menampilkan ikon 📷 di sebelah jam masuk/pulang yang berasal dari absen HP — bisa diklik untuk lihat fotonya langsung, jadi ada cara nyata mengecek bukti kalau ada kecurigaan.
+
+| File | Perubahan |
+|---|---|
+| `components/AbsenSekarang.tsx` | Komponen baru — alur cek radius → kamera live → kirim |
+| `lib/attendanceSchedule.ts` | Modul baru — rumus telat/lembur/jarak, dipakai bareng Import & absen HP |
+| `app/api/attendance/import/route.ts` | Pakai `lib/attendanceSchedule.ts`, bukan salinan sendiri |
+| `app/(dashboard)/portal/absensi/page.tsx` | Render `AbsenSekarang` |
+| `app/(dashboard)/cabang/page.tsx` | Kolom Latitude/Longitude/Radius + tombol lokasi saat ini |
+| `app/(dashboard)/absensi/rekap/page.tsx` | Alasan wajib untuk input manual status hadir; link foto absen HP |
+| **DB** | Kolom baru `branches.latitude/longitude/checkin_radius_meters`, `attendances.source` + kolom foto/lokasi; RLS mobile check-in; bucket storage publik `attendance-photos` |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
