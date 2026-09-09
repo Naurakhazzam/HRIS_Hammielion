@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
 export default function LoginPage() {
@@ -186,6 +187,10 @@ export default function LoginPage() {
             </button>
           </form>
         </div>
+
+        <p className="text-center text-sm text-slate-500 mt-6">
+          Belum punya akun? <Link href="/signup" className="text-blue-600 hover:underline font-medium">Daftar di sini</Link>
+        </p>
 
         {/* Footer */}
         <p className="text-center text-xs text-slate-400 mt-6">

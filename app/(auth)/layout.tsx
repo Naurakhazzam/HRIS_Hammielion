@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Masuk — Hammielion HRIS',
-  description: 'Login ke sistem HRIS Hammielion Management',
+  title: 'Hammielion HRIS',
+  description: 'Login / daftar akun sistem HRIS Hammielion Management',
 }
 
 export default function AuthLayout({
