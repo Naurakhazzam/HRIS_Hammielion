@@ -10,6 +10,7 @@ type WorkSchedule = { id: string; name: string; check_in_time: string; check_out
 type Attendance = {
   id: string; date: string; check_in: string | null; check_out: string | null
   late_minutes: number; overtime_hours: number; status: string; notes: string | null
+  source: string; check_in_photo_url: string | null; check_out_photo_url: string | null
   employees: { full_name: string; branch_id: string; department_id: string; custom_check_in_time: string | null; custom_check_out_time: string | null; branches: { name: string }; departments: { name: string } }
 }
 
@@ -130,7 +131,7 @@ export default function RekapAbsensiPage() {
     const mySeq = ++fetchSeq.current
     setLoading(true)
     let q = supabase.from('attendances')
-      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,branches(name),departments(name))')
+      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,source,check_in_photo_url,check_out_photo_url,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,branches(name),departments(name))')
       .order('date', { ascending: true })
     if (filterMonth) {
       const p = filterMonth.split('-'); const y=parseInt(p[0]); const m=parseInt(p[1])
@@ -262,10 +263,13 @@ export default function RekapAbsensiPage() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSubmitting(true)
     if (!formData.employee_id) { showMsg('error','Pilih karyawan.'); setSubmitting(false); return }
+    // Absen HP jadi jalur default untuk status hadir — kalau admin input manual, wajib ada
+    // alasan (HP rusak, tidak ada sinyal, dll) supaya ada jejak kenapa tidak lewat HP.
+    if (formData.status === 'present' && !formData.notes.trim()) { showMsg('error','Isi dulu alasan input manual.'); setSubmitting(false); return }
     // Jam diinput WIB → simpan UTC dengan offset +07:00
     const ci = formData.check_in ? new Date(formData.date+'T'+formData.check_in+':00+07:00').toISOString() : null
     const co = formData.check_out ? new Date(formData.date+'T'+formData.check_out+':00+07:00').toISOString() : null
-    const { error } = await supabase.from('attendances').insert([{ employee_id:formData.employee_id, date:formData.date, check_in:ci, check_out:co, late_minutes:0, overtime_hours:0, status:formData.status, notes:formData.notes||null }])
+    const { error } = await supabase.from('attendances').insert([{ employee_id:formData.employee_id, date:formData.date, check_in:ci, check_out:co, late_minutes:0, overtime_hours:0, status:formData.status, notes:formData.notes||null, source:'manual' }])
     if (error) showMsg('error', error.code==='23505'?'Data tanggal ini sudah ada.':'Gagal: '+error.message)
     else { showMsg('success','Absensi disimpan.'); setShowForm(false); setFormData({employee_id:'',date:new Date().toISOString().split('T')[0],check_in:'',check_out:'',status:'present',notes:''}); fetchAttendances() }
     setSubmitting(false)
@@ -513,8 +517,13 @@ export default function RekapAbsensiPage() {
               <input type="time" value={formData.check_out} onChange={e=>setFormData({...formData,check_out:e.target.value})} disabled={formData.status!=='present'} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none disabled:bg-slate-100" />
             </div>
             <div className="space-y-1 lg:col-span-2">
-              <label className="text-sm font-medium text-slate-700">Catatan</label>
-              <input type="text" value={formData.notes} onChange={e=>setFormData({...formData,notes:e.target.value})} placeholder="Opsional" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+              <label className="text-sm font-medium text-slate-700">
+                {formData.status === 'present' ? <>Alasan Input Manual <span className="text-red-500">*</span></> : 'Catatan'}
+              </label>
+              <input type="text" required={formData.status === 'present'} value={formData.notes} onChange={e=>setFormData({...formData,notes:e.target.value})}
+                placeholder={formData.status === 'present' ? 'Wajib diisi — contoh: HP rusak, tidak ada sinyal GPS' : 'Opsional'}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+              {formData.status === 'present' && <p className="text-[11px] text-slate-400">Karyawan absen lewat HP secara default — isi alasan kenapa dicatat manual di sini, supaya ada jejaknya.</p>}
             </div>
             <div className="lg:col-span-4 flex justify-end">
               <button type="submit" disabled={submitting} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">{submitting?'Menyimpan...':'Simpan'}</button>
@@ -704,8 +713,14 @@ export default function RekapAbsensiPage() {
                             </div>
                           ) : <span className="text-slate-300 text-xs">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">{fmtTs(att.check_in)}</td>
-                        <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">{fmtTs(att.check_out)}</td>
+                        <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">
+                          {fmtTs(att.check_in)}
+                          {att.check_in_photo_url && <a href={att.check_in_photo_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</a>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">
+                          {fmtTs(att.check_out)}
+                          {att.check_out_photo_url && <a href={att.check_out_photo_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</a>}
+                        </td>
                         <td className="px-4 py-3 text-center">
                           {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}
                         </td>

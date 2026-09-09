@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import AbsenSekarang from '@/components/AbsenSekarang'
 
 type Attendance = {
   id: string
@@ -91,6 +92,8 @@ export default function PortalAbsensiPage() {
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Rekap Absensi Saya</h1>
         <p className="text-sm text-slate-500">Halo, <strong>{myName}</strong>. Rekap kehadiran Anda.</p>
       </div>
+
+      {myEmployeeId && <AbsenSekarang employeeId={myEmployeeId} employeeName={myName} onDone={fetchAttendances} />}
 
       {/* Filter */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6 flex flex-wrap gap-4 items-center">

@@ -10,6 +10,9 @@ type Branch = {
   is_active: boolean
   created_at: string
   fingerprint_device_group_id: string | null
+  latitude: number | null
+  longitude: number | null
+  checkin_radius_meters: number
 }
 
 type DeviceGroup = { id: string; name: string }
@@ -27,6 +30,12 @@ export default function CabangPage() {
   const [editName, setEditName] = useState('')
   const [editAddress, setEditAddress] = useState('')
   const [editSubmitting, setEditSubmitting] = useState(false)
+  // Absen HP (test drive) — titik koordinat & radius cabang, dipakai AbsenSekarang.tsx untuk
+  // cek jarak. Kosong (null) = cabang itu belum diaktifkan untuk absen HP, fingerprint tetap jalan.
+  const [editLat, setEditLat] = useState('')
+  const [editLng, setEditLng] = useState('')
+  const [editRadius, setEditRadius] = useState('150')
+  const [locatingMe, setLocatingMe] = useState(false)
 
   // Kelompok Mesin Fingerprint
   const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([])
@@ -113,6 +122,19 @@ export default function CabangPage() {
     setEditBranch(branch)
     setEditName(branch.name)
     setEditAddress(branch.address || '')
+    setEditLat(branch.latitude != null ? String(branch.latitude) : '')
+    setEditLng(branch.longitude != null ? String(branch.longitude) : '')
+    setEditRadius(String(branch.checkin_radius_meters ?? 150))
+  }
+
+  function useMyLocationForEdit() {
+    if (!navigator.geolocation) { showMessage('error', 'Browser ini tidak mendukung deteksi lokasi.'); return }
+    setLocatingMe(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => { setEditLat(String(pos.coords.latitude)); setEditLng(String(pos.coords.longitude)); setLocatingMe(false) },
+      () => { showMessage('error', 'Gagal mengambil lokasi — pastikan izin lokasi browser diaktifkan.'); setLocatingMe(false) },
+      { enableHighAccuracy: true, timeout: 15000 }
+    )
   }
 
   async function handleEditSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -120,9 +142,18 @@ export default function CabangPage() {
     if (!editBranch) return
     setEditSubmitting(true)
 
+    const latNum = editLat.trim() === '' ? null : Number(editLat)
+    const lngNum = editLng.trim() === '' ? null : Number(editLng)
+    if ((latNum !== null && isNaN(latNum)) || (lngNum !== null && isNaN(lngNum))) {
+      showMessage('error', 'Koordinat tidak valid.')
+      setEditSubmitting(false)
+      return
+    }
+    const radiusNum = Math.max(10, Number(editRadius) || 150)
+
     const { error } = await supabase
       .from('branches')
-      .update({ name: editName, address: editAddress || null })
+      .update({ name: editName, address: editAddress || null, latitude: latNum, longitude: lngNum, checkin_radius_meters: radiusNum })
       .eq('id', editBranch.id)
 
     if (error) {
@@ -255,6 +286,7 @@ export default function CabangPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Nama Cabang</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Alamat</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider">Kelompok Mesin</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider text-center">Absen HP</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider text-center">Status</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider text-center">Aksi</th>
                   </tr>
@@ -262,11 +294,11 @@ export default function CabangPage() {
                 <tbody className="divide-y divide-slate-200">
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
                     </tr>
                   ) : branches.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data cabang.</td>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data cabang.</td>
                     </tr>
                   ) : (
                     branches.map((branch) => (
@@ -284,6 +316,13 @@ export default function CabangPage() {
                               <option key={g.id} value={g.id}>{g.name}</option>
                             ))}
                           </select>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {branch.latitude != null && branch.longitude != null ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 text-blue-700">✓ Aktif ({branch.checkin_radius_meters}m)</span>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -354,6 +393,37 @@ export default function CabangPage() {
                     rows={3}
                   />
                 </div>
+
+                <div className="pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm font-medium text-slate-700">Absen HP (Test Drive)</label>
+                    <button type="button" onClick={useMyLocationForEdit} disabled={locatingMe}
+                      className="text-xs px-2.5 py-1 rounded border border-blue-200 text-blue-600 hover:bg-blue-50 transition disabled:opacity-50">
+                      {locatingMe ? 'Mendeteksi...' : '📍 Pakai lokasi saya sekarang'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-2">Kosongkan Latitude/Longitude kalau cabang ini belum ikut test drive absen HP — karyawan tetap pakai fingerprint seperti biasa.</p>
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Latitude</label>
+                      <input type="text" inputMode="decimal" value={editLat} onChange={e => setEditLat(e.target.value)}
+                        placeholder="Contoh: -6.914744"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Longitude</label>
+                      <input type="text" inputMode="decimal" value={editLng} onChange={e => setEditLng(e.target.value)}
+                        placeholder="Contoh: 107.609810"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Radius Absen (meter)</label>
+                    <input type="number" min={10} value={editRadius} onChange={e => setEditRadius(e.target.value)}
+                      className="w-32 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+
                 <div className="flex justify-end gap-3 pt-2">
                   <button
                     type="button"

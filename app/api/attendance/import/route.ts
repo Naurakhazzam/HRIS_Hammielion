@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import * as XLSX from 'xlsx'
+import { matchSchedule, timeToMinutes } from '@/lib/attendanceSchedule'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function timeToMinutes(t: string): number {
-  const [h, m] = t.substring(0, 5).split(':').map(Number)
-  return h * 60 + m
-}
 
 function parsePeriod(rawData: string[][]): {
   startMonth: number; startDay: number; startYear: number
@@ -61,19 +57,6 @@ function dayToDate(
   const year  = day >= p.startDay ? p.startYear  : p.endYear
   const month = day >= p.startDay ? p.startMonth : p.endMonth
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-}
-
-function matchSchedule(checkInStr: string, schedules: any[]): any | null {
-  if (!schedules.length) return null
-  const sorted = [...schedules].sort((a, b) => {
-    if (!a.detect_until) return 1
-    if (!b.detect_until) return -1
-    return a.detect_until.localeCompare(b.detect_until)
-  })
-  return (
-    sorted.find(s => !s.detect_until || checkInStr <= s.detect_until.substring(0, 5)) ??
-    sorted[sorted.length - 1]
-  )
 }
 
 // ─── POST /api/attendance/import ────────────────────────────────────────────
