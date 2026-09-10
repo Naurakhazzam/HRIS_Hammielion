@@ -743,6 +743,18 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 | `components/ThemeToggle.tsx` | Baru — tombol toggle matahari/bulan |
 | `components/DashboardShell.tsx` | Pasang `<ThemeToggle />` di navbar |
 
+### 43. Simplifikasi: Laporan Resmi Jadi Bulanan Saja, Tab Mingguan Dihapus
+
+**Permintaan Owner:** "untuk laporan resmi, sepertinya, filter perbulan, harus anda hapus, cukup laporan perbulan saja" — dikonfirmasi maksudnya: hapus tab pemilihan Mingguan/Bulanan, sisakan tampilan Bulanan saja (input pilih bulan tetap ada).
+
+**Fix:** Tab switcher "Laporan Mingguan"/"Laporan Bulanan" dan seluruh cabang kode yang bergantung padanya (helper `isoWeekRange`/`getCurrentIsoWeek`/`shiftWeek`, input `type="week"`, kondisi `tab === 'mingguan'`/`'bulanan'` di berbagai tempat) dihapus. Halaman sekarang selalu menghitung berdasarkan bulan yang dipilih; realisasi kasbon (yang sebelumnya cuma aktif saat tab Bulanan) sekarang selalu dihitung.
+
+**Terkait:** Owner juga sempat menanyakan kenapa kartu "Total Konsolidasi" bisa menampilkan Laba Kotor minus (Rp-746 juta) untuk Agustus — ditelusuri: itu bukan kerugian riil, tapi karena Laba Kotor di kartu itu dihitung dari Kas Masuk (uang tercatat masuk manual) dikurangi HPP (dari sistem kasir), dan Kas Masuk Agustus jauh lebih kecil dari Omset Sistem — 845 juta dari selisih ~900 juta itu berasal dari kelompok "Gudang & Back Office" yang wajar (uang dari cabang ke Gudang sering lewat piutang/transfer internal, bukan kas tunai langsung, lih. [[project_internal_suppliers]]). Kartu ungu "Omset & HPP Sistem Kasir vs Kas Real" di bawahnya sudah punya angka Laba Kotor (Sistem) yang benar (+Rp160,5 juta). Persentase naik/turun yang ekstrem (+231%, +100%, dst.) juga karena Juli belum punya data HPP/Omset sama sekali (fitur itu baru dipakai mulai Agustus) — bukan perubahan bisnis beneran. Belum ada perubahan kode untuk ini, baru penjelasan ke Owner.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Hapus tab Mingguan & helper minggu; `computeTotals`/`fetchData` selalu bulanan |
+
 ---
 
-*Terakhir diupdate: Sesi 3 (2026-09-10), lanjutan*
+*Terakhir diupdate: Sesi 4 (2026-09-11)*
