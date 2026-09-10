@@ -691,6 +691,16 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 | `app/api/signup/route.ts` | Endpoint publik — verifikasi & buat akun |
 | `app/(auth)/login/page.tsx` | Link ke halaman daftar |
 
+### 39. Fix Kritis: Dashboard Keuangan Hitung Ganda HPP + Omset, Laba Kotor/Bersih Salah
+
+**Ditemukan (audit ulang tab Keuangan):** Tabel `fin_hpp_entries` menyimpan dua jenis baris (`entry_type` = `hpp` atau `omset`, sejak item #22), tapi query di Dashboard Keuangan menjumlahkan SEMUA baris ke satu keranjang "HPP" tanpa filter `entry_type` — beda dari Laporan Resmi yang sudah benar memfilternya. Dicek ke data Agustus 2026: HPP asli Rp2,64M, Omset Rp2,80M — Dashboard menjumlahkan jadi "HPP" ≈ Rp5,44M (hampir 2x lipat), bikin Laba Kotor & Laba Bersih di Dashboard salah dan tidak nyambung dengan angka yang benar di Laporan Resmi untuk bulan yang sama.
+
+**Fix:** Tambah `.eq('entry_type', 'hpp')` di query tersebut, sama seperti Laporan Resmi.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/dashboard/page.tsx` | Query HPP difilter `entry_type='hpp'`, tidak ikut Omset lagi |
+
 ---
 
 *Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
