@@ -261,7 +261,9 @@ export default function LaporanResmiPage() {
 
     const [cashInRes, hppRes] = await Promise.all([
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
-      supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').gte('entry_date', startDate).lte('entry_date', endDate),
+      // entry_type='hpp' wajib — tabel ini juga menyimpan baris entry_type='omset' (item #22),
+      // sama seperti bug yang sempat kejadian di Dashboard Keuangan (item #39).
+      supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'hpp').gte('entry_date', startDate).lte('entry_date', endDate),
     ])
 
     const omzetByBranch = new Map<string, number>()
