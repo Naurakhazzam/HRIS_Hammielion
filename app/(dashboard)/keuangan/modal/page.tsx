@@ -61,6 +61,7 @@ export default function ModalCabangPage() {
   })
 
   const isAdmin = ADMIN_ROLES.includes(role)
+  const isOwner = role === 'owner'
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -213,6 +214,20 @@ export default function ModalCabangPage() {
     setSubmitting(false)
   }
 
+  async function handleDeleteBaseline(b: Baseline) {
+    if (!confirm(`Hapus baseline modal awal ${b.branches?.name ?? 'cabang ini'}? Setelah dihapus, cabang ini bisa diisi baseline baru lagi.`)) return
+    const { error } = await supabase.from('fin_branch_capital_baseline').delete().eq('id', b.id)
+    if (error) showMessage('error', 'Gagal menghapus: ' + error.message)
+    else { showMessage('success', 'Baseline berhasil dihapus.'); fetchAll(); checkExistingBaseline() }
+  }
+
+  async function handleDeleteSnapshot(s: Snapshot) {
+    if (!confirm(`Hapus snapshot ${s.branches?.name ?? ''} bulan ${new Date(s.snapshot_period).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}?`)) return
+    const { error } = await supabase.from('fin_branch_capital_snapshot').delete().eq('id', s.id)
+    if (error) showMessage('error', 'Gagal menghapus: ' + error.message)
+    else { showMessage('success', 'Snapshot berhasil dihapus.'); fetchAll(); checkExistingSnapshot() }
+  }
+
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
@@ -312,13 +327,14 @@ export default function ModalCabangPage() {
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Barang</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Aset</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+                      {isOwner && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {loading ? (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                     ) : baselines.length === 0 ? (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
                     ) : baselines.map(b => (
                       <tr key={b.id} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm text-slate-700">{b.branches?.name}</td>
@@ -327,6 +343,11 @@ export default function ModalCabangPage() {
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(b.inventory_value)}</td>
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(b.asset_value)}</td>
                         <td className="px-4 py-3 text-center">{statusBadge(b.status)}</td>
+                        {isOwner && (
+                          <td className="px-4 py-3 text-center">
+                            <button onClick={() => handleDeleteBaseline(b)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-red-600 border-red-200 hover:bg-red-50">Hapus</button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -395,13 +416,14 @@ export default function ModalCabangPage() {
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Barang</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Aset</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+                      {isOwner && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {loading ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                     ) : snapshots.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
                     ) : snapshots.map(s => (
                       <tr key={s.id} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm text-slate-700">{s.branches?.name}</td>
@@ -409,6 +431,11 @@ export default function ModalCabangPage() {
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(s.inventory_value)}</td>
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(s.asset_value)}</td>
                         <td className="px-4 py-3 text-center">{statusBadge(s.status)}</td>
+                        {isOwner && (
+                          <td className="px-4 py-3 text-center">
+                            <button onClick={() => handleDeleteSnapshot(s)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-red-600 border-red-200 hover:bg-red-50">Hapus</button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

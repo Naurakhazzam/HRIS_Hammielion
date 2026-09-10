@@ -60,7 +60,17 @@ export default function AsetKontrakPage() {
     rent_amount: '', payment_cycle: 'bulanan', reminder_days_before_due: '30', notes: '',
   })
 
+  // Edit — cuma dibuka untuk entri yang masih "Menunggu" (yang sudah disetujui dianggap final,
+  // kalau salah harus ditolak dulu lewat Verifikasi lalu diajukan ulang, bukan diedit diam-diam).
+  const [editAsset, setEditAsset] = useState<Asset | null>(null)
+  const [editAssetForm, setEditAssetForm] = useState({ branch_id: '', name: '', type: '', acquisition_value: '', acquisition_date: '', status: 'aktif', notes: '' })
+  const [editAssetSubmitting, setEditAssetSubmitting] = useState(false)
+  const [editContract, setEditContract] = useState<Contract | null>(null)
+  const [editContractForm, setEditContractForm] = useState({ contract_type: '', start_date: '', end_date: '', rent_amount: '', payment_cycle: 'bulanan', reminder_days_before_due: '30', notes: '' })
+  const [editContractSubmitting, setEditContractSubmitting] = useState(false)
+
   const isAdmin = ADMIN_ROLES.includes(role)
+  const isOwner = role === 'owner'
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -158,6 +168,76 @@ export default function AsetKontrakPage() {
       fetchAll()
     }
     setSubmitting(false)
+  }
+
+  function canEditAsset(a: Asset) { return isAdmin && a.approval_status === 'pending' }
+  function canEditContract(c: Contract) { return isAdmin && c.approval_status === 'pending' }
+
+  function openEditAsset(a: Asset) {
+    setEditAsset(a)
+    setEditAssetForm({
+      branch_id: a.branch_id, name: a.name, type: a.type,
+      acquisition_value: String(a.acquisition_value), acquisition_date: a.acquisition_date || '',
+      status: a.status, notes: a.notes || '',
+    })
+  }
+
+  async function handleEditAsset(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editAsset) return
+    if (!editAssetForm.branch_id || !editAssetForm.name.trim() || !editAssetForm.type.trim()) {
+      showMessage('error', 'Cabang, nama, dan tipe aset wajib diisi.'); return
+    }
+    setEditAssetSubmitting(true)
+    const { error } = await supabase.from('fin_assets').update({
+      branch_id: editAssetForm.branch_id, name: editAssetForm.name.trim(), type: editAssetForm.type.trim(),
+      acquisition_value: parseFloat(editAssetForm.acquisition_value) || 0,
+      acquisition_date: editAssetForm.acquisition_date || null,
+      status: editAssetForm.status, notes: editAssetForm.notes || null,
+    }).eq('id', editAsset.id)
+    if (error) showMessage('error', 'Gagal memperbarui aset: ' + error.message)
+    else { showMessage('success', 'Aset berhasil diperbarui.'); setEditAsset(null); fetchAll() }
+    setEditAssetSubmitting(false)
+  }
+
+  async function handleDeleteAsset(a: Asset) {
+    if (!confirm(`Hapus aset "${a.name}"? Kontrak sewa yang terhubung ke aset ini juga akan ikut terhapus.`)) return
+    const { error } = await supabase.from('fin_assets').delete().eq('id', a.id)
+    if (error) showMessage('error', 'Gagal menghapus aset: ' + error.message)
+    else { showMessage('success', 'Aset berhasil dihapus.'); fetchAll() }
+  }
+
+  function openEditContract(c: Contract) {
+    setEditContract(c)
+    setEditContractForm({
+      contract_type: c.contract_type, start_date: c.start_date, end_date: c.end_date || '',
+      rent_amount: String(c.rent_amount), payment_cycle: c.payment_cycle || 'bulanan',
+      reminder_days_before_due: String(c.reminder_days_before_due), notes: c.notes || '',
+    })
+  }
+
+  async function handleEditContract(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editContract) return
+    if (!editContractForm.contract_type.trim()) { showMessage('error', 'Tipe kontrak wajib diisi.'); return }
+    setEditContractSubmitting(true)
+    const { error } = await supabase.from('fin_asset_contracts').update({
+      contract_type: editContractForm.contract_type.trim(), start_date: editContractForm.start_date,
+      end_date: editContractForm.end_date || null, rent_amount: parseFloat(editContractForm.rent_amount) || 0,
+      payment_cycle: editContractForm.payment_cycle || null,
+      reminder_days_before_due: parseInt(editContractForm.reminder_days_before_due) || 30,
+      notes: editContractForm.notes || null,
+    }).eq('id', editContract.id)
+    if (error) showMessage('error', 'Gagal memperbarui kontrak: ' + error.message)
+    else { showMessage('success', 'Kontrak berhasil diperbarui.'); setEditContract(null); fetchAll() }
+    setEditContractSubmitting(false)
+  }
+
+  async function handleDeleteContract(c: Contract) {
+    if (!confirm(`Hapus kontrak "${c.contract_type}" untuk ${c.fin_assets?.name}?`)) return
+    const { error } = await supabase.from('fin_asset_contracts').delete().eq('id', c.id)
+    if (error) showMessage('error', 'Gagal menghapus kontrak: ' + error.message)
+    else { showMessage('success', 'Kontrak berhasil dihapus.'); fetchAll() }
   }
 
   const formatRupiah = (angka: number) =>
@@ -282,13 +362,14 @@ export default function AsetKontrakPage() {
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Nilai Perolehan</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kondisi</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Verifikasi</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {loading ? (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                     ) : assets.length === 0 ? (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada aset tercatat.</td></tr>
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada aset tercatat.</td></tr>
                     ) : assets.map(a => (
                       <tr key={a.id} className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm font-medium text-slate-800">{a.name}</td>
@@ -297,6 +378,17 @@ export default function AsetKontrakPage() {
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(a.acquisition_value)}</td>
                         <td className="px-4 py-3 text-sm text-slate-600 capitalize">{a.status}</td>
                         <td className="px-4 py-3 text-center">{approvalBadge(a.approval_status)}</td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1 flex-wrap">
+                            {canEditAsset(a) && (
+                              <button onClick={() => openEditAsset(a)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-blue-600 border-blue-200 hover:bg-blue-50">Edit</button>
+                            )}
+                            {isOwner && (
+                              <button onClick={() => handleDeleteAsset(a)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-red-600 border-red-200 hover:bg-red-50">Hapus</button>
+                            )}
+                            {!canEditAsset(a) && !isOwner && <span className="text-xs text-slate-300">—</span>}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -378,13 +470,14 @@ export default function AsetKontrakPage() {
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Berakhir</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Nominal</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Verifikasi</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {loading ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                     ) : contracts.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kontrak tercatat.</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kontrak tercatat.</td></tr>
                     ) : contracts.map(c => (
                       <tr key={c.id} className={`hover:bg-slate-50 transition ${dueSoon(c) ? 'bg-amber-50/60' : ''}`}>
                         <td className="px-4 py-3 text-sm font-medium text-slate-800">{c.fin_assets?.name} <span className="text-xs text-slate-400">({c.fin_assets?.branches?.name})</span></td>
@@ -395,11 +488,150 @@ export default function AsetKontrakPage() {
                         </td>
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{formatRupiah(c.rent_amount)}</td>
                         <td className="px-4 py-3 text-center">{approvalBadge(c.approval_status)}</td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1 flex-wrap">
+                            {canEditContract(c) && (
+                              <button onClick={() => openEditContract(c)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-blue-600 border-blue-200 hover:bg-blue-50">Edit</button>
+                            )}
+                            {isOwner && (
+                              <button onClick={() => handleDeleteContract(c)} className="text-xs px-2.5 py-1 rounded border font-medium transition text-red-600 border-red-200 hover:bg-red-50">Hapus</button>
+                            )}
+                            {!canEditContract(c) && !isOwner && <span className="text-xs text-slate-300">—</span>}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Aset */}
+      {editAsset && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-slate-800 mb-4 pb-2 border-b border-slate-100">Edit Aset</h2>
+              <form onSubmit={handleEditAsset} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
+                  <select required value={editAssetForm.branch_id} onChange={e => setEditAssetForm({ ...editAssetForm, branch_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nama Aset <span className="text-red-500">*</span></label>
+                  <input type="text" required value={editAssetForm.name} onChange={e => setEditAssetForm({ ...editAssetForm, name: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Tipe <span className="text-red-500">*</span></label>
+                  <input type="text" required value={editAssetForm.type} onChange={e => setEditAssetForm({ ...editAssetForm, type: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nilai Perolehan (Rp)</label>
+                  <RupiahInput value={editAssetForm.acquisition_value} onChange={v => setEditAssetForm({ ...editAssetForm, acquisition_value: v })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Tanggal Perolehan</label>
+                  <input type="date" value={editAssetForm.acquisition_date} onChange={e => setEditAssetForm({ ...editAssetForm, acquisition_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Kondisi</label>
+                  <select value={editAssetForm.status} onChange={e => setEditAssetForm({ ...editAssetForm, status: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="aktif">Aktif</option>
+                    <option value="nonaktif">Nonaktif</option>
+                    <option value="dijual">Dijual</option>
+                    <option value="rusak">Rusak</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Catatan</label>
+                  <textarea value={editAssetForm.notes} onChange={e => setEditAssetForm({ ...editAssetForm, notes: e.target.value })} rows={2}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button type="button" onClick={() => setEditAsset(null)}
+                    className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                    Batal
+                  </button>
+                  <button type="submit" disabled={editAssetSubmitting}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                    {editAssetSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Kontrak */}
+      {editContract && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-slate-800 mb-1 pb-2 border-b border-slate-100">Edit Kontrak</h2>
+              <p className="text-xs text-slate-500 mb-4 pt-2">{editContract.fin_assets?.name} ({editContract.fin_assets?.branches?.name})</p>
+              <form onSubmit={handleEditContract} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Tipe Kontrak <span className="text-red-500">*</span></label>
+                  <input type="text" required value={editContractForm.contract_type} onChange={e => setEditContractForm({ ...editContractForm, contract_type: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Mulai <span className="text-red-500">*</span></label>
+                  <input type="date" required value={editContractForm.start_date} onChange={e => setEditContractForm({ ...editContractForm, start_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Berakhir</label>
+                  <input type="date" value={editContractForm.end_date} onChange={e => setEditContractForm({ ...editContractForm, end_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nominal Sewa (Rp)</label>
+                  <RupiahInput value={editContractForm.rent_amount} onChange={v => setEditContractForm({ ...editContractForm, rent_amount: v })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Siklus Bayar</label>
+                  <select value={editContractForm.payment_cycle} onChange={e => setEditContractForm({ ...editContractForm, payment_cycle: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="bulanan">Bulanan</option>
+                    <option value="tahunan">Tahunan</option>
+                    <option value="sekali_bayar">Sekali Bayar</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Reminder (hari sebelum jatuh tempo)</label>
+                  <input type="number" min="1" step="1" value={editContractForm.reminder_days_before_due} onChange={e => setEditContractForm({ ...editContractForm, reminder_days_before_due: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Catatan</label>
+                  <textarea value={editContractForm.notes} onChange={e => setEditContractForm({ ...editContractForm, notes: e.target.value })} rows={2}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button type="button" onClick={() => setEditContract(null)}
+                    className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                    Batal
+                  </button>
+                  <button type="submit" disabled={editContractSubmitting}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                    {editContractSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>

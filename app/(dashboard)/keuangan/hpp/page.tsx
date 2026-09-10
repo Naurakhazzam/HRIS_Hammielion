@@ -51,6 +51,7 @@ export default function HppPage() {
 
   const isSupervisor = role === 'supervisor'
   const isAdmin = ADMIN_ROLES.includes(role)
+  const isOwner = role === 'owner'
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
@@ -156,6 +157,13 @@ export default function HppPage() {
     const { error } = await supabase.from('fin_hpp_entries').update({ hpp_amount: hppNum, notes: editRowNotes || null }).eq('id', id)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
     else { showMessage('success', 'Entri berhasil diperbarui.'); setEditingRowId(null); fetchRows() }
+  }
+
+  async function handleDeleteRow(r: HppEntry) {
+    if (!confirm(`Hapus entri ${ENTRY_TYPE_LABEL[r.entry_type]} ${r.branches?.name ?? ''} — ${formatRupiah(r.hpp_amount)} (${new Date(r.entry_date).toLocaleDateString('id-ID')})? Tindakan ini tidak bisa dibatalkan.`)) return
+    const { error } = await supabase.from('fin_hpp_entries').delete().eq('id', r.id)
+    if (error) showMessage('error', 'Gagal menghapus: ' + error.message)
+    else { showMessage('success', 'Entri berhasil dihapus.'); fetchRows() }
   }
 
   const formatRupiah = (angka: number) =>
@@ -331,10 +339,12 @@ export default function HppPage() {
                             <button onClick={() => saveEditRow(r.id)} className="px-2 py-1 bg-blue-600 text-white rounded text-xs">Simpan</button>
                             <button onClick={() => setEditingRowId(null)} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-xs">Batal</button>
                           </div>
-                        ) : canEditRow(r) ? (
-                          <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>
                         ) : (
-                          <span className="text-xs text-slate-300">—</span>
+                          <div className="flex gap-1 justify-center flex-wrap">
+                            {canEditRow(r) && <button onClick={() => startEditRow(r)} className="px-2 py-1 text-xs text-blue-600 hover:underline">Edit</button>}
+                            {isOwner && <button onClick={() => handleDeleteRow(r)} className="px-2 py-1 text-xs text-red-600 hover:underline">Hapus</button>}
+                            {!canEditRow(r) && !isOwner && <span className="text-xs text-slate-300">—</span>}
+                          </div>
                         )}
                       </td>
                     </tr>
