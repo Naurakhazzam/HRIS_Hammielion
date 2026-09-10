@@ -22,46 +22,6 @@ type GroupTotals = {
   pembayaranSupplierReal: number
 }
 
-type Tab = 'mingguan' | 'bulanan'
-
-function isoWeekRange(weekStr: string): { start: string; end: string } {
-  // weekStr format dari <input type="week">: "2026-W27"
-  const [yearStr, weekPart] = weekStr.split('-W')
-  const year = Number(yearStr)
-  const week = Number(weekPart)
-  // ISO week: cari hari Kamis di minggu itu untuk menentukan tahun ISO dengan benar
-  const simple = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7))
-  const dayOfWeek = simple.getUTCDay() || 7
-  const isoMonday = new Date(simple)
-  isoMonday.setUTCDate(simple.getUTCDate() - dayOfWeek + 1)
-  const isoSunday = new Date(isoMonday)
-  isoSunday.setUTCDate(isoMonday.getUTCDate() + 6)
-  return { start: isoMonday.toISOString().split('T')[0], end: isoSunday.toISOString().split('T')[0] }
-}
-
-function getCurrentIsoWeek(): string {
-  const now = new Date()
-  const target = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-  const dayNum = target.getUTCDay() || 7
-  target.setUTCDate(target.getUTCDate() + 4 - dayNum)
-  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1))
-  const weekNum = Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
-  return `${target.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`
-}
-
-function shiftWeek(weekStr: string, delta: number): string {
-  const { start } = isoWeekRange(weekStr)
-  const d = new Date(start + 'T00:00:00Z')
-  d.setUTCDate(d.getUTCDate() + delta * 7)
-  // hitung ulang ISO week dari tanggal baru
-  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
-  const dayNum = target.getUTCDay() || 7
-  target.setUTCDate(target.getUTCDate() + 4 - dayNum)
-  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1))
-  const weekNum = Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
-  return `${target.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`
-}
-
 function shiftMonth(monthStr: string, delta: number): string {
   const [y, m] = monthStr.split('-').map(Number)
   const d = new Date(y, m - 1 + delta, 1)
@@ -76,8 +36,6 @@ export default function LaporanResmiPage() {
   const [roleLoading, setRoleLoading] = useState(true)
   const isAdmin = ADMIN_ROLES.includes(role)
 
-  const [tab, setTab] = useState<Tab>('mingguan')
-  const [week, setWeek] = useState(getCurrentIsoWeek())
   const today = todayLocalStr()
   const [month, setMonth] = useState(today.slice(0, 7))
 
@@ -109,7 +67,7 @@ export default function LaporanResmiPage() {
     init()
   }, [supabase])
 
-  const computeTotals = useCallback(async (startDate: string, endDate: string, periodMonth?: number, periodYear?: number): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
+  const computeTotals = useCallback(async (startDate: string, endDate: string, periodMonth: number, periodYear: number): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
     const [groupsRes, cashInRes, hppRes, omsetSistemRes, cashOutRes, supplierRes, kasbonRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
@@ -117,11 +75,7 @@ export default function LaporanResmiPage() {
       supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'omset').gte('entry_date', startDate).lte('entry_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount, fin_cash_out_categories(affects_net_profit)').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount').eq('status', 'approved').eq('category', 'pembayaran_supplier').gte('transaction_date', startDate).lte('transaction_date', endDate),
-      // Realisasi kasbon cuma berlaku untuk tampilan bulanan (periodMonth/periodYear diisi) —
-      // tidak diikutkan untuk mingguan karena periode gaji tidak selaras dengan minggu.
-      periodMonth && periodYear
-        ? supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').eq('status', 'paid').eq('period_month', periodMonth).eq('period_year', periodYear).gt('kasbon_deduction', 0)
-        : Promise.resolve({ data: [], error: null }),
+      supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').eq('status', 'paid').eq('period_month', periodMonth).eq('period_year', periodYear).gt('kasbon_deduction', 0),
     ])
     if (groupsRes.error) console.error('Detail error report_groups:', JSON.stringify(groupsRes.error, null, 2))
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
@@ -192,29 +146,17 @@ export default function LaporanResmiPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    let curStart: string, curEnd: string, prevStart: string, prevEnd: string
-    let curPeriod: [number, number] | null = null
-    let prevPeriod: [number, number] | null = null
-
-    if (tab === 'mingguan') {
-      const cur = isoWeekRange(week)
-      const prev = isoWeekRange(shiftWeek(week, -1))
-      curStart = cur.start; curEnd = cur.end; prevStart = prev.start; prevEnd = prev.end
-    } else {
-      const [y, m] = month.split('-').map(Number)
-      curStart = localDateStr(new Date(y, m - 1, 1))
-      curEnd = localDateStr(new Date(y, m, 0))
-      curPeriod = [m, y]
-      const prevMonth = shiftMonth(month, -1)
-      const [py, pm] = prevMonth.split('-').map(Number)
-      prevStart = localDateStr(new Date(py, pm - 1, 1))
-      prevEnd = localDateStr(new Date(py, pm, 0))
-      prevPeriod = [pm, py]
-    }
+    const [y, m] = month.split('-').map(Number)
+    const curStart = localDateStr(new Date(y, m - 1, 1))
+    const curEnd = localDateStr(new Date(y, m, 0))
+    const prevMonth = shiftMonth(month, -1)
+    const [py, pm] = prevMonth.split('-').map(Number)
+    const prevStart = localDateStr(new Date(py, pm - 1, 1))
+    const prevEnd = localDateStr(new Date(py, pm, 0))
 
     const [cur, prev, saldoAwalRes] = await Promise.all([
-      computeTotals(curStart, curEnd, curPeriod?.[0], curPeriod?.[1]),
-      computeTotals(prevStart, prevEnd, prevPeriod?.[0], prevPeriod?.[1]),
+      computeTotals(curStart, curEnd, m, y),
+      computeTotals(prevStart, prevEnd, pm, py),
       // Saldo Awal (Real) cuma valid kalau ada rekening yang opening_balance_date-nya PERSIS di tanggal 1 periode ini —
       // artinya periode ini punya anchor saldo fisik yang benar-benar dihitung, bukan diperkirakan.
       supabase.from('fin_bank_accounts').select('opening_balance').eq('is_active', true).eq('opening_balance_date', curStart),
@@ -229,7 +171,7 @@ export default function LaporanResmiPage() {
         : null
     )
     setLoading(false)
-  }, [tab, week, month, computeTotals, supabase])
+  }, [month, computeTotals, supabase])
 
   useEffect(() => { if (!roleLoading) fetchData() }, [roleLoading, fetchData])
 
@@ -306,42 +248,21 @@ export default function LaporanResmiPage() {
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Laporan Resmi</h1>
         <p className="text-sm text-slate-500">Laporan P&L per kelompok laporan dengan perbandingan periode sebelumnya, berdasarkan data yang sudah disetujui.</p>
         <p className="text-xs text-slate-400 mt-1">
-          Ini versi lengkap (mingguan/bulanan + ekspor CSV). Untuk sekilas lihat laba bulan ini saja, buka{' '}
+          Ini versi lengkap (per bulan + ekspor CSV). Untuk sekilas lihat laba bulan ini saja, buka{' '}
           <Link href="/keuangan/dashboard" className="text-blue-600 hover:underline font-medium">Dashboard Keuangan</Link>.
         </p>
       </div>
 
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6">
-        {(['mingguan', 'bulanan'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab === t ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            {t === 'mingguan' ? 'Laporan Mingguan' : 'Laporan Bulanan'}
-          </button>
-        ))}
-      </div>
-
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div className="flex items-end gap-3">
-          {tab === 'mingguan' ? (
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Minggu</label>
-              <input type="week" value={week} onChange={e => setWeek(e.target.value)}
-                className="px-3 py-2 border border-slate-300 rounded text-sm outline-none bg-white" />
-            </div>
-          ) : (
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Bulan</label>
-              <input type="month" value={month} onChange={e => setMonth(e.target.value)}
-                className="px-3 py-2 border border-slate-300 rounded text-sm outline-none bg-white" />
-            </div>
-          )}
-          <p className="text-xs text-slate-400 pb-2">
-            {tab === 'mingguan'
-              ? `${isoWeekRange(week).start} s/d ${isoWeekRange(week).end}, dibanding minggu sebelumnya`
-              : `Dibanding bulan sebelumnya (${shiftMonth(month, -1)})`}
-          </p>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">Bulan</label>
+            <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+              className="px-3 py-2 border border-slate-300 rounded text-sm outline-none bg-white" />
+          </div>
+          <p className="text-xs text-slate-400 pb-2">Dibanding bulan sebelumnya ({shiftMonth(month, -1)})</p>
         </div>
-        {tab === 'bulanan' && isAdmin && (
+        {isAdmin && (
           <button onClick={handleExportOmzetPerCabang} disabled={exporting}
             className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
             {exporting ? 'Menyiapkan...' : '⬇ Ekspor Omzet per Cabang (CSV)'}
@@ -385,7 +306,6 @@ export default function LaporanResmiPage() {
                   </p>
                   <p className="text-lg font-semibold text-amber-700 whitespace-nowrap">{formatRupiah(consolidated.kasbonRealisasi)}</p>
                   <VarianceBadge cur={consolidated.kasbonRealisasi} prev={prevConsolidated.kasbonRealisasi} />
-                  {tab === 'mingguan' && <p className="text-[10px] text-slate-400 mt-0.5">Cuma dihitung di tampilan bulanan</p>}
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Laba Bersih</p>
@@ -396,7 +316,7 @@ export default function LaporanResmiPage() {
             </div>
           )}
 
-          {isAdmin && tab === 'bulanan' && consolidated && consolidated.omsetSistem > 0 && (() => {
+          {isAdmin && consolidated && consolidated.omsetSistem > 0 && (() => {
             const labaKotorSistem = consolidated.omsetSistem - consolidated.hpp
             const labaBersihSistem = labaKotorSistem - consolidated.biayaOperasional - consolidated.kasbonRealisasi
             const sisaKasSeharusnya = consolidated.kasMasuk - consolidated.pembayaranSupplierReal
@@ -578,7 +498,7 @@ export default function LaporanResmiPage() {
             )
           })()}
 
-          <p className="text-xs text-slate-400 mt-3">Hanya menghitung entri berstatus &quot;Disetujui&quot;. Ekspor CSV omzet per cabang (tab Bulanan) memakai data per cabang asli, bukan per kelompok laporan gabungan — sesuai kebutuhan pelaporan pajak.</p>
+          <p className="text-xs text-slate-400 mt-3">Hanya menghitung entri berstatus &quot;Disetujui&quot;. Ekspor CSV omzet per cabang memakai data per cabang asli, bukan per kelompok laporan gabungan — sesuai kebutuhan pelaporan pajak.</p>
         </>
       )}
     </div>
