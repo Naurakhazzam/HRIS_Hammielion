@@ -701,6 +701,48 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 |---|---|
 | `app/(dashboard)/keuangan/dashboard/page.tsx` | Query HPP difilter `entry_type='hpp'`, tidak ikut Omset lagi |
 
+### 40. Fitur: Edit/Hapus untuk Aset & Kontrak Sewa, Hapus untuk HPP/Omset dan Modal Cabang
+
+**Ditemukan (audit ulang tab Keuangan):** Tabel `fin_assets`, `fin_asset_contracts`, `fin_hpp_entries`, `fin_branch_capital_baseline`, `fin_branch_capital_snapshot` semuanya sudah punya RLS DELETE owner-only (dan untuk HPP/Modal, UPDATE terbatas ke status pending) — tapi tidak ada tombol di UI yang memakainya. Kalau ada salah input (misal salah cabang atau salah ketik), satu-satunya jalan adalah minta Finance menolak lewat Verifikasi, padahal itu untuk "data ini salah secara substansi", bukan "typo perlu dibetulkan".
+
+**Fix:**
+- Aset & Kontrak Sewa: tambah Edit lewat modal (nama/jenis/nilai/tanggal/kondisi/catatan untuk aset; jenis/tanggal/sewa/siklus/pengingat/catatan untuk kontrak), dibatasi ke entri berstatus pending (sama seperti pola di halaman lain), plus tombol Hapus khusus owner.
+- HPP & Omset: tambah Hapus di sebelah Edit inline yang sudah ada, khusus owner.
+- Modal Cabang: tambah Hapus untuk baris baseline maupun snapshot, khusus owner — untuk baseline, hapus juga membuka lagi cabang tersebut untuk pengajuan baseline baru.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/aset/page.tsx` | Modal Edit + tombol Hapus untuk aset dan kontrak sewa |
+| `app/(dashboard)/keuangan/hpp/page.tsx` | Tombol Hapus di samping Edit inline |
+| `app/(dashboard)/keuangan/modal/page.tsx` | Tombol Hapus untuk baseline & snapshot |
+
+### 41. Fix: Export Omzet per Cabang Juga Hitung Ganda HPP + Omset
+
+**Ditemukan:** Bug yang sama persis dengan item #39 (Dashboard Keuangan), tapi di fungsi export CSV "Export Omzet per Cabang" di halaman Laporan Resmi — query HPP-nya juga tidak difilter `entry_type='hpp'`, jadi kolom "HPP" dan "Laba Kotor" di file CSV yang diunduh akan salah dengan cara yang sama (hampir 2x lipat). Tabel di layar (`computeTotals`, baris 116-117) sudah benar sejak awal — cuma fungsi export ini yang kena.
+
+**Fix:** Tambah `.eq('entry_type', 'hpp')` di query export tersebut.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Query HPP di `handleExportOmzetPerCabang` difilter `entry_type='hpp'` |
+
+### 42. Fitur: Dark Mode
+
+**Permintaan Owner:** "saya ingin ada fitur dark mode, sistem ini, bisa?"
+
+**Cara kerja:** Tombol ganti tema (ikon matahari/bulan) di navbar, di sebelah info user & tombol Keluar. Pilihan disimpan di `localStorage`, dibaca lewat skrip kecil yang jalan sebelum React hydrate (di `app/layout.tsx`) supaya tidak ada kedip (flash) ke tema terang dulu saat halaman dimuat. Sengaja TIDAK mengikuti pengaturan gelap otomatis dari OS/browser — cuma aktif kalau tombolnya ditekan sendiri, sesuai niat awal yang sudah ada di catatan `globals.css` soal input/select harus konsisten dengan tema aktif, bukan ikut OS.
+
+**Pendekatan teknis:** App ini punya puluhan halaman yang semuanya hardcode warna terang (`bg-white`, `text-slate-800`, dst) tanpa varian `dark:` di masing-masing file, karena dari awal didesain selalu terang. Mengedit tiap halaman satu-satu tidak realistis, jadi dipakai pendekatan terpusat: kelas warna yang PALING SERING dipakai (hasil audit `grep` ke seluruh `app/` & `components/` — slate netral + 10 warna aksen) di-remap sekaligus di `globals.css` ketika class `dark` aktif di `<html>`, pakai tabel pembalikan skala warna (50↔950, 100↔900, 200↔800, 300↔700, 400↔600) dan variabel warna bawaan Tailwind v4 (`var(--color-x-y)`). Aturan ini ditulis di luar `@layer` supaya otomatis menang atas utility Tailwind tanpa perlu `!important`.
+
+**Keterbatasan yang perlu diketahui:** Ini bukan `dark:` per-elemen yang didesain halaman-per-halaman — kombinasi warna yang jarang dipakai atau di luar daftar hasil audit bisa saja masih kelihatan aneh di beberapa halaman. Belum sempat diverifikasi visual satu-satu di browser (server dev yang sedang jalan terpakai proses lain di port 3000); kalau ada bagian yang kontras/warnanya tidak pas di dark mode, laporkan halaman & elemennya supaya bisa ditambahkan aturan yang cocok di `globals.css`.
+
+| File | Perubahan |
+|---|---|
+| `app/globals.css` | `@custom-variant dark`, variabel `--background`/`--foreground` untuk `.dark`, ~130 aturan remap warna |
+| `app/layout.tsx` | Skrip inline baca `localStorage` sebelum hydrate, cegah flash |
+| `components/ThemeToggle.tsx` | Baru — tombol toggle matahari/bulan |
+| `components/DashboardShell.tsx` | Pasang `<ThemeToggle />` di navbar |
+
 ---
 
-*Terakhir diupdate: Sesi 3 (2026-09-07), lanjutan*
+*Terakhir diupdate: Sesi 3 (2026-09-10), lanjutan*
