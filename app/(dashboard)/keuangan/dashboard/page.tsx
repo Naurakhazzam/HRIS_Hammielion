@@ -65,7 +65,9 @@ export default function DashboardKeuanganPage() {
     const [groupsRes, cashInRes, hppRes, cashOutRes, kasbonRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
-      supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').gte('entry_date', startDate).lte('entry_date', endDate),
+      // entry_type='hpp' wajib — tabel ini juga menyimpan baris entry_type='omset' (item #22),
+      // tanpa filter ini "hpp" di sini kehitung dobel dengan omset dan Laba Kotor/Bersih jadi salah.
+      supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'hpp').gte('entry_date', startDate).lte('entry_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount, fin_cash_out_categories(affects_net_profit)').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       // Kasbon yang terpotong dari gaji (dilunasi) periode ini — bukan kas keluar baru
       // (kasbon-nya sudah tercatat kas keluar saat dicairkan), tapi baru DI SINI beban
