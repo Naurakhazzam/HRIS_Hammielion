@@ -1,9 +1,19 @@
 @import "tailwindcss";
 
+/* Dark mode lewat class `dark` di <html> (diatur oleh ThemeToggle + skrip di app/layout.tsx),
+   BUKAN otomatis ikut prefers-color-scheme OS — sesuai keputusan lama di file ini. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
   color-scheme: light;
+}
+
+.dark {
+  --background: var(--color-slate-900);
+  --foreground: var(--color-slate-100);
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -19,7 +29,157 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* Pastikan input/select selalu teks gelap, tidak terpengaruh dark mode OS */
+/* Pastikan input/select selalu ikut warna teks tema aktif (bukan hitam paksa) */
 input, select, textarea, button {
   color: inherit;
 }
+
+/* ============================================================================
+   RETROFIT DARK MODE — hampir semua halaman di app ini pakai class Tailwind
+   warna terang yang di-hardcode (mis. bg-white, text-slate-800) tanpa varian
+   dark: di tiap file, karena awalnya app ini didesain selalu terang. Daripada
+   edit ratusan halaman satu-satu, warna-warna yang PALING SERING dipakai
+   (hasil audit lewat grep ke seluruh app/ & components/) di-remap terpusat di
+   sini ketika class `dark` aktif — pakai aturan pembalikan skala warna
+   (50↔950, 100↔900, 200↔800, 300↔700, 400↔600, 500 tetap).
+   Aturan ini SENGAJA ditulis di luar @layer supaya otomatis menang atas
+   utility Tailwind (CSS: style tak berlapis selalu menang atas style
+   berlapis/@layer, terlepas dari urutan/spesifisitas) — tidak perlu !important.
+   Kalau ada halaman baru pakai kombinasi warna di luar daftar ini dan
+   kelihatan aneh di dark mode, tambahkan baris yang cocok di sini. */
+
+.dark .bg-white { background-color: var(--color-slate-900); }
+.dark .bg-slate-50 { background-color: var(--color-slate-800); }
+.dark .bg-slate-100 { background-color: var(--color-slate-700); }
+.dark .bg-slate-200 { background-color: var(--color-slate-600); }
+.dark .hover\:bg-slate-50:hover { background-color: var(--color-slate-800); }
+.dark .hover\:bg-slate-100:hover { background-color: var(--color-slate-700); }
+.dark .hover\:bg-slate-200:hover { background-color: var(--color-slate-600); }
+
+.dark .text-slate-900 { color: var(--color-slate-50); }
+.dark .text-slate-800 { color: var(--color-slate-100); }
+.dark .text-slate-700 { color: var(--color-slate-200); }
+.dark .text-slate-600 { color: var(--color-slate-300); }
+.dark .text-slate-500 { color: var(--color-slate-400); }
+.dark .text-slate-400 { color: var(--color-slate-500); }
+.dark .text-slate-300 { color: var(--color-slate-600); }
+.dark .hover\:text-slate-700:hover { color: var(--color-slate-200); }
+.dark .hover\:text-slate-800:hover { color: var(--color-slate-100); }
+.dark .hover\:text-slate-900:hover { color: var(--color-slate-50); }
+
+.dark .border-slate-100 { border-color: var(--color-slate-700); }
+.dark .border-slate-200 { border-color: var(--color-slate-700); }
+.dark .border-slate-300 { border-color: var(--color-slate-600); }
+.dark .border-slate-400 { border-color: var(--color-slate-500); }
+.dark .hover\:border-slate-300:hover { border-color: var(--color-slate-500); }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--color-slate-700); }
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--color-slate-700); }
+.dark .placeholder-slate-400::placeholder { color: var(--color-slate-500); }
+.dark input::placeholder,
+.dark select::placeholder,
+.dark textarea::placeholder { color: var(--color-slate-500); }
+
+/* Badge/pill berwarna (bg terang + teks gelap di light mode) → bg gelap + teks terang.
+   Sama polanya untuk tiap warna, jadi ditulis per-warna secara ringkas. */
+.dark .bg-red-50 { background-color: var(--color-red-950); }
+.dark .bg-red-100 { background-color: color-mix(in srgb, var(--color-red-900) 70%, transparent); }
+.dark .text-red-400 { color: var(--color-red-500); }
+.dark .text-red-500 { color: var(--color-red-400); }
+.dark .text-red-600 { color: var(--color-red-400); }
+.dark .text-red-700 { color: var(--color-red-300); }
+.dark .text-red-800 { color: var(--color-red-300); }
+.dark .border-red-100 { border-color: var(--color-red-800); }
+.dark .border-red-200 { border-color: var(--color-red-800); }
+.dark .border-red-300 { border-color: var(--color-red-700); }
+.dark .border-red-400 { border-color: var(--color-red-600); }
+.dark .hover\:bg-red-50:hover { background-color: var(--color-red-950); }
+.dark .hover\:bg-red-100:hover { background-color: color-mix(in srgb, var(--color-red-900) 70%, transparent); }
+
+.dark .bg-blue-50 { background-color: var(--color-blue-950); }
+.dark .bg-blue-100 { background-color: color-mix(in srgb, var(--color-blue-900) 70%, transparent); }
+.dark .text-blue-300 { color: var(--color-blue-300); }
+.dark .text-blue-400 { color: var(--color-blue-400); }
+.dark .text-blue-500 { color: var(--color-blue-400); }
+.dark .text-blue-600 { color: var(--color-blue-400); }
+.dark .text-blue-700 { color: var(--color-blue-300); }
+.dark .text-blue-800 { color: var(--color-blue-300); }
+.dark .border-blue-100 { border-color: var(--color-blue-800); }
+.dark .border-blue-200 { border-color: var(--color-blue-800); }
+.dark .border-blue-300 { border-color: var(--color-blue-700); }
+.dark .border-blue-400 { border-color: var(--color-blue-600); }
+.dark .hover\:bg-blue-50:hover { background-color: var(--color-blue-950); }
+.dark .focus\:ring-blue-500:focus { --tw-ring-color: var(--color-blue-400); }
+
+.dark .bg-green-50 { background-color: var(--color-green-950); }
+.dark .bg-green-100 { background-color: color-mix(in srgb, var(--color-green-900) 70%, transparent); }
+.dark .text-green-300 { color: var(--color-green-300); }
+.dark .text-green-500 { color: var(--color-green-400); }
+.dark .text-green-600 { color: var(--color-green-400); }
+.dark .text-green-700 { color: var(--color-green-300); }
+.dark .text-green-800 { color: var(--color-green-300); }
+.dark .border-green-100 { border-color: var(--color-green-800); }
+.dark .border-green-200 { border-color: var(--color-green-800); }
+.dark .border-green-300 { border-color: var(--color-green-700); }
+.dark .border-green-400 { border-color: var(--color-green-600); }
+.dark .border-green-500 { border-color: var(--color-green-500); }
+.dark .hover\:bg-green-50:hover { background-color: var(--color-green-950); }
+
+.dark .bg-yellow-50 { background-color: var(--color-yellow-950); }
+.dark .bg-yellow-100 { background-color: color-mix(in srgb, var(--color-yellow-900) 70%, transparent); }
+.dark .text-yellow-600 { color: var(--color-yellow-400); }
+.dark .text-yellow-700 { color: var(--color-yellow-300); }
+.dark .text-yellow-800 { color: var(--color-yellow-300); }
+.dark .border-yellow-100 { border-color: var(--color-yellow-800); }
+.dark .border-yellow-200 { border-color: var(--color-yellow-800); }
+.dark .border-yellow-300 { border-color: var(--color-yellow-700); }
+.dark .border-yellow-400 { border-color: var(--color-yellow-600); }
+
+.dark .bg-amber-50 { background-color: var(--color-amber-950); }
+.dark .bg-amber-100 { background-color: color-mix(in srgb, var(--color-amber-900) 70%, transparent); }
+.dark .text-amber-500 { color: var(--color-amber-400); }
+.dark .text-amber-600 { color: var(--color-amber-400); }
+.dark .text-amber-700 { color: var(--color-amber-300); }
+.dark .text-amber-800 { color: var(--color-amber-300); }
+.dark .border-amber-100 { border-color: var(--color-amber-800); }
+.dark .border-amber-200 { border-color: var(--color-amber-800); }
+.dark .border-amber-300 { border-color: var(--color-amber-700); }
+
+.dark .bg-purple-50 { background-color: var(--color-purple-950); }
+.dark .bg-purple-100 { background-color: color-mix(in srgb, var(--color-purple-900) 70%, transparent); }
+.dark .text-purple-600 { color: var(--color-purple-400); }
+.dark .text-purple-700 { color: var(--color-purple-300); }
+.dark .text-purple-800 { color: var(--color-purple-300); }
+.dark .border-purple-100 { border-color: var(--color-purple-800); }
+.dark .border-purple-200 { border-color: var(--color-purple-800); }
+
+.dark .bg-indigo-50 { background-color: var(--color-indigo-950); }
+.dark .bg-indigo-100 { background-color: color-mix(in srgb, var(--color-indigo-900) 70%, transparent); }
+.dark .text-indigo-500 { color: var(--color-indigo-400); }
+.dark .text-indigo-600 { color: var(--color-indigo-400); }
+.dark .text-indigo-800 { color: var(--color-indigo-300); }
+.dark .border-indigo-100 { border-color: var(--color-indigo-800); }
+.dark .border-indigo-200 { border-color: var(--color-indigo-800); }
+
+.dark .bg-orange-50 { background-color: var(--color-orange-950); }
+.dark .bg-orange-100 { background-color: color-mix(in srgb, var(--color-orange-900) 70%, transparent); }
+.dark .text-orange-500 { color: var(--color-orange-400); }
+.dark .text-orange-600 { color: var(--color-orange-400); }
+.dark .text-orange-700 { color: var(--color-orange-300); }
+.dark .text-orange-800 { color: var(--color-orange-300); }
+.dark .border-orange-100 { border-color: var(--color-orange-800); }
+.dark .border-orange-200 { border-color: var(--color-orange-800); }
+.dark .border-orange-300 { border-color: var(--color-orange-700); }
+
+.dark .bg-emerald-50 { background-color: var(--color-emerald-950); }
+.dark .bg-emerald-100 { background-color: color-mix(in srgb, var(--color-emerald-900) 70%, transparent); }
+.dark .text-emerald-500 { color: var(--color-emerald-400); }
+.dark .text-emerald-600 { color: var(--color-emerald-400); }
+.dark .text-emerald-700 { color: var(--color-emerald-300); }
+
+.dark .bg-rose-50 { background-color: var(--color-rose-950); }
+.dark .bg-rose-100 { background-color: color-mix(in srgb, var(--color-rose-900) 70%, transparent); }
+.dark .text-rose-700 { color: var(--color-rose-300); }
+.dark .border-rose-500 { border-color: var(--color-rose-600); }
+
+/* Modal overlay (bg-slate-900/50 dkk) sengaja dibiarkan — gelap transparan
+   sudah cocok dipakai di kedua tema, tidak perlu di-remap. */

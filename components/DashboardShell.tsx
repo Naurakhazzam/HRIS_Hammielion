@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import Sidebar from './sidebar'
+import ThemeToggle from './ThemeToggle'
 
 export default function DashboardShell({ children, userEmail }: { children: React.ReactNode; userEmail: string }) {
   // null = belum disentuh user, ikuti perilaku bawaan (tampil di layar >=768px, sembunyi di bawahnya).
@@ -69,6 +70,7 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
             <span className="text-xs text-slate-500 hidden sm:block">
               {userEmail}
             </span>
+            <ThemeToggle />
             <form action="/auth/logout" method="POST">
               <button
                 type="submit"
