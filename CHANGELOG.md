@@ -821,6 +821,20 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 |---|---|
 | `app/(dashboard)/keuangan/laporan/page.tsx` | `GroupTotals` tambah `belanjaSupplier`/`totalKasKeluar`; query baru `supplier_purchases`; 4 baris baru di tabel & Total Konsolidasi |
 
+### 49. Fix: Kelompokkan Baris Per Kelompok Laporan Menurut Sumber Data (Sistem vs Kas Real)
+
+**Ditemukan:** setelah item #48 nambah 4 baris baru, tabel "Per Kelompok Laporan" jadi 13 baris yang sumber datanya campur aduk tanpa pemisah jelas — Owner: "jujur saja, membaca ini sangat bingung, bisakah anda pisahkan berdasarkan, mana yang sistem (yang hanya sekedar angka) dengan yang beneran angka real, agar tau bedanya."
+
+**Fix:** Dikelompokkan jadi 4 bagian dengan judul pemisah (baris penuh berwarna, span semua kolom):
+- **📊 Data Sistem (Kasir/POS):** Omset, HPP, Laba Kotor, Laba Bersih — semuanya diberi label "(Sistem)" termasuk HPP yang sebelumnya cuma ditulis "HPP" polos padahal sumbernya sama-sama dari kasir.
+- **💰 Kas Real:** Kas Masuk, Biaya Operasional, Realisasi Kasbon, Dibayar ke Supplier, Kas Sesungguhnya (Real).
+- **📝 Nota & Utang Supplier:** Belanja (Nota), Sisa (Utang Bulan Ini) — transaksi nyata tapi belum tentu sudah jadi kas keluar.
+- **🔀 Laba Campuran:** "Laba Kotor" & "Laba Bersih (vs periode lalu)" yang asli (Kas Masuk dikurangi HPP Sistem) — TETAP ada (bawa badge vs-bulan-lalu yang sebelumnya diminta dipertahankan), tapi sekarang judul bagiannya jujur menjelaskan bahwa ini campuran dua sumber berbeda, bukan angka yang berdiri sendiri.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Tabel Per Kelompok Laporan dikelompokkan jadi 4 bagian berjudul, bukan 13 baris berurutan tanpa pemisah |
+
 ---
 
-*Terakhir diupdate: Sesi 4 (2026-09-12)*
+*Terakhir diupdate: Sesi 4 (2026-09-12), lanjutan*
