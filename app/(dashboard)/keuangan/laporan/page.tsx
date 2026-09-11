@@ -20,6 +20,8 @@ type GroupTotals = {
   labaBersih: number
   omsetSistem: number
   pembayaranSupplierReal: number
+  belanjaSupplier: number
+  totalKasKeluar: number
 }
 
 function shiftMonth(monthStr: string, delta: number): string {
@@ -76,7 +78,7 @@ export default function LaporanResmiPage() {
   }, [supabase])
 
   const computeTotals = useCallback(async (startDate: string, endDate: string, periodMonth: number, periodYear: number): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
-    const [groupsRes, cashInRes, hppRes, omsetSistemRes, cashOutRes, supplierRes, kasbonRes] = await Promise.all([
+    const [groupsRes, cashInRes, hppRes, omsetSistemRes, cashOutRes, supplierRes, kasbonRes, belanjaSupplierRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
       supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'hpp').gte('entry_date', startDate).lte('entry_date', endDate),
@@ -84,6 +86,9 @@ export default function LaporanResmiPage() {
       supabase.from('fin_cash_out').select('branch_id, amount, fin_cash_out_categories(affects_net_profit)').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount').eq('status', 'approved').eq('category', 'pembayaran_supplier').gte('transaction_date', startDate).lte('transaction_date', endDate),
       supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').eq('status', 'paid').eq('period_month', periodMonth).eq('period_year', periodYear).gt('kasbon_deduction', 0),
+      // Belanja ke Supplier (Nota) — dari nota pembelian bulan ini, BEDA dari pembayaran (supplierRes
+      // di atas), yang basisnya kapan uangnya benar-benar dibayar, bisa beda bulan dari nota-nya.
+      supabase.from('supplier_purchases').select('branch_id, total_amount').gte('purchase_date', startDate).lte('purchase_date', endDate),
     ])
     if (groupsRes.error) console.error('Detail error report_groups:', JSON.stringify(groupsRes.error, null, 2))
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
@@ -92,13 +97,14 @@ export default function LaporanResmiPage() {
     if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
     if (supplierRes.error) console.error('Detail error supplier:', JSON.stringify(supplierRes.error, null, 2))
     if (kasbonRes.error) console.error('Detail error kasbon:', JSON.stringify(kasbonRes.error, null, 2))
+    if (belanjaSupplierRes.error) console.error('Detail error belanja_supplier:', JSON.stringify(belanjaSupplierRes.error, null, 2))
 
     const branchToGroup = new Map<string, string>()
     for (const g of (groupsRes.data as ReportGroup[]) || []) branchToGroup.set(g.branch_id, g.report_group_label)
 
-    const totalsByGroup = new Map<string, { kasMasuk: number; hpp: number; biayaOperasional: number; kasbonRealisasi: number; omsetSistem: number; pembayaranSupplierReal: number }>()
+    const totalsByGroup = new Map<string, { kasMasuk: number; hpp: number; biayaOperasional: number; kasbonRealisasi: number; omsetSistem: number; pembayaranSupplierReal: number; belanjaSupplier: number; totalKasKeluar: number }>()
     function ensure(label: string) {
-      if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0 })
+      if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, belanjaSupplier: 0, totalKasKeluar: 0 })
       return totalsByGroup.get(label)!
     }
     for (const row of (cashInRes.data as { branch_id: string; amount: number }[]) || []) {
@@ -116,6 +122,9 @@ export default function LaporanResmiPage() {
     for (const row of (cashOutRes.data as unknown as { branch_id: string; amount: number; fin_cash_out_categories: { affects_net_profit: boolean } | null }[]) || []) {
       const label = branchToGroup.get(row.branch_id)
       if (!label) continue
+      // totalKasKeluar = SEMUA kategori (dasar hitung Kas Sesungguhnya di bawah — cuma uang yang
+      // benar-benar sudah keluar yang boleh mengurangi, utang belanja yang belum dibayar TIDAK).
+      ensure(label).totalKasKeluar += Number(row.amount)
       if (row.fin_cash_out_categories?.affects_net_profit !== false) ensure(label).biayaOperasional += Number(row.amount)
     }
     for (const row of (supplierRes.data as { branch_id: string; amount: number }[]) || []) {
@@ -128,10 +137,15 @@ export default function LaporanResmiPage() {
       if (!label) continue
       ensure(label).kasbonRealisasi += Number(row.kasbon_deduction)
     }
+    for (const row of (belanjaSupplierRes.data as { branch_id: string; total_amount: number }[]) || []) {
+      const label = branchToGroup.get(row.branch_id)
+      if (label) ensure(label).belanjaSupplier += Number(row.total_amount)
+    }
 
     let groupList: GroupTotals[] = Array.from(totalsByGroup.entries()).map(([label, t]) => ({
       label, kasMasuk: t.kasMasuk, hpp: t.hpp, biayaOperasional: t.biayaOperasional, kasbonRealisasi: t.kasbonRealisasi,
       omsetSistem: t.omsetSistem, pembayaranSupplierReal: t.pembayaranSupplierReal,
+      belanjaSupplier: t.belanjaSupplier, totalKasKeluar: t.totalKasKeluar,
       labaKotor: t.kasMasuk - t.hpp, labaBersih: t.kasMasuk - t.hpp - t.biayaOperasional - t.kasbonRealisasi,
     }))
 
@@ -146,8 +160,9 @@ export default function LaporanResmiPage() {
       kasMasuk: acc.kasMasuk + g.kasMasuk, hpp: acc.hpp + g.hpp, biayaOperasional: acc.biayaOperasional + g.biayaOperasional,
       kasbonRealisasi: acc.kasbonRealisasi + g.kasbonRealisasi,
       omsetSistem: acc.omsetSistem + g.omsetSistem, pembayaranSupplierReal: acc.pembayaranSupplierReal + g.pembayaranSupplierReal,
+      belanjaSupplier: acc.belanjaSupplier + g.belanjaSupplier, totalKasKeluar: acc.totalKasKeluar + g.totalKasKeluar,
       labaKotor: acc.labaKotor + g.labaKotor, labaBersih: acc.labaBersih + g.labaBersih,
-    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 })
+    }), { label: 'Total Konsolidasi', kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, belanjaSupplier: 0, totalKasKeluar: 0, labaKotor: 0, labaBersih: 0 })
 
     return { groups: groupList, consolidated: total }
   }, [supabase, isAdmin, myBranchId])
@@ -336,7 +351,7 @@ export default function LaporanResmiPage() {
           {isAdmin && consolidated && prevConsolidated && (
             <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200 print:break-inside-avoid">
               <h2 className="text-lg font-bold text-slate-800 mb-3">Total Konsolidasi (Seluruh Bisnis)</h2>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Kas Masuk</p>
                   <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.kasMasuk)}</p>
@@ -365,6 +380,13 @@ export default function LaporanResmiPage() {
                   </p>
                   <p className="text-lg font-semibold text-amber-700 whitespace-nowrap">{formatRupiah(consolidated.kasbonRealisasi)}</p>
                   <VarianceBadge cur={consolidated.kasbonRealisasi} prev={prevConsolidated.kasbonRealisasi} />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 flex items-start min-h-[2rem]">Kas Sesungguhnya (Real)
+                    <InfoTooltip text="Kas Masuk dikurangi SEMUA kas keluar yang benar-benar sudah dibayar bulan ini (termasuk pembayaran ke supplier). Utang belanja yang belum dibayar TIDAK ikut mengurangi — uangnya belum benar-benar keluar." />
+                  </p>
+                  <p className={`text-lg font-bold whitespace-nowrap ${(consolidated.kasMasuk - consolidated.totalKasKeluar) >= 0 ? 'text-blue-700' : 'text-red-700'}`}>{formatRupiah(consolidated.kasMasuk - consolidated.totalKasKeluar)}</p>
+                  <VarianceBadge cur={consolidated.kasMasuk - consolidated.totalKasKeluar} prev={prevConsolidated.kasMasuk - prevConsolidated.totalKasKeluar} />
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Laba Bersih</p>
@@ -559,9 +581,51 @@ export default function LaporanResmiPage() {
                         ))}
                       </tr>
                       <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">
+                          <span className="inline-flex items-center">Belanja ke Supplier (Nota)
+                            <InfoTooltip text="Total nota pembelian ke supplier bulan ini — beda dari yang sudah dibayar, karena nota bisa belum lunas (utang)." />
+                          </span>
+                        </td>
+                        {groups.map(g => (
+                          <td key={g.label} className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.belanjaSupplier)}</td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">Dibayar ke Supplier</td>
+                        {groups.map(g => (
+                          <td key={g.label} className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.pembayaranSupplierReal)}</td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">
+                          <span className="inline-flex items-center">Sisa (Utang Bulan Ini)
+                            <InfoTooltip text="Belanja (Nota) dikurangi Dibayar, dari transaksi bulan ini saja — bukan sisa utang total/akumulasi (itu ada di Detail Laporan per Cabang). Bisa minus kalau bulan ini bayar lebih banyak dari nota baru (melunasi utang lama)." />
+                          </span>
+                        </td>
+                        {groups.map(g => {
+                          const sisaBulanIni = g.belanjaSupplier - g.pembayaranSupplierReal
+                          return (
+                            <td key={g.label} className={`px-4 py-3 text-sm text-right font-medium whitespace-nowrap ${sisaBulanIni > 0 ? 'text-red-700' : 'text-slate-500'}`}>{formatRupiah(sisaBulanIni)}</td>
+                          )
+                        })}
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition bg-blue-50/40">
+                        <td className="px-4 py-3 text-sm font-bold text-slate-800 whitespace-nowrap sticky left-0 bg-blue-50">
+                          <span className="inline-flex items-center">Kas Sesungguhnya (Real)
+                            <InfoTooltip text="Uang Diterima (Kas Masuk) dikurangi SEMUA kas keluar yang benar-benar sudah dibayar bulan ini (termasuk Dibayar ke Supplier di atas). Utang yang belum dibayar TIDAK ikut mengurangi — uangnya belum benar-benar keluar dari kas." />
+                          </span>
+                        </td>
+                        {groups.map(g => {
+                          const kasSesungguhnya = g.kasMasuk - g.totalKasKeluar
+                          return (
+                            <td key={g.label} className={`px-4 py-3 text-sm text-right font-bold whitespace-nowrap ${kasSesungguhnya >= 0 ? 'text-blue-700' : 'text-red-700'}`}>{formatRupiah(kasSesungguhnya)}</td>
+                          )
+                        })}
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition">
                         <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">Laba Bersih (vs periode lalu)</td>
                         {groups.map(g => {
-                          const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 }
+                          const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, belanjaSupplier: 0, totalKasKeluar: 0, labaKotor: 0, labaBersih: 0 }
                           return (
                             <td key={g.label} className="px-4 py-3 text-right whitespace-nowrap">
                               <div className={`text-sm font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</div>
