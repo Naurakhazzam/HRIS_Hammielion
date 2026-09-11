@@ -94,6 +94,8 @@ export default function LaporanDetailPage() {
   const [prevMonthCashOutRows, setPrevMonthCashOutRows] = useState<{ category: string; amount: number; status: string }[]>([])
   // Sama, buat pembanding Rincian Pemasukan (Kas Masuk).
   const [prevMonthCashInRows, setPrevMonthCashInRows] = useState<{ amount: number; expense_amount: number; cash_adjustment: number; status: string }[]>([])
+  // Bulan lalu, buat Ringkasan Eksekutif (Laba Bersih Sistem vs bulan lalu).
+  const [prevMonthHppRows, setPrevMonthHppRows] = useState<{ hpp_amount: number; entry_type: 'hpp' | 'omset' }[]>([])
   const [hppRows, setHppRows] = useState<HppRow[]>([])
   const [cashierLossRows, setCashierLossRows] = useState<CashierLossRow[]>([])
   const [totalKehilanganBarang, setTotalKehilanganBarang] = useState(0)
@@ -171,7 +173,7 @@ export default function LaporanDetailPage() {
     // Kehilangan Barang: total_loss_amount (loss_monthly_inputs, per cabang per bulan — angka resmi yang
     // diinput di halaman Kehilangan Barang & Kerugian Kasir) dikurangi bagian yang dipotong dari gaji
     // karyawan (cashier_loss_entries dengan employee_id terisi) = sisanya itu yang DITANGGUNG KANTOR.
-    const [cashInRes, cashOutRes, hppRes, cashierLossRes, lossMonthlyRes, prevCashOutRes, prevCashInRes] = await Promise.all([
+    const [cashInRes, cashOutRes, hppRes, cashierLossRes, lossMonthlyRes, prevCashOutRes, prevCashInRes, prevHppRes] = await Promise.all([
       supabase.from('fin_cash_in')
         .select('id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, branch_id, branches(name)')
         .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
@@ -196,11 +198,16 @@ export default function LaporanDetailPage() {
       supabase.from('fin_cash_in')
         .select('amount, expense_amount, cash_adjustment, status')
         .in('branch_id', branchIds).gte('transaction_date', prevStartDate).lte('transaction_date', prevEndDate),
+      // Bulan lalu juga — dipakai Ringkasan Eksekutif untuk bandingkan Laba Bersih (Sistem) vs bulan lalu.
+      supabase.from('fin_hpp_entries')
+        .select('hpp_amount, entry_type').eq('status', 'approved')
+        .in('branch_id', branchIds).gte('entry_date', prevStartDate).lte('entry_date', prevEndDate),
     ])
 
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
     if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
     if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
+    if (prevHppRes.error) console.error('Detail error prev hpp:', JSON.stringify(prevHppRes.error, null, 2))
     if (lossMonthlyRes.error) console.error('Detail error loss_monthly:', JSON.stringify(lossMonthlyRes.error, null, 2))
     if (cashierLossRes.error) console.error('Detail error cashier_loss:', JSON.stringify(cashierLossRes.error, null, 2))
     if (prevCashOutRes.error) console.error('Detail error prev cash_out:', JSON.stringify(prevCashOutRes.error, null, 2))
@@ -212,6 +219,7 @@ export default function LaporanDetailPage() {
     setCashierLossRows((cashierLossRes.data as unknown as CashierLossRow[]) || [])
     setPrevMonthCashOutRows(prevCashOutRes.data || [])
     setPrevMonthCashInRows(prevCashInRes.data || [])
+    setPrevMonthHppRows((prevHppRes.data as { hpp_amount: number; entry_type: 'hpp' | 'omset' }[]) || [])
     const lossMonthlyRows = (lossMonthlyRes.data as LossMonthlyInputRow[]) || []
     setTotalKehilanganBarang(lossMonthlyRows.reduce((s, r) => s + Number(r.total_loss_amount), 0))
     setHasLossMonthlyInput(lossMonthlyRows.length > 0)
@@ -474,6 +482,16 @@ export default function LaporanDetailPage() {
   const prevTotalUangDiterima = prevMonthCashInRows
     .filter(r => r.status === 'approved')
     .reduce((s, r) => s + Number(r.amount) - Number(r.expense_amount || 0) + Number(r.cash_adjustment || 0), 0)
+
+  // Bulan lalu (Sistem) & Perkiraan Kas — dipakai Ringkasan Eksekutif di atas laporan.
+  const prevOmsetSistem = prevMonthHppRows.filter(r => r.entry_type === 'omset').reduce((s, r) => s + Number(r.hpp_amount), 0)
+  const prevHppSistem = prevMonthHppRows.filter(r => r.entry_type === 'hpp').reduce((s, r) => s + Number(r.hpp_amount), 0)
+  const prevHasSistemData = prevOmsetSistem > 0 || prevHppSistem > 0
+  const prevBiayaOperasional = prevMonthCashOutRows.filter(r => r.status === 'approved' && catMap.get(r.category)?.affects_net_profit !== false).reduce((s, r) => s + Number(r.amount), 0)
+  const prevLabaBersihSistem = (prevOmsetSistem - prevHppSistem) - prevBiayaOperasional
+  const prevTotalKasKeluarAll = prevMonthCashOutRows.filter(r => r.status === 'approved').reduce((s, r) => s + Number(r.amount), 0)
+  const prevPerkiraanKasSeharusnya = prevTotalUangDiterima - prevTotalKasKeluarAll
+
   const kehilanganKaryawanRows = cashierLossRows.filter(r => r.employee_id)
   const totalKehilanganKaryawan = kehilanganKaryawanRows.reduce((s, r) => s + Number(r.amount), 0)
   const totalKehilanganKantor = totalKehilanganBarang - totalKehilanganKaryawan
@@ -501,6 +519,28 @@ export default function LaporanDetailPage() {
     .sort((a, b) => b.total - a.total)
   const totalRitaseBulanIni = deliveryTrips.length
 
+  // Ringkasan Eksekutif — satu kalimat di paling atas laporan supaya Owner langsung dapat inti
+  // cerita saat buka/print, tanpa harus baca semua angka dulu. Prioritas: Laba Bersih (Sistem,
+  // paling bisa dipercaya) kalau ada datanya bulan ini & bulan lalu; kalau salah satu bulan
+  // belum punya data Sistem, turun ke Perkiraan Kas yang Harus Ada (basis Kas Masuk/Keluar).
+  function ringkasanEksekutif(): string {
+    if (hasSistemData && prevHasSistemData) {
+      const diff = labaBersihSistem - prevLabaBersihSistem
+      if (prevLabaBersihSistem === 0) return `📌 Laba Bersih (Sistem) bulan ini ${formatRupiah(labaBersihSistem)}.`
+      const pct = (diff / Math.abs(prevLabaBersihSistem)) * 100
+      const arah = diff > 0 ? 'naik' : diff < 0 ? 'turun' : 'sama persis dengan'
+      return `📌 Laba Bersih (Sistem) bulan ini ${formatRupiah(labaBersihSistem)}, ${arah}${diff !== 0 ? ` ${Math.abs(pct).toFixed(0)}%` : ''} dari bulan lalu (${formatRupiah(prevLabaBersihSistem)}).`
+    }
+    if (hasSistemData && !prevHasSistemData) {
+      return `📌 Laba Bersih (Sistem) bulan ini ${formatRupiah(labaBersihSistem)} — belum ada data Sistem (HPP & Omset) bulan lalu untuk dibandingkan.`
+    }
+    const diff = perkiraanKasSeharusnya - prevPerkiraanKasSeharusnya
+    if (prevPerkiraanKasSeharusnya === 0 && diff === 0) return `📌 Perkiraan Kas yang Harus Ada bulan ini ${formatRupiah(perkiraanKasSeharusnya)}.`
+    const arah = diff > 0 ? 'naik' : diff < 0 ? 'turun' : 'sama persis dengan'
+    const pct = prevPerkiraanKasSeharusnya !== 0 ? (Math.abs(diff / prevPerkiraanKasSeharusnya) * 100).toFixed(0) + '%' : null
+    return `📌 Perkiraan Kas yang Harus Ada bulan ini ${formatRupiah(perkiraanKasSeharusnya)}${pct ? `, ${arah} ${pct} dari bulan lalu` : ''} (data Sistem HPP & Omset belum diisi untuk grup ini).`
+  }
+
   if (roleLoading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
 
   if (!isAdmin) {
@@ -519,6 +559,9 @@ export default function LaporanDetailPage() {
           <h1 className="text-2xl font-bold text-slate-800 mt-2 mb-1">Detail Laporan per Cabang</h1>
           <p className="text-sm text-slate-500 print:hidden">Rincian lengkap pemasukan &amp; pengeluaran per kelompok laporan, diurutkan dari tanggal 1 — klik kategori pengeluaran untuk lihat daftar transaksinya.</p>
           <p className="hidden print:block text-xs text-slate-500 mt-1">Hammielion HRIS — Dicetak {new Date().toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}</p>
+          {selectedGroup && !loading && (
+            <p className="text-sm font-medium text-slate-700 mt-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 inline-block">{ringkasanEksekutif()}</p>
+          )}
         </div>
         {isAdmin && selectedGroup && !loading && (
           <button onClick={handlePrint}
