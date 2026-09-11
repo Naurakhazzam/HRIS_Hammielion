@@ -835,6 +835,16 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 |---|---|
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Tabel Per Kelompok Laporan dikelompokkan jadi 4 bagian berjudul, bukan 13 baris berurutan tanpa pemisah |
 
+### 50. Fix: Kelompokkan Kartu "Omset & HPP Sistem Kasir vs Kas Real" Juga
+
+**Ditemukan:** keluhan yang sama dengan item #49, tapi di kartu ungu "Omset & HPP Sistem Kasir vs Kas Real" (Total Konsolidasi) — 6 angka (Omset, HPP, Laba Kotor, Laba Bersih Sistem, lalu Uang Diterima & Pembayaran Supplier Real) ada di satu grid tanpa pemisah.
+
+**Fix:** Dipecah jadi 2 grid berlabel — "📊 Data Sistem (Kasir/POS)" (Omset, HPP, Laba Kotor, Laba Bersih) dan "💰 Kas Real" (Uang Diterima, Pembayaran Supplier, Sisa Kas Seharusnya Ada, Biaya Operasional) — dengan "Cek Kecukupan Kas" (Selisih Surplus/Defisit) tetap jadi kesimpulan di bawahnya.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Kartu Omset & HPP Sistem dipecah jadi grid Data Sistem & Kas Real terpisah |
+
 ---
 
 *Terakhir diupdate: Sesi 4 (2026-09-12), lanjutan*
