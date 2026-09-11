@@ -755,6 +755,20 @@ Menyelesaikan aktivasi alur formal kasbon (lanjutan item #29-30).
 |---|---|
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Hapus tab Mingguan & helper minggu; `computeTotals`/`fetchData` selalu bulanan |
 
+### 44. Fitur: Cetak/Simpan PDF untuk Detail Laporan per Cabang
+
+**Permintaan Owner:** "untuk laporan percabang ini, apakah bisa di buatkan fitur print dokumentnya? dalam bentuk PDF? untuk di print, demi keperluan arsip."
+
+**Cara kerja:** Tombol "🖨️ Cetak / Simpan PDF" di halaman Detail Laporan per Cabang. Saat diklik: semua bagian yang biasanya collapse (Rincian per Supplier, Rincian Pengeluaran per Kategori, Rincian Penggajian, Kehilangan, Pemasukan) otomatis dibuka dulu supaya dokumen arsipnya lengkap — bukan cuma yang kebetulan sedang terbuka di layar — lalu memanggil dialog print bawaan browser (semua browser modern punya opsi "Simpan sebagai PDF" di situ, jadi tidak perlu library PDF tambahan). Setelah selesai/dibatalkan, tampilan dikembalikan ke kondisi semula.
+
+Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — kelas `dark` dilepas sementara sebelum print, dikembalikan sesudahnya), navbar & sidebar disembunyikan, dan tabel yang tadinya dibatasi scroll (mis. Rincian Penggajian) dibuat mengalir penuh supaya tidak terpotong di kertas.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Tombol + `handlePrint` (expand semua, print, restore); `print:hidden` di filter/nav; hapus batas scroll saat print |
+| `components/DashboardShell.tsx` | Navbar & sidebar `print:hidden`; layout jadi full-height saat print |
+| `app/globals.css` | Reset ringan (background putih, margin halaman) untuk `@media print` |
+
 ---
 
-*Terakhir diupdate: Sesi 4 (2026-09-11)*
+*Terakhir diupdate: Sesi 4 (2026-09-11), lanjutan*
