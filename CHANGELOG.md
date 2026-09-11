@@ -793,6 +793,18 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 |---|---|
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Tabel matriks kategori x cabang baru; fetch `fin_cash_out_categories` & pivot per kategori per kelompok |
 
+### 47. Fitur: Print/PDF di Laporan Resmi + Balik Orientasi Tabel Per Kelompok Laporan
+
+**Permintaan Owner:** setelah lihat hasil item #46, dua hal — "harus nya laporan resmi pun ada fitur print nya" dan tabel "Per Kelompok Laporan" "seharus nya di balik orintasi nya, si cabang nya jadi kolom dan yang lain nya menjadi baris."
+
+**Fix:**
+- Tombol "🖨️ Cetak / Simpan PDF" ditambahkan ke Laporan Resmi, pola sama persis dengan Detail Laporan per Cabang (item #44): `window.print()`, tema dipaksa terang sementara, navbar/sidebar disembunyikan (sudah otomatis lewat `print:hidden` di `DashboardShell`).
+- Tabel "Per Kelompok Laporan" dibalik: cabang jadi kolom, baris jadi metrik (Omset Sistem, Kas Masuk, HPP, Laba Kotor, Laba Kotor Sistem, Biaya Operasional, Realisasi Kasbon, Laba Bersih + panah vs bulan lalu, Laba Bersih Sistem) — supaya orientasinya sama dengan tabel "Pengeluaran per Kategori per Cabang" (item #46) di bawahnya, keduanya kebaca sama saat dicetak berdampingan.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Tombol + `handlePrint`; tabel Per Kelompok Laporan dibalik jadi metrik x cabang; `print:break-inside-avoid` di kartu ringkasan |
+
 ---
 
 *Terakhir diupdate: Sesi 4 (2026-09-11), lanjutan*
