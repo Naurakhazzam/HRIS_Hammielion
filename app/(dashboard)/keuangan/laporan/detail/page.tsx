@@ -7,6 +7,10 @@ import Link from 'next/link'
 import { remainingFor, paidApprovedFor, type SupplierPaymentRow } from '@/lib/supplierPurchases'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
+// Cuma Gudang yang punya supir/kendaraan pengiriman — dipakai untuk memutuskan kapan bagian
+// "Ritase & Kendaraan" ditampilkan (sama pola hardcoded-branch-id seperti LOGISTIK_BRANCH_ID
+// di app/(dashboard)/keuangan/logistik/page.tsx).
+const GUDANG_BRANCH_ID = '9b42e8b0-db18-492d-8001-fc5e9f103325'
 
 type CashInRow = {
   id: string
@@ -54,6 +58,15 @@ type SupplierPurchaseRow = {
 }
 type SupplierDebt = { supplierId: string; name: string; totalBeli: number; totalDibayar: number; sisa: number; purchases: (SupplierPurchaseRow & { dibayar: number; sisaPurchase: number })[] }
 type AssetBaselineRow = { branch_id: string; inventory_value: number; baseline_date: string }
+type DeliveryTripRow = {
+  id: string
+  trip_date: string
+  vehicle_id: string | null
+  vehicles: { name: string; plate_number: string | null } | null
+  delivery_routes: { name: string } | null
+  driver: { full_name: string } | null
+  helper: { full_name: string } | null
+}
 
 // Kategori Kas Keluar yang berasal dari penggajian — dikelompokkan jadi satu bagian tersendiri
 // ("Rincian Penggajian"), bukan tercampur di daftar kategori umum.
@@ -99,6 +112,13 @@ export default function LaporanDetailPage() {
   const [totalAsetBarang, setTotalAsetBarang] = useState(0)
   const [asetBaselineDate, setAsetBaselineDate] = useState<string | null>(null)
   const [loadingKondisi, setLoadingKondisi] = useState(true)
+
+  // Ritase & Kendaraan — cuma terisi/tampil kalau grup terpilih mencakup Gudang.
+  const [deliveryTrips, setDeliveryTrips] = useState<DeliveryTripRow[]>([])
+  const [loadingRitase, setLoadingRitase] = useState(true)
+  const [ritaseApplicable, setRitaseApplicable] = useState(false)
+  const [showRitase, setShowRitase] = useState(false)
+  const [expandedRitaseRoutes, setExpandedRitaseRoutes] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     async function init() {
@@ -266,6 +286,43 @@ export default function LaporanDetailPage() {
 
   useEffect(() => { if (!roleLoading && isAdmin) fetchKondisi() }, [roleLoading, isAdmin, fetchKondisi])
 
+  // Ritase & Kendaraan — cuma relevan kalau grup yang dipilih mencakup Gudang (satu-satunya
+  // yang punya supir/kendaraan pengiriman). Datanya dari delivery_trips, tabel yang sama yang
+  // sudah dipakai untuk hitung gaji driver di Penggajian > Driver, jadi tidak ada input baru.
+  const fetchRitase = useCallback(async () => {
+    if (!selectedGroup) { setDeliveryTrips([]); setRitaseApplicable(false); setLoadingRitase(false); return }
+    setLoadingRitase(true)
+    const branchIds = Array.from(branchToGroup.entries()).filter(([, label]) => label === selectedGroup).map(([id]) => id)
+    if (!branchIds.includes(GUDANG_BRANCH_ID)) {
+      setDeliveryTrips([]); setRitaseApplicable(false); setLoadingRitase(false)
+      return
+    }
+    setRitaseApplicable(true)
+
+    const { data: driverEmployees, error: empErr } = await supabase.from('employees').select('id').in('branch_id', branchIds)
+    if (empErr) console.error('Detail error ritase employees:', JSON.stringify(empErr, null, 2))
+    const driverIds = (driverEmployees || []).map(e => e.id)
+    if (driverIds.length === 0) { setDeliveryTrips([]); setLoadingRitase(false); return }
+
+    const [year, m] = month.split('-').map(Number)
+    const startDate = localDateStr(new Date(year, m - 1, 1))
+    const endDate = localDateStr(new Date(year, m, 0))
+
+    const { data: tripsRes, error: tripsErr } = await supabase
+      .from('delivery_trips')
+      .select('id, trip_date, vehicle_id, vehicles(name, plate_number), delivery_routes(name), driver:employees!delivery_trips_driver_id_fkey(full_name), helper:employees!delivery_trips_helper_id_fkey(full_name)')
+      .in('driver_id', driverIds)
+      .gte('trip_date', startDate).lte('trip_date', endDate)
+      .order('trip_date', { ascending: true })
+    if (tripsErr) console.error('Detail error delivery_trips:', JSON.stringify(tripsErr, null, 2))
+
+    setDeliveryTrips((tripsRes as unknown as DeliveryTripRow[]) || [])
+    setExpandedRitaseRoutes(new Set())
+    setLoadingRitase(false)
+  }, [supabase, selectedGroup, month, branchToGroup])
+
+  useEffect(() => { if (!roleLoading && isAdmin) fetchRitase() }, [roleLoading, isAdmin, fetchRitase])
+
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
@@ -366,6 +423,14 @@ export default function LaporanDetailPage() {
     })
   }
 
+  function toggleRitaseRoute(key: string) {
+    setExpandedRitaseRoutes(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+
   // Ringkasan
   const cashInApproved = cashInRows.filter(r => r.status === 'approved')
   const totalOmzetDilaporkan = cashInApproved.reduce((s, r) => s + Number(r.amount), 0)
@@ -414,6 +479,27 @@ export default function LaporanDetailPage() {
   const totalKehilanganKantor = totalKehilanganBarang - totalKehilanganKaryawan
 
   const monthLabel = new Date(month + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+
+  // Ritase & Kendaraan — kelompokkan per kendaraan, lalu per tujuan.
+  const ritaseByVehicle = new Map<string, { vehicleName: string; plateNumber: string | null; total: number; routes: Map<string, DeliveryTripRow[]> }>()
+  for (const t of deliveryTrips) {
+    const vid = t.vehicle_id || 'unknown'
+    if (!ritaseByVehicle.has(vid)) {
+      ritaseByVehicle.set(vid, { vehicleName: t.vehicles?.name || '(Kendaraan tidak diketahui)', plateNumber: t.vehicles?.plate_number || null, total: 0, routes: new Map() })
+    }
+    const veh = ritaseByVehicle.get(vid)!
+    veh.total += 1
+    const routeName = t.delivery_routes?.name || '(Tanpa tujuan)'
+    if (!veh.routes.has(routeName)) veh.routes.set(routeName, [])
+    veh.routes.get(routeName)!.push(t)
+  }
+  const ritaseVehicleList = Array.from(ritaseByVehicle.entries())
+    .map(([vehicleId, v]) => ({
+      vehicleId, vehicleName: v.vehicleName, plateNumber: v.plateNumber, total: v.total,
+      routes: Array.from(v.routes.entries()).map(([routeName, trips]) => ({ routeName, trips })).sort((a, b) => b.trips.length - a.trips.length),
+    }))
+    .sort((a, b) => b.total - a.total)
+  const totalRitaseBulanIni = deliveryTrips.length
 
   if (roleLoading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
 
@@ -595,6 +681,81 @@ export default function LaporanDetailPage() {
               </div>
             )}
           </div>
+
+          {ritaseApplicable && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6 print:break-inside-avoid">
+              <button onClick={() => setShowRitase(v => !v)}
+                className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition text-left border-b border-slate-200 bg-slate-50">
+                <span className="flex items-center gap-2 text-sm font-semibold text-slate-600 uppercase">
+                  <span className={`text-xs transition-transform ${showRitase ? 'rotate-90' : ''}`}>▶</span>
+                  🚚 Ritase &amp; Kendaraan
+                  <span className="text-xs text-slate-400 normal-case">({ritaseVehicleList.length} kendaraan)</span>
+                </span>
+                <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">{totalRitaseBulanIni} ritase — {monthLabel}</span>
+              </button>
+              {showRitase && (
+                <div className="p-4 space-y-4">
+                  {loadingRitase ? (
+                    <div className="text-sm text-slate-400 py-2 text-center">Memuat...</div>
+                  ) : ritaseVehicleList.length === 0 ? (
+                    <div className="text-sm text-slate-500 text-center py-4">Belum ada ritase tercatat untuk periode ini. Data diinput lewat halaman <Link href="/penggajian/driver" className="text-blue-600 hover:underline">Penggajian &gt; Driver</Link>.</div>
+                  ) : (
+                    ritaseVehicleList.map(v => (
+                      <div key={v.vehicleId} className="border border-slate-200 rounded-lg overflow-hidden">
+                        <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                          <span className="text-sm font-medium text-slate-800">
+                            {v.vehicleName}
+                            {v.plateNumber && <span className="text-xs text-slate-400 ml-1.5">({v.plateNumber})</span>}
+                          </span>
+                          <span className="text-sm font-semibold text-slate-700 whitespace-nowrap">{v.total} ritase</span>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                          {v.routes.map(r => {
+                            const key = `${v.vehicleId}::${r.routeName}`
+                            return (
+                              <div key={key}>
+                                <button onClick={() => toggleRitaseRoute(key)}
+                                  className="w-full px-3 py-2 flex items-center justify-between hover:bg-slate-50 transition text-left">
+                                  <span className="flex items-center gap-2 text-sm text-slate-700">
+                                    <span className={`text-xs transition-transform ${expandedRitaseRoutes.has(key) ? 'rotate-90' : ''}`}>▶</span>
+                                    {r.routeName}
+                                  </span>
+                                  <span className="text-sm font-medium text-slate-600 whitespace-nowrap">{r.trips.length}x</span>
+                                </button>
+                                {expandedRitaseRoutes.has(key) && (
+                                  <div className="bg-slate-50 border-t border-slate-100">
+                                    <table className="w-full text-left">
+                                      <thead>
+                                        <tr className="text-xs text-slate-500 uppercase">
+                                          <th className="px-4 pl-9 py-2">Tanggal</th>
+                                          <th className="px-4 py-2">Driver</th>
+                                          <th className="px-4 py-2">Helper</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-200">
+                                        {r.trips.map(t => (
+                                          <tr key={t.id} className="text-sm">
+                                            <td className="px-4 pl-9 py-2 text-slate-600 whitespace-nowrap">{new Date(t.trip_date).toLocaleDateString('id-ID')}</td>
+                                            <td className="px-4 py-2 text-slate-700">{t.driver?.full_name || '—'}</td>
+                                            <td className="px-4 py-2 text-slate-500">{t.helper?.full_name || '—'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  <p className="text-[11px] text-slate-400">Belum ada pencatatan jarak (KM) atau biaya per kendaraan di sistem — bagian ini cuma menghitung jumlah &amp; tujuan ritase.</p>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
             <div className="p-4 border-b border-slate-200 bg-slate-50">
