@@ -405,8 +405,12 @@ export default function LaporanResmiPage() {
             return (
             <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-purple-200 print:break-inside-avoid">
               <h2 className="text-lg font-bold text-slate-800 mb-1">Omset &amp; HPP Sistem Kasir vs Kas Real</h2>
-              <p className="text-xs text-slate-500 mb-3">Dari input di <Link href="/keuangan/hpp" className="text-blue-600 hover:underline">HPP &amp; Omset (Sistem)</Link>. Laba Kotor/Bersih (Sistem) lebih dipercaya daripada di panel atas (yang berbasis Kas Masuk), karena langsung dari sistem kasir — tidak terpengaruh piutang/uang yang belum cair.</p>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <p className="text-xs text-slate-500 mb-4">Dari input di <Link href="/keuangan/hpp" className="text-blue-600 hover:underline">HPP &amp; Omset (Sistem)</Link>. Laba Kotor/Bersih (Sistem) lebih dipercaya daripada di panel atas (yang berbasis Kas Masuk), karena langsung dari sistem kasir — tidak terpengaruh piutang/uang yang belum cair.</p>
+
+              <div className="px-3 py-1.5 text-[11px] font-bold text-purple-700 uppercase bg-purple-50 border border-purple-100 rounded-md mb-3">
+                📊 Data Sistem (Kasir/POS)
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Omset (Sistem)</p>
                   <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.omsetSistem)}</p>
@@ -421,17 +425,23 @@ export default function LaporanResmiPage() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 flex items-start min-h-[2rem]">Laba Bersih (Sistem)
-                    <InfoTooltip text="Laba Kotor (Sistem) dikurangi Biaya Operasional (Real) & Realisasi Kasbon — angka bottom line yang paling bisa dipercaya bulan ini." />
+                    <InfoTooltip text="Laba Kotor (Sistem) dikurangi Biaya Operasional (Real) & Realisasi Kasbon (dua-duanya dari bagian Kas Real di bawah, karena Sistem cuma mencatat Omset & HPP) — angka bottom line yang paling bisa dipercaya, tapi masih angka Sistem, bukan kas di tangan." />
                   </p>
                   <p className={`text-lg font-bold whitespace-nowrap ${labaBersihSistem >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaBersihSistem)}</p>
                 </div>
+              </div>
+
+              <div className="px-3 py-1.5 text-[11px] font-bold text-blue-700 uppercase bg-blue-50 border border-blue-100 rounded-md mb-3 mt-5">
+                💰 Kas Real — uang yang benar-benar sudah bergerak
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 uppercase mb-1 flex items-start min-h-[2rem]">Uang Diterima (Real)
                     <InfoTooltip text="Kas Masuk yang benar-benar terkumpul (dari entri harian HRIS). Selisih dengan Omset Sistem itu wajar untuk cabang yang punya piutang atau alur uang antar-cabang (mis. Gudang, Toko Pusat) — bukan berarti ada kesalahan." />
                   </p>
                   <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.kasMasuk)}</p>
                   <p className={`text-xs mt-0.5 whitespace-nowrap ${consolidated.omsetSistem - consolidated.kasMasuk >= 0 ? 'text-amber-600' : 'text-slate-400'}`}>
-                    Selisih: {formatRupiah(consolidated.omsetSistem - consolidated.kasMasuk)}
+                    Selisih dgn Omset (Sistem): {formatRupiah(consolidated.omsetSistem - consolidated.kasMasuk)}
                   </p>
                 </div>
                 <div>
@@ -440,23 +450,23 @@ export default function LaporanResmiPage() {
                   </p>
                   <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.pembayaranSupplierReal)}</p>
                 </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Sisa Kas Seharusnya Ada</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(sisaKasSeharusnya)}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Uang Diterima − Pembayaran Supplier</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Biaya Operasional (Real)</p>
+                  <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.biayaOperasional)}</p>
+                </div>
               </div>
 
               <div className="mt-4 pt-4 border-t border-slate-200">
                 <h3 className="text-sm font-bold text-slate-700 mb-1 flex items-center">Cek Kecukupan Kas
                   <InfoTooltip text="Uang Diterima (Real) dikurangi Pembayaran Supplier (Real) = sisa kas yang seharusnya ada untuk menutup Biaya Operasional. Ini cek likuiditas bulan ini, BUKAN cek untung/rugi — bisa saja untung (Laba Bersih Sistem positif) tapi kasnya sedang defisit karena momentum bayar supplier." />
                 </h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                <div className="grid grid-cols-1 gap-4 mt-2">
                   <div>
-                    <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Sisa Kas Seharusnya Ada</p>
-                    <p className="text-base font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(sisaKasSeharusnya)}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Uang Diterima − Pembayaran Supplier</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Biaya Operasional (Real)</p>
-                    <p className="text-base font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(consolidated.biayaOperasional)}</p>
-                  </div>
-                  <div className="md:col-span-2">
                     <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Selisih (Surplus/Defisit)</p>
                     <p className={`text-base font-bold whitespace-nowrap ${selisihKecukupanKas >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(selisihKecukupanKas)}</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
