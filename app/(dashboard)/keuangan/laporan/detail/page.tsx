@@ -600,7 +600,7 @@ export default function LaporanDetailPage() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center text-slate-500 text-sm">Pilih kelompok/cabang dulu.</div>
       ) : (
         <>
-          <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200">
+          <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200 print:break-inside-avoid">
             <h2 className="text-lg font-bold text-slate-800 mb-3">{selectedGroup} — {monthLabel}</h2>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <div>
@@ -648,7 +648,7 @@ export default function LaporanDetailPage() {
             )}
           </div>
 
-          <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-amber-200">
+          <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-amber-200 print:break-inside-avoid">
             <h2 className="text-lg font-bold text-slate-800 mb-1">Kondisi Cabang Saat Ini</h2>
             <p className="text-xs text-slate-500 mb-3">Berbeda dari angka di atas — ini bukan angka per bulan, tapi kondisi terkini (neraca), supaya kelihatan jelas posisi cabang ini: apa yang masih dipunya (aset barang) dan apa yang masih ditanggung (utang supplier).</p>
             {loadingKondisi ? (
