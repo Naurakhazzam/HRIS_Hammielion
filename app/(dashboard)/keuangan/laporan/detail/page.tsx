@@ -498,9 +498,12 @@ export default function LaporanDetailPage() {
 
   const monthLabel = new Date(month + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
 
-  // Ritase & Kendaraan — kelompokkan per kendaraan, lalu per tujuan.
+  // Ritase & Kendaraan — kelompokkan per kendaraan, lalu per tujuan. Trip "Belanja ..." (mis.
+  // Belanja Aina dan H.Agus, Belanja Rajawali & Wiji Dadi) itu perjalanan BELANJA ke supplier,
+  // bukan ritase pengiriman — sengaja dikeluarkan dari hitungan/daftar ini.
+  const ritaseTrips = deliveryTrips.filter(t => !(t.delivery_routes?.name || '').startsWith('Belanja'))
   const ritaseByVehicle = new Map<string, { vehicleName: string; plateNumber: string | null; total: number; routes: Map<string, DeliveryTripRow[]> }>()
-  for (const t of deliveryTrips) {
+  for (const t of ritaseTrips) {
     const vid = t.vehicle_id || 'unknown'
     if (!ritaseByVehicle.has(vid)) {
       ritaseByVehicle.set(vid, { vehicleName: t.vehicles?.name || '(Kendaraan tidak diketahui)', plateNumber: t.vehicles?.plate_number || null, total: 0, routes: new Map() })
@@ -517,7 +520,7 @@ export default function LaporanDetailPage() {
       routes: Array.from(v.routes.entries()).map(([routeName, trips]) => ({ routeName, trips })).sort((a, b) => b.trips.length - a.trips.length),
     }))
     .sort((a, b) => b.total - a.total)
-  const totalRitaseBulanIni = deliveryTrips.length
+  const totalRitaseBulanIni = ritaseTrips.length
 
   // Ringkasan Eksekutif — satu kalimat di paling atas laporan supaya Owner langsung dapat inti
   // cerita saat buka/print, tanpa harus baca semua angka dulu. Prioritas: Laba Bersih (Sistem,
