@@ -231,6 +231,20 @@ export default function LaporanResmiPage() {
     )
   }
 
+  // Cetak/Simpan PDF — hasil cetak selalu terang (kelas `dark` dilepas sementara, dikembalikan
+  // sesudahnya), sama pola dengan Detail Laporan per Cabang. Halaman ini tidak punya bagian yang
+  // collapse, jadi tidak perlu expand apapun sebelum print.
+  function handlePrint() {
+    const wasDark = document.documentElement.classList.contains('dark')
+    if (wasDark) document.documentElement.classList.remove('dark')
+    function restore() {
+      if (wasDark) document.documentElement.classList.add('dark')
+      window.removeEventListener('afterprint', restore)
+    }
+    window.addEventListener('afterprint', restore)
+    setTimeout(() => window.print(), 50)
+  }
+
   async function handleExportOmzetPerCabang() {
     setExporting(true)
     const [y, m] = month.split('-').map(Number)
@@ -280,16 +294,25 @@ export default function LaporanResmiPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">Laporan Resmi</h1>
-        <p className="text-sm text-slate-500">Laporan P&L per kelompok laporan dengan perbandingan periode sebelumnya, berdasarkan data yang sudah disetujui.</p>
-        <p className="text-xs text-slate-400 mt-1">
-          Ini versi lengkap (per bulan + ekspor CSV). Untuk sekilas lihat laba bulan ini saja, buka{' '}
-          <Link href="/keuangan/dashboard" className="text-blue-600 hover:underline font-medium">Dashboard Keuangan</Link>.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 mb-1">Laporan Resmi</h1>
+          <p className="text-sm text-slate-500 print:hidden">Laporan P&L per kelompok laporan dengan perbandingan periode sebelumnya, berdasarkan data yang sudah disetujui.</p>
+          <p className="text-xs text-slate-400 mt-1 print:hidden">
+            Ini versi lengkap (per bulan + ekspor CSV). Untuk sekilas lihat laba bulan ini saja, buka{' '}
+            <Link href="/keuangan/dashboard" className="text-blue-600 hover:underline font-medium">Dashboard Keuangan</Link>.
+          </p>
+          <p className="hidden print:block text-xs text-slate-500 mt-1">Hammielion HRIS — {new Date(month + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} — Dicetak {new Date().toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}</p>
+        </div>
+        {!loading && (
+          <button onClick={handlePrint}
+            className="print:hidden px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition whitespace-nowrap">
+            🖨️ Cetak / Simpan PDF
+          </button>
+        )}
       </div>
 
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4 print:hidden">
         <div className="flex items-end gap-3">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Bulan</label>
@@ -311,7 +334,7 @@ export default function LaporanResmiPage() {
       ) : (
         <>
           {isAdmin && consolidated && prevConsolidated && (
-            <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200">
+            <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200 print:break-inside-avoid">
               <h2 className="text-lg font-bold text-slate-800 mb-3">Total Konsolidasi (Seluruh Bisnis)</h2>
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <div>
@@ -358,7 +381,7 @@ export default function LaporanResmiPage() {
             const sisaKasSeharusnya = consolidated.kasMasuk - consolidated.pembayaranSupplierReal
             const selisihKecukupanKas = sisaKasSeharusnya - consolidated.biayaOperasional
             return (
-            <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-purple-200">
+            <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-purple-200 print:break-inside-avoid">
               <h2 className="text-lg font-bold text-slate-800 mb-1">Omset &amp; HPP Sistem Kasir vs Kas Real</h2>
               <p className="text-xs text-slate-500 mb-3">Dari input di <Link href="/keuangan/hpp" className="text-blue-600 hover:underline">HPP &amp; Omset (Sistem)</Link>. Laba Kotor/Bersih (Sistem) lebih dipercaya daripada di panel atas (yang berbasis Kas Masuk), karena langsung dari sistem kasir — tidak terpengaruh piutang/uang yang belum cair.</p>
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
@@ -446,87 +469,127 @@ export default function LaporanResmiPage() {
           {(() => {
             const showSistem = !!(consolidated && consolidated.omsetSistem > 0)
             return (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:break-inside-avoid">
             <div className="p-4 border-b border-slate-200 bg-slate-50">
               <h2 className="text-sm font-semibold text-slate-600 uppercase">Per Kelompok Laporan</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Cabang berdampingan sebagai kolom, supaya bisa langsung dibandingkan.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-white border-b border-slate-200">
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kelompok</th>
-                    {showSistem && <th className="px-4 py-3 text-xs font-semibold text-purple-600 uppercase text-right">Omset (Sistem)</th>}
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Masuk</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">HPP</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Kotor</th>
-                    {showSistem && (
-                      <th className="px-4 py-3 text-xs font-semibold text-purple-600 uppercase text-right">
-                        <span className="inline-flex items-center justify-end">Laba Kotor (Sistem)
-                          <InfoTooltip text="Omset (Sistem) dikurangi HPP — lebih bisa dipercaya daripada Laba Kotor di sebelahnya (berbasis Kas Masuk), karena tidak terpengaruh piutang/uang yang belum cair." />
-                        </span>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase sticky left-0 bg-white">Kelompok</th>
+                    {groups.map(g => (
+                      <th key={g.label} className="px-4 py-3 text-xs font-semibold text-slate-700 uppercase text-right whitespace-nowrap">
+                        <Link href={`/keuangan/laporan/detail?group=${encodeURIComponent(g.label)}&month=${month}`} className="text-blue-700 hover:underline print:no-underline print:text-slate-700">
+                          {g.label} <span className="text-xs print:hidden">🔍</span>
+                        </Link>
                       </th>
-                    )}
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">
-                      <span className="inline-flex items-center justify-end">Biaya Operasional
-                        <InfoTooltip text="Tidak termasuk pembelian stok/restock ke supplier — sudah dihitung di HPP, supaya tidak dobel." />
-                      </span>
-                    </th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">
-                      <span className="inline-flex items-center justify-end">Realisasi Kasbon
-                        <InfoTooltip text="Baru dihitung sebagai biaya saat gajinya lunas, meski uangnya sudah keluar duluan saat kasbon dicairkan. Bukan dobel hitung." />
-                      </span>
-                    </th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Laba Bersih (vs periode lalu)</th>
-                    {showSistem && (
-                      <th className="px-4 py-3 text-xs font-semibold text-purple-600 uppercase text-right">
-                        <span className="inline-flex items-center justify-end">Laba Bersih (Sistem)
-                          <InfoTooltip text="Laba Kotor (Sistem) dikurangi Biaya Operasional & Realisasi Kasbon — angka bottom line per kelompok yang paling bisa dipercaya." />
-                        </span>
-                      </th>
-                    )}
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {groups.length === 0 ? (
-                    <tr><td colSpan={showSistem ? 10 : 7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
-                  ) : groups.map(g => {
-                    const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 }
-                    const labaKotorSistemGroup = g.omsetSistem - g.hpp
-                    const labaBersihSistemGroup = labaKotorSistemGroup - g.biayaOperasional - g.kasbonRealisasi
-                    return (
-                      <tr key={g.label} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-3 text-sm font-medium whitespace-nowrap">
-                          <Link href={`/keuangan/laporan/detail?group=${encodeURIComponent(g.label)}&month=${month}`} className="text-blue-700 hover:underline">
-                            {g.label} <span className="text-xs">🔍</span>
-                          </Link>
-                        </td>
-                        {showSistem && (
-                          <td className="px-4 py-3 text-sm text-right text-purple-700 whitespace-nowrap">
-                            {g.omsetSistem > 0 ? formatRupiah(g.omsetSistem) : <span className="text-slate-300">—</span>}
-                          </td>
-                        )}
-                        <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.kasMasuk)}</td>
-                        <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.hpp)}</td>
-                        <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700 whitespace-nowrap">{formatRupiah(g.labaKotor)}</td>
-                        {showSistem && (
-                          <td className={`px-4 py-3 text-sm text-right font-semibold whitespace-nowrap ${g.omsetSistem > 0 ? (labaKotorSistemGroup >= 0 ? 'text-green-700' : 'text-red-700') : 'text-slate-300'}`}>
-                            {g.omsetSistem > 0 ? formatRupiah(labaKotorSistemGroup) : '—'}
-                          </td>
-                        )}
-                        <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.biayaOperasional)}</td>
-                        <td className="px-4 py-3 text-sm text-right text-amber-700 whitespace-nowrap">{formatRupiah(g.kasbonRealisasi)}</td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <div className={`text-sm font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</div>
-                          <VarianceBadge cur={g.labaBersih} prev={prev.labaBersih} />
-                        </td>
-                        {showSistem && (
-                          <td className={`px-4 py-3 text-sm text-right font-bold whitespace-nowrap ${g.omsetSistem > 0 ? (labaBersihSistemGroup >= 0 ? 'text-green-700' : 'text-red-700') : 'text-slate-300'}`}>
-                            {g.omsetSistem > 0 ? formatRupiah(labaBersihSistemGroup) : '—'}
-                          </td>
-                        )}
+                    <tr><td colSpan={groups.length + 1} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data disetujui untuk periode ini.</td></tr>
+                  ) : (
+                    <>
+                      {showSistem && (
+                        <tr className="hover:bg-slate-50 transition">
+                          <td className="px-4 py-3 text-sm font-medium text-purple-600 whitespace-nowrap sticky left-0 bg-white">Omset (Sistem)</td>
+                          {groups.map(g => (
+                            <td key={g.label} className="px-4 py-3 text-sm text-right text-purple-700 whitespace-nowrap">
+                              {g.omsetSistem > 0 ? formatRupiah(g.omsetSistem) : <span className="text-slate-300">—</span>}
+                            </td>
+                          ))}
+                        </tr>
+                      )}
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">Kas Masuk</td>
+                        {groups.map(g => (
+                          <td key={g.label} className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.kasMasuk)}</td>
+                        ))}
                       </tr>
-                    )
-                  })}
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">HPP</td>
+                        {groups.map(g => (
+                          <td key={g.label} className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.hpp)}</td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">Laba Kotor</td>
+                        {groups.map(g => (
+                          <td key={g.label} className="px-4 py-3 text-sm text-right font-semibold text-blue-700 whitespace-nowrap">{formatRupiah(g.labaKotor)}</td>
+                        ))}
+                      </tr>
+                      {showSistem && (
+                        <tr className="hover:bg-slate-50 transition">
+                          <td className="px-4 py-3 text-sm font-medium text-purple-600 whitespace-nowrap sticky left-0 bg-white">
+                            <span className="inline-flex items-center">Laba Kotor (Sistem)
+                              <InfoTooltip text="Omset (Sistem) dikurangi HPP — lebih bisa dipercaya daripada Laba Kotor di atasnya (berbasis Kas Masuk), karena tidak terpengaruh piutang/uang yang belum cair." />
+                            </span>
+                          </td>
+                          {groups.map(g => {
+                            const labaKotorSistemGroup = g.omsetSistem - g.hpp
+                            return (
+                              <td key={g.label} className={`px-4 py-3 text-sm text-right font-semibold whitespace-nowrap ${g.omsetSistem > 0 ? (labaKotorSistemGroup >= 0 ? 'text-green-700' : 'text-red-700') : 'text-slate-300'}`}>
+                                {g.omsetSistem > 0 ? formatRupiah(labaKotorSistemGroup) : '—'}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )}
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">
+                          <span className="inline-flex items-center">Biaya Operasional
+                            <InfoTooltip text="Tidak termasuk pembelian stok/restock ke supplier — sudah dihitung di HPP, supaya tidak dobel." />
+                          </span>
+                        </td>
+                        {groups.map(g => (
+                          <td key={g.label} className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{formatRupiah(g.biayaOperasional)}</td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">
+                          <span className="inline-flex items-center">Realisasi Kasbon
+                            <InfoTooltip text="Baru dihitung sebagai biaya saat gajinya lunas, meski uangnya sudah keluar duluan saat kasbon dicairkan. Bukan dobel hitung." />
+                          </span>
+                        </td>
+                        {groups.map(g => (
+                          <td key={g.label} className="px-4 py-3 text-sm text-right text-amber-700 whitespace-nowrap">{formatRupiah(g.kasbonRealisasi)}</td>
+                        ))}
+                      </tr>
+                      <tr className="hover:bg-slate-50 transition">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-white">Laba Bersih (vs periode lalu)</td>
+                        {groups.map(g => {
+                          const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, labaKotor: 0, labaBersih: 0 }
+                          return (
+                            <td key={g.label} className="px-4 py-3 text-right whitespace-nowrap">
+                              <div className={`text-sm font-bold ${g.labaBersih >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.labaBersih)}</div>
+                              <VarianceBadge cur={g.labaBersih} prev={prev.labaBersih} />
+                            </td>
+                          )
+                        })}
+                      </tr>
+                      {showSistem && (
+                        <tr className="hover:bg-slate-50 transition">
+                          <td className="px-4 py-3 text-sm font-medium text-purple-600 whitespace-nowrap sticky left-0 bg-white">
+                            <span className="inline-flex items-center">Laba Bersih (Sistem)
+                              <InfoTooltip text="Laba Kotor (Sistem) dikurangi Biaya Operasional & Realisasi Kasbon — angka bottom line per kelompok yang paling bisa dipercaya." />
+                            </span>
+                          </td>
+                          {groups.map(g => {
+                            const labaKotorSistemGroup = g.omsetSistem - g.hpp
+                            const labaBersihSistemGroup = labaKotorSistemGroup - g.biayaOperasional - g.kasbonRealisasi
+                            return (
+                              <td key={g.label} className={`px-4 py-3 text-sm text-right font-bold whitespace-nowrap ${g.omsetSistem > 0 ? (labaBersihSistemGroup >= 0 ? 'text-green-700' : 'text-red-700') : 'text-slate-300'}`}>
+                                {g.omsetSistem > 0 ? formatRupiah(labaBersihSistemGroup) : '—'}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )}
+                    </>
+                  )}
                 </tbody>
               </table>
             </div>
