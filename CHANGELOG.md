@@ -805,6 +805,22 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 |---|---|
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Tombol + `handlePrint`; tabel Per Kelompok Laporan dibalik jadi metrik x cabang; `print:break-inside-avoid` di kartu ringkasan |
 
+### 48. Fitur: Belanja/Dibayar ke Supplier & Kas Sesungguhnya (Real) di Laporan Resmi
+
+**Permintaan Owner:** "tambahkan juga matriknya, belanja ke supplier, sebagai pembanding juga, lalu sampaikan juga, berapa kas sesungguhnya." Dijelaskan lebih lanjut: mau tahu Belanja (nota) vs yang sudah Dibayar, supaya kelihatan sisa utangnya; dan "kas sesungguhnya" = Kas Masuk dikurangi yang BENAR-BENAR sudah dibayar (bukan dikurangi nota yang masih utang). Sempat diminta matriks per-supplier, tapi Owner lalu minta disederhanakan jadi total saja per cabang (tidak usah dirincikan per supplier).
+
+**Saran yang diberikan & dipakai:** utang yang belum dibayar TIDAK mengurangi Kas Sesungguhnya (uangnya belum benar-benar keluar) — ditampilkan terpisah sebagai baris "Sisa (Utang Bulan Ini)", supaya kewajiban yang menggantung tetap kelihatan tanpa menyamarkan kas yang masih ada.
+
+**Fix:** 4 baris baru ditambahkan ke tabel "Per Kelompok Laporan" (item #47) yang sudah dibalik orientasinya:
+- **Belanja ke Supplier (Nota)** — dari `supplier_purchases.purchase_date` bulan ini.
+- **Dibayar ke Supplier** — pakai `pembayaranSupplierReal` yang sudah ada (kategori `pembayaran_supplier`).
+- **Sisa (Utang Bulan Ini)** — Belanja dikurangi Dibayar, cuma dari transaksi bulan ini (BUKAN sisa utang akumulasi/total — itu tetap di Detail Laporan per Cabang).
+- **Kas Sesungguhnya (Real)** — Kas Masuk dikurangi SEMUA kas keluar yang sudah benar-benar dibayar bulan ini (semua kategori, bukan cuma Biaya Operasional). Juga ditambahkan ke kartu Total Konsolidasi.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/page.tsx` | `GroupTotals` tambah `belanjaSupplier`/`totalKasKeluar`; query baru `supplier_purchases`; 4 baris baru di tabel & Total Konsolidasi |
+
 ---
 
-*Terakhir diupdate: Sesi 4 (2026-09-11), lanjutan*
+*Terakhir diupdate: Sesi 4 (2026-09-12)*
