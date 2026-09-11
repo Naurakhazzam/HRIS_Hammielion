@@ -783,6 +783,16 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 |---|---|
 | `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Section Ritase & Kendaraan (query `delivery_trips`, gate `GUDANG_BRANCH_ID`); `ringkasanEksekutif()` + query HPP bulan lalu; `print:break-inside-avoid` di 3 kartu ringkasan |
 
+### 46. Fitur: Pengeluaran per Kategori per Cabang di Laporan Resmi
+
+**Permintaan Owner:** setelah lihat Laporan Resmi, ternyata yang dimaksud bukan pembanding waktu (vs bulan lalu) — "laporan resmi itu isi nya tinggal anda tambahkan pengeluaran nya berdasarkan katagori, tidak pakai detail, tapi tampilkan setiap cabang nya, jadi owner bisa lihat secara langsung, bandingannya, vs masing2 cabang, untuk penilaian." Rencananya laporan ini dicetak berdampingan dengan Detail Laporan per Cabang (item #44-45) sebagai 2 dokumen arsip terpisah.
+
+**Fix:** Tabel baru "Pengeluaran per Kategori per Cabang" di bawah tabel "Per Kelompok Laporan" yang sudah ada — baris = kategori pengeluaran, kolom = tiap cabang/kelompok, isi cuma total (bukan per-transaksi), plus kolom & baris Total. Sengaja TANPA indikator naik/turun vs bulan lalu — sumbu perbandingannya di sini antar-cabang (horizontal), bukan antar-waktu (yang sudah ada di badge Laba Bersih tabel atasnya, dan di `monthDelta` Detail Laporan per Cabang). Cakupannya disamakan dengan "Biaya Operasional" yang sudah ada (kategori `affects_net_profit=false`, mis. pembelian stok ke supplier, dikeluarkan — sudah dihitung di HPP) supaya baris Total per kolom persis sama dengan angka Biaya Operasional per kelompok di tabel atasnya — dicek manual lewat SQL, cocok.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Tabel matriks kategori x cabang baru; fetch `fin_cash_out_categories` & pivot per kategori per kelompok |
+
 ---
 
 *Terakhir diupdate: Sesi 4 (2026-09-11), lanjutan*
