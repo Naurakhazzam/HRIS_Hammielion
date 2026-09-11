@@ -48,6 +48,12 @@ export default function LaporanResmiPage() {
   const [exporting, setExporting] = useState(false)
   const [saldoAwalReal, setSaldoAwalReal] = useState<number | null>(null)
 
+  // Pengeluaran per Kategori per Cabang — matriks kategori x cabang, cuma total bulan berjalan
+  // (tanpa pembanding bulan lalu, beda tujuan dari tabel "Per Kelompok Laporan" di atas: ini
+  // untuk perbandingan ANTAR CABANG, bukan tren waktu).
+  const [cashOutCategories, setCashOutCategories] = useState<{ code: string; label: string; affects_net_profit: boolean }[]>([])
+  const [categoryBreakdown, setCategoryBreakdown] = useState<{ code: string; label: string; totals: Map<string, number>; total: number }[]>([])
+
   useEffect(() => {
     async function init() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -62,6 +68,8 @@ export default function LaporanResmiPage() {
       }
       const { data: bRes } = await supabase.from('branches').select('id, name').eq('is_active', true).order('name')
       if (bRes) setBranches(bRes)
+      const { data: catRes } = await supabase.from('fin_cash_out_categories').select('code, label, affects_net_profit')
+      if (catRes) setCashOutCategories(catRes)
       setRoleLoading(false)
     }
     init()
@@ -154,12 +162,16 @@ export default function LaporanResmiPage() {
     const prevStart = localDateStr(new Date(py, pm - 1, 1))
     const prevEnd = localDateStr(new Date(py, pm, 0))
 
-    const [cur, prev, saldoAwalRes] = await Promise.all([
+    const [cur, prev, saldoAwalRes, groupsRes, catCashOutRes] = await Promise.all([
       computeTotals(curStart, curEnd, m, y),
       computeTotals(prevStart, prevEnd, pm, py),
       // Saldo Awal (Real) cuma valid kalau ada rekening yang opening_balance_date-nya PERSIS di tanggal 1 periode ini —
       // artinya periode ini punya anchor saldo fisik yang benar-benar dihitung, bukan diperkirakan.
       supabase.from('fin_bank_accounts').select('opening_balance').eq('is_active', true).eq('opening_balance_date', curStart),
+      // Buat matriks Pengeluaran per Kategori per Cabang di bawah — perlu peta cabang->kelompok
+      // sendiri di sini karena computeTotals tidak mengekspos punyanya.
+      supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
+      supabase.from('fin_cash_out').select('branch_id, category, amount').eq('status', 'approved').gte('transaction_date', curStart).lte('transaction_date', curEnd),
     ])
     setGroups(cur.groups)
     setConsolidated(cur.consolidated)
@@ -170,8 +182,32 @@ export default function LaporanResmiPage() {
         ? saldoAwalRes.data.reduce((s, r) => s + Number(r.opening_balance), 0)
         : null
     )
+
+    // Pengeluaran per Kategori per Cabang — sama scope-nya dengan "Biaya Operasional" di atas
+    // (kategori yang affects_net_profit=false, mis. pembelian stok ke supplier, DIKELUARKAN —
+    // itu sudah dihitung di HPP, supaya total per baris tetap nyambung dengan Biaya Operasional).
+    const branchToGroupForCat = new Map<string, string>()
+    for (const g of (groupsRes.data as ReportGroup[]) || []) branchToGroupForCat.set(g.branch_id, g.report_group_label)
+    const visibleLabels = new Set(cur.groups.map(g => g.label))
+    const catInfo = new Map(cashOutCategories.map(c => [c.code, c]))
+    const pivot = new Map<string, Map<string, number>>()
+    for (const row of (catCashOutRes.data as { branch_id: string; category: string; amount: number }[]) || []) {
+      const label = branchToGroupForCat.get(row.branch_id)
+      if (!label || !visibleLabels.has(label)) continue
+      const info = catInfo.get(row.category)
+      if (info?.affects_net_profit === false) continue
+      if (!pivot.has(row.category)) pivot.set(row.category, new Map())
+      const g = pivot.get(row.category)!
+      g.set(label, (g.get(label) || 0) + Number(row.amount))
+    }
+    const breakdownList = Array.from(pivot.entries()).map(([code, totals]) => ({
+      code, label: catInfo.get(code)?.label || code, totals,
+      total: Array.from(totals.values()).reduce((s, v) => s + v, 0),
+    })).sort((a, b) => b.total - a.total)
+    setCategoryBreakdown(breakdownList)
+
     setLoading(false)
-  }, [month, computeTotals, supabase])
+  }, [month, computeTotals, supabase, cashOutCategories])
 
   useEffect(() => { if (!roleLoading) fetchData() }, [roleLoading, fetchData])
 
@@ -497,6 +533,58 @@ export default function LaporanResmiPage() {
           </div>
             )
           })()}
+
+          {groups.length > 0 && (
+            <div className="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-4 border-b border-slate-200 bg-slate-50">
+                <h2 className="text-sm font-semibold text-slate-600 uppercase">Pengeluaran per Kategori per Cabang</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Total per kategori, sisi berdampingan tiap cabang — untuk lihat perbandingan langsung antar cabang, bukan tren dari waktu ke waktu. Sama scope-nya dengan Biaya Operasional (tidak termasuk pembelian stok ke supplier, sudah dihitung di HPP).</p>
+              </div>
+              {categoryBreakdown.length === 0 ? (
+                <div className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pengeluaran untuk periode ini.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-white border-b border-slate-200">
+                        <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase sticky left-0 bg-white">Kategori</th>
+                        {groups.map(g => (
+                          <th key={g.label} className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right whitespace-nowrap">{g.label}</th>
+                        ))}
+                        <th className="px-4 py-3 text-xs font-semibold text-slate-700 uppercase text-right whitespace-nowrap">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {categoryBreakdown.map(row => (
+                        <tr key={row.code} className="hover:bg-slate-50 transition">
+                          <td className="px-4 py-2.5 text-sm font-medium text-slate-800 whitespace-nowrap sticky left-0 bg-white">{row.label}</td>
+                          {groups.map(g => {
+                            const v = row.totals.get(g.label) || 0
+                            return (
+                              <td key={g.label} className="px-4 py-2.5 text-sm text-right whitespace-nowrap text-slate-700">
+                                {v > 0 ? formatRupiah(v) : <span className="text-slate-300">—</span>}
+                              </td>
+                            )
+                          })}
+                          <td className="px-4 py-2.5 text-sm text-right font-semibold text-red-700 whitespace-nowrap">{formatRupiah(row.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-50 border-t-2 border-slate-200">
+                        <td className="px-4 py-3 text-sm font-bold text-slate-800 sticky left-0 bg-slate-50">Total</td>
+                        {groups.map(g => {
+                          const colTotal = categoryBreakdown.reduce((s, row) => s + (row.totals.get(g.label) || 0), 0)
+                          return <td key={g.label} className="px-4 py-3 text-sm text-right font-bold text-slate-800 whitespace-nowrap">{formatRupiah(colTotal)}</td>
+                        })}
+                        <td className="px-4 py-3 text-sm text-right font-bold text-red-800 whitespace-nowrap">{formatRupiah(categoryBreakdown.reduce((s, row) => s + row.total, 0))}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           <p className="text-xs text-slate-400 mt-3">Hanya menghitung entri berstatus &quot;Disetujui&quot;. Ekspor CSV omzet per cabang memakai data per cabang asli, bukan per kelompok laporan gabungan — sesuai kebutuhan pelaporan pajak.</p>
         </>
