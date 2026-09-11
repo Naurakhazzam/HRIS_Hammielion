@@ -183,3 +183,16 @@ input, select, textarea, button {
 
 /* Modal overlay (bg-slate-900/50 dkk) sengaja dibiarkan — gelap transparan
    sudah cocok dipakai di kedua tema, tidak perlu di-remap. */
+
+/* ============================================================================
+   PRINT — dipakai untuk fitur "Cetak / Simpan PDF" di halaman laporan (mis.
+   Detail Laporan per Cabang). Kelas `dark` di <html> sengaja DILEPAS lewat JS
+   sebelum window.print() dipanggil (lihat handlePrint di halaman terkait) dan
+   dikembalikan sesudahnya — supaya hasil cetak selalu terang & konsisten,
+   tidak tergantung tema yang sedang aktif di layar. Elemen yang tidak perlu
+   ikut tercetak (navbar, sidebar, filter, tombol) ditandai `print:hidden`
+   langsung di komponennya (utility bawaan Tailwind). */
+@media print {
+  body { background: white; }
+  @page { margin: 12mm; }
+}

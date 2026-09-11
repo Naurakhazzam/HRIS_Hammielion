@@ -315,6 +315,41 @@ export default function LaporanDetailPage() {
     )
   }
 
+  // Cetak/Simpan PDF: buka semua bagian yang collapse (kategori, supplier, penggajian,
+  // kehilangan, pemasukan) supaya dokumen arsipnya lengkap, lalu print, lalu kembalikan
+  // ke state semula. Kelas `dark` juga dilepas sementara (lihat globals.css) supaya
+  // hasil cetak selalu terang, tidak ikut tema layar yang sedang aktif.
+  function handlePrint() {
+    const prevExpandedCategories = expandedCategories
+    const prevExpandedSuppliers = expandedSuppliers
+    const prevShowPenggajian = showPenggajian
+    const prevShowKehilangan = showKehilangan
+    const prevShowPemasukan = showPemasukan
+    const wasDark = document.documentElement.classList.contains('dark')
+
+    setExpandedCategories(new Set(categoryList.map(([code]) => code)))
+    setExpandedSuppliers(new Set(supplierDebtList.map(s => s.supplierId)))
+    setShowPenggajian(true)
+    setShowKehilangan(true)
+    setShowPemasukan(true)
+    if (wasDark) document.documentElement.classList.remove('dark')
+
+    function restore() {
+      setExpandedCategories(prevExpandedCategories)
+      setExpandedSuppliers(prevExpandedSuppliers)
+      setShowPenggajian(prevShowPenggajian)
+      setShowKehilangan(prevShowKehilangan)
+      setShowPemasukan(prevShowPemasukan)
+      if (wasDark) document.documentElement.classList.add('dark')
+      window.removeEventListener('afterprint', restore)
+    }
+    window.addEventListener('afterprint', restore)
+
+    // Beri waktu React re-render dulu (kategori/supplier yang baru di-expand) sebelum
+    // dialog print muncul, supaya semuanya ikut tercetak, bukan versi collapse yang lama.
+    setTimeout(() => window.print(), 80)
+  }
+
   function toggleSupplier(id: string) {
     setExpandedSuppliers(prev => {
       const next = new Set(prev)
@@ -392,13 +427,22 @@ export default function LaporanDetailPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <Link href="/keuangan/laporan" className="text-sm text-blue-600 hover:underline">&larr; Kembali ke Laporan Resmi</Link>
-        <h1 className="text-2xl font-bold text-slate-800 mt-2 mb-1">Detail Laporan per Cabang</h1>
-        <p className="text-sm text-slate-500">Rincian lengkap pemasukan &amp; pengeluaran per kelompok laporan, diurutkan dari tanggal 1 — klik kategori pengeluaran untuk lihat daftar transaksinya.</p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <Link href="/keuangan/laporan" className="text-sm text-blue-600 hover:underline print:hidden">&larr; Kembali ke Laporan Resmi</Link>
+          <h1 className="text-2xl font-bold text-slate-800 mt-2 mb-1">Detail Laporan per Cabang</h1>
+          <p className="text-sm text-slate-500 print:hidden">Rincian lengkap pemasukan &amp; pengeluaran per kelompok laporan, diurutkan dari tanggal 1 — klik kategori pengeluaran untuk lihat daftar transaksinya.</p>
+          <p className="hidden print:block text-xs text-slate-500 mt-1">Hammielion HRIS — Dicetak {new Date().toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}</p>
+        </div>
+        {isAdmin && selectedGroup && !loading && (
+          <button onClick={handlePrint}
+            className="print:hidden px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition whitespace-nowrap">
+            🖨️ Cetak / Simpan PDF
+          </button>
+        )}
       </div>
 
-      <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end justify-between">
+      <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end justify-between print:hidden">
         <div>
           <label className="block text-xs text-slate-500 mb-2">Pilih Cabang</label>
           {groupLabels.length === 0 ? (
@@ -622,7 +666,7 @@ export default function LaporanDetailPage() {
               </span>
             </button>
             {showPenggajian && (
-              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto print:max-h-none print:overflow-visible">
                 <table className="w-full text-left">
                   <thead>
                     <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">
@@ -681,7 +725,7 @@ export default function LaporanDetailPage() {
 
                 <div>
                   <p className="text-xs font-medium text-slate-500 mb-2">Rincian yang ditanggung karyawan (dipotong gaji, {kehilanganKaryawanRows.length} entri) — ditampilkan untuk transparansi, sudah dikurangkan dari total di atas</p>
-                  <div className="overflow-x-auto max-h-[40vh] overflow-y-auto border border-slate-200 rounded-lg">
+                  <div className="overflow-x-auto max-h-[40vh] overflow-y-auto print:max-h-none print:overflow-visible border border-slate-200 rounded-lg">
                     <table className="w-full text-left">
                       <thead>
                         <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">
@@ -726,7 +770,7 @@ export default function LaporanDetailPage() {
               </span>
             </button>
             {showPemasukan && (
-              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto print:max-h-none print:overflow-visible">
                 <table className="w-full text-left">
                   <thead>
                     <tr className="text-xs text-slate-500 uppercase sticky top-0 bg-white">

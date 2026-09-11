@@ -28,9 +28,9 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col print:block print:h-auto print:min-h-0">
       {/* Navbar */}
-      <nav className="bg-white border-b border-slate-200 px-4 sm:px-6 z-30 sticky top-0">
+      <nav className="bg-white border-b border-slate-200 px-4 sm:px-6 z-30 sticky top-0 print:hidden">
         <div className="flex items-center justify-between h-16 w-full">
           {/* Toggle + Logo */}
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -87,15 +87,17 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
       </nav>
 
       {/* Konten Utama dengan Sidebar */}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden relative print:block print:h-auto print:overflow-visible">
         {forceOpen === true && (
           <div
             className="fixed inset-0 top-16 bg-slate-900/40 z-20 md:hidden"
             onClick={() => setForceOpen(false)}
           />
         )}
-        <Sidebar forceOpen={forceOpen} onNavigate={() => setForceOpen(false)} />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
+        <div className="print:hidden">
+          <Sidebar forceOpen={forceOpen} onNavigate={() => setForceOpen(false)} />
+        </div>
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8 print:overflow-visible print:h-auto print:p-0">
           <div className="max-w-6xl mx-auto">
             {children}
           </div>
