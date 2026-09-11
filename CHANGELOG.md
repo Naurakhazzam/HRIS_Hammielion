@@ -769,6 +769,20 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 | `components/DashboardShell.tsx` | Navbar & sidebar `print:hidden`; layout jadi full-height saat print |
 | `app/globals.css` | Reset ringan (background putih, margin halaman) untuk `@media print` |
 
+### 45. Fitur: Ritase & Kendaraan, Ringkasan Eksekutif, dan Page-Break Print — Detail Laporan per Cabang
+
+**Permintaan Owner:** "coba kerjakan semuanya... intinya saya ingin laporan detail percabang ini matang dengan sempurna, karena tujuannya adalah untuk di print, dan disajikan untuk owner." Tiga bagian, dikerjakan satu per satu:
+
+**a) Ritase & Kendaraan.** Owner minta ringkasan ritase Gudang (kendaraan ke mana saja, berapa kali) untuk diarsipkan. Ternyata datanya sudah ada di `delivery_trips` (dipakai untuk hitung gaji driver, menu Penggajian &gt; Driver) — tidak perlu input baru. Ditambah section collapsible "🚚 Ritase & Kendaraan" yang otomatis muncul **cuma saat grup yang dipilih mencakup Gudang** (satu-satunya cabang berkendaraan), dikelompokkan per kendaraan → per tujuan → bisa expand lagi untuk lihat tanggal & nama driver per trip. Belum ada data jarak (KM) atau biaya per kendaraan di sistem — dicatat jujur di catatan kecil pada section-nya.
+
+**b) Ringkasan Eksekutif.** Satu kalimat otomatis di bawah judul laporan, supaya Owner langsung dapat inti cerita. Prioritas: Laba Bersih (Sistem) bulan ini vs bulan lalu (paling bisa dipercaya) kalau datanya ada di kedua bulan; kalau bulan lalu belum ada data Sistem (mis. baru mulai pakai fitur HPP & Omset), turun ke Perkiraan Kas yang Harus Ada, dan TIDAK menampilkan persentase menyesatkan seperti "+100%" untuk kasus data-baru (sama prinsipnya dengan `monthDelta` yang sudah ada). Perlu 1 query tambahan di `fetchData` (HPP bulan lalu) yang sebelumnya tidak diambil.
+
+**c) Kontrol Page-Break saat Print.** Kartu ringkasan (Ringkasan, Kondisi Cabang Saat Ini, Ritase & Kendaraan) diberi `print:break-inside-avoid` supaya tidak terpotong setengah di tengah pas ganti halaman kertas. Tabel transaksi panjang (Rincian Pengeluaran, Penggajian, Pemasukan) sengaja TIDAK diberi ini — dipaksa utuh justru bikin boros kertas & bolong besar kalau isinya panjang.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Section Ritase & Kendaraan (query `delivery_trips`, gate `GUDANG_BRANCH_ID`); `ringkasanEksekutif()` + query HPP bulan lalu; `print:break-inside-avoid` di 3 kartu ringkasan |
+
 ---
 
 *Terakhir diupdate: Sesi 4 (2026-09-11), lanjutan*
