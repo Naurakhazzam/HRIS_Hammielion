@@ -856,6 +856,16 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 | `app/globals.css` | `@page { size: landscape }`; class `.print-compact-table` baru |
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Class `print-compact-table` ditambahkan ke 2 tabel matriks |
 
+### 52. Fix: Print Laporan Resmi Jadi Satu Blok per Cabang, Bukan Matriks Lagi
+
+**Ditemukan:** landscape + tabel kompak (item #51) ternyata masih belum cukup — matriks 6 kolom (label + 5 cabang) tetap kepencet/terpotong di kertas. Owner: "bisakah dibuatkan khusus print nya? jadi per masing-masing cabang, dengan jelas."
+
+**Fix:** Ditambahkan section khusus print (`hidden print:block`, tersembunyi di layar) yang me-render tiap cabang sebagai satu blok penuh sendiri — 4 bagian yang sama seperti tabel di layar (Data Sistem, Kas Real, Nota & Utang Supplier, Laba Campuran) plus rincian Pengeluaran per Kategori-nya — disusun ke bawah dengan jeda halaman baru di tiap cabang. Tabel matriks di layar (Per Kelompok Laporan, Pengeluaran per Kategori per Cabang) di-`print:hidden` karena sudah digantikan section ini khusus untuk cetak — di layar keduanya tetap tampil seperti biasa untuk perbandingan cepat antar cabang.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Section print-only per cabang (satu halaman per cabang); 2 tabel matriks jadi `print:hidden` |
+
 ---
 
 *Terakhir diupdate: Sesi 4 (2026-09-12), lanjutan*
