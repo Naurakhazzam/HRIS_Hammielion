@@ -866,6 +866,18 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 |---|---|
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Section print-only per cabang (satu halaman per cabang); 2 tabel matriks jadi `print:hidden` |
 
+### 53. Fitur: Toggle Potret/Lanskap saat Print, Bukan Dipaksa Lanskap
+
+**Permintaan Owner:** "buatkan saja bisa potrait atau landscape, tadi saya salah sangka" — setelah item #52 mengubah Laporan Resmi jadi cetak per-cabang (satu kolom, bukan matriks lebar lagi), lanskap yang dipaksakan sebelumnya (item #51) jadi tidak selalu relevan.
+
+**Fix:** `@page { size: landscape }` yang di-hardcode dihapus, dikembalikan ke potret sebagai default. Ditambahkan toggle "Potret" / "Lanskap" kecil di sebelah tombol Cetak, di Laporan Resmi maupun Detail Laporan per Cabang. Karena `@page` tidak bisa di-scope pakai class biasa, orientasi pilihan disisipkan sebagai tag `<style>` sesaat sebelum `window.print()` dipanggil, lalu dilepas lagi sesudahnya.
+
+| File | Perubahan |
+|---|---|
+| `app/globals.css` | `@page` kembali ke potret sebagai default |
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Toggle Potret/Lanskap; `handlePrint` sisipkan `<style>` @page |
+| `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Sama, untuk konsistensi |
+
 ---
 
 *Terakhir diupdate: Sesi 4 (2026-09-12), lanjutan*
