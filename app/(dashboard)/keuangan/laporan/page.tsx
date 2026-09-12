@@ -507,7 +507,7 @@ export default function LaporanResmiPage() {
               <p className="text-xs text-slate-400 mt-0.5">Cabang berdampingan sebagai kolom, supaya bisa langsung dibandingkan.</p>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left border-collapse print-compact-table">
                 <thead>
                   <tr className="bg-white border-b border-slate-200">
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase sticky left-0 bg-white">Kelompok</th>
@@ -702,7 +702,7 @@ export default function LaporanResmiPage() {
                 <div className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pengeluaran untuk periode ini.</div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full text-left border-collapse print-compact-table">
                     <thead>
                       <tr className="bg-white border-b border-slate-200">
                         <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase sticky left-0 bg-white">Kategori</th>

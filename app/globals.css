@@ -194,5 +194,12 @@ input, select, textarea, button {
    langsung di komponennya (utility bawaan Tailwind). */
 @media print {
   body { background: white; }
-  @page { margin: 12mm; }
+  /* Landscape — laporan keuangan di sini isinya tabel lebar (banyak kolom cabang berdampingan),
+     kalau dipaksa potret jadi kepencet kecil banget dan susah dibaca. */
+  @page { size: landscape; margin: 10mm; }
+
+  /* Tabel matriks lebar (kategori/metrik x cabang, mis. Laporan Resmi) — beri class ini di <table>
+     supaya sel-selnya lebih rapat saat print, jadi lebih banyak kolom cabang yang muat tanpa
+     kolom paling kanan terpotong/kepencet. */
+  .print-compact-table th, .print-compact-table td { padding: 4px 6px !important; font-size: 10px !important; }
 }
