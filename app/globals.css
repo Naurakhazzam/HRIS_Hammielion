@@ -194,9 +194,11 @@ input, select, textarea, button {
    langsung di komponennya (utility bawaan Tailwind). */
 @media print {
   body { background: white; }
-  /* Landscape — laporan keuangan di sini isinya tabel lebar (banyak kolom cabang berdampingan),
-     kalau dipaksa potret jadi kepencet kecil banget dan susah dibaca. */
-  @page { size: landscape; margin: 10mm; }
+  /* Default potret dengan margin wajar. Orientasi (potret/lanskap) dipilih sendiri oleh
+     pengguna lewat toggle di tombol Cetak tiap halaman — <style> #print-orientation-override
+     disisipkan sesaat sebelum window.print() dipanggil (lihat handlePrint di halaman terkait)
+     untuk menimpa @page size ini kalau lanskap yang dipilih, lalu dilepas lagi sesudahnya. */
+  @page { size: portrait; margin: 10mm; }
 
   /* Tabel matriks lebar (kategori/metrik x cabang, mis. Laporan Resmi) — beri class ini di <table>
      supaya sel-selnya lebih rapat saat print, jadi lebih banyak kolom cabang yang muat tanpa

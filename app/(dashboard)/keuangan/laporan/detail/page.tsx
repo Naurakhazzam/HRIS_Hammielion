@@ -104,6 +104,7 @@ export default function LaporanDetailPage() {
   const [showPemasukan, setShowPemasukan] = useState(false)
   const [showPenggajian, setShowPenggajian] = useState(false)
   const [showKehilangan, setShowKehilangan] = useState(false)
+  const [printOrientation, setPrintOrientation] = useState<'portrait' | 'landscape'>('portrait')
 
   // Kondisi saat ini (bukan berdasarkan periode/bulan yang dipilih) — Sisa Utang Supplier itu saldo
   // berjalan real-time, dan Aset Barang cuma ada 1 snapshot (baseline), bukan data bulanan.
@@ -383,7 +384,9 @@ export default function LaporanDetailPage() {
   // Cetak/Simpan PDF: buka semua bagian yang collapse (kategori, supplier, penggajian,
   // kehilangan, pemasukan) supaya dokumen arsipnya lengkap, lalu print, lalu kembalikan
   // ke state semula. Kelas `dark` juga dilepas sementara (lihat globals.css) supaya
-  // hasil cetak selalu terang, tidak ikut tema layar yang sedang aktif.
+  // hasil cetak selalu terang, tidak ikut tema layar yang sedang aktif. Orientasi kertas
+  // (potret/lanskap) dipilih pengguna lewat toggle di sebelah tombol — disisipkan sebagai
+  // <style> @page sesaat sebelum print, karena @page tidak bisa di-scope pakai className biasa.
   function handlePrint() {
     const prevExpandedCategories = expandedCategories
     const prevExpandedSuppliers = expandedSuppliers
@@ -398,6 +401,10 @@ export default function LaporanDetailPage() {
     setShowKehilangan(true)
     setShowPemasukan(true)
     if (wasDark) document.documentElement.classList.remove('dark')
+    const styleTag = document.createElement('style')
+    styleTag.id = 'print-orientation-override'
+    styleTag.textContent = `@media print { @page { size: ${printOrientation}; margin: 10mm; } }`
+    document.head.appendChild(styleTag)
 
     function restore() {
       setExpandedCategories(prevExpandedCategories)
@@ -406,6 +413,7 @@ export default function LaporanDetailPage() {
       setShowKehilangan(prevShowKehilangan)
       setShowPemasukan(prevShowPemasukan)
       if (wasDark) document.documentElement.classList.add('dark')
+      styleTag.remove()
       window.removeEventListener('afterprint', restore)
     }
     window.addEventListener('afterprint', restore)
@@ -567,10 +575,22 @@ export default function LaporanDetailPage() {
           )}
         </div>
         {isAdmin && selectedGroup && !loading && (
-          <button onClick={handlePrint}
-            className="print:hidden px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition whitespace-nowrap">
-            🖨️ Cetak / Simpan PDF
-          </button>
+          <div className="print:hidden flex items-end gap-2">
+            <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+              <button onClick={() => setPrintOrientation('portrait')}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${printOrientation === 'portrait' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                Potret
+              </button>
+              <button onClick={() => setPrintOrientation('landscape')}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${printOrientation === 'landscape' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                Lanskap
+              </button>
+            </div>
+            <button onClick={handlePrint}
+              className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium rounded-lg shadow-sm transition whitespace-nowrap">
+              🖨️ Cetak / Simpan PDF
+            </button>
+          </div>
         )}
       </div>
 
