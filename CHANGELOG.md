@@ -845,6 +845,17 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 |---|---|
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Kartu Omset & HPP Sistem dipecah jadi grid Data Sistem & Kas Real terpisah |
 
+### 51. Fix: Tabel Lebar di Laporan Resmi Kepencet Kecil Saat Print
+
+**Ditemukan:** Owner cetak Laporan Resmi, tabel "Per Kelompok Laporan" & "Pengeluaran per Kategori per Cabang" (6 kolom: label + 5 cabang) kepencet jadi sangat kecil dan susah dibaca — halaman print masih potret (A4 210mm), tidak cukup lebar untuk tabel matriks sebanyak itu.
+
+**Fix:** `@page { size: landscape }` diterapkan global untuk semua print di app ini (penggunaan print di app ini memang didominasi laporan tabel lebar, jadi landscape masuk akal jadi default). Ditambah class `.print-compact-table` (padding lebih rapat, font 10px, cuma aktif saat print) di kedua tabel matriks tersebut supaya makin banyak kolom cabang yang muat rapi.
+
+| File | Perubahan |
+|---|---|
+| `app/globals.css` | `@page { size: landscape }`; class `.print-compact-table` baru |
+| `app/(dashboard)/keuangan/laporan/page.tsx` | Class `print-compact-table` ditambahkan ke 2 tabel matriks |
+
 ---
 
 *Terakhir diupdate: Sesi 4 (2026-09-12), lanjutan*
