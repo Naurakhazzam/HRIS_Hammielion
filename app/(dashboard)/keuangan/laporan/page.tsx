@@ -501,10 +501,10 @@ export default function LaporanResmiPage() {
           {(() => {
             const showSistem = !!(consolidated && consolidated.omsetSistem > 0)
             return (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:break-inside-avoid">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50">
               <h2 className="text-sm font-semibold text-slate-600 uppercase">Per Kelompok Laporan</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Cabang berdampingan sebagai kolom, supaya bisa langsung dibandingkan.</p>
+              <p className="text-xs text-slate-400 mt-0.5">Cabang berdampingan sebagai kolom, supaya bisa langsung dibandingkan. Untuk versi cetak, lihat rincian per cabang di bawah (satu halaman per cabang).</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse print-compact-table">
@@ -693,10 +693,10 @@ export default function LaporanResmiPage() {
           })()}
 
           {groups.length > 0 && (
-            <div className="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="mt-6 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print:hidden">
               <div className="p-4 border-b border-slate-200 bg-slate-50">
                 <h2 className="text-sm font-semibold text-slate-600 uppercase">Pengeluaran per Kategori per Cabang</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Total per kategori, sisi berdampingan tiap cabang — untuk lihat perbandingan langsung antar cabang, bukan tren dari waktu ke waktu. Sama scope-nya dengan Biaya Operasional (tidak termasuk pembelian stok ke supplier, sudah dihitung di HPP).</p>
+                <p className="text-xs text-slate-400 mt-0.5">Total per kategori, sisi berdampingan tiap cabang — untuk lihat perbandingan langsung antar cabang, bukan tren dari waktu ke waktu. Sama scope-nya dengan Biaya Operasional (tidak termasuk pembelian stok ke supplier, sudah dihitung di HPP). Untuk versi cetak, lihat rincian per cabang di bawah.</p>
               </div>
               {categoryBreakdown.length === 0 ? (
                 <div className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada pengeluaran untuk periode ini.</div>
@@ -744,7 +744,78 @@ export default function LaporanResmiPage() {
             </div>
           )}
 
-          <p className="text-xs text-slate-400 mt-3">Hanya menghitung entri berstatus &quot;Disetujui&quot;. Ekspor CSV omzet per cabang memakai data per cabang asli, bukan per kelompok laporan gabungan — sesuai kebutuhan pelaporan pajak.</p>
+          {/* Versi cetak: satu blok penuh per cabang (bukan matriks berdampingan) — supaya tidak
+              kepencet kecil di kertas seperti tabel di atas. Halaman baru per cabang. */}
+          <div className="hidden print:block">
+            {groups.map((g, idx) => {
+              const prev = prevGroups.find(p => p.label === g.label) || { label: g.label, kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, belanjaSupplier: 0, totalKasKeluar: 0, labaKotor: 0, labaBersih: 0 }
+              const labaKotorSistemGroup = g.omsetSistem - g.hpp
+              const labaBersihSistemGroup = labaKotorSistemGroup - g.biayaOperasional - g.kasbonRealisasi
+              const sisaBulanIni = g.belanjaSupplier - g.pembayaranSupplierReal
+              const kasSesungguhnya = g.kasMasuk - g.totalKasKeluar
+              const { diff, pct } = variance(g.labaBersih, prev.labaBersih)
+              const rows: { label: string; value: string; cls?: string }[][] = []
+
+              const sistemRows = g.omsetSistem > 0 ? [
+                { label: 'Omset (Sistem)', value: formatRupiah(g.omsetSistem) },
+                { label: 'HPP (Sistem)', value: formatRupiah(g.hpp) },
+                { label: 'Laba Kotor (Sistem)', value: formatRupiah(labaKotorSistemGroup), cls: labaKotorSistemGroup >= 0 ? 'text-green-700 font-semibold' : 'text-red-700 font-semibold' },
+                { label: 'Laba Bersih (Sistem)', value: formatRupiah(labaBersihSistemGroup), cls: labaBersihSistemGroup >= 0 ? 'text-green-700 font-bold' : 'text-red-700 font-bold' },
+              ] : []
+              const kasRealRows = [
+                { label: 'Kas Masuk', value: formatRupiah(g.kasMasuk) },
+                { label: 'Biaya Operasional', value: formatRupiah(g.biayaOperasional) },
+                { label: 'Realisasi Kasbon', value: formatRupiah(g.kasbonRealisasi) },
+                { label: 'Dibayar ke Supplier', value: formatRupiah(g.pembayaranSupplierReal) },
+                { label: 'Kas Sesungguhnya (Real)', value: formatRupiah(kasSesungguhnya), cls: kasSesungguhnya >= 0 ? 'text-blue-700 font-bold' : 'text-red-700 font-bold' },
+              ]
+              const utangRows = [
+                { label: 'Belanja ke Supplier (Nota)', value: formatRupiah(g.belanjaSupplier) },
+                { label: 'Sisa (Utang Bulan Ini)', value: formatRupiah(sisaBulanIni), cls: sisaBulanIni > 0 ? 'text-red-700 font-medium' : 'text-slate-500' },
+              ]
+              const campuranRows = [
+                { label: 'Laba Kotor', value: formatRupiah(g.labaKotor) },
+                { label: 'Laba Bersih (vs bulan lalu)', value: `${formatRupiah(g.labaBersih)}  (${diff >= 0 ? '▲' : '▼'} ${pct.toFixed(0)}%)`, cls: g.labaBersih >= 0 ? 'text-green-700 font-bold' : 'text-red-700 font-bold' },
+              ]
+
+              function block(title: string, colorCls: string, items: { label: string; value: string; cls?: string }[]) {
+                return (
+                  <div className="mb-3">
+                    <div className={`px-2 py-1 text-[11px] font-bold uppercase mb-1 ${colorCls}`}>{title}</div>
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {items.map(it => (
+                          <tr key={it.label}>
+                            <td className="py-1 text-slate-600">{it.label}</td>
+                            <td className={`py-1 text-right whitespace-nowrap ${it.cls || 'text-slate-800'}`}>{it.value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              }
+
+              return (
+                <div key={g.label} className={idx > 0 ? 'print:break-before-page' : ''}>
+                  <h2 className="text-xl font-bold text-slate-800 mb-3">{g.label}</h2>
+                  {sistemRows.length > 0 && block('📊 Data Sistem (Kasir/POS)', 'text-purple-700 bg-purple-50', sistemRows)}
+                  {block('💰 Kas Real', 'text-blue-700 bg-blue-50', kasRealRows)}
+                  {block('📝 Nota & Utang Supplier', 'text-amber-700 bg-amber-50', utangRows)}
+                  {block('🔀 Laba Campuran (Kas Masuk − HPP Sistem)', 'text-slate-600 bg-slate-100', campuranRows)}
+                  {categoryBreakdown.length > 0 && (() => {
+                    const catItems = categoryBreakdown
+                      .map(row => ({ label: row.label, value: row.totals.get(g.label) || 0 }))
+                      .filter(it => it.value > 0)
+                      .map(it => ({ label: it.label, value: formatRupiah(it.value) }))
+                    return catItems.length > 0 ? block('📋 Pengeluaran per Kategori', 'text-slate-600 bg-slate-100', catItems) : null
+                  })()}
+                </div>
+              )
+            })}
+          </div>
+
+          <p className="text-xs text-slate-400 mt-3 print:hidden">Hanya menghitung entri berstatus &quot;Disetujui&quot;. Ekspor CSV omzet per cabang memakai data per cabang asli, bukan per kelompok laporan gabungan — sesuai kebutuhan pelaporan pajak.</p>
         </>
       )}
     </div>
