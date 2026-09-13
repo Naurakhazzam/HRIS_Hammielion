@@ -40,7 +40,10 @@ type PsychotestResult = {
   score: number
   overall_accuracy: number
   resilience: number
-  levels: { level: number; min: number; max: number; questions: number; correct: number; accuracy: number }[]
+  levels: {
+    level: number; min: number; max: number; questions: number; correct: number
+    accuracy: number; target_questions: number; throughput_ratio: number
+  }[]
 }
 
 type PsychometricResultRow = {
@@ -488,11 +491,17 @@ export default function RekrutmenPage() {
                     {detailPsychotest.levels.map(l => (
                       <div key={l.level} className="flex items-center justify-between text-xs text-slate-600 border-b border-purple-100 pb-1">
                         <span className="shrink-0">Level {l.level} ({l.min}-{l.max})</span>
-                        <span>{l.correct}/{l.questions} benar ({Math.round(l.accuracy * 100)}%)</span>
+                        <span>
+                          {l.correct}/{l.questions} benar ({Math.round(l.accuracy * 100)}%) — {l.questions}/{l.target_questions} soal target
+                          {l.throughput_ratio >= 1 ? ' ✓' : ` (${Math.round(l.throughput_ratio * 100)}%)`}
+                        </span>
                       </div>
                     ))}
                   </div>
-                  <p className="text-xs text-purple-700">Alat bantu skrining internal, bukan tes psikologi resmi — gunakan bersama hasil interview.</p>
+                  <p className="text-xs text-purple-700">
+                    Skor = ketepatan (60%) + kecepatan relatif target (40%) per level. Target soal masih perkiraan awal,
+                    akan disesuaikan setelah cukup banyak pelamar mengerjakan tes ini. Alat bantu skrining internal, bukan tes psikologi resmi — gunakan bersama hasil interview.
+                  </p>
                 </div>
               )}
 

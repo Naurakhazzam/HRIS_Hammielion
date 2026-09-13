@@ -39,7 +39,10 @@ export async function POST(req: NextRequest) {
       }
       byLevel.set(entry.level, entry)
     }
-    const normalizedLevels: { level: number; min: number; max: number; questions: number; correct: number; accuracy: number }[] = []
+    const normalizedLevels: {
+      level: number; min: number; max: number; questions: number; correct: number
+      accuracy: number; target_questions: number; throughput_ratio: number; level_score: number
+    }[] = []
     for (const cfg of PSYCHOTEST_LEVELS) {
       const entry = byLevel.get(cfg.level)
       if (!entry) {
@@ -51,13 +54,23 @@ export async function POST(req: NextRequest) {
       ) {
         return NextResponse.json({ error: 'Data hasil tes tidak valid.' }, { status: 400 })
       }
+      const accuracy = entry.questions > 0 ? entry.correct / entry.questions : 0
+      // Kecepatan (jumlah soal terjawab) ikut dinilai, bukan cuma ketepatan —
+      // dibatasi maksimal 1 supaya soal di atas target tidak menambah skor
+      // tanpa batas. accuracy tetap dibobot lebih berat (60%) karena buat
+      // kasir, benar itu lebih penting daripada asal cepat.
+      const throughput_ratio = Math.min(1, entry.questions / cfg.targetQuestions)
+      const level_score = accuracy * 0.6 + throughput_ratio * 0.4
       normalizedLevels.push({
         level: cfg.level,
         min: cfg.min,
         max: cfg.max,
         questions: entry.questions,
         correct: entry.correct,
-        accuracy: entry.questions > 0 ? entry.correct / entry.questions : 0,
+        accuracy,
+        target_questions: cfg.targetQuestions,
+        throughput_ratio,
+        level_score,
       })
     }
 
@@ -83,11 +96,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Tes sudah pernah Anda kerjakan sebelumnya.' }, { status: 400 })
     }
 
-    const [acc1, acc2, acc3] = normalizedLevels.map(l => l.accuracy)
+    const [acc1, , acc3] = normalizedLevels.map(l => l.accuracy)
+    const [score1, score2, score3] = normalizedLevels.map(l => l.level_score)
     const totalQuestions = normalizedLevels.reduce((sum, l) => sum + l.questions, 0)
     const totalCorrect = normalizedLevels.reduce((sum, l) => sum + l.correct, 0)
     const overall_accuracy = totalQuestions > 0 ? totalCorrect / totalQuestions : 0
-    const score = Math.round(acc1 * 20 + acc2 * 30 + acc3 * 50)
+    // Skor akhir sekarang gabungan ketepatan (60%) + kecepatan relatif terhadap
+    // target per level (40%), tetap dibobot makin berat di level yang lebih sulit.
+    const score = Math.round(score1 * 20 + score2 * 30 + score3 * 50)
+    // Resilience tetap murni soal ketepatan (bukan kecepatan) — mengukur apakah
+    // presisi bertahan waktu soal makin susah, terpisah dari soal cepat/lambat.
     const resilience = acc1 > 0 ? Math.min(1, acc3 / acc1) : (acc3 > 0 ? 1 : 0)
 
     const { error } = await supabaseAdmin.from('psychotest_results').insert({
