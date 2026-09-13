@@ -184,7 +184,10 @@ export default function LamaranPage() {
 
           <Field label="Ceritakan tentang diri Anda & kenapa kami harus menerima Anda">
             <textarea className={inputClass} rows={4} value={form.motivation}
-              onChange={e => update('motivation', e.target.value)} />
+              onChange={e => update('motivation', e.target.value)}
+              onPaste={e => e.preventDefault()}
+              onDrop={e => e.preventDefault()} />
+            <p className="text-xs text-slate-400">Tulis dengan kata-kata sendiri — kolom ini tidak bisa ditempel (paste).</p>
           </Field>
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-3 space-y-1">
