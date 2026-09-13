@@ -29,6 +29,7 @@ function hasActiveDescendant(item: NavNode, pathname: string): boolean {
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
   { name: 'Karyawan', href: '/karyawan', icon: '👥' },
+  { name: 'Rekrutmen', href: '/rekrutmen', icon: '📝' },
   {
     name: 'Absensi',
     href: '/absensi',

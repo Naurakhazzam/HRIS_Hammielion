@@ -13,7 +13,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // Route yang tidak memerlukan autentikasi
-const PUBLIC_ROUTES = ['/login', '/auth/callback']
+const PUBLIC_ROUTES = ['/login', '/auth/callback', '/lamaran', '/api/lamaran']
 
 // Route yang hanya bisa diakses sebelum login
 const AUTH_ROUTES = ['/login']
