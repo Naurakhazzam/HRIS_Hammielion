@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { APPLICANT_STATUS_LABELS } from '@/lib/recruitmentStatusLabels'
 
 // Endpoint publik (tanpa login) — pelamar isi form sendiri di /lamaran.
 // Sama seperti app/api/signup/route.ts: pakai service_role di server supaya
@@ -13,6 +14,10 @@ const supabaseAdmin = createClient(
 const GENDER_VALUES = ['male', 'female']
 const MARITAL_VALUES = ['single', 'married', 'divorced', 'widowed']
 const MIN_WORK_EXPERIENCE_LENGTH = 10
+
+function normalizePhone(phone: string): string {
+  return String(phone).replace(/\D/g, '')
+}
 
 async function generateApplicationCode(): Promise<string> {
   const year = new Date().getFullYear()
@@ -55,6 +60,24 @@ export async function POST(req: NextRequest) {
     }
     if (!MARITAL_VALUES.includes(marital_status)) {
       return NextResponse.json({ error: 'Status perkawinan tidak valid.' }, { status: 400 })
+    }
+
+    // Cegah submit dobel dari nomor HP yang sama selama lamaran sebelumnya masih
+    // berjalan. Kalau lamaran sebelumnya sudah "ditolak", tetap boleh melamar lagi.
+    const normalizedPhone = normalizePhone(phone)
+    const { data: existingRows } = await supabaseAdmin
+      .from('job_applicants')
+      .select('application_code, phone, status')
+    const existing = (existingRows || []).find(
+      r => normalizePhone(r.phone) === normalizedPhone && r.status !== 'ditolak'
+    )
+    if (existing) {
+      return NextResponse.json(
+        {
+          error: `Nomor HP ini sudah pernah mendaftar (kode: ${existing.application_code}, status: ${APPLICANT_STATUS_LABELS[existing.status] || existing.status}). Cek status lamaran Anda di /lamaran/status, atau hubungi HR kalau ini kesalahan.`,
+        },
+        { status: 400 }
+      )
     }
 
     const application_code = await generateApplicationCode()

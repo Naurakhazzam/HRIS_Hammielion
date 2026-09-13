@@ -2,14 +2,7 @@
 
 import { useState } from 'react'
 import { blockPasteOnChange, blockPasteHandlers } from '@/lib/noPaste'
-
-const STATUS_LABELS: Record<string, string> = {
-  baru: 'Baru Masuk',
-  screening: 'Sedang Diproses (Screening)',
-  interview: 'Dipanggil Interview',
-  diterima: 'Diterima',
-  ditolak: 'Belum Berhasil Kali Ini',
-}
+import { APPLICANT_STATUS_LABELS as STATUS_LABELS } from '@/lib/recruitmentStatusLabels'
 
 const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
 
