@@ -60,6 +60,8 @@ export async function POST(req: NextRequest) {
       existing_answers = Object.fromEntries((aData || []).map(a => [a.question_id, a.answer_text || '']))
     }
 
+    let psychometric_done: Record<string, boolean> = {}
+
     if (applicant.status === 'psikotes') {
       const { data: resultData } = await supabaseAdmin
         .from('psychotest_results')
@@ -67,6 +69,18 @@ export async function POST(req: NextRequest) {
         .eq('applicant_id', applicant.id)
         .maybeSingle()
       psychotest_done = !!resultData
+
+      const { data: psychometricData } = await supabaseAdmin
+        .from('psychometric_results')
+        .select('test_type')
+        .eq('applicant_id', applicant.id)
+      const doneTypes = new Set((psychometricData || []).map(r => r.test_type))
+      psychometric_done = {
+        disc: doneTypes.has('disc'),
+        personality: doneTypes.has('personality'),
+        work_preference: doneTypes.has('work_preference'),
+        integrity: doneTypes.has('integrity'),
+      }
     }
 
     return NextResponse.json({
@@ -79,6 +93,7 @@ export async function POST(req: NextRequest) {
       questions,
       existing_answers,
       psychotest_done,
+      psychometric_done,
     })
   } catch (err) {
     return NextResponse.json(
