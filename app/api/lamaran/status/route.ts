@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
 
     let questions: { id: string; question_text: string }[] = []
     let existing_answers: Record<string, string> = {}
+    let psychotest_done = false
 
     if (applicant.status === 'screening') {
       const { data: qData } = await supabaseAdmin
@@ -59,6 +60,15 @@ export async function POST(req: NextRequest) {
       existing_answers = Object.fromEntries((aData || []).map(a => [a.question_id, a.answer_text || '']))
     }
 
+    if (applicant.status === 'psikotes') {
+      const { data: resultData } = await supabaseAdmin
+        .from('psychotest_results')
+        .select('id')
+        .eq('applicant_id', applicant.id)
+        .maybeSingle()
+      psychotest_done = !!resultData
+    }
+
     return NextResponse.json({
       found: true,
       applicant_id: applicant.id,
@@ -68,6 +78,7 @@ export async function POST(req: NextRequest) {
       notice: NOTICE,
       questions,
       existing_answers,
+      psychotest_done,
     })
   } catch (err) {
     return NextResponse.json(

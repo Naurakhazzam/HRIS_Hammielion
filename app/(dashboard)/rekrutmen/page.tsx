@@ -36,6 +36,15 @@ type ScreeningAnswerRow = {
   screening_questions: { question_text: string; sort_order: number } | null
 }
 
+type PsychotestResult = {
+  score: number
+  accuracy: number
+  stability: number
+  total_questions: number
+  correct_count: number
+  interval_stats: { interval: number; questions: number; correct: number }[]
+}
+
 const GENDER_LABELS: Record<string, string> = { male: 'Laki-laki', female: 'Perempuan' }
 const MARITAL_LABELS: Record<string, string> = {
   single: 'Belum Menikah', married: 'Menikah', divorced: 'Cerai', widowed: 'Janda/Duda',
@@ -43,6 +52,7 @@ const MARITAL_LABELS: Record<string, string> = {
 const STATUS_OPTIONS = [
   { value: 'baru', label: 'Baru Masuk' },
   { value: 'screening', label: 'Screening' },
+  { value: 'psikotes', label: 'Psikotes' },
   { value: 'interview', label: 'Interview' },
   { value: 'diterima', label: 'Diterima' },
   { value: 'ditolak', label: 'Ditolak' },
@@ -51,9 +61,17 @@ const STATUS_LABELS: Record<string, string> = Object.fromEntries(STATUS_OPTIONS.
 const STATUS_COLORS: Record<string, string> = {
   baru: 'bg-slate-100 text-slate-700',
   screening: 'bg-amber-100 text-amber-700',
+  psikotes: 'bg-purple-100 text-purple-700',
   interview: 'bg-blue-100 text-blue-700',
   diterima: 'bg-green-100 text-green-700',
   ditolak: 'bg-red-100 text-red-700',
+}
+
+function psychotestLabel(score: number): string {
+  if (score >= 80) return 'Sangat Stabil'
+  if (score >= 60) return 'Stabil'
+  if (score >= 40) return 'Cukup'
+  return 'Kurang Stabil'
 }
 
 function calcAge(birthDate: string | null): number | null {
@@ -84,6 +102,7 @@ export default function RekrutmenPage() {
 
   const [detail, setDetail] = useState<Applicant | null>(null)
   const [detailAnswers, setDetailAnswers] = useState<{ question_text: string; answer_text: string }[]>([])
+  const [detailPsychotest, setDetailPsychotest] = useState<PsychotestResult | null>(null)
   const [detailStatus, setDetailStatus] = useState('')
   const [savingStatus, setSavingStatus] = useState(false)
 
@@ -182,11 +201,19 @@ export default function RekrutmenPage() {
       .sort((a, b) => (a.screening_questions!.sort_order - b.screening_questions!.sort_order))
       .map(r => ({ question_text: r.screening_questions!.question_text, answer_text: r.answer_text || '' }))
     setDetailAnswers(rows)
+
+    const { data: psychotest } = await supabase
+      .from('psychotest_results')
+      .select('score, accuracy, stability, total_questions, correct_count, interval_stats')
+      .eq('applicant_id', applicant.id)
+      .maybeSingle()
+    setDetailPsychotest(psychotest || null)
   }
 
   function closeDetail() {
     setDetail(null)
     setDetailAnswers([])
+    setDetailPsychotest(null)
   }
 
   async function saveStatus() {
@@ -389,6 +416,35 @@ export default function RekrutmenPage() {
                       <p className="text-sm text-slate-600 whitespace-pre-wrap">{a.answer_text || '-'}</p>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {detailPsychotest && (
+                <div className="mb-3 bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-3">
+                  <p className="text-sm font-medium text-purple-800">Hasil Psikotes (Tes Hitung Cepat)</p>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-bold text-purple-700">{detailPsychotest.score}</span>
+                    <span className="text-sm text-slate-600">/ 100 — {psychotestLabel(detailPsychotest.score)}</span>
+                  </div>
+                  <p className="text-sm text-slate-600">
+                    {detailPsychotest.correct_count} benar dari {detailPsychotest.total_questions} soal
+                    ({Math.round(detailPsychotest.accuracy * 100)}% akurasi)
+                  </p>
+                  <div className="space-y-1">
+                    {detailPsychotest.interval_stats.map(s => {
+                      const maxQ = Math.max(...detailPsychotest.interval_stats.map(x => x.questions), 1)
+                      return (
+                        <div key={s.interval} className="flex items-center gap-2 text-xs text-slate-500">
+                          <span className="w-16 shrink-0">Interval {s.interval}</span>
+                          <div className="flex-1 h-2 bg-purple-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-purple-500 rounded-full" style={{ width: `${(s.questions / maxQ) * 100}%` }} />
+                          </div>
+                          <span className="w-24 shrink-0 text-right">{s.correct}/{s.questions} benar</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p className="text-xs text-purple-700">Alat bantu skrining internal, bukan tes psikologi resmi — gunakan bersama hasil interview.</p>
                 </div>
               )}
 
