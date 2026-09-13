@@ -138,6 +138,7 @@ export default function RekrutmenPage() {
   const router = useRouter()
   const [applicants, setApplicants] = useState<Applicant[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<'semua' | string>('semua')
   const [lamaranUrl, setLamaranUrl] = useState('')
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [copied, setCopied] = useState(false)
@@ -287,6 +288,12 @@ export default function RekrutmenPage() {
     router.push(`/karyawan?from_applicant=${detail.id}`)
   }
 
+  const tabs = [
+    { value: 'semua', label: 'Semua', count: applicants.length },
+    ...STATUS_OPTIONS.map(o => ({ value: o.value, label: o.label, count: applicants.filter(a => a.status === o.value).length })),
+  ]
+  const filteredApplicants = activeTab === 'semua' ? applicants : applicants.filter(a => a.status === activeTab)
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-slate-800 mb-2">Rekrutmen</h1>
@@ -368,8 +375,23 @@ export default function RekrutmenPage() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200">
-          <h2 className="text-base font-semibold text-slate-800">Daftar Pelamar ({applicants.length})</h2>
+        <div className="px-6 pt-4 border-b border-slate-200">
+          <h2 className="text-base font-semibold text-slate-800 mb-3">Daftar Pelamar ({filteredApplicants.length})</h2>
+          <div className="flex gap-1 overflow-x-auto -mb-px">
+            {tabs.map(tab => (
+              <button
+                key={tab.value}
+                onClick={() => setActiveTab(tab.value)}
+                className={`shrink-0 px-3 py-2 text-sm font-medium border-b-2 transition ${
+                  activeTab === tab.value
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {tab.label} <span className="text-xs text-slate-400">({tab.count})</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -388,10 +410,10 @@ export default function RekrutmenPage() {
               {loading && (
                 <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
               )}
-              {!loading && applicants.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar masuk.</td></tr>
+              {!loading && filteredApplicants.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
               )}
-              {applicants.map(a => (
+              {filteredApplicants.map(a => (
                 <tr key={a.id} className="border-t border-slate-100">
                   <td className="px-4 py-2 font-mono text-xs text-blue-600">{a.application_code}</td>
                   <td className="px-4 py-2 text-slate-800">{a.full_name}</td>
