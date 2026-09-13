@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { toWhatsAppLink } from '@/lib/waLink'
 import QRCode from 'qrcode'
 
 type Applicant = {
@@ -312,7 +313,12 @@ export default function RekrutmenPage() {
                   <td className="px-4 py-2 text-slate-800">{a.full_name}</td>
                   <td className="px-4 py-2 text-slate-600">{calcAge(a.birth_date) ?? '-'}</td>
                   <td className="px-4 py-2 text-slate-600">{a.education}</td>
-                  <td className="px-4 py-2 text-slate-600">{a.phone}</td>
+                  <td className="px-4 py-2">
+                    <a href={toWhatsAppLink(a.phone)} target="_blank" rel="noopener noreferrer"
+                      className="text-green-600 hover:underline" title="Chat via WhatsApp">
+                      {a.phone}
+                    </a>
+                  </td>
                   <td className="px-4 py-2">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[a.status] || 'bg-slate-100 text-slate-700'}`}>
                       {STATUS_LABELS[a.status] || a.status}
@@ -346,7 +352,13 @@ export default function RekrutmenPage() {
                 <p><span className="text-slate-500">Tempat Lahir:</span> {detail.birth_place || '-'}</p>
                 <p><span className="text-slate-500">Tanggal Lahir:</span> {detail.birth_date || '-'}</p>
                 <p className="col-span-2"><span className="text-slate-500">Alamat:</span> {detail.address || '-'}</p>
-                <p><span className="text-slate-500">Telepon:</span> {detail.phone}</p>
+                <p>
+                  <span className="text-slate-500">Telepon:</span>{' '}
+                  <a href={toWhatsAppLink(detail.phone)} target="_blank" rel="noopener noreferrer"
+                    className="text-green-600 hover:underline" title="Chat via WhatsApp">
+                    {detail.phone}
+                  </a>
+                </p>
                 <p><span className="text-slate-500">Pendidikan:</span> {detail.education}</p>
                 <p>
                   <span className="text-slate-500">Status Perkawinan:</span> {MARITAL_LABELS[detail.marital_status] || detail.marital_status}
