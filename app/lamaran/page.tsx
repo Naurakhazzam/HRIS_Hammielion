@@ -176,10 +176,10 @@ export default function LamaranPage() {
             </select>
           </Field>
 
-          <Field label="Pengalaman Kerja">
-            <textarea className={inputClass} rows={3} value={form.work_experience}
+          <Field label="Pengalaman Kerja" required>
+            <textarea className={inputClass} rows={3} required minLength={10} value={form.work_experience}
               onChange={e => update('work_experience', e.target.value)}
-              placeholder="Ceritakan pengalaman kerja sebelumnya (jika ada)" />
+              placeholder='Ceritakan pengalaman kerja Anda. Kalau belum pernah bekerja, tulis "Belum ada pengalaman kerja".' />
           </Field>
 
           <Field label="Ceritakan tentang diri Anda & kenapa kami harus menerima Anda">

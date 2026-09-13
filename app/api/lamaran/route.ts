@@ -12,6 +12,7 @@ const supabaseAdmin = createClient(
 
 const GENDER_VALUES = ['male', 'female']
 const MARITAL_VALUES = ['single', 'married', 'divorced', 'widowed']
+const MIN_WORK_EXPERIENCE_LENGTH = 10
 
 async function generateApplicationCode(): Promise<string> {
   const year = new Date().getFullYear()
@@ -43,6 +44,12 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
+    if (!work_experience || String(work_experience).trim().length < MIN_WORK_EXPERIENCE_LENGTH) {
+      return NextResponse.json(
+        { error: 'Pengalaman kerja wajib diisi (minimal 10 karakter). Kalau belum pernah bekerja, tulis "Belum ada pengalaman kerja".' },
+        { status: 400 }
+      )
+    }
     if (!GENDER_VALUES.includes(gender)) {
       return NextResponse.json({ error: 'Jenis kelamin tidak valid.' }, { status: 400 })
     }
@@ -63,7 +70,7 @@ export async function POST(req: NextRequest) {
       marital_status,
       number_of_children: marital_status === 'married' && number_of_children !== '' ? Number(number_of_children) : null,
       education,
-      work_experience: work_experience || null,
+      work_experience: String(work_experience).trim(),
       motivation: motivation || null,
     })
 
