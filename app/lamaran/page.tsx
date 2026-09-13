@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 const GENDER_OPTIONS = [
   { value: 'male', label: 'Laki-laki' },
@@ -49,9 +50,19 @@ export default function LamaranPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [applicationCode, setApplicationCode] = useState('')
+  const [uploadFormUrl, setUploadFormUrl] = useState('')
 
-  const uploadFormUrl = process.env.NEXT_PUBLIC_UPLOAD_FORM_URL || ''
   const age = calcAge(form.birth_date)
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase
+      .from('recruitment_settings')
+      .select('upload_form_url')
+      .eq('id', 1)
+      .maybeSingle()
+      .then(({ data }) => setUploadFormUrl(data?.upload_form_url || ''))
+  }, [])
 
   function update<K extends keyof typeof emptyForm>(key: K, value: string) {
     setForm(prev => ({ ...prev, [key]: value }))
