@@ -184,7 +184,19 @@ export default function LamaranPage() {
 
           <Field label="Ceritakan tentang diri Anda & kenapa kami harus menerima Anda">
             <textarea className={inputClass} rows={4} value={form.motivation}
-              onChange={e => update('motivation', e.target.value)}
+              onChange={e => {
+                // Sebagian browser HP (chip clipboard/keyboard bawaan) menempelkan teks lewat
+                // event 'input' biasa, bukan event 'paste' — jadi onPaste saja tidak cukup.
+                // inputType di sini mengungkap jenis perubahan aslinya, termasuk saat itu
+                // sebetulnya tempelan yang menyamar sebagai input biasa.
+                const inputType = (e.nativeEvent as InputEvent).inputType
+                const pasteLikeTypes = ['insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromDrop', 'insertFromYank', 'insertReplacementText']
+                if (inputType && pasteLikeTypes.includes(inputType)) {
+                  e.currentTarget.value = form.motivation
+                  return
+                }
+                update('motivation', e.target.value)
+              }}
               onPaste={e => e.preventDefault()}
               onDrop={e => e.preventDefault()} />
             <p className="text-xs text-slate-400">Tulis dengan kata-kata sendiri — kolom ini tidak bisa ditempel (paste).</p>
