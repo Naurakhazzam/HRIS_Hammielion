@@ -43,6 +43,54 @@ type PsychotestResult = {
   levels: { level: number; min: number; max: number; questions: number; correct: number; accuracy: number }[]
 }
 
+type PsychometricResultRow = {
+  test_type: 'disc' | 'personality' | 'work_preference' | 'integrity'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  result_summary: any
+}
+
+const PSYCHOMETRIC_LABELS: Record<string, string> = {
+  disc: 'DISC — Gaya Kerja',
+  personality: 'Tipe Kepribadian Kerja',
+  work_preference: 'Preferensi Kerja',
+  integrity: 'Sikap & Etika Kerja',
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderPsychometricSummary(testType: string, summary: any) {
+  if (testType === 'disc') {
+    return (
+      <p className="text-sm text-slate-600">
+        Gaya dominan: <span className="font-medium">{summary.dominant_traits.join(' & ')}</span> — {summary.description}
+      </p>
+    )
+  }
+  if (testType === 'personality') {
+    return (
+      <p className="text-sm text-slate-600">
+        Tipe: <span className="font-medium">{summary.type}</span> — {summary.description}
+      </p>
+    )
+  }
+  if (testType === 'work_preference') {
+    return (
+      <div className="space-y-1">
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+        {summary.dimensions.map((d: any) => (
+          <div key={d.key} className="flex justify-between text-sm text-slate-600">
+            <span>{d.label}</span><span className="font-medium">{d.level}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <p className="text-sm text-slate-600">
+      Kecenderungan: <span className="font-medium">{summary.level}</span> ({summary.percentage}%)
+    </p>
+  )
+}
+
 const GENDER_LABELS: Record<string, string> = { male: 'Laki-laki', female: 'Perempuan' }
 const MARITAL_LABELS: Record<string, string> = {
   single: 'Belum Menikah', married: 'Menikah', divorced: 'Cerai', widowed: 'Janda/Duda',
@@ -101,6 +149,7 @@ export default function RekrutmenPage() {
   const [detail, setDetail] = useState<Applicant | null>(null)
   const [detailAnswers, setDetailAnswers] = useState<{ question_text: string; answer_text: string }[]>([])
   const [detailPsychotest, setDetailPsychotest] = useState<PsychotestResult | null>(null)
+  const [detailPsychometrics, setDetailPsychometrics] = useState<PsychometricResultRow[]>([])
   const [detailStatus, setDetailStatus] = useState('')
   const [savingStatus, setSavingStatus] = useState(false)
 
@@ -206,12 +255,19 @@ export default function RekrutmenPage() {
       .eq('applicant_id', applicant.id)
       .maybeSingle()
     setDetailPsychotest(psychotest || null)
+
+    const { data: psychometrics } = await supabase
+      .from('psychometric_results')
+      .select('test_type, result_summary')
+      .eq('applicant_id', applicant.id)
+    setDetailPsychometrics(psychometrics || [])
   }
 
   function closeDetail() {
     setDetail(null)
     setDetailAnswers([])
     setDetailPsychotest(null)
+    setDetailPsychometrics([])
   }
 
   async function saveStatus() {
@@ -437,6 +493,21 @@ export default function RekrutmenPage() {
                     ))}
                   </div>
                   <p className="text-xs text-purple-700">Alat bantu skrining internal, bukan tes psikologi resmi — gunakan bersama hasil interview.</p>
+                </div>
+              )}
+
+              {detailPsychometrics.length > 0 && (
+                <div className="mb-3 bg-indigo-50 border border-indigo-200 rounded-lg p-3 space-y-3">
+                  <p className="text-sm font-medium text-indigo-800">Profil Psikometri</p>
+                  {detailPsychometrics.map(r => (
+                    <div key={r.test_type} className="border-b border-indigo-100 pb-2 last:border-b-0 last:pb-0">
+                      <p className="text-xs font-medium text-slate-500 mb-1">{PSYCHOMETRIC_LABELS[r.test_type] || r.test_type}</p>
+                      {renderPsychometricSummary(r.test_type, r.result_summary)}
+                    </div>
+                  ))}
+                  <p className="text-xs text-indigo-700">
+                    DISC & Tes Sikap dibangun sendiri (bukan replika instrumen berlisensi), berdasarkan jawaban self-report pelamar — kecenderungan, bukan diagnosis resmi.
+                  </p>
                 </div>
               )}
 
