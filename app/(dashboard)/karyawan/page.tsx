@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 
@@ -114,10 +115,45 @@ export default function KaryawanPage() {
   const photoRef = useRef<HTMLInputElement>(null)
   const editPhotoRef = useRef<HTMLInputElement>(null)
 
+  const [prefillNotice, setPrefillNotice] = useState('')
+  const searchParams = useSearchParams()
+
   const supabase = createClient()
 
   useEffect(() => { fetchReferenceData() }, [])
   useEffect(() => { fetchEmployees() }, [filterBranch, filterDept])
+  useEffect(() => {
+    const applicantId = searchParams.get('from_applicant')
+    if (applicantId) prefillFromApplicant(applicantId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function prefillFromApplicant(applicantId: string) {
+    const { data: applicant } = await supabase
+      .from('job_applicants')
+      .select('full_name, gender, birth_date, birth_place, address, phone, marital_status, number_of_children, education')
+      .eq('id', applicantId)
+      .maybeSingle()
+    if (!applicant) return
+
+    const code = await generateEmployeeCode()
+    setFormData({
+      ...emptyForm,
+      employee_code: code,
+      join_date: new Date().toISOString().split('T')[0],
+      full_name: applicant.full_name || '',
+      phone: applicant.phone || '',
+      birth_date: applicant.birth_date || '',
+      birth_place: applicant.birth_place || '',
+      gender: applicant.gender || '',
+      address: applicant.address || '',
+      marital_status: applicant.marital_status || '',
+      dependants: String(applicant.number_of_children ?? 0),
+      education: applicant.education || '',
+    })
+    setShowForm(true)
+    setPrefillNotice(`Data dari pelamar "${applicant.full_name}" sudah dimuat — lengkapi Kode Karyawan, Cabang, Jabatan, dan Gaji.`)
+  }
 
   async function fetchReferenceData() {
     const [bRes, dRes, pRes] = await Promise.all([
@@ -532,6 +568,12 @@ export default function KaryawanPage() {
       {message && (
         <div className={`p-4 mb-6 rounded-lg border ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
           {message.text}
+        </div>
+      )}
+
+      {prefillNotice && (
+        <div className="p-4 mb-6 rounded-lg border bg-blue-50 border-blue-200 text-blue-700 text-sm">
+          {prefillNotice}
         </div>
       )}
 

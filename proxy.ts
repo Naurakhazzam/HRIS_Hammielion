@@ -14,6 +14,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 // Route yang tidak memerlukan autentikasi
 const PUBLIC_ROUTES = ['/login', '/auth/callback', '/lamaran', '/api/lamaran']
+// Catatan: '/lamaran' dan '/api/lamaran' di atas sudah otomatis mencakup
+// '/lamaran/status', '/api/lamaran/status', dan '/api/lamaran/screening-answers'
+// lewat pengecekan startsWith() di bawah.
 
 // Route yang hanya bisa diakses sebelum login
 const AUTH_ROUTES = ['/login']

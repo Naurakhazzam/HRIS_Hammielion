@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
 const GENDER_OPTIONS = [
@@ -100,6 +101,9 @@ export default function LamaranPage() {
           <p className="text-sm text-slate-600">Simpan kode lamaran Anda:</p>
           <p className="text-xl font-mono font-bold text-blue-600">{applicationCode}</p>
           <p className="text-sm text-slate-600">Tim HR akan menghubungi Anda melalui nomor telepon yang didaftarkan.</p>
+          <Link href="/lamaran/status" className="inline-block text-sm text-blue-600 underline">
+            Cek status lamaran Anda di sini
+          </Link>
         </div>
       </div>
     )

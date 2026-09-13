@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import QRCode from 'qrcode'
 
@@ -9,10 +10,49 @@ type Applicant = {
   application_code: string
   full_name: string
   gender: string
+  birth_place: string | null
   birth_date: string | null
-  education: string
+  address: string | null
   phone: string
+  marital_status: string
+  number_of_children: number | null
+  education: string
+  work_experience: string | null
+  motivation: string | null
+  status: string
   created_at: string
+}
+
+type ScreeningQuestion = {
+  id: string
+  question_text: string
+  sort_order: number
+  is_active: boolean
+}
+
+type ScreeningAnswerRow = {
+  answer_text: string | null
+  screening_questions: { question_text: string; sort_order: number } | null
+}
+
+const GENDER_LABELS: Record<string, string> = { male: 'Laki-laki', female: 'Perempuan' }
+const MARITAL_LABELS: Record<string, string> = {
+  single: 'Belum Menikah', married: 'Menikah', divorced: 'Cerai', widowed: 'Janda/Duda',
+}
+const STATUS_OPTIONS = [
+  { value: 'baru', label: 'Baru Masuk' },
+  { value: 'screening', label: 'Screening' },
+  { value: 'interview', label: 'Interview' },
+  { value: 'diterima', label: 'Diterima' },
+  { value: 'ditolak', label: 'Ditolak' },
+]
+const STATUS_LABELS: Record<string, string> = Object.fromEntries(STATUS_OPTIONS.map(o => [o.value, o.label]))
+const STATUS_COLORS: Record<string, string> = {
+  baru: 'bg-slate-100 text-slate-700',
+  screening: 'bg-amber-100 text-amber-700',
+  interview: 'bg-blue-100 text-blue-700',
+  diterima: 'bg-green-100 text-green-700',
+  ditolak: 'bg-red-100 text-red-700',
 }
 
 function calcAge(birthDate: string | null): number | null {
@@ -27,6 +67,7 @@ function calcAge(birthDate: string | null): number | null {
 }
 
 export default function RekrutmenPage() {
+  const router = useRouter()
   const [applicants, setApplicants] = useState<Applicant[]>([])
   const [loading, setLoading] = useState(true)
   const [lamaranUrl, setLamaranUrl] = useState('')
@@ -36,16 +77,33 @@ export default function RekrutmenPage() {
   const [savingUrl, setSavingUrl] = useState(false)
   const [urlSaved, setUrlSaved] = useState(false)
 
+  const [questions, setQuestions] = useState<ScreeningQuestion[]>([])
+  const [newQuestion, setNewQuestion] = useState('')
+  const [addingQuestion, setAddingQuestion] = useState(false)
+
+  const [detail, setDetail] = useState<Applicant | null>(null)
+  const [detailAnswers, setDetailAnswers] = useState<{ question_text: string; answer_text: string }[]>([])
+  const [detailStatus, setDetailStatus] = useState('')
+  const [savingStatus, setSavingStatus] = useState(false)
+
   const supabase = createClient()
 
   const fetchApplicants = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_date, education, phone, created_at')
+      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at')
       .order('created_at', { ascending: false })
     setApplicants(data || [])
     setLoading(false)
+  }, [supabase])
+
+  const fetchQuestions = useCallback(async () => {
+    const { data } = await supabase
+      .from('screening_questions')
+      .select('id, question_text, sort_order, is_active')
+      .order('sort_order')
+    setQuestions(data || [])
   }, [supabase])
 
   useEffect(() => {
@@ -53,6 +111,7 @@ export default function RekrutmenPage() {
     // cascading-render yang jadi target rule ini.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchApplicants()
+    fetchQuestions()
 
     const url = `${window.location.origin}/lamaran`
     QRCode.toDataURL(url, { width: 320, margin: 1 }).then(dataUrl => {
@@ -67,7 +126,7 @@ export default function RekrutmenPage() {
       .maybeSingle()
       .then(({ data }) => setUploadFormUrl(data?.upload_form_url || ''))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchApplicants])
+  }, [fetchApplicants, fetchQuestions])
 
   function copyLink() {
     navigator.clipboard.writeText(lamaranUrl)
@@ -92,6 +151,55 @@ export default function RekrutmenPage() {
     setSavingUrl(false)
     setUrlSaved(true)
     setTimeout(() => setUrlSaved(false), 2000)
+  }
+
+  async function addQuestion(e: React.FormEvent) {
+    e.preventDefault()
+    if (!newQuestion.trim()) return
+    setAddingQuestion(true)
+    const nextOrder = questions.length > 0 ? Math.max(...questions.map(q => q.sort_order)) + 1 : 0
+    await supabase.from('screening_questions').insert({ question_text: newQuestion.trim(), sort_order: nextOrder })
+    setNewQuestion('')
+    setAddingQuestion(false)
+    fetchQuestions()
+  }
+
+  async function toggleQuestionActive(q: ScreeningQuestion) {
+    await supabase.from('screening_questions').update({ is_active: !q.is_active }).eq('id', q.id)
+    fetchQuestions()
+  }
+
+  async function openDetail(applicant: Applicant) {
+    setDetail(applicant)
+    setDetailStatus(applicant.status)
+    const { data } = await supabase
+      .from('screening_answers')
+      .select('answer_text, screening_questions(question_text, sort_order)')
+      .eq('applicant_id', applicant.id)
+    const rows = ((data || []) as unknown as ScreeningAnswerRow[])
+      .filter(r => r.screening_questions)
+      .sort((a, b) => (a.screening_questions!.sort_order - b.screening_questions!.sort_order))
+      .map(r => ({ question_text: r.screening_questions!.question_text, answer_text: r.answer_text || '' }))
+    setDetailAnswers(rows)
+  }
+
+  function closeDetail() {
+    setDetail(null)
+    setDetailAnswers([])
+  }
+
+  async function saveStatus() {
+    if (!detail) return
+    setSavingStatus(true)
+    await supabase.from('job_applicants').update({ status: detailStatus }).eq('id', detail.id)
+    setSavingStatus(false)
+    setDetail({ ...detail, status: detailStatus })
+    fetchApplicants()
+  }
+
+  function goToJadikanKaryawan() {
+    if (!detail) return
+    router.push(`/karyawan?from_applicant=${detail.id}`)
   }
 
   return (
@@ -145,6 +253,35 @@ export default function RekrutmenPage() {
         </div>
       </div>
 
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+        <h2 className="text-base font-semibold text-slate-800 mb-1">Kelola Pertanyaan Screening</h2>
+        <p className="text-sm text-slate-500 mb-3">
+          Pertanyaan aktif akan otomatis muncul untuk dijawab pelamar yang statusnya diubah jadi &quot;Screening&quot;
+          lewat halaman cek status mereka.
+        </p>
+        <form onSubmit={addQuestion} className="flex gap-2 mb-3">
+          <input value={newQuestion} onChange={e => setNewQuestion(e.target.value)}
+            placeholder="Tulis pertanyaan baru..."
+            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          <button type="submit" disabled={addingQuestion}
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50">
+            Tambah
+          </button>
+        </form>
+        <div className="space-y-2">
+          {questions.length === 0 && <p className="text-sm text-slate-400">Belum ada pertanyaan screening.</p>}
+          {questions.map(q => (
+            <div key={q.id} className="flex items-center justify-between gap-3 px-3 py-2 border border-slate-200 rounded-lg">
+              <span className={`text-sm ${q.is_active ? 'text-slate-800' : 'text-slate-400 line-through'}`}>{q.question_text}</span>
+              <button onClick={() => toggleQuestionActive(q)}
+                className={`text-xs px-2 py-1 rounded-lg border shrink-0 ${q.is_active ? 'border-green-300 text-green-700 bg-green-50' : 'border-slate-300 text-slate-500 bg-slate-50'}`}>
+                {q.is_active ? 'Aktif' : 'Nonaktif'}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200">
           <h2 className="text-base font-semibold text-slate-800">Daftar Pelamar ({applicants.length})</h2>
@@ -158,15 +295,16 @@ export default function RekrutmenPage() {
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Usia</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Pendidikan</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Telepon</th>
-                <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Tanggal Daftar</th>
+                <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Status</th>
+                <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600"></th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
               )}
               {!loading && applicants.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar masuk.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar masuk.</td></tr>
               )}
               {applicants.map(a => (
                 <tr key={a.id} className="border-t border-slate-100">
@@ -175,13 +313,96 @@ export default function RekrutmenPage() {
                   <td className="px-4 py-2 text-slate-600">{calcAge(a.birth_date) ?? '-'}</td>
                   <td className="px-4 py-2 text-slate-600">{a.education}</td>
                   <td className="px-4 py-2 text-slate-600">{a.phone}</td>
-                  <td className="px-4 py-2 text-slate-600">{new Date(a.created_at).toLocaleDateString('id-ID')}</td>
+                  <td className="px-4 py-2">
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[a.status] || 'bg-slate-100 text-slate-700'}`}>
+                      {STATUS_LABELS[a.status] || a.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <button onClick={() => openDetail(a)} className="text-blue-600 text-xs font-medium hover:underline">Detail</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {detail && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6">
+              <div className="flex items-start justify-between mb-4 pb-2 border-b border-slate-100">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-800">{detail.full_name}</h2>
+                  <p className="text-xs font-mono text-blue-600">{detail.application_code}</p>
+                </div>
+                <button onClick={closeDetail} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm mb-4">
+                <p><span className="text-slate-500">Jenis Kelamin:</span> {GENDER_LABELS[detail.gender] || detail.gender}</p>
+                <p><span className="text-slate-500">Usia:</span> {calcAge(detail.birth_date) ?? '-'} tahun</p>
+                <p><span className="text-slate-500">Tempat Lahir:</span> {detail.birth_place || '-'}</p>
+                <p><span className="text-slate-500">Tanggal Lahir:</span> {detail.birth_date || '-'}</p>
+                <p className="col-span-2"><span className="text-slate-500">Alamat:</span> {detail.address || '-'}</p>
+                <p><span className="text-slate-500">Telepon:</span> {detail.phone}</p>
+                <p><span className="text-slate-500">Pendidikan:</span> {detail.education}</p>
+                <p>
+                  <span className="text-slate-500">Status Perkawinan:</span> {MARITAL_LABELS[detail.marital_status] || detail.marital_status}
+                  {detail.marital_status === 'married' && ` (${detail.number_of_children ?? 0} anak)`}
+                </p>
+              </div>
+
+              {detail.work_experience && (
+                <div className="mb-3">
+                  <p className="text-sm font-medium text-slate-700 mb-1">Pengalaman Kerja</p>
+                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{detail.work_experience}</p>
+                </div>
+              )}
+
+              {detail.motivation && (
+                <div className="mb-3">
+                  <p className="text-sm font-medium text-slate-700 mb-1">Tentang Diri & Motivasi</p>
+                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{detail.motivation}</p>
+                </div>
+              )}
+
+              {detailAnswers.length > 0 && (
+                <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                  <p className="text-sm font-medium text-amber-800">Jawaban Screening</p>
+                  {detailAnswers.map((a, i) => (
+                    <div key={i}>
+                      <p className="text-sm font-medium text-slate-700">{a.question_text}</p>
+                      <p className="text-sm text-slate-600 whitespace-pre-wrap">{a.answer_text || '-'}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+                <div className="flex gap-2 items-center">
+                  <label className="text-sm text-slate-600">Status:</label>
+                  <select value={detailStatus} onChange={e => setDetailStatus(e.target.value)}
+                    className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                    {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <button onClick={saveStatus} disabled={savingStatus || detailStatus === detail.status}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50">
+                    {savingStatus ? 'Menyimpan...' : 'Simpan'}
+                  </button>
+                </div>
+                {detail.status === 'diterima' && (
+                  <button onClick={goToJadikanKaryawan}
+                    className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium">
+                    Jadikan Karyawan →
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
