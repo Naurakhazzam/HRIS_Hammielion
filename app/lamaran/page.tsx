@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { blockPasteOnChange, blockPasteHandlers } from '@/lib/noPaste'
 
 const GENDER_OPTIONS = [
   { value: 'male', label: 'Laki-laki' },
@@ -182,27 +183,16 @@ export default function LamaranPage() {
 
           <Field label="Pengalaman Kerja" required>
             <textarea className={inputClass} rows={3} required minLength={10} value={form.work_experience}
-              onChange={e => update('work_experience', e.target.value)}
+              onChange={blockPasteOnChange(form.work_experience, v => update('work_experience', v))}
+              {...blockPasteHandlers}
               placeholder='Ceritakan pengalaman kerja Anda. Kalau belum pernah bekerja, tulis "Belum ada pengalaman kerja".' />
+            <p className="text-xs text-slate-400">Tulis dengan kata-kata sendiri — kolom ini tidak bisa ditempel (paste).</p>
           </Field>
 
           <Field label="Ceritakan tentang diri Anda & kenapa kami harus menerima Anda">
             <textarea className={inputClass} rows={4} value={form.motivation}
-              onChange={e => {
-                // Sebagian browser HP (chip clipboard/keyboard bawaan) menempelkan teks lewat
-                // event 'input' biasa, bukan event 'paste' — jadi onPaste saja tidak cukup.
-                // inputType di sini mengungkap jenis perubahan aslinya, termasuk saat itu
-                // sebetulnya tempelan yang menyamar sebagai input biasa.
-                const inputType = (e.nativeEvent as InputEvent).inputType
-                const pasteLikeTypes = ['insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromDrop', 'insertFromYank', 'insertReplacementText']
-                if (inputType && pasteLikeTypes.includes(inputType)) {
-                  e.currentTarget.value = form.motivation
-                  return
-                }
-                update('motivation', e.target.value)
-              }}
-              onPaste={e => e.preventDefault()}
-              onDrop={e => e.preventDefault()} />
+              onChange={blockPasteOnChange(form.motivation, v => update('motivation', v))}
+              {...blockPasteHandlers} />
             <p className="text-xs text-slate-400">Tulis dengan kata-kata sendiri — kolom ini tidak bisa ditempel (paste).</p>
           </Field>
 

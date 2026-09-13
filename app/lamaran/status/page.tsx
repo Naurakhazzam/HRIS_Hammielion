@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { blockPasteOnChange, blockPasteHandlers } from '@/lib/noPaste'
 
 const STATUS_LABELS: Record<string, string> = {
   baru: 'Baru Masuk',
@@ -24,10 +25,6 @@ type StatusResult = {
   questions?: Question[]
   existing_answers?: Record<string, string>
 }
-
-// Sama seperti proteksi di app/lamaran/page.tsx — sebagian browser HP menempelkan
-// teks lewat event 'input' biasa (chip clipboard keyboard), bukan event 'paste'.
-const PASTE_LIKE_TYPES = ['insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromDrop', 'insertFromYank', 'insertReplacementText']
 
 export default function CekStatusLamaranPage() {
   const [full_name, setFullName] = useState('')
@@ -146,16 +143,8 @@ export default function CekStatusLamaranPage() {
                       rows={3}
                       required
                       value={answers[q.id] || ''}
-                      onChange={e => {
-                        const inputType = (e.nativeEvent as InputEvent).inputType
-                        if (inputType && PASTE_LIKE_TYPES.includes(inputType)) {
-                          e.currentTarget.value = answers[q.id] || ''
-                          return
-                        }
-                        updateAnswer(q.id, e.target.value)
-                      }}
-                      onPaste={e => e.preventDefault()}
-                      onDrop={e => e.preventDefault()}
+                      onChange={blockPasteOnChange(answers[q.id] || '', v => updateAnswer(q.id, v))}
+                      {...blockPasteHandlers}
                     />
                   </div>
                 ))}
