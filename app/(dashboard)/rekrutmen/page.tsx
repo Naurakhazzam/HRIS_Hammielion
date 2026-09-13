@@ -38,11 +38,9 @@ type ScreeningAnswerRow = {
 
 type PsychotestResult = {
   score: number
-  accuracy: number
-  stability: number
-  total_questions: number
-  correct_count: number
-  interval_stats: { interval: number; questions: number; correct: number }[]
+  overall_accuracy: number
+  resilience: number
+  levels: { level: number; min: number; max: number; questions: number; correct: number; accuracy: number }[]
 }
 
 const GENDER_LABELS: Record<string, string> = { male: 'Laki-laki', female: 'Perempuan' }
@@ -204,7 +202,7 @@ export default function RekrutmenPage() {
 
     const { data: psychotest } = await supabase
       .from('psychotest_results')
-      .select('score, accuracy, stability, total_questions, correct_count, interval_stats')
+      .select('score, overall_accuracy, resilience, levels')
       .eq('applicant_id', applicant.id)
       .maybeSingle()
     setDetailPsychotest(psychotest || null)
@@ -421,28 +419,22 @@ export default function RekrutmenPage() {
 
               {detailPsychotest && (
                 <div className="mb-3 bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-3">
-                  <p className="text-sm font-medium text-purple-800">Hasil Psikotes (Tes Hitung Cepat)</p>
+                  <p className="text-sm font-medium text-purple-800">Hasil Psikotes (Tes Hitung Cepat 3 Level)</p>
                   <div className="flex items-baseline gap-2">
                     <span className="text-3xl font-bold text-purple-700">{detailPsychotest.score}</span>
                     <span className="text-sm text-slate-600">/ 100 — {psychotestLabel(detailPsychotest.score)}</span>
                   </div>
                   <p className="text-sm text-slate-600">
-                    {detailPsychotest.correct_count} benar dari {detailPsychotest.total_questions} soal
-                    ({Math.round(detailPsychotest.accuracy * 100)}% akurasi)
+                    Akurasi keseluruhan: {Math.round(detailPsychotest.overall_accuracy * 100)}% — Mempertahankan{' '}
+                    {Math.round(detailPsychotest.resilience * 100)}% performa saat soal makin sulit
                   </p>
                   <div className="space-y-1">
-                    {detailPsychotest.interval_stats.map(s => {
-                      const maxQ = Math.max(...detailPsychotest.interval_stats.map(x => x.questions), 1)
-                      return (
-                        <div key={s.interval} className="flex items-center gap-2 text-xs text-slate-500">
-                          <span className="w-16 shrink-0">Interval {s.interval}</span>
-                          <div className="flex-1 h-2 bg-purple-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-purple-500 rounded-full" style={{ width: `${(s.questions / maxQ) * 100}%` }} />
-                          </div>
-                          <span className="w-24 shrink-0 text-right">{s.correct}/{s.questions} benar</span>
-                        </div>
-                      )
-                    })}
+                    {detailPsychotest.levels.map(l => (
+                      <div key={l.level} className="flex items-center justify-between text-xs text-slate-600 border-b border-purple-100 pb-1">
+                        <span className="shrink-0">Level {l.level} ({l.min}-{l.max})</span>
+                        <span>{l.correct}/{l.questions} benar ({Math.round(l.accuracy * 100)}%)</span>
+                      </div>
+                    ))}
                   </div>
                   <p className="text-xs text-purple-700">Alat bantu skrining internal, bukan tes psikologi resmi — gunakan bersama hasil interview.</p>
                 </div>
