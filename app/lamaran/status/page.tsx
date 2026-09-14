@@ -18,6 +18,7 @@ type StatusResult = {
   questions?: ScreeningQuestion[]
   existing_answers?: Record<string, string>
   psychotest_done?: boolean
+  psikotes_levels_done?: { level: number; questions: number; correct: number }[]
   psychometric_done?: Record<TestType, boolean>
 }
 
@@ -97,6 +98,7 @@ export default function CekStatusLamaranPage() {
                   questions={result.questions}
                   existingAnswers={result.existing_answers}
                   psychotestDone={result.psychotest_done}
+                  psikotesLevelsDone={result.psikotes_levels_done}
                   psychometricDone={result.psychometric_done}
                 />
               </div>

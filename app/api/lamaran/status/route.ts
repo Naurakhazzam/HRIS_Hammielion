@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
     }
 
     let psychometric_done: Record<string, boolean> = {}
+    let psikotes_levels_done: { level: number; questions: number; correct: number }[] = []
 
     if (applicant.status === 'psikotes') {
       const { data: resultData } = await supabaseAdmin
@@ -69,6 +70,15 @@ export async function POST(req: NextRequest) {
         .eq('applicant_id', applicant.id)
         .maybeSingle()
       psychotest_done = !!resultData
+
+      if (!psychotest_done) {
+        const { data: levelProgress } = await supabaseAdmin
+          .from('psychotest_level_progress')
+          .select('level, questions, correct')
+          .eq('applicant_id', applicant.id)
+          .order('level')
+        psikotes_levels_done = levelProgress || []
+      }
 
       const { data: psychometricData } = await supabaseAdmin
         .from('psychometric_results')
@@ -93,6 +103,7 @@ export async function POST(req: NextRequest) {
       questions,
       existing_answers,
       psychotest_done,
+      psikotes_levels_done,
       psychometric_done,
     })
   } catch (err) {

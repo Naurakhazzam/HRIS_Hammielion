@@ -7,6 +7,7 @@ const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm 
 
 type RoundResult = { questions: number; correct: number }
 type LevelResult = RoundResult & { level: number; label: string }
+type LevelProgress = { level: number; questions: number; correct: number }
 
 function randomInRange(min: number, max: number) {
   return min + Math.floor(Math.random() * (max - min + 1))
@@ -16,6 +17,10 @@ function praiseFor(accuracy: number): string {
   if (accuracy >= PSYCHOTEST_PRAISE_THRESHOLD) return 'Luar biasa! Ketelitian Anda sangat baik. 👏'
   if (accuracy >= 0.6) return 'Bagus, terus pertahankan!'
   return 'Tahap ini selesai — lanjut ke tahap berikutnya.'
+}
+
+function labelForLevel(level: number): string {
+  return PSYCHOTEST_LEVELS.find(l => l.level === level)?.label || `Level ${level}`
 }
 
 // Komponen ronde hitung cepat, dipakai ulang untuk latihan maupun 3 level
@@ -67,6 +72,10 @@ function TimedArithmeticRound({ durationSeconds, rangeMin, rangeMax, onComplete 
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    // Kotak kosong bukan jawaban — jangan dihitung sebagai soal terjawab
+    // (Number('') === 0 di JS, jadi tanpa guard ini malah bisa "benar" kalau
+    // hasilnya kebetulan 0, dan tetap menambah jumlah soal walau belum dijawab).
+    if (answer.trim() === '') return
     const isCorrect = Number(answer) === problem.a + problem.b
     statsRef.current.questions += 1
     if (isCorrect) statsRef.current.correct += 1
@@ -97,46 +106,58 @@ function TimedArithmeticRound({ durationSeconds, rangeMin, rangeMax, onComplete 
   )
 }
 
-export default function PsikotesArithmetic({ applicantId, phone, onDone }: { applicantId: string; phone: string; onDone: () => void }) {
-  const [phase, setPhase] = useState<'intro' | 'practice' | 'confirm' | 'level' | 'level_result' | 'submitting' | 'summary'>('intro')
-  const [levelIndex, setLevelIndex] = useState(0)
-  const [levelResults, setLevelResults] = useState<LevelResult[]>([])
+export default function PsikotesArithmetic({ applicantId, phone, initialLevelsDone, onDone }: {
+  applicantId: string
+  phone: string
+  initialLevelsDone?: LevelProgress[]
+  onDone: () => void
+}) {
+  const alreadyDone = initialLevelsDone || []
+  const [levelResults, setLevelResults] = useState<LevelResult[]>(
+    alreadyDone.map(p => ({ level: p.level, label: labelForLevel(p.level), questions: p.questions, correct: p.correct }))
+  )
+  // levelIndex menunjuk ke level yang BELUM dikerjakan — kalau resume dengan
+  // sebagian level sudah tersimpan di server, langsung lanjut dari situ.
+  const [levelIndex, setLevelIndex] = useState(alreadyDone.length)
+  const [phase, setPhase] = useState<'intro' | 'practice' | 'confirm' | 'level' | 'submitting_level' | 'level_result' | 'summary'>(
+    alreadyDone.length > 0 ? 'level' : 'intro'
+  )
   const [lastResult, setLastResult] = useState<RoundResult | null>(null)
+  const [error, setError] = useState('')
 
-  async function submitResults(results: LevelResult[]) {
-    setPhase('submitting')
+  async function handleLevelComplete(result: RoundResult) {
+    const cfg = PSYCHOTEST_LEVELS[levelIndex]
+    setLastResult(result)
+    setPhase('submitting_level')
+    setError('')
     try {
-      await fetch('/api/lamaran/psikotes', {
+      const res = await fetch('/api/lamaran/psikotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          applicant_id: applicantId,
-          phone,
-          levels: results.map(r => ({ level: r.level, questions: r.questions, correct: r.correct })),
-        }),
+        body: JSON.stringify({ applicant_id: applicantId, phone, level: cfg.level, questions: result.questions, correct: result.correct }),
       })
-    } finally {
-      setPhase('summary')
-      onDone()
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Gagal menyimpan hasil level ini.')
+        setPhase('level_result')
+        return
+      }
+      setLevelResults(prev => [...prev, { level: cfg.level, label: cfg.label, ...result }])
+      if (data.allLevelsDone) {
+        setPhase('summary')
+        onDone()
+      } else {
+        setPhase('level_result')
+      }
+    } catch {
+      setError('Gagal menyimpan hasil level ini. Cek koneksi internet Anda.')
+      setPhase('level_result')
     }
-  }
-
-  function handleLevelComplete(result: RoundResult) {
-    const cfg = PSYCHOTEST_LEVELS[levelIndex]
-    const entry: LevelResult = { level: cfg.level, label: cfg.label, ...result }
-    const updated = [...levelResults, entry]
-    setLevelResults(updated)
-    setLastResult(result)
-    setPhase('level_result')
   }
 
   function handleContinue() {
-    if (levelIndex < PSYCHOTEST_LEVELS.length - 1) {
-      setLevelIndex(i => i + 1)
-      setPhase('level')
-    } else {
-      submitResults(levelResults)
-    }
+    setLevelIndex(i => i + 1)
+    setPhase('level')
   }
 
   if (phase === 'intro') {
@@ -147,7 +168,8 @@ export default function PsikotesArithmetic({ applicantId, phone, onDone }: { app
           Anda akan mengerjakan tes hitung sederhana dalam 3 level yang makin sulit (masing-masing 2 menit). Soal
           penjumlahan muncul satu per satu — jawab secepat dan setepat mungkin, lalu tekan Enter untuk lanjut ke
           soal berikutnya. Sebelum mulai, ada 1 ronde latihan {PSYCHOTEST_PRACTICE.durationSeconds} detik dulu
-          (tidak dinilai) supaya Anda terbiasa dengan caranya. Tes sungguhan hanya bisa dikerjakan satu kali.
+          (tidak dinilai) supaya Anda terbiasa dengan caranya. Hasil tiap level langsung tersimpan begitu selesai,
+          jadi kalau koneksi terputus Anda bisa lanjut dari level berikutnya tanpa mengulang dari awal.
         </p>
         <button onClick={() => setPhase('practice')} className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium">
           Mulai Latihan
@@ -185,8 +207,12 @@ export default function PsikotesArithmetic({ applicantId, phone, onDone }: { app
 
   if (phase === 'level') {
     const cfg = PSYCHOTEST_LEVELS[levelIndex]
+    if (!cfg) return null
     return (
       <div className="space-y-3">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+        )}
         <p className="text-sm font-medium text-slate-700 text-center">{cfg.label}</p>
         <TimedArithmeticRound
           durationSeconds={cfg.durationSeconds}
@@ -198,11 +224,18 @@ export default function PsikotesArithmetic({ applicantId, phone, onDone }: { app
     )
   }
 
+  if (phase === 'submitting_level') {
+    return <p className="text-sm text-slate-500 text-center">Menyimpan hasil level ini...</p>
+  }
+
   if (phase === 'level_result' && lastResult) {
     const accuracy = lastResult.questions > 0 ? lastResult.correct / lastResult.questions : 0
     const isLast = levelIndex >= PSYCHOTEST_LEVELS.length - 1
     return (
       <div className="space-y-3 text-center">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 text-left">{error}</div>
+        )}
         <p className="text-sm font-medium text-slate-700">{PSYCHOTEST_LEVELS[levelIndex].label} selesai</p>
         <p className="text-sm text-slate-600">
           Anda menjawab {lastResult.questions} soal, dengan tingkat akurasi {Math.round(accuracy * 100)}%.
@@ -213,10 +246,6 @@ export default function PsikotesArithmetic({ applicantId, phone, onDone }: { app
         </button>
       </div>
     )
-  }
-
-  if (phase === 'submitting') {
-    return <p className="text-sm text-slate-500 text-center">Menyimpan hasil...</p>
   }
 
   const totalQuestions = levelResults.reduce((sum, r) => sum + r.questions, 0)

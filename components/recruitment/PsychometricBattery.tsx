@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { DISC_BLOCKS, PERSONALITY_ITEMS, WORK_PREFERENCE_ITEMS, INTEGRITY_ITEMS, TestType } from '@/lib/psychometricTests'
 
 const PSYCHOMETRIC_MODULES: { type: TestType; title: string; description: string }[] = [
@@ -235,8 +236,19 @@ export default function PsychometricBattery({ applicantId, phone, initialDone }:
 
   if (phase === 'all_done') {
     return (
-      <div className="text-sm text-slate-700 text-center space-y-2">
-        <p>Anda sudah menyelesaikan seluruh rangkaian tes tambahan. Terima kasih!</p>
+      <div className="text-sm text-slate-700 text-center space-y-3">
+        <p className="font-medium">Anda sudah menyelesaikan seluruh rangkaian tes. Terima kasih! 🎉</p>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-left space-y-1">
+          <p className="text-sm text-blue-800 font-medium">Apa selanjutnya?</p>
+          <p className="text-sm text-blue-700">
+            Tim HR akan meninjau seluruh jawaban dan hasil tes Anda. Kalau Anda lolos ke tahap berikutnya, HR akan
+            menghubungi Anda langsung lewat nomor WhatsApp yang Anda daftarkan untuk jadwal interview.
+          </p>
+          <p className="text-sm text-blue-700">
+            Anda bisa cek status lamaran kapan saja di halaman{' '}
+            <Link href="/lamaran/status" className="underline font-medium">Cek Status Lamaran</Link>.
+          </p>
+        </div>
         <p className="text-xs text-slate-400">
           Hasil di atas menunjukkan kecenderungan dari jawaban Anda sendiri — bukan diagnosis psikologi resmi.
         </p>

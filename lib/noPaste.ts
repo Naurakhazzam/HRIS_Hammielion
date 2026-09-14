@@ -4,9 +4,14 @@
  * sendiri. onPaste/onDrop saja tidak cukup — sebagian browser HP (chip
  * clipboard bawaan keyboard) menyisipkan teks lewat event 'input' biasa, jadi
  * onChange di sini juga mengecek InputEvent.inputType.
+ *
+ * CATATAN: 'insertReplacementText' sengaja TIDAK dimasukkan ke daftar ini —
+ * itu juga dipakai keyboard HP untuk autocorrect/saran kata biasa saat mengetik
+ * normal. Kalau ikut diblokir, ketikan jujur pelamar yang kena autocorrect bisa
+ * "kebalik sendiri" tanpa penjelasan, kelihatan seperti web-nya rusak.
  */
 
-const PASTE_LIKE_TYPES = ['insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromDrop', 'insertFromYank', 'insertReplacementText']
+const PASTE_LIKE_TYPES = ['insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromDrop', 'insertFromYank']
 
 export function blockPasteOnChange(currentValue: string, onChange: (value: string) => void) {
   return (e: React.ChangeEvent<HTMLTextAreaElement>) => {

@@ -18,7 +18,7 @@ import { TestType } from '@/lib/psychometricTests'
  * komponen ini cuma mengikuti progres di sisi client tanpa perlu refetch.
  */
 export default function RecruitmentFlow({
-  applicantId, phone, status, questions = [], existingAnswers, psychotestDone, psychometricDone,
+  applicantId, phone, status, questions = [], existingAnswers, psychotestDone, psikotesLevelsDone, psychometricDone,
 }: {
   applicantId: string
   phone: string
@@ -26,6 +26,7 @@ export default function RecruitmentFlow({
   questions?: ScreeningQuestion[]
   existingAnswers?: Record<string, string>
   psychotestDone?: boolean
+  psikotesLevelsDone?: { level: number; questions: number; correct: number }[]
   psychometricDone?: Record<TestType, boolean>
 }) {
   const [screeningSubmitted, setScreeningSubmitted] = useState(status !== 'screening')
@@ -49,7 +50,14 @@ export default function RecruitmentFlow({
   }
 
   if (showArithmetic) {
-    return <PsikotesArithmetic applicantId={applicantId} phone={phone} onDone={() => setArithmeticDone(true)} />
+    return (
+      <PsikotesArithmetic
+        applicantId={applicantId}
+        phone={phone}
+        initialLevelsDone={psikotesLevelsDone}
+        onDone={() => setArithmeticDone(true)}
+      />
+    )
   }
 
   if (showPsychometric) {
