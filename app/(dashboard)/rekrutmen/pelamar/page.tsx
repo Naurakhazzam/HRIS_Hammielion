@@ -110,6 +110,7 @@ const STATUS_OPTIONS = [
   { value: 'screening', label: 'Screening' },
   { value: 'psikotes', label: 'Psikotes' },
   { value: 'interview', label: 'Menunggu Dipanggil Interview' },
+  { value: 'interview_called', label: 'Dipanggil Interview' },
   { value: 'training', label: 'Training/Percobaan' },
   { value: 'diterima', label: 'Diterima' },
   { value: 'ditolak', label: 'Ditolak' },
@@ -120,6 +121,7 @@ const STATUS_COLORS: Record<string, string> = {
   screening: 'bg-amber-100 text-amber-700',
   psikotes: 'bg-purple-100 text-purple-700',
   interview: 'bg-blue-100 text-blue-700',
+  interview_called: 'bg-indigo-100 text-indigo-700',
   training: 'bg-cyan-100 text-cyan-700',
   diterima: 'bg-green-100 text-green-700',
   ditolak: 'bg-red-100 text-red-700',
@@ -127,7 +129,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 // Urutan tahap normal, dipakai tombol cepat "Lanjut" — HR tetap bisa override
 // manual lewat dropdown di bawahnya kalau perlu lompat/mundur tahap.
-const STATUS_ORDER = ['baru', 'screening', 'psikotes', 'interview', 'training', 'diterima']
+const STATUS_ORDER = ['baru', 'screening', 'psikotes', 'interview', 'interview_called', 'training', 'diterima']
 
 function getNextStatus(current: string): string | null {
   const idx = STATUS_ORDER.indexOf(current)

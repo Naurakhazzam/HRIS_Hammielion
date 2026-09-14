@@ -12,7 +12,7 @@ import UploadDocumentsPrompt from '@/components/recruitment/UploadDocumentsPromp
 // pasti selesai — dipakai untuk nampilkan link upload dokumen tanpa perlu
 // nunggu event onAllDone dari RecruitmentFlow (yang cuma jalan kalau memang
 // ada tahap aktif untuk dikerjakan barusan).
-const TESTS_DONE_STATUSES = ['interview', 'training', 'diterima']
+const TESTS_DONE_STATUSES = ['interview', 'interview_called', 'training', 'diterima']
 
 const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
 
