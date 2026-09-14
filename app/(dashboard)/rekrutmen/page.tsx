@@ -124,6 +124,16 @@ const STATUS_COLORS: Record<string, string> = {
   ditolak: 'bg-red-100 text-red-700',
 }
 
+// Urutan tahap normal, dipakai tombol cepat "Lanjut" — HR tetap bisa override
+// manual lewat dropdown di bawahnya kalau perlu lompat/mundur tahap.
+const STATUS_ORDER = ['baru', 'screening', 'psikotes', 'interview', 'training', 'diterima']
+
+function getNextStatus(current: string): string | null {
+  const idx = STATUS_ORDER.indexOf(current)
+  if (idx === -1 || idx === STATUS_ORDER.length - 1) return null
+  return STATUS_ORDER[idx + 1]
+}
+
 function psychotestLabel(score: number): string {
   if (score >= 80) return 'Sangat Stabil'
   if (score >= 60) return 'Stabil'
@@ -293,6 +303,16 @@ export default function RekrutmenPage() {
     await supabase.from('job_applicants').update({ status: detailStatus }).eq('id', detail.id)
     setSavingStatus(false)
     setDetail({ ...detail, status: detailStatus })
+    fetchApplicants()
+  }
+
+  async function quickSetStatus(newStatus: string) {
+    if (!detail) return
+    setSavingStatus(true)
+    await supabase.from('job_applicants').update({ status: newStatus }).eq('id', detail.id)
+    setSavingStatus(false)
+    setDetail({ ...detail, status: newStatus })
+    setDetailStatus(newStatus)
     fetchApplicants()
   }
 
@@ -591,9 +611,26 @@ export default function RekrutmenPage() {
                 </div>
               )}
 
+              {(getNextStatus(detail.status) || detail.status !== 'ditolak') && (
+                <div className="pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+                  {getNextStatus(detail.status) && (
+                    <button onClick={() => quickSetStatus(getNextStatus(detail.status)!)} disabled={savingStatus}
+                      className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+                      ✅ Lanjut ke {STATUS_LABELS[getNextStatus(detail.status)!]}
+                    </button>
+                  )}
+                  {detail.status !== 'ditolak' && (
+                    <button onClick={() => quickSetStatus('ditolak')} disabled={savingStatus}
+                      className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+                      ❌ Tolak Pelamar
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
                 <div className="flex gap-2 items-center">
-                  <label className="text-sm text-slate-600">Status:</label>
+                  <label className="text-xs text-slate-400">Ubah manual:</label>
                   <select value={detailStatus} onChange={e => setDetailStatus(e.target.value)}
                     className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
                     {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
