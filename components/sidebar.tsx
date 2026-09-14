@@ -29,7 +29,15 @@ function hasActiveDescendant(item: NavNode, pathname: string): boolean {
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
   { name: 'Karyawan', href: '/karyawan', icon: '👥' },
-  { name: 'Rekrutmen', href: '/rekrutmen', icon: '📝' },
+  {
+    name: 'Rekrutmen',
+    href: '/rekrutmen',
+    icon: '📝',
+    submenu: [
+      { name: 'Pengaturan & QR', href: '/rekrutmen' },
+      { name: 'Daftar Pelamar', href: '/rekrutmen/pelamar' },
+    ]
+  },
   {
     name: 'Absensi',
     href: '/absensi',
@@ -223,6 +231,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const navItems = isEmployee ? employeeNavItems : adminNavItems
 
   const defaultOpen: Record<string, boolean> = {
+    'Rekrutmen':  pathname.startsWith('/rekrutmen'),
     'Absensi':    pathname.startsWith('/absensi'),
     'Penggajian': pathname.startsWith('/penggajian'),
     // Keuangan (input) & Laporan Keuangan (baca-saja) sama-sama di bawah URL /keuangan/*, dan
