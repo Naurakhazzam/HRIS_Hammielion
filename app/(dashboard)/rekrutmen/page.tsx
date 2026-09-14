@@ -169,6 +169,9 @@ export default function RekrutmenPage() {
   const [savingUrl, setSavingUrl] = useState(false)
   const [urlSaved, setUrlSaved] = useState(false)
 
+  const [demoInfo, setDemoInfo] = useState<{ application_code: string; full_name: string; phone: string } | null>(null)
+  const [creatingDemo, setCreatingDemo] = useState(false)
+
   const [questions, setQuestions] = useState<ScreeningQuestion[]>([])
   const [newQuestion, setNewQuestion] = useState('')
   const [addingQuestion, setAddingQuestion] = useState(false)
@@ -245,6 +248,39 @@ export default function RekrutmenPage() {
     setSavingUrl(false)
     setUrlSaved(true)
     setTimeout(() => setUrlSaved(false), 2000)
+  }
+
+  async function resetDemoApplicant() {
+    setCreatingDemo(true)
+    const DEMO_CODE = 'LMR-DEMO'
+    const DEMO_PHONE = '089999999999'
+    const full_name = 'Pelamar Demo (Pratinjau HR)'
+
+    // Hapus data demo lama kalau ada — cascade otomatis bersihkan jawaban/hasil tesnya juga.
+    await supabase.from('job_applicants').delete().eq('application_code', DEMO_CODE)
+
+    const { count } = await supabase
+      .from('screening_questions')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_active', true)
+    const initialStatus = (count || 0) > 0 ? 'screening' : 'psikotes'
+
+    const { error } = await supabase.from('job_applicants').insert({
+      application_code: DEMO_CODE,
+      full_name,
+      gender: 'male',
+      phone: DEMO_PHONE,
+      marital_status: 'single',
+      education: 'S1',
+      work_experience: 'Data contoh untuk pratinjau HR — bukan pelamar sungguhan.',
+      status: initialStatus,
+    })
+
+    setCreatingDemo(false)
+    if (!error) {
+      setDemoInfo({ application_code: DEMO_CODE, full_name, phone: DEMO_PHONE })
+      fetchApplicants()
+    }
   }
 
   async function addQuestion(e: React.FormEvent) {
@@ -373,6 +409,37 @@ export default function RekrutmenPage() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+        <h2 className="text-base font-semibold text-slate-800 mb-1">Pratinjau & Demo</h2>
+        <p className="text-sm text-slate-500 mb-3">
+          Coba langsung alur lamaran yang sesungguhnya (bukan tiruan) tanpa perlu isi form dari awal. Klik &quot;Buat/Reset
+          Pelamar Demo&quot; untuk dapat nama &amp; nomor HP contoh, lalu pakai itu di halaman Cek Status Lamaran untuk
+          melihat tiap tahap langsung di aplikasi.
+        </p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <a href="/lamaran" target="_blank" rel="noopener noreferrer"
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
+            Buka Halaman Lamaran ↗
+          </a>
+          <a href="/lamaran/status" target="_blank" rel="noopener noreferrer"
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
+            Buka Cek Status Lamaran ↗
+          </a>
+          <button onClick={resetDemoApplicant} disabled={creatingDemo}
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50">
+            {creatingDemo ? 'Menyiapkan...' : 'Buat / Reset Pelamar Demo'}
+          </button>
+        </div>
+        {demoInfo && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-3 text-sm space-y-1">
+            <p className="text-blue-800 font-medium">Data demo siap dipakai di halaman Cek Status Lamaran:</p>
+            <p className="text-blue-700">Nama: <b>{demoInfo.full_name}</b></p>
+            <p className="text-blue-700">Nomor HP: <b>{demoInfo.phone}</b></p>
+            <p className="text-xs text-blue-600 mt-1">Klik &quot;Buat/Reset&quot; lagi kapan saja untuk mengulang dari awal.</p>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
