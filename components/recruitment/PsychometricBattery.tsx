@@ -7,22 +7,34 @@ const PSYCHOMETRIC_MODULES: { type: TestType; title: string; description: string
   {
     type: 'disc',
     title: 'DISC — Gaya Kerja',
-    description: 'Untuk tiap kelompok pernyataan, pilih satu yang PALING menggambarkan Anda, dan satu yang PALING TIDAK menggambarkan Anda.',
+    description:
+      'Di bawah ada 12 kelompok, masing-masing berisi 4 pernyataan. Untuk SETIAP kelompok, Anda harus memilih ' +
+      'TEPAT 1 pernyataan yang PALING menggambarkan diri Anda (klik tombol hijau "Paling"), dan TEPAT 1 pernyataan ' +
+      'lain yang PALING TIDAK menggambarkan diri Anda (klik tombol merah "Paling Tidak"). Dua pernyataan sisanya ' +
+      'di kelompok itu tidak usah diklik sama sekali — biarkan kosong. Contoh: dari 4 pernyataan, kalau pernyataan ' +
+      'ke-1 paling mirip Anda dan pernyataan ke-3 paling tidak mirip Anda, klik "Paling" di baris 1 dan "Paling Tidak" ' +
+      'di baris 3, lalu lanjut ke kelompok berikutnya. Ulangi sampai semua 12 kelompok terisi, baru tombol "Kirim Jawaban" bisa ditekan.',
   },
   {
     type: 'personality',
     title: 'Tipe Kepribadian Kerja',
-    description: 'Nyatakan seberapa setuju Anda dengan tiap pernyataan berikut, dari 1 (Sangat Tidak Setuju) sampai 5 (Sangat Setuju).',
+    description:
+      'Ada 24 pernyataan. Untuk SETIAP pernyataan, klik SATU angka dari 1 sampai 5 yang paling sesuai dengan diri ' +
+      'Anda: 1 = Sangat Tidak Setuju, 3 = Netral/Ragu-ragu, 5 = Sangat Setuju. Jawab semua 24 pernyataan sampai selesai.',
   },
   {
     type: 'work_preference',
     title: 'Preferensi Kerja',
-    description: 'Nyatakan seberapa setuju Anda dengan tiap pernyataan tentang gaya kerja Anda.',
+    description:
+      'Ada 24 pernyataan tentang gaya kerja Anda. Sama seperti sebelumnya: klik SATU angka dari 1 (Sangat Tidak ' +
+      'Setuju) sampai 5 (Sangat Setuju) untuk tiap pernyataan, sampai semua terisi.',
   },
   {
     type: 'integrity',
     title: 'Sikap & Etika Kerja',
-    description: 'Jawab sesuai pendapat pribadi Anda yang sebenarnya — tidak ada jawaban benar atau salah.',
+    description:
+      'Ada 12 pernyataan. Klik SATU angka dari 1 (Sangat Tidak Setuju) sampai 5 (Sangat Setuju) untuk tiap ' +
+      'pernyataan, sesuai pendapat pribadi Anda yang sebenarnya — tidak ada jawaban benar atau salah.',
   },
 ]
 
@@ -45,8 +57,18 @@ function DiscForm({ onSubmit }: { onSubmit: (answers: { most: number; least: num
     onSubmit(selections.map(s => ({ most: s.most as number, least: s.least as number })))
   }
 
+  const filledCount = selections.filter(s => s.most !== null && s.least !== null).length
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1 sticky top-0 z-10">
+        <p className="text-xs text-blue-800">
+          Tiap kelompok: klik <span className="font-semibold">satu</span> tombol hijau &quot;Paling&quot; (paling
+          menggambarkan Anda) dan <span className="font-semibold">satu</span> tombol merah &quot;Paling Tidak&quot;
+          (paling TIDAK menggambarkan Anda). 2 pernyataan sisanya dibiarkan kosong.
+        </p>
+        <p className="text-xs font-medium text-blue-700">{filledCount} dari {DISC_BLOCKS.length} kelompok terisi</p>
+      </div>
       {DISC_BLOCKS.map((block, bi) => (
         <div key={bi} className="border border-slate-200 rounded-lg p-3 space-y-2">
           <p className="text-xs text-slate-400">Kelompok {bi + 1} dari {DISC_BLOCKS.length}</p>
@@ -85,8 +107,17 @@ function LikertForm({ items, onSubmit }: { items: { text: string }[]; onSubmit: 
     onSubmit(values as number[])
   }
 
+  const filledCount = values.filter(v => v !== null).length
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 space-y-1 sticky top-0 z-10">
+        <p className="text-xs text-blue-800">
+          Klik <span className="font-semibold">satu</span> angka untuk tiap pernyataan: 1 = Sangat Tidak Setuju,
+          3 = Netral, 5 = Sangat Setuju.
+        </p>
+        <p className="text-xs font-medium text-blue-700">{filledCount} dari {items.length} pernyataan terisi</p>
+      </div>
       {items.map((item, i) => (
         <div key={i} className="space-y-1.5">
           <p className="text-sm text-slate-700">{i + 1}. {item.text}</p>
@@ -237,9 +268,9 @@ export default function PsychometricBattery({ applicantId, phone, initialDone }:
       )}
 
       {phase === 'intro' && (
-        <div className="space-y-3 text-center">
-          <p className="text-sm font-medium text-slate-700">{currentModule.title}</p>
-          <p className="text-sm text-slate-600">{currentModule.description}</p>
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-slate-700 text-center">{currentModule.title}</p>
+          <p className="text-sm text-slate-600 text-left leading-relaxed">{currentModule.description}</p>
           <button onClick={() => setPhase('form')} className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium">
             Mulai
           </button>
