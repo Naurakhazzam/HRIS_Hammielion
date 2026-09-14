@@ -27,6 +27,12 @@ type Applicant = {
   distance_km: number | null
   distance_minutes: number | null
   psychotest_results: { score: number } | null
+  screening_answers: { created_at: string }[] | null
+}
+
+function getScreeningSubmittedAt(a: Applicant): string | null {
+  if (!a.screening_answers || a.screening_answers.length === 0) return null
+  return a.screening_answers.reduce((earliest, r) => (r.created_at < earliest ? r.created_at : earliest), a.screening_answers[0].created_at)
 }
 
 type ScreeningAnswerRow = {
@@ -172,7 +178,7 @@ export default function DaftarPelamarPage() {
     setLoading(true)
     const { data } = await supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score)')
+      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at)')
       .order('created_at', { ascending: false })
     setApplicants((data as unknown as Applicant[]) || [])
     setLoading(false)
@@ -284,7 +290,17 @@ export default function DaftarPelamarPage() {
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-6 pt-4 border-b border-slate-200">
-          <h2 className="text-base font-semibold text-slate-800 mb-3">Daftar Pelamar ({filteredApplicants.length})</h2>
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+            <h2 className="text-base font-semibold text-slate-800">Daftar Pelamar ({filteredApplicants.length})</h2>
+            <p className="text-xs text-slate-400 flex items-center gap-3">
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" /> Sebelum perbaikan anti-paste
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" /> Sesudah
+              </span>
+            </p>
+          </div>
           <div className="flex gap-1 overflow-x-auto -mb-px">
             {tabs.map(tab => (
               <button
@@ -312,6 +328,9 @@ export default function DaftarPelamarPage() {
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Telepon</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Penempatan</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Status</th>
+                <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600" title="Menandai apakah jawaban screening diisi sebelum atau sesudah perbaikan celah bypass anti-paste">
+                  Anti-Paste
+                </th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">
                   <button onClick={toggleScoreSort} className="flex items-center gap-1 hover:text-slate-800">
                     Skor Psikotes
@@ -323,10 +342,10 @@ export default function DaftarPelamarPage() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
+                <tr><td colSpan={10} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
               )}
               {!loading && filteredApplicants.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
               )}
               {filteredApplicants.map(a => (
                 <tr key={a.id} className="border-t border-slate-100">
@@ -345,6 +364,18 @@ export default function DaftarPelamarPage() {
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[a.status] || 'bg-slate-100 text-slate-700'}`}>
                       {STATUS_LABELS[a.status] || a.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-2">
+                    {(() => {
+                      const submittedAt = getScreeningSubmittedAt(a)
+                      if (!submittedAt) return <span className="text-slate-300">-</span>
+                      return (
+                        <span
+                          className={`inline-block w-3 h-3 rounded-full ${isBeforeAntiPasteFix(submittedAt) ? 'bg-red-500' : 'bg-green-500'}`}
+                          title={isBeforeAntiPasteFix(submittedAt) ? 'Diisi sebelum perbaikan anti-paste' : 'Diisi sesudah perbaikan anti-paste'}
+                        />
+                      )
+                    })()}
                   </td>
                   <td className="px-4 py-2 text-slate-600">
                     {getPsikotesScore(a) !== null ? (
