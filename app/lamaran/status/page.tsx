@@ -1,10 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { APPLICANT_STATUS_LABELS as STATUS_LABELS } from '@/lib/recruitmentStatusLabels'
 import { TestType } from '@/lib/psychometricTests'
 import RecruitmentFlow from '@/components/recruitment/RecruitmentFlow'
 import { ScreeningQuestion } from '@/components/recruitment/ScreeningForm'
+import UploadDocumentsPrompt from '@/components/recruitment/UploadDocumentsPrompt'
+
+// Status di mana seluruh rangkaian tes (screening+psikotes+psikometri) sudah
+// pasti selesai — dipakai untuk nampilkan link upload dokumen tanpa perlu
+// nunggu event onAllDone dari RecruitmentFlow (yang cuma jalan kalau memang
+// ada tahap aktif untuk dikerjakan barusan).
+const TESTS_DONE_STATUSES = ['interview', 'training', 'diterima']
 
 const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
 
@@ -28,11 +36,24 @@ export default function CekStatusLamaranPage() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<StatusResult | null>(null)
   const [error, setError] = useState('')
+  const [uploadFormUrl, setUploadFormUrl] = useState('')
+  const [justCompleted, setJustCompleted] = useState(false)
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase
+      .from('recruitment_settings')
+      .select('upload_form_url')
+      .eq('id', 1)
+      .maybeSingle()
+      .then(({ data }) => setUploadFormUrl(data?.upload_form_url || ''))
+  }, [])
 
   async function handleCheck(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
+    setJustCompleted(false)
     try {
       const res = await fetch('/api/lamaran/status', {
         method: 'POST',
@@ -100,7 +121,11 @@ export default function CekStatusLamaranPage() {
                   psychotestDone={result.psychotest_done}
                   psikotesLevelsDone={result.psikotes_levels_done}
                   psychometricDone={result.psychometric_done}
+                  onAllDone={() => setJustCompleted(true)}
                 />
+                {(justCompleted || TESTS_DONE_STATUSES.includes(result.status || '')) && (
+                  <UploadDocumentsPrompt url={uploadFormUrl} />
+                )}
               </div>
             )}
           </div>

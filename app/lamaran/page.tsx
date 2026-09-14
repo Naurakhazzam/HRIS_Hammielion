@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { blockPasteOnChange, blockPasteHandlers } from '@/lib/noPaste'
 import RecruitmentFlow from '@/components/recruitment/RecruitmentFlow'
 import { ScreeningQuestion } from '@/components/recruitment/ScreeningForm'
+import UploadDocumentsPrompt from '@/components/recruitment/UploadDocumentsPrompt'
 
 const GENDER_OPTIONS = [
   { value: 'male', label: 'Laki-laki' },
@@ -145,6 +146,7 @@ export default function LamaranPage() {
   const [error, setError] = useState('')
   const [submission, setSubmission] = useState<SubmissionResult | null>(null)
   const [uploadFormUrl, setUploadFormUrl] = useState('')
+  const [testsComplete, setTestsComplete] = useState(false)
 
   const age = calcAge(form.birth_date)
 
@@ -220,7 +222,9 @@ export default function LamaranPage() {
               phone={form.phone}
               status={submission.status}
               questions={submission.questions}
+              onAllDone={() => setTestsComplete(true)}
             />
+            {testsComplete && <UploadDocumentsPrompt url={uploadFormUrl} />}
           </div>
         </div>
       </div>
@@ -356,17 +360,9 @@ export default function LamaranPage() {
             <p className="text-xs text-slate-400">Tulis dengan kata-kata sendiri — kolom ini tidak bisa ditempel (paste).</p>
           </Field>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-3 space-y-1">
-            <p className="text-sm font-medium text-blue-800">Upload CV & Foto Diri</p>
-            {uploadFormUrl ? (
-              <a href={uploadFormUrl} target="_blank" rel="noopener noreferrer"
-                className="text-sm text-blue-600 underline">
-                Klik di sini untuk upload CV & foto
-              </a>
-            ) : (
-              <p className="text-sm text-blue-700">Link upload menyusul, akan diinfokan oleh HR.</p>
-            )}
-          </div>
+          <p className="text-xs text-slate-400 text-center">
+            Upload CV &amp; foto diri akan diminta di langkah terakhir, setelah Anda menyelesaikan semua tahap tes di halaman ini.
+          </p>
 
           <button type="submit" disabled={submitting}
             className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">

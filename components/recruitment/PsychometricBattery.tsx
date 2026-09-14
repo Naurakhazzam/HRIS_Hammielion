@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { DISC_BLOCKS, PERSONALITY_ITEMS, WORK_PREFERENCE_ITEMS, INTEGRITY_ITEMS, TestType } from '@/lib/psychometricTests'
 
@@ -187,15 +187,20 @@ function PsychometricResultDisplay({ testType, summary }: { testType: TestType; 
   )
 }
 
-export default function PsychometricBattery({ applicantId, phone, initialDone }: {
+export default function PsychometricBattery({ applicantId, phone, initialDone, onAllDone }: {
   applicantId: string
   phone: string
   initialDone: Record<TestType, boolean>
+  onAllDone?: () => void
 }) {
   const [doneMap, setDoneMap] = useState(initialDone)
   const [phase, setPhase] = useState<'intro' | 'form' | 'submitting' | 'result' | 'all_done'>(
     () => (PSYCHOMETRIC_MODULES.every(m => initialDone[m.type]) ? 'all_done' : 'intro')
   )
+
+  useEffect(() => {
+    if (phase === 'all_done') onAllDone?.()
+  }, [phase, onAllDone])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [resultSummary, setResultSummary] = useState<any>(null)
   // Modul yang hasilnya sedang ditampilkan di layar 'result' — disimpan terpisah dari
