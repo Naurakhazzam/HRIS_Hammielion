@@ -916,6 +916,30 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 | `app/(dashboard)/portal/slip-gaji/page.tsx` | `print:hidden` di header/filter/grid; modal detail jadi print-friendly |
 | Database (fungsi `approve_leave_request`) | `ON CONFLICT ... WHERE check_in IS NULL AND check_out IS NULL` — lindungi data absensi asli |
 
+### 56. Fitur: Redesain Menu Karyawan — Jadwal Shift/Libur, Jatah Cuti, Kasbon Self-Service
+
+**Konteks:** Owner minta menu karyawan dirapikan: cukup Dashboard, Portal Saya (+info shift/libur/jatah cuti), Cuti & Izin (dengan aturan minimal 1 tahun masa kerja + sinkron absensi — item ini ternyata sudah ada duluan, lihat #55), dan Kasbon (harus lewat pengajuan sendiri).
+
+**Fix/Fitur:**
+1. **Tabel baru `employee_roster`** (migrasi `026_employee_roster.sql`) — jadwal shift/libur per karyawan per tanggal, direncanakan di muka oleh HR/Owner. RLS: karyawan baca sendiri, supervisor baca cabangnya, HR/Owner CRUD semua.
+2. **Aturan Cuti Tahunan** (`lib/leaveQuota.ts`, dipakai di `/cuti/ajukan`, `/portal/jadwal`, Dashboard): kuota flat 12 hari per tahun masa kerja (dihitung dari ulang tahun `join_date`, bukan tahun kalender) — dihitung dinamis dari `leave_requests` yang pending+approved, tidak ada tabel saldo terpisah. Submit ditolak keras kalau masa kerja < 1 tahun atau melebihi sisa jatah. Jenis cuti lain (sakit/izin/duka) tidak kena aturan ini.
+3. **Kasbon self-service**: tombol "Ajukan Kasbon" kini juga muncul untuk role employee/supervisor (form tanpa pilih nama, otomatis dirinya sendiri) — RLS `kasbon_req_insert_employee` sudah lama mengizinkan ini, cuma belum ada UI-nya.
+4. **`/absensi/shift`** diubah dari halaman info statis jadi editor roster: HR/Owner pilih karyawan + rentang tanggal, set shift (dari `work_schedules` departemennya) atau tandai libur per hari.
+5. **`/portal/jadwal`** (baru): karyawan lihat jadwal 14 hari ke depan + sisa jatah cuti tahunan.
+6. **Sidebar karyawan**: submenu Keuangan dihapus total (RLS sudah menolak employee di semua tabel `fin_*`, jadi menunya cuma jalan buntu); "Jadwal Saya" ditambahkan ke Portal Saya.
+7. **Dashboard karyawan**: kartu placeholder statis diganti kartu nyata (jadwal hari ini, sisa cuti, jumlah kasbon pending) khusus untuk role employee/supervisor; role lain tetap seperti semula.
+
+| File | Perubahan |
+|---|---|
+| Database: `employee_roster` (migrasi `026_employee_roster.sql`) | Tabel baru + RLS |
+| `lib/leaveQuota.ts` | Baru — helper masa kerja & kuota cuti tahunan |
+| `app/(dashboard)/cuti/ajukan/page.tsx` | Validasi masa kerja + kuota untuk leave_type `annual` |
+| `app/(dashboard)/kasbon/page.tsx` | Form self-service untuk employee/supervisor |
+| `app/(dashboard)/absensi/shift/page.tsx` | Diubah total jadi editor roster |
+| `app/(dashboard)/portal/jadwal/page.tsx` | Baru — halaman Jadwal Saya |
+| `app/(dashboard)/dashboard/page.tsx` | Kartu nyata untuk role employee/supervisor |
+| `components/sidebar.tsx` | Hapus submenu Keuangan dari menu karyawan; tambah Jadwal Saya |
+
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug tampilan karyawan*
+*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan*

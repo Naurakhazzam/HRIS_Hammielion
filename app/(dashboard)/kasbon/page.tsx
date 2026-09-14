@@ -59,12 +59,13 @@ export default function KasbonPage() {
   const [activeTab, setActiveTab] = useState<'pengajuan' | 'limit' | 'riwayat' | 'driver' | 'kenek'>('pengajuan')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [role, setRole] = useState<string>('')
+  const [myEmployeeId, setMyEmployeeId] = useState<string>('')
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
-      supabase.from('users').select('role').eq('id', user.id).single().then(({ data }) => {
-        if (data) setRole(data.role)
+      supabase.from('users').select('role, employee_id').eq('id', user.id).single().then(({ data }) => {
+        if (data) { setRole(data.role); setMyEmployeeId(data.employee_id || '') }
       })
     })
   }, [])
@@ -105,7 +106,7 @@ export default function KasbonPage() {
         ))}
       </div>
 
-      {activeTab === 'pengajuan' && <TabPengajuan showMessage={showMessage} role={role} />}
+      {activeTab === 'pengajuan' && <TabPengajuan showMessage={showMessage} role={role} myEmployeeId={myEmployeeId} />}
       {activeTab === 'limit' && <TabLimit showMessage={showMessage} />}
       {activeTab === 'riwayat' && <TabRiwayat showMessage={showMessage} />}
       {activeTab === 'driver' && <TabKasbonDriver showMessage={showMessage} />}
@@ -123,13 +124,16 @@ const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
 }
 
 // ─── TAB 1: PENGAJUAN ────────────────────────────────────────────────────────
-function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'error', msg: string) => void; role: string }) {
+function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 'success' | 'error', msg: string) => void; role: string; myEmployeeId: string }) {
   const supabase = createClient()
   // Persetujuan (Setujui/Tolak/Tandai Lunas) sengaja dibatasi ke owner saja — ditegakkan juga
   // lewat RLS kasbon_req_update, bukan cuma sembunyi tombol di UI.
   const canApprove = role === 'owner'
   // Match RLS kasbon_req_insert: owner/hr boleh mengajukan atas nama karyawan.
   const canSubmit = role === 'owner' || role === 'hr'
+  // Karyawan/supervisor boleh ajukan untuk diri sendiri — RLS "kasbon_req_insert_employee"
+  // sudah mengizinkan ini sejak awal, cuma belum ada UI-nya (tombolnya dulu cuma untuk HR/Owner).
+  const canSelfSubmit = role === 'employee' || role === 'supervisor'
   const [requests, setRequests] = useState<KasbonRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<string>('all')
@@ -140,7 +144,23 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
   // form input sama sekali, jadi tabelnya selalu kosong).
   const [modalAjukan, setModalAjukan] = useState(false)
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [myKasbonInfo, setMyKasbonInfo] = useState<Employee | null>(null)
   const [ajukanForm, setAjukanForm] = useState({ employee_id: '', amount_requested: '', reason: '' })
+
+  function openModalAjukan() {
+    if (canSelfSubmit) {
+      setAjukanForm({ employee_id: myEmployeeId, amount_requested: '', reason: '' })
+      if (myEmployeeId) fetchMyKasbonInfo()
+    }
+    setModalAjukan(true)
+  }
+
+  async function fetchMyKasbonInfo() {
+    const { data } = await supabase.from('employees')
+      .select('id, full_name, employee_code, kasbon_limit, departments(name)')
+      .eq('id', myEmployeeId).single()
+    if (data) setMyKasbonInfo(data as unknown as Employee)
+  }
 
   useEffect(() => {
     fetchRequests()
@@ -208,11 +228,11 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
 
   return (
     <div className="space-y-4">
-      {canSubmit && (
+      {(canSubmit || canSelfSubmit) && (
         <div className="flex justify-end">
-          <button onClick={() => setModalAjukan(true)}
+          <button onClick={openModalAjukan}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition">
-            <span className="text-base leading-none">+</span> Ajukan Kasbon Baru
+            <span className="text-base leading-none">+</span> {canSelfSubmit ? 'Ajukan Kasbon' : 'Ajukan Kasbon Baru'}
           </button>
         </div>
       )}
@@ -291,20 +311,31 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
       {modalAjukan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold text-slate-800 mb-1">Ajukan Kasbon Baru</h2>
-            <p className="text-sm text-slate-500 mb-4">Diinput oleh Admin/HR atas permintaan karyawan.</p>
+            <h2 className="text-lg font-bold text-slate-800 mb-1">{canSelfSubmit ? 'Ajukan Kasbon' : 'Ajukan Kasbon Baru'}</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              {canSelfSubmit ? 'Pengajuan atas nama Anda sendiri, menunggu persetujuan Owner.' : 'Diinput oleh Admin/HR atas permintaan karyawan.'}
+            </p>
             <form onSubmit={handleAjukan} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Karyawan <span className="text-red-500">*</span></label>
-                <select required value={ajukanForm.employee_id}
-                  onChange={e => setAjukanForm({ ...ajukanForm, employee_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                  <option value="">-- Pilih Karyawan --</option>
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.employee_code})</option>
-                  ))}
-                </select>
-              </div>
+              {canSelfSubmit ? (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Karyawan</label>
+                  <div className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm text-slate-500">
+                    Anda ({myKasbonInfo?.full_name || '...'})
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Karyawan <span className="text-red-500">*</span></label>
+                  <select required value={ajukanForm.employee_id}
+                    onChange={e => setAjukanForm({ ...ajukanForm, employee_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                    <option value="">-- Pilih Karyawan --</option>
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.full_name} ({emp.employee_code})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Diajukan (Rp) <span className="text-red-500">*</span></label>
                 <RupiahInput required value={ajukanForm.amount_requested}
@@ -312,7 +343,7 @@ function TabPengajuan({ showMessage, role }: { showMessage: (t: 'success' | 'err
                   placeholder="Contoh: 1.000.000"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 {ajukanForm.employee_id && (() => {
-                  const emp = employees.find(e => e.id === ajukanForm.employee_id)
+                  const emp = canSelfSubmit ? myKasbonInfo : employees.find(e => e.id === ajukanForm.employee_id)
                   const outstanding = outstandingFor(ajukanForm.employee_id)
                   const limit = Number(emp?.kasbon_limit || 0)
                   const amt = Number(ajukanForm.amount_requested) || 0

@@ -145,7 +145,9 @@ const adminNavItems: NavNode[] = [
   { name: 'Manajemen User', href: '/users', icon: '🔑' },
 ]
 
-// Menu untuk Karyawan (employee/supervisor)
+// Menu untuk Karyawan (employee/supervisor) — sengaja TIDAK menyertakan Keuangan: RLS di
+// database sudah menolak akses role employee ke semua tabel fin_*/supplier_purchases, jadi
+// menampilkan menunya di sini cuma bikin karyawan buka halaman kosong tanpa penjelasan.
 const employeeNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
   {
@@ -155,52 +157,11 @@ const employeeNavItems: NavNode[] = [
     submenu: [
       { name: 'Slip Gaji', href: '/portal/slip-gaji' },
       { name: 'Rekap Absensi', href: '/portal/absensi' },
+      { name: 'Jadwal Saya', href: '/portal/jadwal' },
     ]
   },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
-  {
-    name: 'Keuangan',
-    href: '/keuangan',
-    icon: '💵',
-    submenu: [
-      {
-        name: 'Kas Masuk',
-        href: '/keuangan/kas-masuk',
-        submenu: [
-          { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
-          { name: 'HPP & Omset (Sistem)', href: '/keuangan/hpp' },
-        ]
-      },
-      {
-        name: 'Kas Keluar',
-        href: '/keuangan/kas-keluar',
-        submenu: [
-          { name: 'Input Kas Keluar', href: '/keuangan/kas-keluar' },
-          { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
-        ]
-      },
-      {
-        name: 'Pembelian & Utang Supplier',
-        href: '/keuangan/pembelian',
-        submenu: [
-          { name: 'Catat & Bayar', href: '/keuangan/pembelian/input' },
-          { name: 'Master Supplier', href: '/keuangan/pembelian/supplier' },
-        ]
-      },
-      {
-        name: 'Modal & Aset',
-        href: '/keuangan/modal',
-        submenu: [
-          { name: 'Modal Cabang', href: '/keuangan/modal' },
-          { name: 'Aset & Kontrak Sewa', href: '/keuangan/aset' },
-        ]
-      },
-      { name: 'Dashboard Keuangan', href: '/keuangan/dashboard' },
-      { name: 'Detail Laporan per Cabang', href: '/keuangan/laporan/detail' },
-      { name: 'Laporan Resmi', href: '/keuangan/laporan' },
-    ]
-  },
 ]
 
 type SidebarProps = {

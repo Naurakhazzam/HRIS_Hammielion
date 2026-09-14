@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { ANNUAL_LEAVE_QUOTA_DAYS, isEligibleForAnnualLeave, tenureDays, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
 
 export const metadata: Metadata = {
   title: 'Dashboard — Hammielion HRIS',
@@ -11,6 +13,83 @@ export default async function DashboardPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser()
+
+  const { data: userData } = user
+    ? await supabase.from('users').select('role, employee_id, employees(full_name, join_date)').eq('id', user.id).single()
+    : { data: null }
+
+  const isEmployeeRole = userData ? ['employee', 'supervisor'].includes(userData.role) : false
+
+  if (isEmployeeRole && userData?.employee_id) {
+    const emp = (userData as any).employees
+    const today = toDateStr(new Date())
+
+    const [{ data: todayRoster }, { data: leaveReqs }, { count: pendingKasbonCount }] = await Promise.all([
+      supabase.from('employee_roster')
+        .select('is_day_off, work_schedules(name, check_in_time, check_out_time)')
+        .eq('employee_id', userData.employee_id).eq('date', today).maybeSingle(),
+      emp?.join_date
+        ? (() => {
+            const { start, end } = getCurrentLeaveYear(emp.join_date)
+            return supabase.from('leave_requests').select('total_days')
+              .eq('employee_id', userData.employee_id).eq('leave_type', 'annual')
+              .in('status', ['pending', 'approved'])
+              .gte('start_date', toDateStr(start)).lte('start_date', toDateStr(end))
+          })()
+        : Promise.resolve({ data: [] as { total_days: number }[] }),
+      supabase.from('kasbon_requests').select('id', { count: 'exact', head: true })
+        .eq('employee_id', userData.employee_id).eq('status', 'pending'),
+    ])
+
+    const usedDays = (leaveReqs || []).reduce((s, r) => s + Number(r.total_days), 0)
+    const remaining = Math.max(0, ANNUAL_LEAVE_QUOTA_DAYS - usedDays)
+    const eligible = emp?.join_date ? isEligibleForAnnualLeave(emp.join_date) : false
+    const roster = todayRoster as unknown as { is_day_off: boolean; work_schedules: { name: string; check_in_time: string; check_out_time: string } | null } | null
+
+    return (
+      <div>
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
+          <p className="text-slate-500 text-sm mt-1">Halo, <strong>{emp?.full_name || user?.email}</strong>.</p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Jadwal Hari Ini</p>
+            {!roster ? (
+              <p className="text-sm text-slate-400 italic">Belum dijadwalkan</p>
+            ) : roster.is_day_off ? (
+              <p className="text-lg font-bold text-slate-700">🛑 Libur</p>
+            ) : (
+              <p className="text-lg font-bold text-green-700">
+                {roster.work_schedules?.name}
+                <span className="block text-xs font-normal text-slate-500 mt-0.5">
+                  {roster.work_schedules?.check_in_time?.substring(0,5)}–{roster.work_schedules?.check_out_time?.substring(0,5)}
+                </span>
+              </p>
+            )}
+            <Link href="/portal/jadwal" className="text-xs text-blue-600 hover:underline mt-2 inline-block">Lihat jadwal 14 hari →</Link>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Sisa Cuti Tahunan</p>
+            {!eligible ? (
+              <p className="text-sm text-amber-600">Masa kerja belum genap 1 tahun</p>
+            ) : (
+              <p className="text-2xl font-bold text-blue-600">{remaining} <span className="text-sm font-normal text-slate-400">/ {ANNUAL_LEAVE_QUOTA_DAYS} hari</span></p>
+            )}
+            <Link href="/cuti/ajukan" className="text-xs text-blue-600 hover:underline mt-2 inline-block">Ajukan cuti/izin →</Link>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Kasbon Menunggu</p>
+            <p className="text-2xl font-bold text-slate-700">{pendingKasbonCount ?? 0}</p>
+            <Link href="/kasbon" className="text-xs text-blue-600 hover:underline mt-2 inline-block">Lihat kasbon →</Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

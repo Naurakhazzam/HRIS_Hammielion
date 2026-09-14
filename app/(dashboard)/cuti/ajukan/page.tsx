@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
 
 type Employee = { id: string; full_name: string }
 
@@ -18,7 +19,14 @@ export default function AjukanCutiPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   const [documentFile, setDocumentFile] = useState<File | null>(null)
-  
+
+  // Kelayakan Cuti Tahunan untuk employee_id yang sedang dipilih di form — dicek ulang tiap
+  // ganti karyawan (relevan kalau yang mengajukan HR/Owner atas nama orang lain), bukan cuma
+  // untuk diri sendiri.
+  const [annualEligibility, setAnnualEligibility] = useState<{
+    loading: boolean; joinDate: string | null; usedDays: number
+  }>({ loading: false, joinDate: null, usedDays: 0 })
+
   const [formData, setFormData] = useState({
     employee_id: '',
     leave_type: 'annual',
@@ -31,7 +39,7 @@ export default function AjukanCutiPage() {
   const calcTotalDays = (start: string, end: string) => {
     if (!start || !end) return 0
     const diffTime = Math.abs(new Date(end).getTime() - new Date(start).getTime())
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) 
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
     // Jika end_date < start_date, hasilkan 0 untuk handle error
     if (new Date(end) < new Date(start)) return 0
     return diffDays + 1
@@ -43,6 +51,33 @@ export default function AjukanCutiPage() {
   useEffect(() => {
     fetchMyUserAndEmployees()
   }, [])
+
+  // Muat masa kerja & pemakaian Cuti Tahunan karyawan yang dipilih, tiap kali employee_id berubah.
+  useEffect(() => {
+    if (!formData.employee_id) { setAnnualEligibility({ loading: false, joinDate: null, usedDays: 0 }); return }
+    fetchAnnualEligibility(formData.employee_id)
+  }, [formData.employee_id])
+
+  async function fetchAnnualEligibility(employeeId: string) {
+    setAnnualEligibility(prev => ({ ...prev, loading: true }))
+    const { data: emp } = await supabase.from('employees').select('join_date').eq('id', employeeId).single()
+    if (!emp?.join_date) { setAnnualEligibility({ loading: false, joinDate: null, usedDays: 0 }); return }
+
+    const { start, end } = getCurrentLeaveYear(emp.join_date)
+    // Hitung pending + approved supaya tidak bisa "overbook" lewat beberapa pengajuan
+    // Cuti Tahunan sekaligus sebelum yang pertama diproses HR.
+    const { data: reqs } = await supabase
+      .from('leave_requests')
+      .select('total_days')
+      .eq('employee_id', employeeId)
+      .eq('leave_type', 'annual')
+      .in('status', ['pending', 'approved'])
+      .gte('start_date', toDateStr(start))
+      .lte('start_date', toDateStr(end))
+
+    const usedDays = (reqs || []).reduce((s, r) => s + Number(r.total_days), 0)
+    setAnnualEligibility({ loading: false, joinDate: emp.join_date, usedDays })
+  }
 
   async function fetchMyUserAndEmployees() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -83,6 +118,29 @@ export default function AjukanCutiPage() {
       showMessage('error', 'Karyawan harus dipilih.')
       setSubmitting(false)
       return
+    }
+
+    // Aturan Cuti Tahunan: minimal 1 tahun masa kerja, dan tidak boleh melebihi sisa jatah
+    // 12 hari/tahun masa kerja berjalan. Keduanya hard block, bukan cuma peringatan — beda dari
+    // kasbon yang cuma warning, karena ini soal hak cuti yang harus dipatuhi, bukan sekadar limit.
+    if (formData.leave_type === 'annual') {
+      if (!annualEligibility.joinDate) {
+        showMessage('error', 'Data masa kerja karyawan belum termuat. Coba lagi sesaat lagi.')
+        setSubmitting(false)
+        return
+      }
+      if (!isEligibleForAnnualLeave(annualEligibility.joinDate)) {
+        const months = Math.floor(tenureDays(annualEligibility.joinDate) / 30)
+        showMessage('error', `Cuti Tahunan baru bisa diajukan setelah masa kerja minimal 1 tahun (saat ini ±${months} bulan).`)
+        setSubmitting(false)
+        return
+      }
+      const remaining = ANNUAL_LEAVE_QUOTA_DAYS - annualEligibility.usedDays
+      if (totalDays > remaining) {
+        showMessage('error', `Sisa jatah Cuti Tahunan cuma ${remaining} dari ${ANNUAL_LEAVE_QUOTA_DAYS} hari/tahun, tapi Anda mengajukan ${totalDays} hari.`)
+        setSubmitting(false)
+        return
+      }
     }
 
     let finalLeaveType = formData.leave_type
@@ -210,6 +268,22 @@ export default function AjukanCutiPage() {
               <option value="bereaved">Izin Duka Keluarga</option>
             </select>
           </div>
+
+          {/* Info kelayakan & sisa jatah Cuti Tahunan */}
+          {formData.leave_type === 'annual' && (
+            annualEligibility.loading ? (
+              <div className="text-xs text-slate-400">Memuat data masa kerja...</div>
+            ) : !annualEligibility.joinDate ? null : !isEligibleForAnnualLeave(annualEligibility.joinDate) ? (
+              <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm border border-red-100">
+                ⚠️ Masa kerja baru ±{Math.floor(tenureDays(annualEligibility.joinDate) / 30)} bulan.
+                Cuti Tahunan baru bisa diajukan setelah genap {MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE} hari (1 tahun) masa kerja.
+              </div>
+            ) : (
+              <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm border border-blue-100">
+                Sisa jatah Cuti Tahunan: <strong>{Math.max(0, ANNUAL_LEAVE_QUOTA_DAYS - annualEligibility.usedDays)}</strong> dari {ANNUAL_LEAVE_QUOTA_DAYS} hari (tahun masa kerja berjalan).
+              </div>
+            )
+          )}
 
           {/* Tanggal */}
           <div className="grid grid-cols-2 gap-4">
