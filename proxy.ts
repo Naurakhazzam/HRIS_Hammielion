@@ -13,7 +13,10 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // Route yang tidak memerlukan autentikasi
-const PUBLIC_ROUTES = ['/login', '/auth/callback', '/lamaran', '/api/lamaran']
+const PUBLIC_ROUTES = ['/login', '/forgot-password', '/reset-password', '/auth/callback', '/lamaran', '/api/lamaran']
+// Catatan: '/reset-password' harus tetap publik meski secara teknis user sudah
+// "login" lewat sesi recovery dari /auth/callback — kalau dianggap AUTH_ROUTE dan
+// di-redirect ke /dashboard, karyawan tidak akan sempat mengisi password baru.
 // Catatan: '/lamaran' dan '/api/lamaran' di atas sudah otomatis mencakup
 // '/lamaran/status', '/api/lamaran/status', dan '/api/lamaran/screening-answers'
 // lewat pengecekan startsWith() di bawah.

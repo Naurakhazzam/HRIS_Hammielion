@@ -878,6 +878,22 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 | `app/(dashboard)/keuangan/laporan/page.tsx` | Toggle Potret/Lanskap; `handlePrint` sisipkan `<style>` @page |
 | `app/(dashboard)/keuangan/laporan/detail/page.tsx` | Sama, untuk konsistensi |
 
+### 54. Fitur: Lupa Password (Reset Mandiri)
+
+**Konteks:** Sign up mandiri untuk karyawan sudah ada (Kode Karyawan + verifikasi HP/tanggal lahir → `/api/signup`), tapi karyawan yang sudah punya akun dan lupa password sebelumnya cuma bisa "hubungi HR" — belum ada jalur reset mandiri.
+
+**Fix:** Alur reset password standar Supabase Auth: halaman `/forgot-password` (input email → `supabase.auth.resetPasswordForEmail`) → email berisi link ke `/auth/callback` (tukar `code` jadi sesi via `exchangeCodeForSession`) → redirect ke `/reset-password` (input password baru → `supabase.auth.updateUser`) → sign out dari sesi recovery → redirect ke `/login`. Pesan sukses di `/forgot-password` sengaja digeneralisir (tidak bilang email ditemukan/tidak) supaya tidak bisa dipakai menebak-nebak email karyawan yang punya akun, sama seperti pola di endpoint signup.
+
+| File | Perubahan |
+|---|---|
+| `app/(auth)/forgot-password/page.tsx` | Baru — form input email untuk kirim link reset |
+| `app/(auth)/reset-password/page.tsx` | Baru — form password baru + konfirmasi |
+| `app/auth/callback/route.ts` | Baru — tukar `code` dari link email jadi sesi, redirect ke `next` |
+| `app/(auth)/login/page.tsx` | Link "Lupa password?" di sebelah label Password |
+| `proxy.ts` | `/forgot-password` & `/reset-password` ditambahkan ke `PUBLIC_ROUTES` |
+
+**Catatan setup manual (Supabase Dashboard):** Authentication → URL Configuration harus ada `<domain-produksi>/auth/callback` di daftar Redirect URLs, kalau belum, email reset akan gagal redirect setelah user klik link-nya.
+
 ---
 
-*Terakhir diupdate: Sesi 4 (2026-09-12), lanjutan*
+*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password*
