@@ -54,6 +54,10 @@ export default function ScreeningForm({ applicantId, phone, questions, existingA
       <p className="text-sm font-medium text-slate-700">
         Selamat! Anda lolos ke tahap screening. Mohon jawab pertanyaan berikut:
       </p>
+      <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+        Jawablah sejelas dan sedetail mungkin, lengkap dengan contoh nyata dari pengalaman Anda. Semakin jelas dan
+        lengkap jawaban Anda, semakin mudah bagi tim HR untuk menilai kesiapan dan kecocokan Anda.
+      </p>
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
       )}

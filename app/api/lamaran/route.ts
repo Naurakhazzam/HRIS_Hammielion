@@ -13,6 +13,7 @@ const supabaseAdmin = createClient(
 
 const GENDER_VALUES = ['male', 'female']
 const MARITAL_VALUES = ['single', 'married', 'divorced', 'widowed']
+const PLACEMENT_VALUES = ['singaparna', 'tasik_kota']
 const MIN_WORK_EXPERIENCE_LENGTH = 10
 
 function normalizePhone(phone: string): string {
@@ -41,11 +42,23 @@ export async function POST(req: NextRequest) {
     const {
       full_name, gender, birth_place, birth_date, address, phone,
       marital_status, number_of_children, education, work_experience, motivation,
+      placement, distance_km, distance_minutes,
     } = body
 
     if (!full_name || !gender || !phone || !marital_status || !education) {
       return NextResponse.json(
         { error: 'Nama, jenis kelamin, nomor telepon, status perkawinan, dan pendidikan wajib diisi.' },
+        { status: 400 }
+      )
+    }
+    if (!PLACEMENT_VALUES.includes(placement)) {
+      return NextResponse.json({ error: 'Penempatan cabang wajib dipilih.' }, { status: 400 })
+    }
+    const distanceKmNum = Number(distance_km)
+    const distanceMinutesNum = Number(distance_minutes)
+    if (!distance_km || !distance_minutes || !Number.isFinite(distanceKmNum) || !Number.isFinite(distanceMinutesNum) || distanceKmNum < 0 || distanceMinutesNum < 0) {
+      return NextResponse.json(
+        { error: 'Jarak (KM) dan waktu tempuh (menit) ke titik acuan cabang wajib diisi dengan angka.' },
         { status: 400 }
       )
     }
@@ -106,6 +119,9 @@ export async function POST(req: NextRequest) {
         education,
         work_experience: String(work_experience).trim(),
         motivation: motivation || null,
+        placement,
+        distance_km: distanceKmNum,
+        distance_minutes: distanceMinutesNum,
         status: initialStatus,
       })
       .select('id')

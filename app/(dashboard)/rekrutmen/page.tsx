@@ -22,6 +22,9 @@ type Applicant = {
   motivation: string | null
   status: string
   created_at: string
+  placement: string | null
+  distance_km: number | null
+  distance_minutes: number | null
   psychotest_results: { score: number } | null
 }
 
@@ -96,6 +99,8 @@ function renderPsychometricSummary(testType: string, summary: any) {
 }
 
 const GENDER_LABELS: Record<string, string> = { male: 'Laki-laki', female: 'Perempuan' }
+const PLACEMENT_LABELS: Record<string, string> = { singaparna: 'Singaparna', tasik_kota: 'Tasik Kota' }
+const PLACEMENT_REFERENCE_POINT: Record<string, string> = { singaparna: 'Alun-alun Singaparna', tasik_kota: 'UNSIL' }
 const MARITAL_LABELS: Record<string, string> = {
   single: 'Belum Menikah', married: 'Menikah', divorced: 'Cerai', widowed: 'Janda/Duda',
 }
@@ -169,7 +174,7 @@ export default function RekrutmenPage() {
     setLoading(true)
     const { data } = await supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, psychotest_results(score)')
+      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score)')
       .order('created_at', { ascending: false })
     setApplicants((data as unknown as Applicant[]) || [])
     setLoading(false)
@@ -422,6 +427,7 @@ export default function RekrutmenPage() {
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Usia</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Pendidikan</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Telepon</th>
+                <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Penempatan</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Status</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">
                   <button onClick={toggleScoreSort} className="flex items-center gap-1 hover:text-slate-800">
@@ -434,10 +440,10 @@ export default function RekrutmenPage() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
               )}
               {!loading && filteredApplicants.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
               )}
               {filteredApplicants.map(a => (
                 <tr key={a.id} className="border-t border-slate-100">
@@ -451,6 +457,7 @@ export default function RekrutmenPage() {
                       {a.phone}
                     </a>
                   </td>
+                  <td className="px-4 py-2 text-slate-600">{a.placement ? PLACEMENT_LABELS[a.placement] || a.placement : '-'}</td>
                   <td className="px-4 py-2">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[a.status] || 'bg-slate-100 text-slate-700'}`}>
                       {STATUS_LABELS[a.status] || a.status}
@@ -500,6 +507,15 @@ export default function RekrutmenPage() {
                 <p>
                   <span className="text-slate-500">Status Perkawinan:</span> {MARITAL_LABELS[detail.marital_status] || detail.marital_status}
                   {detail.marital_status === 'married' && ` (${detail.number_of_children ?? 0} anak)`}
+                </p>
+                <p className="col-span-2">
+                  <span className="text-slate-500">Penempatan:</span>{' '}
+                  {detail.placement ? PLACEMENT_LABELS[detail.placement] || detail.placement : '-'}
+                  {detail.placement && detail.distance_km !== null && detail.distance_minutes !== null && (
+                    <span className="text-slate-500">
+                      {' '}— {detail.distance_km} KM / {detail.distance_minutes} menit dari rumah ke {PLACEMENT_REFERENCE_POINT[detail.placement]}
+                    </span>
+                  )}
                 </p>
               </div>
 

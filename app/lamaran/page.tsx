@@ -18,6 +18,14 @@ const MARITAL_OPTIONS = [
   { value: 'widowed', label: 'Janda/Duda' },
 ]
 const EDUCATION_OPTIONS = ['SD', 'SMP', 'SMA/SMK', 'D1', 'D2', 'D3', 'D4', 'S1', 'S2', 'S3']
+const PLACEMENT_OPTIONS = [
+  { value: 'singaparna', label: 'Singaparna' },
+  { value: 'tasik_kota', label: 'Tasik Kota' },
+]
+const PLACEMENT_REFERENCE_POINT: Record<string, string> = {
+  singaparna: 'Alun-alun Singaparna',
+  tasik_kota: 'UNSIL',
+}
 
 const inputClass = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
 const selectClass = inputClass + " bg-white"
@@ -47,6 +55,7 @@ function Field({ label, required, children }: { label: string; required?: boolea
 const emptyForm = {
   full_name: '', gender: '', birth_place: '', birth_date: '', address: '', phone: '',
   marital_status: '', number_of_children: '', education: '', work_experience: '', motivation: '',
+  placement: '', distance_km: '', distance_minutes: '',
 }
 
 type SubmissionResult = {
@@ -178,6 +187,49 @@ export default function LamaranPage() {
             <textarea className={inputClass} rows={2} value={form.address}
               onChange={e => update('address', e.target.value)} />
           </Field>
+
+          <Field label="Penempatan Cabang" required>
+            <select className={selectClass} required value={form.placement}
+              onChange={e => update('placement', e.target.value)}>
+              <option value="">Pilih...</option>
+              {PLACEMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
+
+          {form.placement && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-3 space-y-3">
+              <p className="text-sm font-medium text-blue-800">
+                Jarak Rumah ke {PLACEMENT_REFERENCE_POINT[form.placement]}
+              </p>
+              <p className="text-xs text-blue-700">
+                Pastikan Anda mengecek jarak dan waktu tempuhnya lewat Google Maps sebelum mengisi.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Jarak" required>
+                  <div className="flex">
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" required
+                      className={inputClass + " rounded-r-none"}
+                      value={form.distance_km}
+                      onChange={e => update('distance_km', e.target.value.replace(/\D/g, ''))} />
+                    <span className="px-3 flex items-center border border-l-0 border-slate-300 rounded-r-lg bg-slate-100 text-sm text-slate-600 shrink-0">
+                      KM
+                    </span>
+                  </div>
+                </Field>
+                <Field label="Waktu Tempuh" required>
+                  <div className="flex">
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" required
+                      className={inputClass + " rounded-r-none"}
+                      value={form.distance_minutes}
+                      onChange={e => update('distance_minutes', e.target.value.replace(/\D/g, ''))} />
+                    <span className="px-3 flex items-center border border-l-0 border-slate-300 rounded-r-lg bg-slate-100 text-sm text-slate-600 shrink-0">
+                      MENIT
+                    </span>
+                  </div>
+                </Field>
+              </div>
+            </div>
+          )}
 
           <Field label="Nomor Telepon/WhatsApp" required>
             <input className={inputClass} required value={form.phone}
