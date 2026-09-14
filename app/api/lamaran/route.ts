@@ -74,6 +74,9 @@ export async function POST(req: NextRequest) {
     if (!MARITAL_VALUES.includes(marital_status)) {
       return NextResponse.json({ error: 'Status perkawinan tidak valid.' }, { status: 400 })
     }
+    if (marital_status === 'married' && (number_of_children === '' || number_of_children === undefined || number_of_children === null || Number(number_of_children) < 0)) {
+      return NextResponse.json({ error: 'Jumlah anak wajib diisi untuk status menikah.' }, { status: 400 })
+    }
 
     // Cegah submit dobel dari nomor HP yang sama selama lamaran sebelumnya masih
     // berjalan. Kalau lamaran sebelumnya sudah "ditolak", tetap boleh melamar lagi.

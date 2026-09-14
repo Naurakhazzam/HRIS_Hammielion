@@ -65,7 +65,81 @@ type SubmissionResult = {
   questions: ScreeningQuestion[]
 }
 
+const PIPELINE_STAGES = [
+  { emoji: '📝', title: 'Data Diri', desc: 'Isi formulir data diri, pengalaman kerja, dan penempatan cabang yang Anda inginkan.' },
+  { emoji: '❓', title: 'Screening', desc: 'Kalau HR sedang membuka pertanyaan screening, Anda akan diminta menjawab beberapa pertanyaan singkat.' },
+  { emoji: '🧮', title: 'Psikotes', desc: 'Tes hitung cepat dan beberapa tes kepribadian/gaya kerja singkat. Semua bisa dikerjakan langsung, satu per satu.' },
+  { emoji: '⏳', title: 'Menunggu Dipanggil Interview', desc: 'Tim HR meninjau hasil Anda. Kalau lolos, HR akan menghubungi Anda lewat WhatsApp untuk jadwal interview.' },
+  { emoji: '🧑‍💼', title: 'Training/Percobaan', desc: 'Kalau lolos interview, Anda akan menjalani masa training/percobaan terlebih dahulu.' },
+  { emoji: '✅', title: 'Keputusan Akhir', desc: 'HR akan menginfokan apakah Anda diterima sebagai karyawan tetap atau belum berhasil kali ini.' },
+]
+
+function EntryChoiceScreen({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="min-h-screen bg-slate-50 py-8 px-4">
+      <div className="max-w-xl mx-auto">
+        <div className="text-center mb-6">
+          <h1 className="text-2xl font-bold text-slate-800">Lowongan Kerja</h1>
+          <p className="text-sm text-slate-500 mt-1">Hammielion Management</p>
+        </div>
+        <div className="grid gap-4">
+          <button onClick={onNew}
+            className="bg-white rounded-xl shadow-sm border-2 border-blue-200 hover:border-blue-400 p-6 text-left transition-colors">
+            <div className="text-3xl mb-2">🆕</div>
+            <p className="text-base font-semibold text-slate-800">Saya Baru Mau Melamar</p>
+            <p className="text-sm text-slate-500 mt-1">Belum pernah mengisi formulir lamaran untuk lowongan ini.</p>
+          </button>
+          <Link href="/lamaran/status"
+            className="bg-white rounded-xl shadow-sm border-2 border-slate-200 hover:border-slate-400 p-6 text-left transition-colors block">
+            <div className="text-3xl mb-2">🔍</div>
+            <p className="text-base font-semibold text-slate-800">Saya Sudah Pernah Melamar</p>
+            <p className="text-sm text-slate-500 mt-1">Cek status lamaran, atau lanjutkan tahap yang belum selesai.</p>
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StageIntroScreen({ onStart }: { onStart: () => void }) {
+  return (
+    <div className="min-h-screen bg-slate-50 py-8 px-4">
+      <div className="max-w-xl mx-auto">
+        <div className="text-center mb-6">
+          <h1 className="text-2xl font-bold text-slate-800">Sebelum Mulai</h1>
+          <p className="text-sm text-slate-500 mt-1">Hammielion Management</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+          <p className="text-sm text-slate-600">
+            Berikut tahapan proses lamaran kerja di Hammielion Management, supaya Anda tahu ada di tahap mana nanti.
+            Setelah tahap Data Diri sampai Psikotes, semuanya bisa langsung dikerjakan berurutan di halaman ini juga.
+          </p>
+          <div className="space-y-3">
+            {PIPELINE_STAGES.map((s, i) => (
+              <div key={s.title} className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <span className="text-xl leading-none">{s.emoji}</span>
+                  {i < PIPELINE_STAGES.length - 1 && <span className="w-px flex-1 bg-slate-200 mt-1" />}
+                </div>
+                <div className="pb-3">
+                  <p className="text-sm font-semibold text-slate-800">{i + 1}. {s.title}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{s.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={onStart}
+            className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium">
+            Paham, Mulai Isi Formulir
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function LamaranPage() {
+  const [stage, setStage] = useState<'choice' | 'intro' | 'form'>('choice')
   const [form, setForm] = useState(emptyForm)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -114,6 +188,14 @@ export default function LamaranPage() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  if (stage === 'choice') {
+    return <EntryChoiceScreen onNew={() => setStage('intro')} />
+  }
+
+  if (stage === 'intro') {
+    return <StageIntroScreen onStart={() => setStage('form')} />
   }
 
   if (submission) {
@@ -245,8 +327,8 @@ export default function LamaranPage() {
           </Field>
 
           {form.marital_status === 'married' && (
-            <Field label="Jumlah Anak">
-              <input type="number" min={0} className={inputClass} value={form.number_of_children}
+            <Field label="Jumlah Anak" required>
+              <input type="number" min={0} required className={inputClass} value={form.number_of_children}
                 onChange={e => update('number_of_children', e.target.value)} />
             </Field>
           )}

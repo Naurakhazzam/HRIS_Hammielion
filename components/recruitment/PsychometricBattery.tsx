@@ -70,9 +70,14 @@ function DiscForm({ onSubmit }: { onSubmit: (answers: { most: number; least: num
         </p>
         <p className="text-xs font-medium text-blue-700">{filledCount} dari {DISC_BLOCKS.length} kelompok terisi</p>
       </div>
-      {DISC_BLOCKS.map((block, bi) => (
-        <div key={bi} className="border border-slate-200 rounded-lg p-3 space-y-2">
-          <p className="text-xs text-slate-400">Kelompok {bi + 1} dari {DISC_BLOCKS.length}</p>
+      {DISC_BLOCKS.map((block, bi) => {
+        const isBlockFilled = selections[bi].most !== null && selections[bi].least !== null
+        return (
+        <div key={bi} className={`border rounded-lg p-3 space-y-2 ${isBlockFilled ? 'border-green-300 bg-green-50/50' : 'border-slate-200'}`}>
+          <p className="text-xs text-slate-400 flex items-center gap-1">
+            Kelompok {bi + 1} dari {DISC_BLOCKS.length}
+            {isBlockFilled && <span className="text-green-600 font-medium">✓ Terisi</span>}
+          </p>
           {block.map((opt, oi) => (
             <div key={oi} className="flex items-center justify-between gap-2">
               <span className="flex-1 text-sm text-slate-700">{opt.text}</span>
@@ -89,7 +94,8 @@ function DiscForm({ onSubmit }: { onSubmit: (answers: { most: number; least: num
             </div>
           ))}
         </div>
-      ))}
+        )
+      })}
       <button type="submit" disabled={!allAnswered}
         className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
         Kirim Jawaban

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import ScreeningForm, { ScreeningQuestion } from './ScreeningForm'
 import PsikotesArithmetic from './PsikotesArithmetic'
 import PsychometricBattery from './PsychometricBattery'
+import JourneyBreadcrumb from './JourneyBreadcrumb'
 import { TestType } from '@/lib/psychometricTests'
 
 /**
@@ -36,39 +37,55 @@ export default function RecruitmentFlow({
   const showScreening = inPreInterviewFlow && !screeningSubmitted && questions.length > 0
   const showArithmetic = inPreInterviewFlow && (screeningSubmitted || questions.length === 0) && !arithmeticDone
   const showPsychometric = inPreInterviewFlow && (screeningSubmitted || questions.length === 0) && arithmeticDone
+  const hasActiveStage = showScreening || showArithmetic || showPsychometric
 
-  if (showScreening) {
-    return (
-      <ScreeningForm
-        applicantId={applicantId}
-        phone={phone}
-        questions={questions}
-        existingAnswers={existingAnswers}
-        onDone={() => setScreeningSubmitted(true)}
-      />
-    )
-  }
+  // Peringatkan sebelum menutup/refresh tab selagi ada tahap yang sedang
+  // dikerjakan — sebagian jawaban baru tersimpan ke server setelah satu
+  // tahap/level penuh selesai, jadi progres yang belum sampai situ bisa hilang.
+  useEffect(() => {
+    if (!hasActiveStage) return
+    function handler(e: BeforeUnloadEvent) {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [hasActiveStage])
 
-  if (showArithmetic) {
-    return (
-      <PsikotesArithmetic
-        applicantId={applicantId}
-        phone={phone}
-        initialLevelsDone={psikotesLevelsDone}
-        onDone={() => setArithmeticDone(true)}
-      />
-    )
-  }
+  if (!hasActiveStage) return null
 
-  if (showPsychometric) {
-    return (
-      <PsychometricBattery
-        applicantId={applicantId}
-        phone={phone}
-        initialDone={psychometricDone || { disc: false, personality: false, work_preference: false, integrity: false }}
-      />
-    )
-  }
+  const currentStage = showScreening ? 'screening' : 'psikotes'
 
-  return null
+  return (
+    <div>
+      <JourneyBreadcrumb current={currentStage} skipScreening={questions.length === 0} />
+
+      {showScreening && (
+        <ScreeningForm
+          applicantId={applicantId}
+          phone={phone}
+          questions={questions}
+          existingAnswers={existingAnswers}
+          onDone={() => setScreeningSubmitted(true)}
+        />
+      )}
+
+      {showArithmetic && (
+        <PsikotesArithmetic
+          applicantId={applicantId}
+          phone={phone}
+          initialLevelsDone={psikotesLevelsDone}
+          onDone={() => setArithmeticDone(true)}
+        />
+      )}
+
+      {showPsychometric && (
+        <PsychometricBattery
+          applicantId={applicantId}
+          phone={phone}
+          initialDone={psychometricDone || { disc: false, personality: false, work_preference: false, integrity: false }}
+        />
+      )}
+    </div>
+  )
 }
