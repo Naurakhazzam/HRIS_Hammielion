@@ -59,7 +59,10 @@ export default function AjukanCutiPage() {
   }, [formData.employee_id])
 
   async function fetchAnnualEligibility(employeeId: string) {
-    setAnnualEligibility(prev => ({ ...prev, loading: true }))
+    // Reset joinDate/usedDays (bukan cuma loading:true) supaya kalau HR ganti karyawan dengan
+    // cepat lalu langsung submit sebelum fetch baru ini selesai, validasi tenure/kuota tidak
+    // memakai data karyawan SEBELUMNYA yang masih nyangkut di state.
+    setAnnualEligibility({ loading: true, joinDate: null, usedDays: 0 })
     const { data: emp } = await supabase.from('employees').select('join_date').eq('id', employeeId).single()
     if (!emp?.join_date) { setAnnualEligibility({ loading: false, joinDate: null, usedDays: 0 }); return }
 

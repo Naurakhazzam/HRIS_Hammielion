@@ -995,4 +995,16 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening ke karyawan*
+### 60. Fix: Data Masa Kerja Karyawan Lama Bisa "Nyangkut" Saat Ganti Kandidat Cuti Cepat
+
+**Ditemukan:** Saat pengecekan menyeluruh pasca-deploy fitur cuti (item #56) — `npm run build`, smoke test route, dan review kode. Di `/cuti/ajukan`, kalau HR/Owner ganti pilihan karyawan dengan cepat lalu langsung submit Cuti Tahunan sebelum data masa-kerja karyawan baru selesai dimuat, validasi tenure/kuota bisa memakai data karyawan **sebelumnya** yang masih tersimpan di state — bukan karyawan yang baru dipilih.
+
+**Fix:** Saat mulai memuat data karyawan baru, `joinDate`/`usedDays` langsung direset ke kosong (bukan cuma tanda "loading"), jadi tombol submit otomatis terkunci ("data belum termuat") sampai data yang benar-benar sesuai kandidat yang dipilih selesai dimuat.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/cuti/ajukan/page.tsx` | Reset `joinDate`/`usedDays` saat ganti karyawan, bukan cuma flag loading |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti*
