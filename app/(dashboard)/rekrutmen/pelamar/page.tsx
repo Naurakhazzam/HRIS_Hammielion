@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { toWhatsAppLink } from '@/lib/waLink'
+import { isBeforeAntiPasteFix } from '@/lib/antiPasteFix'
 
 type Applicant = {
   id: string
@@ -30,6 +31,7 @@ type Applicant = {
 
 type ScreeningAnswerRow = {
   answer_text: string | null
+  created_at: string
   screening_questions: { question_text: string; sort_order: number } | null
 }
 
@@ -158,6 +160,7 @@ export default function DaftarPelamarPage() {
 
   const [detail, setDetail] = useState<Applicant | null>(null)
   const [detailAnswers, setDetailAnswers] = useState<{ question_text: string; answer_text: string }[]>([])
+  const [detailScreeningSubmittedAt, setDetailScreeningSubmittedAt] = useState<string | null>(null)
   const [detailPsychotest, setDetailPsychotest] = useState<PsychotestResult | null>(null)
   const [detailPsychometrics, setDetailPsychometrics] = useState<PsychometricResultRow[]>([])
   const [detailStatus, setDetailStatus] = useState('')
@@ -187,13 +190,17 @@ export default function DaftarPelamarPage() {
     setDetailStatus(applicant.status)
     const { data } = await supabase
       .from('screening_answers')
-      .select('answer_text, screening_questions(question_text, sort_order)')
+      .select('answer_text, created_at, screening_questions(question_text, sort_order)')
       .eq('applicant_id', applicant.id)
-    const rows = ((data || []) as unknown as ScreeningAnswerRow[])
+    const rawRows = (data || []) as unknown as ScreeningAnswerRow[]
+    const rows = rawRows
       .filter(r => r.screening_questions)
       .sort((a, b) => (a.screening_questions!.sort_order - b.screening_questions!.sort_order))
       .map(r => ({ question_text: r.screening_questions!.question_text, answer_text: r.answer_text || '' }))
     setDetailAnswers(rows)
+    // Semua jawaban screening disimpan sekali jalan (satu upsert), jadi
+    // created_at baris manapun cukup mewakili waktu submit keseluruhan.
+    setDetailScreeningSubmittedAt(rawRows.length > 0 ? rawRows[0].created_at : null)
 
     const { data: psychotest } = await supabase
       .from('psychotest_results')
@@ -212,6 +219,7 @@ export default function DaftarPelamarPage() {
   function closeDetail() {
     setDetail(null)
     setDetailAnswers([])
+    setDetailScreeningSubmittedAt(null)
     setDetailPsychotest(null)
     setDetailPsychometrics([])
   }
@@ -410,8 +418,27 @@ export default function DaftarPelamarPage() {
 
               {detailAnswers.length > 0 && (
                 <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <p className="text-sm font-medium text-amber-800 mb-3">Jawaban Screening</p>
-                  <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                    <p className="text-sm font-medium text-amber-800">Jawaban Screening</p>
+                    {detailScreeningSubmittedAt && (
+                      isBeforeAntiPasteFix(detailScreeningSubmittedAt) ? (
+                        <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-700 font-medium">
+                          ⚠️ Sebelum perbaikan anti-paste
+                        </span>
+                      ) : (
+                        <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium">
+                          ✅ Sesudah perbaikan anti-paste
+                        </span>
+                      )
+                    )}
+                  </div>
+                  {detailScreeningSubmittedAt && isBeforeAntiPasteFix(detailScreeningSubmittedAt) && (
+                    <p className="text-xs text-red-700 mb-2">
+                      Diisi sebelum celah bypass anti-paste ditutup — jawaban ini mungkin masih mengandung teks
+                      tempelan yang tidak sempat terdeteksi. Jadikan pertimbangan tambahan, jangan patokan mutlak.
+                    </p>
+                  )}
+                  <div className="space-y-4 mt-2">
                     {detailAnswers.map((a, i) => (
                       <div key={i} className={i > 0 ? 'pt-4 border-t border-amber-200' : ''}>
                         <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1">
