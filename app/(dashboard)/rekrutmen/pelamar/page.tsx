@@ -30,7 +30,6 @@ type Applicant = {
   psychotest_results: { score: number } | null
   screening_answers: { created_at: string }[] | null
   interview_token: string
-  interview_scheduled_at: string | null
   interview_confirmation: string | null
   interview_confirmed_at: string | null
 }
@@ -104,15 +103,6 @@ function getPsikotesScore(a: Applicant): number | null {
   return a.psychotest_results?.score ?? null
 }
 
-// Format ISO -> value yang dimengerti <input type="datetime-local"> (waktu lokal browser,
-// tanpa offset timezone), dan sebaliknya dikonversi balik ke ISO UTC saat disimpan.
-function toDatetimeLocalValue(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 function formatInterviewSchedule(iso: string): string {
   return new Date(iso).toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB'
 }
@@ -142,9 +132,12 @@ export default function DaftarPelamarPage() {
   const [detailPsychometrics, setDetailPsychometrics] = useState<PsychometricResultRow[]>([])
   const [detailStatus, setDetailStatus] = useState('')
   const [savingStatus, setSavingStatus] = useState(false)
-  const [interviewDateTime, setInterviewDateTime] = useState('')
-  const [savingInterview, setSavingInterview] = useState(false)
-  const [interviewSaved, setInterviewSaved] = useState(false)
+
+  // Jadwal & lokasi interview seragam untuk semua kandidat — diatur sekali di halaman
+  // Pengaturan Rekrutmen (recruitment_settings), bukan per-kandidat lagi.
+  const [interviewSettings, setInterviewSettings] = useState<{
+    interview_scheduled_at: string | null; interview_address: string | null; interview_map_url: string | null
+  } | null>(null)
 
   const supabase = createClient()
 
@@ -152,11 +145,19 @@ export default function DaftarPelamarPage() {
     setLoading(true)
     const { data } = await supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_scheduled_at, interview_confirmation, interview_confirmed_at')
+      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_confirmation, interview_confirmed_at')
       .order('created_at', { ascending: false })
     setApplicants((data as unknown as Applicant[]) || [])
     setLoading(false)
   }, [supabase])
+
+  useEffect(() => {
+    supabase.from('recruitment_settings')
+      .select('interview_scheduled_at, interview_address, interview_map_url')
+      .eq('id', 1).maybeSingle()
+      .then(({ data }) => setInterviewSettings(data))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     // Fetch mount-time data — setLoading(true) di dalamnya aman, bukan pola
@@ -168,8 +169,6 @@ export default function DaftarPelamarPage() {
   async function openDetail(applicant: Applicant) {
     setDetail(applicant)
     setDetailStatus(applicant.status)
-    setInterviewDateTime(toDatetimeLocalValue(applicant.interview_scheduled_at))
-    setInterviewSaved(false)
     const { data } = await supabase
       .from('screening_answers')
       .select('answer_text, created_at, screening_questions(question_text, sort_order)')
@@ -204,22 +203,6 @@ export default function DaftarPelamarPage() {
     setDetailScreeningSubmittedAt(null)
     setDetailPsychotest(null)
     setDetailPsychometrics([])
-    setInterviewDateTime('')
-    setInterviewSaved(false)
-  }
-
-  async function saveInterviewSchedule() {
-    if (!detail || !interviewDateTime) return
-    setSavingInterview(true)
-    const isoValue = new Date(interviewDateTime).toISOString()
-    const { error } = await supabase.from('job_applicants')
-      .update({ interview_scheduled_at: isoValue }).eq('id', detail.id)
-    setSavingInterview(false)
-    if (!error) {
-      setDetail({ ...detail, interview_scheduled_at: isoValue })
-      setInterviewSaved(true)
-      fetchApplicants()
-    }
   }
 
   function interviewInviteLink(applicant: Applicant) {
@@ -538,26 +521,22 @@ export default function DaftarPelamarPage() {
 
               <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
                 <p className="text-sm font-medium text-blue-800">Undangan Interview</p>
-                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                  <input type="datetime-local" value={interviewDateTime} onChange={e => setInterviewDateTime(e.target.value)}
-                    className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
-                  <button onClick={saveInterviewSchedule} disabled={savingInterview || !interviewDateTime}
-                    className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
-                    {savingInterview ? 'Menyimpan...' : 'Simpan Jadwal'}
-                  </button>
-                  {detail.interview_scheduled_at && (
+                {!interviewSettings?.interview_scheduled_at ? (
+                  <p className="text-xs text-amber-700">
+                    Jadwal interview belum diatur. Atur di{' '}
+                    <Link href="/rekrutmen" className="underline font-medium">Pengaturan Rekrutmen</Link> dulu (berlaku sama untuk semua kandidat).
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-500">
+                      Jadwal (untuk semua kandidat): <span className="font-medium text-slate-700">{formatInterviewSchedule(interviewSettings.interview_scheduled_at)}</span>
+                      <br />Link undangan kandidat ini: <span className="font-mono text-blue-600 break-all">{interviewInviteLink(detail)}</span>
+                    </p>
                     <button onClick={() => openInterviewWhatsApp(detail)}
                       className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium">
                       📤 Kirim Link via WhatsApp
                     </button>
-                  )}
-                </div>
-                {interviewSaved && <p className="text-xs text-green-700">Jadwal tersimpan.</p>}
-                {detail.interview_scheduled_at && (
-                  <p className="text-xs text-slate-500">
-                    Jadwal saat ini: <span className="font-medium text-slate-700">{formatInterviewSchedule(detail.interview_scheduled_at)}</span>
-                    <br />Link: <span className="font-mono text-blue-600 break-all">{interviewInviteLink(detail)}</span>
-                  </p>
+                  </>
                 )}
                 {detail.interview_confirmation && (
                   <p className="text-xs bg-white border border-blue-100 rounded-lg px-2 py-1.5 text-slate-600">

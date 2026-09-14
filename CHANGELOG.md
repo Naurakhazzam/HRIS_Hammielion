@@ -963,4 +963,24 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview*
+### 58. Fix: Jadwal Interview Jadi Satu Pengaturan Seragam, Bukan Per-Kandidat
+
+**Permintaan Owner:** "untuk jadwalnya buatkan pengaturan khusus saja, jadi semua seragam" — jadwal per-kandidat (item #57) diganti satu pengaturan yang berlaku untuk semua kandidat, plus tambahan alamat & link Google Maps.
+
+**Fix:**
+1. `job_applicants.interview_scheduled_at` (per-kandidat, dari #57) dihapus. Diganti 3 kolom baru di `recruitment_settings` (migrasi `028_interview_schedule_uniform.sql`, `029_interview_location.sql`): `interview_scheduled_at`, `interview_address`, `interview_map_url` — satu baris pengaturan untuk semua kandidat.
+2. Halaman **Pengaturan Rekrutmen** (`/rekrutmen`) dapat kartu baru "Jadwal & Lokasi Interview": tanggal/jam, alamat, dan link Google Maps — sekali isi, berlaku untuk semua undangan.
+3. Halaman undangan kandidat (`/lamaran/interview/[token]`) sekarang juga menampilkan alamat + tombol "Buka di Google Maps".
+4. Modal Detail Pelamar tidak lagi punya date-picker sendiri — cuma menampilkan jadwal seragam yang sedang berlaku + tombol kirim link WhatsApp per kandidat.
+
+| File | Perubahan |
+|---|---|
+| Database: `recruitment_settings` (migrasi `028`, `029`), `job_applicants` (migrasi `028`) | Kolom jadwal/lokasi pindah ke `recruitment_settings` |
+| `app/(dashboard)/rekrutmen/page.tsx` | Kartu baru "Jadwal & Lokasi Interview" |
+| `app/(dashboard)/rekrutmen/pelamar/page.tsx` | Date-picker per-kandidat dihapus, baca jadwal seragam dari `recruitment_settings` |
+| `app/api/lamaran/interview/[token]/route.ts` | Baca jadwal & lokasi dari `recruitment_settings`, bukan per-kandidat |
+| `app/lamaran/interview/[token]/page.tsx` | Tampilkan alamat + link Google Maps |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam*

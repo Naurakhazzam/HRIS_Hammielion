@@ -12,6 +12,14 @@ type ScreeningQuestion = {
   is_active: boolean
 }
 
+// Format ISO -> value yang dimengerti <input type="datetime-local"> (waktu lokal browser).
+function toDatetimeLocalValue(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 export default function RekrutmenPage() {
   const [applicantCount, setApplicantCount] = useState<number | null>(null)
   const [lamaranUrl, setLamaranUrl] = useState('')
@@ -20,6 +28,14 @@ export default function RekrutmenPage() {
   const [uploadFormUrl, setUploadFormUrl] = useState('')
   const [savingUrl, setSavingUrl] = useState(false)
   const [urlSaved, setUrlSaved] = useState(false)
+
+  // Jadwal & lokasi interview — satu pengaturan seragam untuk semua kandidat yang diundang,
+  // dipakai oleh halaman undangan personal /lamaran/interview/[token].
+  const [interviewDateTime, setInterviewDateTime] = useState('')
+  const [interviewAddress, setInterviewAddress] = useState('')
+  const [interviewMapUrl, setInterviewMapUrl] = useState('')
+  const [savingInterview, setSavingInterview] = useState(false)
+  const [interviewSaved, setInterviewSaved] = useState(false)
 
   const [demoInfo, setDemoInfo] = useState<{ application_code: string; full_name: string; phone: string } | null>(null)
   const [creatingDemo, setCreatingDemo] = useState(false)
@@ -58,10 +74,15 @@ export default function RekrutmenPage() {
 
     supabase
       .from('recruitment_settings')
-      .select('upload_form_url')
+      .select('upload_form_url, interview_scheduled_at, interview_address, interview_map_url')
       .eq('id', 1)
       .maybeSingle()
-      .then(({ data }) => setUploadFormUrl(data?.upload_form_url || ''))
+      .then(({ data }) => {
+        setUploadFormUrl(data?.upload_form_url || '')
+        setInterviewDateTime(toDatetimeLocalValue(data?.interview_scheduled_at ?? null))
+        setInterviewAddress(data?.interview_address || '')
+        setInterviewMapUrl(data?.interview_map_url || '')
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchApplicantCount, fetchQuestions])
 
@@ -132,6 +153,23 @@ export default function RekrutmenPage() {
     setNewQuestion('')
     setAddingQuestion(false)
     fetchQuestions()
+  }
+
+  async function saveInterviewSettings() {
+    setSavingInterview(true)
+    setInterviewSaved(false)
+    await supabase
+      .from('recruitment_settings')
+      .update({
+        interview_scheduled_at: interviewDateTime ? new Date(interviewDateTime).toISOString() : null,
+        interview_address: interviewAddress.trim() || null,
+        interview_map_url: interviewMapUrl.trim() || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', 1)
+    setSavingInterview(false)
+    setInterviewSaved(true)
+    setTimeout(() => setInterviewSaved(false), 2000)
   }
 
   async function toggleQuestionActive(q: ScreeningQuestion) {
@@ -216,6 +254,38 @@ export default function RekrutmenPage() {
             <p className="text-xs text-blue-600 mt-1">Klik &quot;Buat/Reset&quot; lagi kapan saja untuk mengulang dari awal.</p>
           </div>
         )}
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+        <h2 className="text-base font-semibold text-slate-800 mb-1">Jadwal & Lokasi Interview</h2>
+        <p className="text-sm text-slate-500 mb-3">
+          Satu jadwal & lokasi untuk semua kandidat yang diundang — dipakai otomatis di halaman
+          undangan personal tiap kandidat (link dikirim dari{' '}
+          <Link href="/rekrutmen/pelamar" className="text-blue-600 hover:underline">Daftar Pelamar</Link>).
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Tanggal & Jam</label>
+            <input type="datetime-local" value={interviewDateTime} onChange={e => setInterviewDateTime(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Link Google Maps</label>
+            <input value={interviewMapUrl} onChange={e => setInterviewMapUrl(e.target.value)}
+              placeholder="https://maps.app.goo.gl/..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          </div>
+        </div>
+        <div className="mb-3">
+          <label className="block text-xs font-medium text-slate-600 mb-1">Alamat</label>
+          <input value={interviewAddress} onChange={e => setInterviewAddress(e.target.value)}
+            placeholder="Contoh: Kantor Pusat Hammielion, Jl. ..."
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+        </div>
+        <button onClick={saveInterviewSettings} disabled={savingInterview}
+          className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50">
+          {savingInterview ? 'Menyimpan...' : interviewSaved ? 'Tersimpan!' : 'Simpan'}
+        </button>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">

@@ -14,7 +14,7 @@ const supabaseAdmin = createClient(
 async function findByToken(token: string) {
   const { data } = await supabaseAdmin
     .from('job_applicants')
-    .select('id, full_name, application_code, interview_scheduled_at, interview_confirmation, interview_confirmed_at')
+    .select('id, full_name, application_code, interview_confirmation, interview_confirmed_at')
     .eq('interview_token', token)
     .maybeSingle()
   return data
@@ -27,7 +27,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   if (!applicant) {
     return NextResponse.json({ found: false }, { status: 404 })
   }
-  if (!applicant.interview_scheduled_at) {
+
+  // Jadwal & lokasi interview seragam untuk semua kandidat, diatur sekali di
+  // Pengaturan Rekrutmen (recruitment_settings), bukan per-kandidat.
+  const { data: settings } = await supabaseAdmin
+    .from('recruitment_settings')
+    .select('interview_scheduled_at, interview_address, interview_map_url')
+    .eq('id', 1)
+    .maybeSingle()
+
+  if (!settings?.interview_scheduled_at) {
     return NextResponse.json({ found: true, scheduled: false, full_name: applicant.full_name })
   }
 
@@ -45,7 +54,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     scheduled: true,
     full_name: applicant.full_name,
     application_code: applicant.application_code,
-    interview_scheduled_at: applicant.interview_scheduled_at,
+    interview_scheduled_at: settings.interview_scheduled_at,
+    interview_address: settings.interview_address,
+    interview_map_url: settings.interview_map_url,
     interview_confirmation: applicant.interview_confirmation,
     interview_confirmed_at: applicant.interview_confirmed_at,
     psychotest: psychotest || null,

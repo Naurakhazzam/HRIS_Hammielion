@@ -13,6 +13,8 @@ type InviteData = {
   full_name?: string
   application_code?: string
   interview_scheduled_at?: string
+  interview_address?: string | null
+  interview_map_url?: string | null
   interview_confirmation?: string | null
   interview_confirmed_at?: string | null
   psychotest?: PsychotestResult | null
@@ -110,6 +112,21 @@ export default function InterviewInvitePage({ params }: { params: Promise<{ toke
             Selamat! Anda diundang untuk wawancara kerja di Hammielion Management, pada:
           </p>
           <p className="text-lg font-bold text-blue-700 mt-2">{formatSchedule(data.interview_scheduled_at!)} sampai selesai</p>
+
+          {data.interview_address && (
+            <div className="mt-2 flex gap-2">
+              <span className="text-lg">📍</span>
+              <div className="text-sm text-slate-600">
+                <p>{data.interview_address}</p>
+                {data.interview_map_url && (
+                  <a href={data.interview_map_url} target="_blank" rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline font-medium inline-block mt-1">
+                    Buka di Google Maps →
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 space-y-3">
             <div className="flex gap-2">
