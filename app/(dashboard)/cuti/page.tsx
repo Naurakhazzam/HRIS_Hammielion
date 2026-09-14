@@ -62,8 +62,11 @@ export default function CutiIzinPage() {
       `)
       .order('created_at', { ascending: false })
 
-    // Jika bukan HR atau Owner, filter hanya miliknya sendiri
-    if (myRole !== 'hr' && myRole !== 'owner') {
+    // Employee hanya lihat miliknya sendiri. Supervisor SENGAJA tidak difilter di sini —
+    // RLS "leave_read_supervisor" sudah otomatis membatasi hasilnya ke karyawan di cabangnya
+    // sendiri; kalau ikut difilter ke diri sendiri juga, supervisor tidak akan pernah bisa
+    // lihat pengajuan cuti anak buahnya lewat halaman ini.
+    if (myRole === 'employee') {
       if (myEmployeeId) {
         query = query.eq('employee_id', myEmployeeId)
       }

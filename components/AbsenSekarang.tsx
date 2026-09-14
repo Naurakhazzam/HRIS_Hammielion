@@ -238,7 +238,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   return (
     <div className="bg-white rounded-xl shadow-sm border-2 border-blue-200 p-5 mb-6">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-base font-bold text-slate-800">📍 Absen Sekarang (Test Drive)</h2>
+        <h2 className="text-base font-bold text-slate-800">📍 Absen Sekarang</h2>
         <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">via HP</span>
       </div>
       <p className="text-xs text-slate-500 mb-3">Radius {branch.checkin_radius_meters}m dari {branch.name}. Foto wajib diambil langsung dari kamera saat itu juga.</p>

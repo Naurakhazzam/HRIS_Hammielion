@@ -894,6 +894,28 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 
 **Catatan setup manual (Supabase Dashboard):** Authentication → URL Configuration harus ada `<domain-produksi>/auth/callback` di daftar Redirect URLs, kalau belum, email reset akan gagal redirect setelah user klik link-nya.
 
+### 55. Fix: 4 Bug di Tampilan Karyawan
+
+**Ditemukan:** Audit halaman-halaman yang dipakai role `employee`/`supervisor`, sambil mendalami rencana redesain menu karyawan.
+
+1. **Label debug "(Test Drive)"** masih tampil di judul widget Absen Sekarang (`AbsenSekarang.tsx`) — kelihatan setiap kali karyawan mau absen lewat HP.
+2. **RPC `approve_leave_request` menimpa data absensi asli jadi NULL** — kalau HR approve cuti/sakit untuk tanggal yang ternyata sudah ada data absensi asli (fingerprint/HP, misal pengajuan diproses telat/backdate), jam masuk-pulang & lembur yang sudah tercatat ikut terhapus, diganti status cuti.
+3. **Cetak Slip Gaji ikut mencetak seluruh halaman** — tombol Cetak di modal detail slip cuma panggil `window.print()` polos, tidak ada isolasi print, jadi ikut ke-print: judul halaman, filter tahun, dan grid semua kartu slip gaji lain di belakang modal.
+4. **Supervisor tidak bisa lihat pengajuan cuti anak buahnya** di `/cuti` — RLS `leave_read_supervisor` sudah mengizinkan lihat seluruh cabangnya, tapi kode client di halaman ini malah ikut memfilter ke diri sendiri untuk semua role selain hr/owner (termasuk supervisor), jadi kebijakan RLS-nya jadi tidak pernah kepakai.
+
+**Fix:**
+1. Hapus teks "(Test Drive)" dari judul.
+2. `ON CONFLICT` di fungsi `approve_leave_request` ditambah `WHERE attendances.check_in IS NULL AND attendances.check_out IS NULL` — kalau tanggal itu sudah ada data absensi asli, baris itu dilewati apa adanya (tidak ditimpa), bukan dipaksa NULL.
+3. Header, filter tahun, dan grid kartu slip di halaman Portal Slip Gaji dikasih `print:hidden`; modal detail diubah dari `fixed` + backdrop hitam jadi `print:static print:bg-white` tanpa backdrop saat print; tombol Cetak/Tutup di dalam modal juga `print:hidden`.
+4. Filter self di `/cuti` sekarang cuma berlaku untuk role `employee`, tidak lagi untuk `supervisor` — biar RLS `leave_read_supervisor` yang menentukan cakupan datanya.
+
+| File | Perubahan |
+|---|---|
+| `components/AbsenSekarang.tsx` | Hapus label "(Test Drive)" |
+| `app/(dashboard)/cuti/page.tsx` | Filter self di `fetchRequests` cuma untuk role `employee` |
+| `app/(dashboard)/portal/slip-gaji/page.tsx` | `print:hidden` di header/filter/grid; modal detail jadi print-friendly |
+| Database (fungsi `approve_leave_request`) | `ON CONFLICT ... WHERE check_in IS NULL AND check_out IS NULL` — lindungi data absensi asli |
+
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password*
+*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug tampilan karyawan*

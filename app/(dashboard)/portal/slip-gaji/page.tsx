@@ -181,13 +181,15 @@ export default function PortalSlipGajiPage() {
 
   return (
     <div>
-      <div className="mb-6">
+      {/* print:hidden — halaman daftar (header, filter, grid kartu) tidak boleh ikut cetak,
+          cuma modal detail slip yang boleh (lihat komentar di modal di bawah). */}
+      <div className="mb-6 print:hidden">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Slip Gaji Saya</h1>
         <p className="text-sm text-slate-500">Halo, <strong>{myName}</strong>. Berikut riwayat slip gaji Anda.</p>
       </div>
 
       {/* Filter Tahun */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6 flex items-center gap-4">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6 flex items-center gap-4 print:hidden">
         <label className="text-sm font-medium text-slate-600">Tahun:</label>
         <div className="flex gap-2">
           {yearOptions.map(y => (
@@ -200,14 +202,14 @@ export default function PortalSlipGajiPage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-slate-500">Memuat slip gaji...</div>
+        <div className="text-center py-12 text-slate-500 print:hidden">Memuat slip gaji...</div>
       ) : payrolls.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-xl border border-slate-200 text-slate-500">
+        <div className="text-center py-12 bg-white rounded-xl border border-slate-200 text-slate-500 print:hidden">
           <div className="text-4xl mb-3">📄</div>
           <p>Belum ada slip gaji untuk tahun {filterYear}.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 print:hidden">
           {payrolls.map(p => {
             const cfg = STATUS_CONFIG[p.status] ?? STATUS_CONFIG.draft
             return (
@@ -239,12 +241,16 @@ export default function PortalSlipGajiPage() {
         </div>
       )}
 
-      {/* Modal Detail Slip */}
+      {/* Modal Detail Slip — dibuat print:static & tanpa backdrop supaya saat window.print()
+          dipanggil, cuma slip ini yang tercetak (bukan ikut ke-print di atas overlay hitam
+          fixed-nya, yang perilakunya beda-beda tiap browser). Tombol Cetak/Tutup di-print:hidden
+          karena tidak ada gunanya di atas kertas. */}
       {selectedPayroll && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto"
->
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4">
-            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto
+                         print:static print:block print:p-0 print:bg-white print:overflow-visible">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4
+                           print:shadow-none print:rounded-none print:max-w-full print:my-0 print:w-auto">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200 print:hidden">
               <h2 className="text-base font-bold text-slate-700">Detail Slip Gaji</h2>
               <div className="flex gap-2">
                 <button onClick={() => window.print()}
