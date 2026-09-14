@@ -82,26 +82,46 @@ export async function POST(req: NextRequest) {
 
     const application_code = await generateApplicationCode()
 
-    const { error: dbError } = await supabaseAdmin.from('job_applicants').insert({
-      application_code,
-      full_name: String(full_name).trim(),
-      gender,
-      birth_place: birth_place || null,
-      birth_date: birth_date || null,
-      address: address || null,
-      phone: String(phone).trim(),
-      marital_status,
-      number_of_children: marital_status === 'married' && number_of_children !== '' ? Number(number_of_children) : null,
-      education,
-      work_experience: String(work_experience).trim(),
-      motivation: motivation || null,
-    })
+    // Langsung lanjut ke screening — kalau HR belum punya pertanyaan screening
+    // aktif, tidak ada yang perlu dijawab, jadi langsung ke tahap psikotes.
+    const { data: activeQuestions } = await supabaseAdmin
+      .from('screening_questions')
+      .select('id, question_text')
+      .eq('is_active', true)
+      .order('sort_order')
+    const initialStatus = (activeQuestions || []).length > 0 ? 'screening' : 'psikotes'
 
-    if (dbError) {
-      return NextResponse.json({ error: 'Gagal menyimpan lamaran: ' + dbError.message }, { status: 500 })
+    const { data: inserted, error: dbError } = await supabaseAdmin
+      .from('job_applicants')
+      .insert({
+        application_code,
+        full_name: String(full_name).trim(),
+        gender,
+        birth_place: birth_place || null,
+        birth_date: birth_date || null,
+        address: address || null,
+        phone: String(phone).trim(),
+        marital_status,
+        number_of_children: marital_status === 'married' && number_of_children !== '' ? Number(number_of_children) : null,
+        education,
+        work_experience: String(work_experience).trim(),
+        motivation: motivation || null,
+        status: initialStatus,
+      })
+      .select('id')
+      .single()
+
+    if (dbError || !inserted) {
+      return NextResponse.json({ error: 'Gagal menyimpan lamaran: ' + (dbError?.message || '') }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, application_code })
+    return NextResponse.json({
+      success: true,
+      application_code,
+      applicant_id: inserted.id,
+      status: initialStatus,
+      questions: initialStatus === 'screening' ? activeQuestions : [],
+    })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Terjadi kesalahan.' }, { status: 500 })
   }

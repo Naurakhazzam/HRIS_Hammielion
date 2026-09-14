@@ -53,6 +53,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Gagal menyimpan jawaban: ' + error.message }, { status: 500 })
     }
 
+    // Otomatis lanjut ke tahap psikotes — HR tidak perlu ubah status manual.
+    await supabaseAdmin.from('job_applicants').update({ status: 'psikotes' }).eq('id', applicant_id)
+
     return NextResponse.json({ success: true })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Terjadi kesalahan.' }, { status: 500 })

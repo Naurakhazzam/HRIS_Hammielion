@@ -22,6 +22,7 @@ type Applicant = {
   motivation: string | null
   status: string
   created_at: string
+  psychotest_results: { score: number } | null
 }
 
 type ScreeningQuestion = {
@@ -102,7 +103,7 @@ const STATUS_OPTIONS = [
   { value: 'baru', label: 'Baru Masuk' },
   { value: 'screening', label: 'Screening' },
   { value: 'psikotes', label: 'Psikotes' },
-  { value: 'interview', label: 'Interview' },
+  { value: 'interview', label: 'Menunggu Dipanggil Interview' },
   { value: 'diterima', label: 'Diterima' },
   { value: 'ditolak', label: 'Ditolak' },
 ]
@@ -123,6 +124,10 @@ function psychotestLabel(score: number): string {
   return 'Kurang Stabil'
 }
 
+function getPsikotesScore(a: Applicant): number | null {
+  return a.psychotest_results?.score ?? null
+}
+
 function calcAge(birthDate: string | null): number | null {
   if (!birthDate) return null
   const bd = new Date(birthDate)
@@ -138,6 +143,7 @@ export default function RekrutmenPage() {
   const router = useRouter()
   const [applicants, setApplicants] = useState<Applicant[]>([])
   const [loading, setLoading] = useState(true)
+  const [scoreSort, setScoreSort] = useState<'asc' | 'desc' | null>(null)
   const [activeTab, setActiveTab] = useState<'semua' | string>('semua')
   const [lamaranUrl, setLamaranUrl] = useState('')
   const [qrDataUrl, setQrDataUrl] = useState('')
@@ -163,9 +169,9 @@ export default function RekrutmenPage() {
     setLoading(true)
     const { data } = await supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at')
+      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, psychotest_results(score)')
       .order('created_at', { ascending: false })
-    setApplicants(data || [])
+    setApplicants((data as unknown as Applicant[]) || [])
     setLoading(false)
   }, [supabase])
 
@@ -292,7 +298,21 @@ export default function RekrutmenPage() {
     { value: 'semua', label: 'Semua', count: applicants.length },
     ...STATUS_OPTIONS.map(o => ({ value: o.value, label: o.label, count: applicants.filter(a => a.status === o.value).length })),
   ]
-  const filteredApplicants = activeTab === 'semua' ? applicants : applicants.filter(a => a.status === activeTab)
+  const statusFiltered = activeTab === 'semua' ? applicants : applicants.filter(a => a.status === activeTab)
+  const filteredApplicants = scoreSort
+    ? [...statusFiltered].sort((a, b) => {
+        const scoreA = getPsikotesScore(a)
+        const scoreB = getPsikotesScore(b)
+        if (scoreA === null && scoreB === null) return 0
+        if (scoreA === null) return 1
+        if (scoreB === null) return -1
+        return scoreSort === 'asc' ? scoreA - scoreB : scoreB - scoreA
+      })
+    : statusFiltered
+
+  function toggleScoreSort() {
+    setScoreSort(prev => (prev === 'desc' ? 'asc' : prev === 'asc' ? null : 'desc'))
+  }
 
   return (
     <div>
@@ -403,15 +423,21 @@ export default function RekrutmenPage() {
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Pendidikan</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Telepon</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Status</th>
+                <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">
+                  <button onClick={toggleScoreSort} className="flex items-center gap-1 hover:text-slate-800">
+                    Skor Psikotes
+                    <span className="text-slate-400">{scoreSort === 'desc' ? '↓' : scoreSort === 'asc' ? '↑' : '↕'}</span>
+                  </button>
+                </th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600"></th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
               )}
               {!loading && filteredApplicants.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
               )}
               {filteredApplicants.map(a => (
                 <tr key={a.id} className="border-t border-slate-100">
@@ -429,6 +455,11 @@ export default function RekrutmenPage() {
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[a.status] || 'bg-slate-100 text-slate-700'}`}>
                       {STATUS_LABELS[a.status] || a.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">
+                    {getPsikotesScore(a) !== null ? (
+                      <span className="font-medium text-purple-700">{getPsikotesScore(a)}</span>
+                    ) : '-'}
                   </td>
                   <td className="px-4 py-2 text-right">
                     <button onClick={() => openDetail(a)} className="text-blue-600 text-xs font-medium hover:underline">Detail</button>

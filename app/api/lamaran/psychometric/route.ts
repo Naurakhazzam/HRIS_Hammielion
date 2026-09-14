@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { scorePsychometricTest, TestType } from '@/lib/psychometricTests'
+import { advanceToInterviewIfComplete } from '@/lib/server/recruitmentTransitions'
 
 // Endpoint publik (tanpa login) — submit jawaban salah satu dari 4 tes
 // tambahan (DISC/personality/work_preference/integrity). Beda dari
@@ -70,6 +71,8 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: 'Gagal menyimpan hasil tes: ' + error.message }, { status: 500 })
     }
+
+    await advanceToInterviewIfComplete(supabaseAdmin, applicant_id)
 
     return NextResponse.json({ success: true, result_summary: scored.result_summary })
   } catch (err) {

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { PSYCHOTEST_LEVELS, PSYCHOTEST_MAX_PLAUSIBLE_QUESTIONS } from '@/lib/psychotestLevels'
+import { advanceToInterviewIfComplete } from '@/lib/server/recruitmentTransitions'
 
 // Endpoint publik (tanpa login) — submit hasil tes hitung cepat 3 level
 // (gaya Kraepelin). Skor dihitung di server, bukan dipercaya dari client.
@@ -119,6 +120,8 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: 'Gagal menyimpan hasil tes: ' + error.message }, { status: 500 })
     }
+
+    await advanceToInterviewIfComplete(supabaseAdmin, applicant_id)
 
     return NextResponse.json({ success: true })
   } catch (err) {

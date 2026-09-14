@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { blockPasteOnChange, blockPasteHandlers } from '@/lib/noPaste'
+import RecruitmentFlow from '@/components/recruitment/RecruitmentFlow'
+import { ScreeningQuestion } from '@/components/recruitment/ScreeningForm'
 
 const GENDER_OPTIONS = [
   { value: 'male', label: 'Laki-laki' },
@@ -47,11 +49,18 @@ const emptyForm = {
   marital_status: '', number_of_children: '', education: '', work_experience: '', motivation: '',
 }
 
+type SubmissionResult = {
+  application_code: string
+  applicant_id: string
+  status: string
+  questions: ScreeningQuestion[]
+}
+
 export default function LamaranPage() {
   const [form, setForm] = useState(emptyForm)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [applicationCode, setApplicationCode] = useState('')
+  const [submission, setSubmission] = useState<SubmissionResult | null>(null)
   const [uploadFormUrl, setUploadFormUrl] = useState('')
 
   const age = calcAge(form.birth_date)
@@ -85,7 +94,12 @@ export default function LamaranPage() {
         setError(data.error || 'Gagal mengirim lamaran.')
         return
       }
-      setApplicationCode(data.application_code)
+      setSubmission({
+        application_code: data.application_code,
+        applicant_id: data.applicant_id,
+        status: data.status,
+        questions: data.questions || [],
+      })
     } catch {
       setError('Gagal mengirim lamaran. Cek koneksi internet Anda.')
     } finally {
@@ -93,18 +107,30 @@ export default function LamaranPage() {
     }
   }
 
-  if (applicationCode) {
+  if (submission) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 max-w-md w-full text-center space-y-3">
-          <div className="text-4xl">✅</div>
-          <h1 className="text-lg font-semibold text-slate-800">Lamaran Berhasil Dikirim</h1>
-          <p className="text-sm text-slate-600">Simpan kode lamaran Anda:</p>
-          <p className="text-xl font-mono font-bold text-blue-600">{applicationCode}</p>
-          <p className="text-sm text-slate-600">Tim HR akan menghubungi Anda melalui nomor telepon yang didaftarkan.</p>
-          <Link href="/lamaran/status" className="inline-block text-sm text-blue-600 underline">
-            Cek status lamaran Anda di sini
-          </Link>
+      <div className="min-h-screen bg-slate-50 py-8 px-4">
+        <div className="max-w-xl mx-auto space-y-4">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 text-center space-y-2">
+            <div className="text-3xl">✅</div>
+            <h1 className="text-lg font-semibold text-slate-800">Lamaran Berhasil Dikirim</h1>
+            <p className="text-sm text-slate-600">Simpan kode lamaran Anda (kalau koneksi putus, gunakan ini untuk lanjut lagi):</p>
+            <p className="text-xl font-mono font-bold text-blue-600">{submission.application_code}</p>
+            <p className="text-sm text-slate-600">
+              Lanjutkan langsung ke tahap berikutnya di bawah ini. Kalau Anda tutup halaman ini sebelum selesai, bisa
+              lanjut lagi lewat{' '}
+              <Link href="/lamaran/status" className="text-blue-600 underline">Cek Status Lamaran</Link>.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <RecruitmentFlow
+              applicantId={submission.applicant_id}
+              phone={form.phone}
+              status={submission.status}
+              questions={submission.questions}
+            />
+          </div>
         </div>
       </div>
     )
