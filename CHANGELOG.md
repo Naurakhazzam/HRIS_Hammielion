@@ -942,4 +942,25 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan*
+### 57. Fitur: Undangan Interview Personal untuk Pelamar
+
+**Permintaan Owner:** link undangan wawancara per kandidat — isi jadwal, dress code (casual rapi, bukan kemeja formal), wajib bawa CV fisik, info gaji training Rp800rb/bulan + bonus Rp400rb bulan terakhir setelah 3 bulan training, tips bicara lancar & lugas, kandidat bisa konfirmasi kehadiran langsung di sistem, dan hasil tes+penilaian ditampilkan juga ke kandidat.
+
+**Fix/Fitur:**
+1. **`job_applicants`** dapat 4 kolom baru (migrasi `027_interview_invite.sql`): `interview_token` (uuid unik, auto-generate, dasar link personal), `interview_scheduled_at`, `interview_confirmation`, `interview_confirmed_at`.
+2. **`/lamaran/interview/[token]`** (baru, publik) — halaman undangan personal per kandidat: jadwal (dinamis dari `interview_scheduled_at`, bisa beda tiap batch rekrutmen), dress code, bawa CV fisik, info gaji training, tips wawancara, DAN hasil psikotes+psikometri kandidat sendiri, plus form konfirmasi kehadiran bebas teks (mis. "Akan hadir sekitar jam 10.15").
+3. **`/api/lamaran/interview/[token]`** (baru) — GET ambil data undangan by token, POST simpan konfirmasi kehadiran. Pola sama seperti `/api/lamaran/status` (service-role, tanpa RLS anon).
+4. **`/rekrutmen/pelamar`**: di modal Detail Pelamar, HR sekarang bisa set/ubah jadwal interview lewat datepicker, lalu kirim link undangan langsung ke WhatsApp kandidat (pesan sudah terisi otomatis) — juga menampilkan konfirmasi kehadiran kandidat begitu masuk.
+5. Logic render skor psikotes & psikometri dipisah ke `lib/psychometricSummary.tsx` supaya dipakai bareng oleh halaman admin (sudah ada) dan halaman kandidat (baru) tanpa duplikasi.
+
+| File | Perubahan |
+|---|---|
+| Database: `job_applicants` (migrasi `027_interview_invite.sql`) | 4 kolom baru + index token |
+| `lib/psychometricSummary.tsx` | Baru — logic render hasil tes, dipakai bareng 2 halaman |
+| `app/api/lamaran/interview/[token]/route.ts` | Baru — GET undangan, POST konfirmasi |
+| `app/lamaran/interview/[token]/page.tsx` | Baru — halaman undangan interview untuk kandidat |
+| `app/(dashboard)/rekrutmen/pelamar/page.tsx` | Set jadwal interview + kirim link WA + tampilkan konfirmasi kandidat |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview*

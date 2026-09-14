@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { toWhatsAppLink } from '@/lib/waLink'
 import { isBeforeAntiPasteFix } from '@/lib/antiPasteFix'
+import { PSYCHOMETRIC_LABELS, renderPsychometricSummary, psychotestLabel } from '@/lib/psychometricSummary'
 
 type Applicant = {
   id: string
@@ -28,6 +29,10 @@ type Applicant = {
   distance_minutes: number | null
   psychotest_results: { score: number } | null
   screening_answers: { created_at: string }[] | null
+  interview_token: string
+  interview_scheduled_at: string | null
+  interview_confirmation: string | null
+  interview_confirmed_at: string | null
 }
 
 function getScreeningSubmittedAt(a: Applicant): string | null {
@@ -55,48 +60,6 @@ type PsychometricResultRow = {
   test_type: 'disc' | 'personality' | 'work_preference' | 'integrity'
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result_summary: any
-}
-
-const PSYCHOMETRIC_LABELS: Record<string, string> = {
-  disc: 'DISC — Gaya Kerja',
-  personality: 'Tipe Kepribadian Kerja',
-  work_preference: 'Preferensi Kerja',
-  integrity: 'Sikap & Etika Kerja',
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function renderPsychometricSummary(testType: string, summary: any) {
-  if (testType === 'disc') {
-    return (
-      <p className="text-sm text-slate-600">
-        Gaya dominan: <span className="font-medium">{summary.dominant_traits.join(' & ')}</span> — {summary.description}
-      </p>
-    )
-  }
-  if (testType === 'personality') {
-    return (
-      <p className="text-sm text-slate-600">
-        Tipe: <span className="font-medium">{summary.type}</span> — {summary.description}
-      </p>
-    )
-  }
-  if (testType === 'work_preference') {
-    return (
-      <div className="space-y-1">
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        {summary.dimensions.map((d: any) => (
-          <div key={d.key} className="flex justify-between text-sm text-slate-600">
-            <span>{d.label}</span><span className="font-medium">{d.level}</span>
-          </div>
-        ))}
-      </div>
-    )
-  }
-  return (
-    <p className="text-sm text-slate-600">
-      Kecenderungan: <span className="font-medium">{summary.level}</span> ({summary.percentage}%)
-    </p>
-  )
 }
 
 const GENDER_LABELS: Record<string, string> = { male: 'Laki-laki', female: 'Perempuan' }
@@ -137,15 +100,21 @@ function getNextStatus(current: string): string | null {
   return STATUS_ORDER[idx + 1]
 }
 
-function psychotestLabel(score: number): string {
-  if (score >= 80) return 'Sangat Stabil'
-  if (score >= 60) return 'Stabil'
-  if (score >= 40) return 'Cukup'
-  return 'Kurang Stabil'
-}
-
 function getPsikotesScore(a: Applicant): number | null {
   return a.psychotest_results?.score ?? null
+}
+
+// Format ISO -> value yang dimengerti <input type="datetime-local"> (waktu lokal browser,
+// tanpa offset timezone), dan sebaliknya dikonversi balik ke ISO UTC saat disimpan.
+function toDatetimeLocalValue(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function formatInterviewSchedule(iso: string): string {
+  return new Date(iso).toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB'
 }
 
 function calcAge(birthDate: string | null): number | null {
@@ -173,6 +142,9 @@ export default function DaftarPelamarPage() {
   const [detailPsychometrics, setDetailPsychometrics] = useState<PsychometricResultRow[]>([])
   const [detailStatus, setDetailStatus] = useState('')
   const [savingStatus, setSavingStatus] = useState(false)
+  const [interviewDateTime, setInterviewDateTime] = useState('')
+  const [savingInterview, setSavingInterview] = useState(false)
+  const [interviewSaved, setInterviewSaved] = useState(false)
 
   const supabase = createClient()
 
@@ -180,7 +152,7 @@ export default function DaftarPelamarPage() {
     setLoading(true)
     const { data } = await supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at)')
+      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_scheduled_at, interview_confirmation, interview_confirmed_at')
       .order('created_at', { ascending: false })
     setApplicants((data as unknown as Applicant[]) || [])
     setLoading(false)
@@ -196,6 +168,8 @@ export default function DaftarPelamarPage() {
   async function openDetail(applicant: Applicant) {
     setDetail(applicant)
     setDetailStatus(applicant.status)
+    setInterviewDateTime(toDatetimeLocalValue(applicant.interview_scheduled_at))
+    setInterviewSaved(false)
     const { data } = await supabase
       .from('screening_answers')
       .select('answer_text, created_at, screening_questions(question_text, sort_order)')
@@ -230,6 +204,32 @@ export default function DaftarPelamarPage() {
     setDetailScreeningSubmittedAt(null)
     setDetailPsychotest(null)
     setDetailPsychometrics([])
+    setInterviewDateTime('')
+    setInterviewSaved(false)
+  }
+
+  async function saveInterviewSchedule() {
+    if (!detail || !interviewDateTime) return
+    setSavingInterview(true)
+    const isoValue = new Date(interviewDateTime).toISOString()
+    const { error } = await supabase.from('job_applicants')
+      .update({ interview_scheduled_at: isoValue }).eq('id', detail.id)
+    setSavingInterview(false)
+    if (!error) {
+      setDetail({ ...detail, interview_scheduled_at: isoValue })
+      setInterviewSaved(true)
+      fetchApplicants()
+    }
+  }
+
+  function interviewInviteLink(applicant: Applicant) {
+    return `${window.location.origin}/lamaran/interview/${applicant.interview_token}`
+  }
+
+  function openInterviewWhatsApp(applicant: Applicant) {
+    const link = interviewInviteLink(applicant)
+    const text = `Halo ${applicant.full_name}, Anda diundang wawancara kerja di Hammielion Management. Cek detail jadwal, hal yang perlu disiapkan, dan konfirmasi kehadiran lewat link ini ya:\n${link}`
+    window.open(`${toWhatsAppLink(applicant.phone)}?text=${encodeURIComponent(text)}`, '_blank')
   }
 
   async function saveStatus() {
@@ -535,6 +535,37 @@ export default function DaftarPelamarPage() {
                   </p>
                 </div>
               )}
+
+              <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+                <p className="text-sm font-medium text-blue-800">Undangan Interview</p>
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                  <input type="datetime-local" value={interviewDateTime} onChange={e => setInterviewDateTime(e.target.value)}
+                    className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
+                  <button onClick={saveInterviewSchedule} disabled={savingInterview || !interviewDateTime}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+                    {savingInterview ? 'Menyimpan...' : 'Simpan Jadwal'}
+                  </button>
+                  {detail.interview_scheduled_at && (
+                    <button onClick={() => openInterviewWhatsApp(detail)}
+                      className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium">
+                      📤 Kirim Link via WhatsApp
+                    </button>
+                  )}
+                </div>
+                {interviewSaved && <p className="text-xs text-green-700">Jadwal tersimpan.</p>}
+                {detail.interview_scheduled_at && (
+                  <p className="text-xs text-slate-500">
+                    Jadwal saat ini: <span className="font-medium text-slate-700">{formatInterviewSchedule(detail.interview_scheduled_at)}</span>
+                    <br />Link: <span className="font-mono text-blue-600 break-all">{interviewInviteLink(detail)}</span>
+                  </p>
+                )}
+                {detail.interview_confirmation && (
+                  <p className="text-xs bg-white border border-blue-100 rounded-lg px-2 py-1.5 text-slate-600">
+                    ✅ Kandidat konfirmasi: &ldquo;{detail.interview_confirmation}&rdquo;
+                    {detail.interview_confirmed_at && <span className="text-slate-400"> — {formatInterviewSchedule(detail.interview_confirmed_at)}</span>}
+                  </p>
+                )}
+              </div>
 
               {(getNextStatus(detail.status) || detail.status !== 'ditolak') && (
                 <div className="pt-3 border-t border-slate-100 flex flex-wrap gap-2">
