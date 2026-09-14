@@ -246,8 +246,12 @@ export default function DaftarPelamarPage() {
     setSavingStatus(true)
     await supabase.from('job_applicants').update({ status: newStatus }).eq('id', detail.id)
     setSavingStatus(false)
-    setDetail({ ...detail, status: newStatus })
-    setDetailStatus(newStatus)
+    // Tutup modal detail begitu status berubah — sebelumnya modal tetap terbuka
+    // dengan tombol "Lanjut" yang label-nya langsung berganti ke tahap
+    // berikutnya di posisi yang sama, jadi kalau HR klik lagi karena mengira
+    // klik pertama tidak kena, pelamar bisa kelewat maju beberapa tahap
+    // sekaligus tanpa sadar. Tutup dulu, HR buka lagi kalau memang mau lanjut.
+    closeDetail()
     fetchApplicants()
   }
 
