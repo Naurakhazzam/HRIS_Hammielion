@@ -983,4 +983,16 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam*
+### 59. Fix Keamanan: Tutup Akses Karyawan Biasa ke Data Referensi Keuangan
+
+**Ditemukan:** Audit role `employee` (lihat #55 area) menemukan 3 tabel referensi Keuangan — `fin_bank_accounts` (termasuk nomor rekening bank perusahaan), `fin_cash_out_categories`, `fin_branch_report_groups` — punya RLS `SELECT USING (true)`, artinya bisa dibaca **siapa pun yang login**, termasuk karyawan biasa, walau menu Keuangan sudah tidak ada di sidebar mereka (item #56). Bukan celah UI (tidak ada halaman yang menampilkannya ke karyawan), tapi tetap bisa diakses lewat query langsung.
+
+**Fix:** Ketiga policy `_select_all` diganti jadi dibatasi ke role yang benar-benar pakai modul Keuangan: `owner`, `hr`, `finance`, `supervisor`. Role `employee` sekarang ditolak di ketiga tabel ini juga, konsisten dengan tabel `fin_*` lainnya.
+
+| File | Perubahan |
+|---|---|
+| Database: `fin_bank_accounts`, `fin_cash_out_categories`, `fin_branch_report_groups` (migrasi `030_restrict_fin_reference_tables.sql`) | Policy SELECT dibatasi ke owner/hr/finance/supervisor |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening ke karyawan*
