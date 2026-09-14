@@ -8,6 +8,7 @@ export const APPLICANT_STATUS_LABELS: Record<string, string> = {
   screening: 'Sedang Diproses (Screening)',
   psikotes: 'Tahap Psikotes',
   interview: 'Menunggu Dipanggil Interview',
+  training: 'Masa Training/Percobaan',
   diterima: 'Diterima',
   ditolak: 'Belum Berhasil Kali Ini',
 }

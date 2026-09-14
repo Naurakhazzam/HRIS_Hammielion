@@ -109,6 +109,7 @@ const STATUS_OPTIONS = [
   { value: 'screening', label: 'Screening' },
   { value: 'psikotes', label: 'Psikotes' },
   { value: 'interview', label: 'Menunggu Dipanggil Interview' },
+  { value: 'training', label: 'Training/Percobaan' },
   { value: 'diterima', label: 'Diterima' },
   { value: 'ditolak', label: 'Ditolak' },
 ]
@@ -118,6 +119,7 @@ const STATUS_COLORS: Record<string, string> = {
   screening: 'bg-amber-100 text-amber-700',
   psikotes: 'bg-purple-100 text-purple-700',
   interview: 'bg-blue-100 text-blue-700',
+  training: 'bg-cyan-100 text-cyan-700',
   diterima: 'bg-green-100 text-green-700',
   ditolak: 'bg-red-100 text-red-700',
 }
