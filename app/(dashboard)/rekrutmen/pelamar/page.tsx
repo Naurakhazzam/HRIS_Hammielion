@@ -322,7 +322,13 @@ export default function DaftarPelamarPage() {
         <span className="text-slate-300">/</span>
         <span className="text-slate-500">Daftar Pelamar</span>
       </div>
-      <h1 className="text-2xl font-bold text-slate-800 mb-2">Daftar Pelamar</h1>
+      <div className="flex items-start justify-between flex-wrap gap-3 mb-2">
+        <h1 className="text-2xl font-bold text-slate-800">Daftar Pelamar</h1>
+        <Link href="/rekrutmen/interview-konfirmasi"
+          className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+          🗓️ Rekap Konfirmasi Interview →
+        </Link>
+      </div>
       <p className="text-sm text-slate-500 mb-6">
         Semua pelamar yang masuk lewat halaman lamaran publik. Untuk QR code, link upload, dan pertanyaan
         screening, buka halaman{' '}

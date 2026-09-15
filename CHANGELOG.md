@@ -1067,4 +1067,16 @@ Semua filter opsional dan independen — bisa isi satu saja atau gabungan bebera
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview*
+### 65. Tambah Jalur Kedua ke Rekap Konfirmasi Interview
+
+**Ditemukan:** Owner tidak melihat kartu "Rekap Konfirmasi Interview" (item #64) di halaman Pengaturan Rekrutmen setelah deploy, walau kode sudah terkonfirmasi benar dan ter-push — kemungkinan cache browser khusus halaman itu (halaman baru `/rekrutmen/interview-konfirmasi` sendiri langsung bisa diakses lewat URL langsung, jadi bukan masalah deploy).
+
+**Fix:** Tambah tombol "🗓️ Rekap Konfirmasi Interview →" di halaman **Daftar Pelamar** juga (bukan cuma di Pengaturan Rekrutmen), supaya ada 2 jalur masuk — tidak bergantung ke satu halaman yang mungkin ke-cache.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/rekrutmen/pelamar/page.tsx` | Tombol ke Rekap Konfirmasi Interview di header halaman |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap*
