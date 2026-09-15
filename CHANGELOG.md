@@ -1091,4 +1091,24 @@ Semua filter opsional dan independen — bisa isi satu saja atau gabungan bebera
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview*
+### 67. Fitur: Form Hasil Interview (Diisi HR Setelah Wawancara)
+
+**Permintaan Owner:** tempat untuk mencatat hasil interview aktual, minta diusulkan field-nya dulu — disepakati: penilaian per-kriteria (bukan cuma catatan bebas), dan rekomendasi otomatis update status pelamar.
+
+**Fitur:** Bagian baru "Hasil Interview" (hijau) di modal Detail Pelamar, terpisah dari "Undangan Interview" yang diisi KANDIDAT sebelum wawancara — ini diisi HR/Owner SETELAH wawancara aktual:
+- Nama Pewawancara
+- Kehadiran (Hadir Tepat Waktu / Hadir Terlambat / Tidak Hadir)
+- Komunikasi, Penampilan & Kesiapan, Motivasi & Kecocokan — masing-masing dinilai sendiri (Baik/Cukup/Kurang)
+- Catatan/Kesan Bebas
+- Rekomendasi (Lanjut ke Training / Tidak Lolos / Pertimbangkan Lagi)
+
+Pilih "Lanjut ke Training" atau "Tidak Lolos" otomatis memindahkan status pelamar ke tab yang sesuai saat disimpan (konsisten dengan auto-pindah status konfirmasi kandidat di #66) — "Pertimbangkan Lagi" sengaja tidak mengubah status apa pun.
+
+| File | Perubahan |
+|---|---|
+| Database: `job_applicants` (migrasi `032_interview_result.sql`) | 8 kolom baru hasil interview |
+| `app/(dashboard)/rekrutmen/pelamar/page.tsx` | Form "Hasil Interview" + auto-update status dari rekomendasi |
+
+---
+
+*Terakhir diupdate: Sesi 5-6 (2026-09-14/16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview*

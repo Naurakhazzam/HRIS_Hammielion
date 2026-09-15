@@ -33,6 +33,37 @@ type Applicant = {
   interview_confirmation: string | null
   interview_confirmed_at: string | null
   test_impression: string | null
+  interview_conducted_at: string | null
+  interviewer_name: string | null
+  interview_attendance: string | null
+  interview_communication_rating: string | null
+  interview_appearance_rating: string | null
+  interview_motivation_rating: string | null
+  interview_notes: string | null
+  interview_recommendation: string | null
+}
+
+const ATTENDANCE_OPTIONS = [
+  { value: 'hadir_tepat_waktu', label: 'Hadir Tepat Waktu' },
+  { value: 'hadir_terlambat', label: 'Hadir Terlambat' },
+  { value: 'tidak_hadir', label: 'Tidak Hadir' },
+]
+const RATING_OPTIONS = [
+  { value: 'baik', label: 'Baik' },
+  { value: 'cukup', label: 'Cukup' },
+  { value: 'kurang', label: 'Kurang' },
+]
+const RECOMMENDATION_OPTIONS = [
+  { value: 'lanjut_training', label: 'Lanjut ke Training' },
+  { value: 'tidak_lolos', label: 'Tidak Lolos' },
+  { value: 'pertimbangkan_lagi', label: 'Pertimbangkan Lagi' },
+]
+// Rekomendasi -> status pelamar otomatis, konsisten dengan auto-pindah status saat kandidat
+// konfirmasi kehadiran. "Pertimbangkan Lagi" sengaja TIDAK mengubah status — biar HR yang
+// putuskan lanjutannya manual kalau masih ragu.
+const RECOMMENDATION_STATUS_MAP: Record<string, string> = {
+  lanjut_training: 'training',
+  tidak_lolos: 'ditolak',
 }
 
 function getScreeningSubmittedAt(a: Applicant): string | null {
@@ -154,6 +185,14 @@ export default function DaftarPelamarPage() {
   const [detailStatus, setDetailStatus] = useState('')
   const [savingStatus, setSavingStatus] = useState(false)
 
+  // Form Hasil Interview — diisi HR/Owner SETELAH wawancara aktual berlangsung.
+  const [interviewResultForm, setInterviewResultForm] = useState({
+    interviewer_name: '', attendance: '', communication: '', appearance: '', motivation: '',
+    notes: '', recommendation: '',
+  })
+  const [savingInterviewResult, setSavingInterviewResult] = useState(false)
+  const [interviewResultSaved, setInterviewResultSaved] = useState(false)
+
   // Jadwal & lokasi interview seragam untuk semua kandidat — diatur sekali di halaman
   // Pengaturan Rekrutmen (recruitment_settings), bukan per-kandidat lagi.
   const [interviewSettings, setInterviewSettings] = useState<{
@@ -166,7 +205,7 @@ export default function DaftarPelamarPage() {
     setLoading(true)
     const { data } = await supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_confirmation, interview_confirmed_at, test_impression')
+      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_confirmation, interview_confirmed_at, test_impression, interview_conducted_at, interviewer_name, interview_attendance, interview_communication_rating, interview_appearance_rating, interview_motivation_rating, interview_notes, interview_recommendation')
       .order('created_at', { ascending: false })
     setApplicants((data as unknown as Applicant[]) || [])
     setLoading(false)
@@ -190,6 +229,16 @@ export default function DaftarPelamarPage() {
   async function openDetail(applicant: Applicant) {
     setDetail(applicant)
     setDetailStatus(applicant.status)
+    setInterviewResultForm({
+      interviewer_name: applicant.interviewer_name || '',
+      attendance: applicant.interview_attendance || '',
+      communication: applicant.interview_communication_rating || '',
+      appearance: applicant.interview_appearance_rating || '',
+      motivation: applicant.interview_motivation_rating || '',
+      notes: applicant.interview_notes || '',
+      recommendation: applicant.interview_recommendation || '',
+    })
+    setInterviewResultSaved(false)
     const { data } = await supabase
       .from('screening_answers')
       .select('answer_text, created_at, screening_questions(question_text, sort_order)')
@@ -228,6 +277,36 @@ export default function DaftarPelamarPage() {
 
   function interviewInviteLink(applicant: Applicant) {
     return `${window.location.origin}/lamaran/interview/${applicant.interview_token}`
+  }
+
+  async function saveInterviewResult() {
+    if (!detail) return
+    setSavingInterviewResult(true)
+    setInterviewResultSaved(false)
+
+    const payload: Record<string, string | null> = {
+      interview_conducted_at: new Date().toISOString(),
+      interviewer_name: interviewResultForm.interviewer_name.trim() || null,
+      interview_attendance: interviewResultForm.attendance || null,
+      interview_communication_rating: interviewResultForm.communication || null,
+      interview_appearance_rating: interviewResultForm.appearance || null,
+      interview_motivation_rating: interviewResultForm.motivation || null,
+      interview_notes: interviewResultForm.notes.trim() || null,
+      interview_recommendation: interviewResultForm.recommendation || null,
+    }
+    // Rekomendasi otomatis majukan status pelamar — konsisten dengan auto-pindah status saat
+    // kandidat konfirmasi kehadiran. "Pertimbangkan Lagi" sengaja tidak mengubah status.
+    const mappedStatus = RECOMMENDATION_STATUS_MAP[interviewResultForm.recommendation]
+    if (mappedStatus) payload.status = mappedStatus
+
+    const { error } = await supabase.from('job_applicants').update(payload).eq('id', detail.id)
+    setSavingInterviewResult(false)
+    if (!error) {
+      setDetail({ ...detail, ...payload } as Applicant)
+      if (mappedStatus) setDetailStatus(mappedStatus)
+      setInterviewResultSaved(true)
+      fetchApplicants()
+    }
   }
 
   function openInterviewWhatsApp(applicant: Applicant) {
@@ -657,6 +736,89 @@ export default function DaftarPelamarPage() {
                     💬 Kesan kandidat soal tes: &ldquo;{detail.test_impression}&rdquo;
                   </p>
                 )}
+              </div>
+
+              {/* Hasil Interview — diisi HR/Owner SETELAH wawancara aktual berlangsung,
+                  beda dari konfirmasi kandidat di atas (yang diisi SEBELUM interview). */}
+              <div className="mb-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-3">
+                <p className="text-sm font-medium text-emerald-800">Hasil Interview</p>
+                {detail.interview_conducted_at && (
+                  <p className="text-xs text-emerald-700">
+                    Terakhir dicatat: {formatInterviewSchedule(detail.interview_conducted_at)}
+                    {detail.interviewer_name && ` oleh ${detail.interviewer_name}`}
+                  </p>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Nama Pewawancara</label>
+                    <input value={interviewResultForm.interviewer_name}
+                      onChange={e => setInterviewResultForm({ ...interviewResultForm, interviewer_name: e.target.value })}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Kehadiran</label>
+                    <select value={interviewResultForm.attendance}
+                      onChange={e => setInterviewResultForm({ ...interviewResultForm, attendance: e.target.value })}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                      <option value="">-- Pilih --</option>
+                      {ATTENDANCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Komunikasi (lancar & lugas)</label>
+                    <select value={interviewResultForm.communication}
+                      onChange={e => setInterviewResultForm({ ...interviewResultForm, communication: e.target.value })}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                      <option value="">-- Pilih --</option>
+                      {RATING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Penampilan & Kesiapan</label>
+                    <select value={interviewResultForm.appearance}
+                      onChange={e => setInterviewResultForm({ ...interviewResultForm, appearance: e.target.value })}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                      <option value="">-- Pilih --</option>
+                      {RATING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Motivasi & Kecocokan</label>
+                    <select value={interviewResultForm.motivation}
+                      onChange={e => setInterviewResultForm({ ...interviewResultForm, motivation: e.target.value })}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                      <option value="">-- Pilih --</option>
+                      {RATING_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Rekomendasi</label>
+                    <select value={interviewResultForm.recommendation}
+                      onChange={e => setInterviewResultForm({ ...interviewResultForm, recommendation: e.target.value })}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                      <option value="">-- Pilih --</option>
+                      {RECOMMENDATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">Catatan / Kesan Bebas</label>
+                  <textarea value={interviewResultForm.notes} rows={2}
+                    onChange={e => setInterviewResultForm({ ...interviewResultForm, notes: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white resize-none" />
+                </div>
+                {interviewResultForm.recommendation && RECOMMENDATION_STATUS_MAP[interviewResultForm.recommendation] && (
+                  <p className="text-xs text-emerald-700">
+                    ℹ️ Simpan akan otomatis pindahkan status pelamar ke &ldquo;{STATUS_LABELS[RECOMMENDATION_STATUS_MAP[interviewResultForm.recommendation]]}&rdquo;.
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <button onClick={saveInterviewResult} disabled={savingInterviewResult}
+                    className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+                    {savingInterviewResult ? 'Menyimpan...' : 'Simpan Hasil Interview'}
+                  </button>
+                  {interviewResultSaved && <span className="text-xs text-emerald-700">Tersimpan.</span>}
+                </div>
               </div>
 
               {(getNextStatus(detail.status) || detail.status !== 'ditolak') && (
