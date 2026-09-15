@@ -1007,4 +1007,22 @@ Hasil cetak SELALU terang (tidak ikut dark mode yang sedang aktif di layar — k
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti*
+### 61. Fitur: Panel Filter Custom di Daftar Pelamar
+
+**Permintaan Owner:** dengan 176 pelamar menumpuk di satu tahap ("Menunggu Dipanggil Interview"), butuh cara saring sesuai kebutuhan saat itu — bukan satu kombinasi filter tetap, tapi kriteria yang bisa dipilih & digabung sendiri tiap kali cari.
+
+**Fix:** Panel filter baru di `/rekrutmen/pelamar`, tampil di bawah tab status, berlaku bareng dengan tab yang aktif:
+- **Usia** (rentang min–max)
+- **Pendidikan Minimal** (SD s/d S3, memakai urutan jenjang yang sama dengan form lamaran — pilih S1 berarti tampilkan S1 ke atas)
+- **Penempatan** (Tasik Kota / Singaparna)
+- **Skor Psikotes Minimal**
+
+Semua filter opsional dan independen — bisa isi satu saja atau gabungan beberapa sekaligus, ada tombol "Reset filter" kalau sudah ada yang aktif. Sort per-kolom (klik header Skor Psikotes) tetap jalan di atas hasil yang sudah difilter.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/rekrutmen/pelamar/page.tsx` | Panel filter usia/pendidikan/penempatan/skor + logic `criteriaFiltered` |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar*

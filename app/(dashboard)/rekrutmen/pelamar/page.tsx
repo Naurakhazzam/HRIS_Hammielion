@@ -107,6 +107,13 @@ function formatInterviewSchedule(iso: string): string {
   return new Date(iso).toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB'
 }
 
+// Urutan jenjang pendidikan — harus sama dengan EDUCATION_OPTIONS di app/lamaran/page.tsx,
+// dipakai untuk bandingkan "minimal jenjang X" (index lebih besar = jenjang lebih tinggi).
+const EDUCATION_ORDER = ['SD', 'SMP', 'SMA/SMK', 'D1', 'D2', 'D3', 'D4', 'S1', 'S2', 'S3']
+function educationRank(edu: string): number {
+  return EDUCATION_ORDER.indexOf(edu)
+}
+
 function calcAge(birthDate: string | null): number | null {
   if (!birthDate) return null
   const bd = new Date(birthDate)
@@ -124,6 +131,18 @@ export default function DaftarPelamarPage() {
   const [loading, setLoading] = useState(true)
   const [scoreSort, setScoreSort] = useState<'asc' | 'desc' | null>(null)
   const [activeTab, setActiveTab] = useState<'semua' | string>('semua')
+
+  // Filter tambahan — dikombinasikan sendiri oleh HR sesuai kebutuhan tiap kali (bukan satu
+  // kombinasi tetap), jadi semuanya opsional dan berlaku bareng dengan tab status di atas.
+  const [filterMinAge, setFilterMinAge] = useState('')
+  const [filterMaxAge, setFilterMaxAge] = useState('')
+  const [filterMinEducation, setFilterMinEducation] = useState('')
+  const [filterPlacement, setFilterPlacement] = useState('')
+  const [filterMinScore, setFilterMinScore] = useState('')
+  const hasActiveFilter = !!(filterMinAge || filterMaxAge || filterMinEducation || filterPlacement || filterMinScore)
+  function resetFilters() {
+    setFilterMinAge(''); setFilterMaxAge(''); setFilterMinEducation(''); setFilterPlacement(''); setFilterMinScore('')
+  }
 
   const [detail, setDetail] = useState<Applicant | null>(null)
   const [detailAnswers, setDetailAnswers] = useState<{ question_text: string; answer_text: string }[]>([])
@@ -248,8 +267,22 @@ export default function DaftarPelamarPage() {
     ...STATUS_OPTIONS.map(o => ({ value: o.value, label: o.label, count: applicants.filter(a => a.status === o.value).length })),
   ]
   const statusFiltered = activeTab === 'semua' ? applicants : applicants.filter(a => a.status === activeTab)
+
+  const criteriaFiltered = statusFiltered.filter(a => {
+    const age = calcAge(a.birth_date)
+    if (filterMinAge && (age === null || age < Number(filterMinAge))) return false
+    if (filterMaxAge && (age === null || age > Number(filterMaxAge))) return false
+    if (filterMinEducation && educationRank(a.education) < educationRank(filterMinEducation)) return false
+    if (filterPlacement && a.placement !== filterPlacement) return false
+    if (filterMinScore) {
+      const score = getPsikotesScore(a)
+      if (score === null || score < Number(filterMinScore)) return false
+    }
+    return true
+  })
+
   const filteredApplicants = scoreSort
-    ? [...statusFiltered].sort((a, b) => {
+    ? [...criteriaFiltered].sort((a, b) => {
         const scoreA = getPsikotesScore(a)
         const scoreB = getPsikotesScore(b)
         if (scoreA === null && scoreB === null) return 0
@@ -257,7 +290,7 @@ export default function DaftarPelamarPage() {
         if (scoreB === null) return -1
         return scoreSort === 'asc' ? scoreA - scoreB : scoreB - scoreA
       })
-    : statusFiltered
+    : criteriaFiltered
 
   function toggleScoreSort() {
     setScoreSort(prev => (prev === 'desc' ? 'asc' : prev === 'asc' ? null : 'desc'))
@@ -306,6 +339,47 @@ export default function DaftarPelamarPage() {
             ))}
           </div>
         </div>
+
+        {/* Panel filter — semua opsional, dikombinasikan bebas sesuai kebutuhan pencarian saat itu */}
+        <div className="px-6 py-3 border-b border-slate-200 bg-slate-50/50 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Usia</label>
+            <div className="flex items-center gap-1">
+              <input type="number" min={0} placeholder="Min" value={filterMinAge} onChange={e => setFilterMinAge(e.target.value)}
+                className="w-16 px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
+              <span className="text-slate-400 text-xs">–</span>
+              <input type="number" min={0} placeholder="Max" value={filterMaxAge} onChange={e => setFilterMaxAge(e.target.value)}
+                className="w-16 px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Pendidikan Minimal</label>
+            <select value={filterMinEducation} onChange={e => setFilterMinEducation(e.target.value)}
+              className="px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">Semua</option>
+              {EDUCATION_ORDER.map(e => <option key={e} value={e}>{e}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Penempatan</label>
+            <select value={filterPlacement} onChange={e => setFilterPlacement(e.target.value)}
+              className="px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+              <option value="">Semua</option>
+              {Object.entries(PLACEMENT_LABELS).map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Skor Psikotes Minimal</label>
+            <input type="number" min={0} max={100} placeholder="mis. 70" value={filterMinScore} onChange={e => setFilterMinScore(e.target.value)}
+              className="w-24 px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
+          </div>
+          {hasActiveFilter && (
+            <button onClick={resetFilters} className="text-xs text-red-600 hover:underline mb-1.5">
+              ✕ Reset filter
+            </button>
+          )}
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50">
