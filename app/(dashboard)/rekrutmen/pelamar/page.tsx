@@ -32,6 +32,7 @@ type Applicant = {
   interview_token: string
   interview_confirmation: string | null
   interview_confirmed_at: string | null
+  test_impression: string | null
 }
 
 function getScreeningSubmittedAt(a: Applicant): string | null {
@@ -130,6 +131,7 @@ export default function DaftarPelamarPage() {
   const [applicants, setApplicants] = useState<Applicant[]>([])
   const [loading, setLoading] = useState(true)
   const [scoreSort, setScoreSort] = useState<'asc' | 'desc' | null>(null)
+  const [distanceSort, setDistanceSort] = useState<'asc' | 'desc' | null>(null)
   const [activeTab, setActiveTab] = useState<'semua' | string>('semua')
 
   // Filter tambahan — dikombinasikan sendiri oleh HR sesuai kebutuhan tiap kali (bukan satu
@@ -164,7 +166,7 @@ export default function DaftarPelamarPage() {
     setLoading(true)
     const { data } = await supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_confirmation, interview_confirmed_at')
+      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_confirmation, interview_confirmed_at, test_impression')
       .order('created_at', { ascending: false })
     setApplicants((data as unknown as Applicant[]) || [])
     setLoading(false)
@@ -281,7 +283,16 @@ export default function DaftarPelamarPage() {
     return true
   })
 
-  const filteredApplicants = scoreSort
+  // Cuma satu kolom yang aktif sort dalam satu waktu — pola sama seperti tabel sort lain di
+  // app ini, supaya urutan hasil jelas (bukan gabungan beberapa sort sekaligus yang ambigu).
+  const filteredApplicants = distanceSort
+    ? [...criteriaFiltered].sort((a, b) => {
+        if (a.distance_km === null && b.distance_km === null) return 0
+        if (a.distance_km === null) return 1
+        if (b.distance_km === null) return -1
+        return distanceSort === 'asc' ? a.distance_km - b.distance_km : b.distance_km - a.distance_km
+      })
+    : scoreSort
     ? [...criteriaFiltered].sort((a, b) => {
         const scoreA = getPsikotesScore(a)
         const scoreB = getPsikotesScore(b)
@@ -293,7 +304,15 @@ export default function DaftarPelamarPage() {
     : criteriaFiltered
 
   function toggleScoreSort() {
+    setDistanceSort(null)
     setScoreSort(prev => (prev === 'desc' ? 'asc' : prev === 'asc' ? null : 'desc'))
+  }
+
+  function toggleDistanceSort() {
+    setScoreSort(null)
+    // Default ke 'asc' dulu (terdekat di atas) — itu yang paling sering dicari, beda dari skor
+    // psikotes yang defaultnya 'desc' (tertinggi di atas).
+    setDistanceSort(prev => (prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc'))
   }
 
   return (
@@ -390,6 +409,12 @@ export default function DaftarPelamarPage() {
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Pendidikan</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Telepon</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Penempatan</th>
+                <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">
+                  <button onClick={toggleDistanceSort} className="flex items-center gap-1 hover:text-slate-800" title="Jarak dari rumah ke titik acuan penempatan">
+                    Jarak
+                    <span className="text-slate-400">{distanceSort === 'asc' ? '↑' : distanceSort === 'desc' ? '↓' : '↕'}</span>
+                  </button>
+                </th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600">Status</th>
                 <th className="bg-slate-50 text-left px-4 py-2 font-medium text-slate-600" title="Menandai apakah jawaban screening diisi sebelum atau sesudah perbaikan celah bypass anti-paste">
                   Anti-Paste
@@ -405,10 +430,10 @@ export default function DaftarPelamarPage() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={10} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
+                <tr><td colSpan={11} className="px-4 py-6 text-center text-slate-400">Memuat...</td></tr>
               )}
               {!loading && filteredApplicants.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
+                <tr><td colSpan={11} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
               )}
               {filteredApplicants.map(a => (
                 <tr key={a.id} className="border-t border-slate-100">
@@ -423,6 +448,9 @@ export default function DaftarPelamarPage() {
                     </a>
                   </td>
                   <td className="px-4 py-2 text-slate-600">{a.placement ? PLACEMENT_LABELS[a.placement] || a.placement : '-'}</td>
+                  <td className="px-4 py-2 text-slate-600">
+                    {a.distance_km !== null ? `${a.distance_km} KM` : '-'}
+                  </td>
                   <td className="px-4 py-2">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[a.status] || 'bg-slate-100 text-slate-700'}`}>
                       {STATUS_LABELS[a.status] || a.status}
@@ -616,6 +644,11 @@ export default function DaftarPelamarPage() {
                   <p className="text-xs bg-white border border-blue-100 rounded-lg px-2 py-1.5 text-slate-600">
                     ✅ Kandidat konfirmasi: &ldquo;{detail.interview_confirmation}&rdquo;
                     {detail.interview_confirmed_at && <span className="text-slate-400"> — {formatInterviewSchedule(detail.interview_confirmed_at)}</span>}
+                  </p>
+                )}
+                {detail.test_impression && (
+                  <p className="text-xs bg-white border border-blue-100 rounded-lg px-2 py-1.5 text-slate-600">
+                    💬 Kesan kandidat soal tes: &ldquo;{detail.test_impression}&rdquo;
                   </p>
                 )}
               </div>

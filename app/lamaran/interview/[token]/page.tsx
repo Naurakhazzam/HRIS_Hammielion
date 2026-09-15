@@ -17,6 +17,7 @@ type InviteData = {
   interview_map_url?: string | null
   interview_confirmation?: string | null
   interview_confirmed_at?: string | null
+  test_impression?: string | null
   psychotest?: PsychotestResult | null
   psychometrics?: PsychometricRow[]
 }
@@ -31,6 +32,7 @@ export default function InterviewInvitePage({ params }: { params: Promise<{ toke
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<InviteData | null>(null)
   const [confirmationText, setConfirmationText] = useState('')
+  const [testImpression, setTestImpression] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
@@ -44,6 +46,7 @@ export default function InterviewInvitePage({ params }: { params: Promise<{ toke
       const json: InviteData = await res.json()
       setData(json)
       if (json.interview_confirmation) setConfirmationText(json.interview_confirmation)
+      if (json.test_impression) setTestImpression(json.test_impression)
     } catch {
       setError('Gagal memuat undangan. Cek koneksi internet Anda.')
     } finally {
@@ -53,14 +56,14 @@ export default function InterviewInvitePage({ params }: { params: Promise<{ toke
 
   async function handleConfirm(e: React.FormEvent) {
     e.preventDefault()
-    if (!confirmationText.trim()) return
+    if (!confirmationText.trim() || !testImpression.trim()) return
     setSubmitting(true)
     setError('')
     try {
       const res = await fetch(`/api/lamaran/interview/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmation_text: confirmationText }),
+        body: JSON.stringify({ confirmation_text: confirmationText, test_impression: testImpression }),
       })
       const json = await res.json()
       if (!res.ok) { setError(json.error || 'Gagal mengirim konfirmasi.'); setSubmitting(false); return }
@@ -181,24 +184,35 @@ export default function InterviewInvitePage({ params }: { params: Promise<{ toke
         )}
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <p className="text-sm font-semibold text-slate-700 mb-2">Konfirmasi Kehadiran</p>
-          {submitted || data.interview_confirmation ? (
-            <div>
+          <p className="text-sm font-semibold text-slate-700 mb-2">Konfirmasi Kehadiran & Kesan Anda</p>
+          {(submitted || data.interview_confirmation) && (submitted || data.test_impression) ? (
+            <div className="space-y-2">
               <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                 Terima kasih, konfirmasi Anda sudah kami terima: &ldquo;{submitted ? confirmationText : data.interview_confirmation}&rdquo;
               </p>
-              <button onClick={() => setSubmitted(false)} className="text-xs text-blue-600 hover:underline mt-2">Ubah konfirmasi</button>
+              <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                Kesan Anda: &ldquo;{submitted ? testImpression : data.test_impression}&rdquo;
+              </p>
+              <button onClick={() => setSubmitted(false)} className="text-xs text-blue-600 hover:underline mt-2">Ubah jawaban</button>
             </div>
           ) : (
-            <form onSubmit={handleConfirm} className="space-y-3">
-              <p className="text-xs text-slate-500">Ketik konfirmasi kehadiran Anda, contoh: &quot;Akan hadir sekitar jam 10.15&quot;</p>
-              <input value={confirmationText} onChange={e => setConfirmationText(e.target.value)} required
-                placeholder="Akan hadir sekitar jam..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            <form onSubmit={handleConfirm} className="space-y-4">
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Ketik konfirmasi kehadiran Anda, contoh: &quot;Akan hadir sekitar jam 10.15&quot;</p>
+                <input value={confirmationText} onChange={e => setConfirmationText(e.target.value)} required
+                  placeholder="Akan hadir sekitar jam..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 mb-1">Bagaimana kesan Anda saat mengisi & mengikuti tes sederhana dari kami? (wajib diisi)</p>
+                <textarea value={testImpression} onChange={e => setTestImpression(e.target.value)} required rows={3}
+                  placeholder="Ceritakan kesan Anda..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
+              </div>
               {error && <p className="text-xs text-red-600">{error}</p>}
               <button type="submit" disabled={submitting}
                 className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
-                {submitting ? 'Mengirim...' : 'Kirim Konfirmasi'}
+                {submitting ? 'Mengirim...' : 'Kirim Jawaban'}
               </button>
             </form>
           )}

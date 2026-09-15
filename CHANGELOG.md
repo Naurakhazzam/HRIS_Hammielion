@@ -1025,4 +1025,23 @@ Semua filter opsional dan independen — bisa isi satu saja atau gabungan bebera
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar*
+### 62. Fitur: Sort Jarak Terdekat + Kesan Pelamar tentang Tes
+
+**Permintaan Owner:** (1) urutkan pelamar berdasarkan jarak terdekat ke titik penempatan — datanya (`distance_km`) sudah ada dari fitur penempatan (migrasi `023_applicant_placement.sql`), tinggal dijadikan kolom sortable. (2) Tambah textbox wajib di halaman undangan interview untuk menjaring kesan pelamar saat mengisi & mengikuti tes sederhana kami.
+
+**Fix/Fitur:**
+1. Kolom baru **"Jarak"** di Daftar Pelamar, sortable (klik header, seperti Skor Psikotes) — `↑` = terdekat dulu. Cuma satu kolom yang aktif sort dalam satu waktu (pilih Jarak otomatis mematikan sort Skor Psikotes, begitu juga sebaliknya).
+2. `job_applicants` dapat kolom baru `test_impression` (migrasi `031_test_impression.sql`).
+3. Halaman undangan interview (`/lamaran/interview/[token]`) sekarang punya 2 field wajib dalam satu form: konfirmasi kehadiran (sudah ada) + **kesan mengikuti tes** (baru, textarea).
+4. Modal Detail Pelamar menampilkan kesan kandidat begitu masuk, sejajar dengan konfirmasi kehadiran.
+
+| File | Perubahan |
+|---|---|
+| Database: `job_applicants` (migrasi `031_test_impression.sql`) | Kolom `test_impression` |
+| `app/(dashboard)/rekrutmen/pelamar/page.tsx` | Kolom Jarak sortable; tampilkan kesan kandidat |
+| `app/api/lamaran/interview/[token]/route.ts` | Terima & simpan `test_impression`, wajib diisi |
+| `app/lamaran/interview/[token]/page.tsx` | Textarea kesan tes (wajib) di form konfirmasi |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes*

@@ -14,7 +14,7 @@ const supabaseAdmin = createClient(
 async function findByToken(token: string) {
   const { data } = await supabaseAdmin
     .from('job_applicants')
-    .select('id, full_name, application_code, interview_confirmation, interview_confirmed_at')
+    .select('id, full_name, application_code, interview_confirmation, interview_confirmed_at, test_impression')
     .eq('interview_token', token)
     .maybeSingle()
   return data
@@ -59,6 +59,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     interview_map_url: settings.interview_map_url,
     interview_confirmation: applicant.interview_confirmation,
     interview_confirmed_at: applicant.interview_confirmed_at,
+    test_impression: applicant.test_impression,
     psychotest: psychotest || null,
     psychometrics: psychometrics || [],
   })
@@ -71,14 +72,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: 'Undangan tidak ditemukan.' }, { status: 404 })
   }
 
-  const { confirmation_text } = await req.json()
+  const { confirmation_text, test_impression } = await req.json()
   if (!confirmation_text || !String(confirmation_text).trim()) {
     return NextResponse.json({ error: 'Konfirmasi kehadiran wajib diisi.' }, { status: 400 })
+  }
+  if (!test_impression || !String(test_impression).trim()) {
+    return NextResponse.json({ error: 'Kesan mengikuti tes wajib diisi.' }, { status: 400 })
   }
 
   const { error } = await supabaseAdmin
     .from('job_applicants')
-    .update({ interview_confirmation: String(confirmation_text).trim(), interview_confirmed_at: new Date().toISOString() })
+    .update({
+      interview_confirmation: String(confirmation_text).trim(),
+      interview_confirmed_at: new Date().toISOString(),
+      test_impression: String(test_impression).trim(),
+    })
     .eq('id', applicant.id)
 
   if (error) {
