@@ -14,7 +14,7 @@ const supabaseAdmin = createClient(
 async function findByToken(token: string) {
   const { data } = await supabaseAdmin
     .from('job_applicants')
-    .select('id, full_name, application_code, interview_confirmation, interview_confirmed_at, test_impression')
+    .select('id, full_name, application_code, status, interview_confirmation, interview_confirmed_at, test_impression')
     .eq('interview_token', token)
     .maybeSingle()
   return data
@@ -80,13 +80,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: 'Kesan mengikuti tes wajib diisi.' }, { status: 400 })
   }
 
+  const updatePayload: Record<string, string> = {
+    interview_confirmation: String(confirmation_text).trim(),
+    interview_confirmed_at: new Date().toISOString(),
+    test_impression: String(test_impression).trim(),
+  }
+  // Begitu kandidat konfirmasi kehadiran, otomatis majukan status ke "Dipanggil Interview" —
+  // tapi cuma kalau statusnya masih "Menunggu Dipanggil Interview". Kalau statusnya sudah lebih
+  // lanjut (mis. training/diterima) dan kandidat iseng buka lagi linknya untuk ubah jawaban,
+  // status TIDAK dimundurkan.
+  if (applicant.status === 'interview') {
+    updatePayload.status = 'interview_called'
+  }
+
   const { error } = await supabaseAdmin
     .from('job_applicants')
-    .update({
-      interview_confirmation: String(confirmation_text).trim(),
-      interview_confirmed_at: new Date().toISOString(),
-      test_impression: String(test_impression).trim(),
-    })
+    .update(updatePayload)
     .eq('id', applicant.id)
 
   if (error) {

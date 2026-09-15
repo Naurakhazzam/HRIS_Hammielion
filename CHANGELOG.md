@@ -1079,4 +1079,16 @@ Semua filter opsional dan independen — bisa isi satu saja atau gabungan bebera
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap*
+### 66. Fitur: Status Otomatis Pindah ke "Dipanggil Interview" Saat Kandidat Konfirmasi
+
+**Permintaan Owner:** kandidat yang sudah konfirmasi kehadiran otomatis pindah dari tab "Menunggu Dipanggil Interview" ke "Dipanggil Interview", tanpa HR harus ubah status manual satu-satu.
+
+**Fix:** Di `POST /api/lamaran/interview/[token]` (saat kandidat kirim konfirmasi), status pelamar otomatis diubah ke `interview_called` — **hanya** kalau status saat itu masih `interview` (maju satu tahap). Kalau kandidat sudah di tahap lebih lanjut (training/diterima) lalu iseng buka lagi linknya untuk ubah jawaban, status tidak dimundurkan.
+
+| File | Perubahan |
+|---|---|
+| `app/api/lamaran/interview/[token]/route.ts` | Auto-update status jadi `interview_called` saat konfirmasi masuk |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview*
