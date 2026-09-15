@@ -1044,4 +1044,14 @@ Semua filter opsional dan independen — bisa isi satu saja atau gabungan bebera
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes*
+### 63. Update Teks: Info Lokasi Training di Undangan Interview
+
+**Permintaan Owner:** tambah info kalau diterima, training dilaksanakan di Singaparna sampai hari Minggu. Juga konfirmasi: link undangan (`/lamaran/interview/[token]`) tidak berubah walau isi/teks halamannya diedit — token per pelamar tersimpan permanen di database sejak dia melamar, tidak terpengaruh perubahan kode. Link yang sudah terkirim ke pelamar tetap berfungsi sama setelah update ini.
+
+| File | Perubahan |
+|---|---|
+| `app/lamaran/interview/[token]/page.tsx` | Tambah kalimat lokasi training (Singaparna, sampai hari Minggu) di blok Info Training |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training*

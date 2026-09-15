@@ -150,6 +150,7 @@ export default function InterviewInvitePage({ params }: { params: Promise<{ toke
               <p className="text-sm text-slate-600">
                 <span className="font-medium text-slate-800">Info Training:</span> Selama masa training, gaji Rp800.000/bulan.
                 Bonus Rp400.000 diberikan di bulan terakhir, setelah menyelesaikan training 3 bulan.
+                Jika diterima, training dilaksanakan di Singaparna sampai hari Minggu.
               </p>
             </div>
             <div className="flex gap-2">
