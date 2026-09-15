@@ -183,7 +183,7 @@ export default function RekrutmenPage() {
       <p className="text-sm text-slate-500 mb-6">Pengaturan lowongan, QR code, dan pertanyaan screening.</p>
 
       <Link href="/rekrutmen/pelamar"
-        className="block bg-blue-600 text-white rounded-xl shadow-sm p-6 mb-6 hover:bg-blue-700 transition-colors">
+        className="block bg-blue-600 text-white rounded-xl shadow-sm p-6 mb-4 hover:bg-blue-700 transition-colors">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-base font-semibold">📋 Daftar Pelamar</p>
@@ -193,6 +193,17 @@ export default function RekrutmenPage() {
             <p className="text-3xl font-bold">{applicantCount ?? '-'}</p>
             <p className="text-xs text-blue-100">pelamar →</p>
           </div>
+        </div>
+      </Link>
+
+      <Link href="/rekrutmen/interview-konfirmasi"
+        className="block bg-white border border-slate-200 rounded-xl shadow-sm p-5 mb-6 hover:bg-slate-50 transition-colors">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">🗓️ Rekap Konfirmasi Interview</p>
+            <p className="text-xs text-slate-500 mt-1">Siapa saja yang sudah konfirmasi kehadiran, plus kesan mereka terhadap tes & sistem rekrutmen.</p>
+          </div>
+          <p className="text-xs text-blue-600 whitespace-nowrap">Buka →</p>
         </div>
       </Link>
 

@@ -1054,4 +1054,17 @@ Semua filter opsional dan independen — bisa isi satu saja atau gabungan bebera
 
 ---
 
-*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training*
+### 64. Fitur: Tabel Rekap Konfirmasi Interview
+
+**Permintaan Owner:** perlu lihat jawaban konfirmasi kehadiran & kesan pelamar terhadap tes/sistem rekrutmen dalam satu tabel ringkas, tanpa buka Detail Pelamar satu per satu.
+
+**Fitur:** Halaman baru **Rekap Konfirmasi Interview** (`/rekrutmen/interview-konfirmasi`), linknya ada di Pengaturan Rekrutmen dan menampilkan tabel: Kode, Nama, Telepon (link WA), Konfirmasi Kehadiran, Waktu Konfirmasi, dan Kesan Terhadap Tes/Sistem Rekrutmen. Ada pencarian nama/kode, dan toggle "Hanya yang sudah konfirmasi" (aktif secara default) supaya tidak tenggelam di antara ratusan pelamar yang belum sampai tahap interview.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/rekrutmen/interview-konfirmasi/page.tsx` | Baru — tabel rekap konfirmasi & kesan pelamar |
+| `app/(dashboard)/rekrutmen/page.tsx` | Kartu link ke halaman rekap baru |
+
+---
+
+*Terakhir diupdate: Sesi 5 (2026-09-14/15) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview*
