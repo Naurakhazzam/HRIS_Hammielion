@@ -47,6 +47,13 @@ export default function CashFlowPage() {
   const [unlinkedIn, setUnlinkedIn] = useState(0)
   const [unlinkedOut, setUnlinkedOut] = useState(0)
   const [unlinkedCount, setUnlinkedCount] = useState(0)
+  // Transaksi status 'pending' (belum diverifikasi Finance) — TIDAK ikut dihitung di Saldo
+  // Berjalan (sengaja), tapi perlu ditampilkan supaya jelas kenapa saldo kelihatan lebih besar
+  // dari yang sebenarnya sudah keluar/masuk secara riil.
+  const [pendingIn, setPendingIn] = useState(0)
+  const [pendingOut, setPendingOut] = useState(0)
+  const [pendingCount, setPendingCount] = useState(0)
+  const [pendingSupplierOut, setPendingSupplierOut] = useState(0)
   const [asOf, setAsOf] = useState('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
@@ -74,15 +81,17 @@ export default function CashFlowPage() {
     // baris per query; tabel ini sudah lebih dari itu, jadi cara lama diam-diam memotong sebagian
     // transaksi (tanpa error) dan bikin Saldo Berjalan salah/tidak konsisten. Lihat migrasi
     // 033_fix_cashflow_aggregation_rpc.sql.
-    const [accRes, summaryRes, unlinkedRes] = await Promise.all([
+    const [accRes, summaryRes, unlinkedRes, pendingRes] = await Promise.all([
       supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active, settlement_account_id').order('account_type').order('bank_name'),
       supabase.rpc('get_account_cashflow_summary', { p_period_start: startDate, p_period_end: endDate }),
       supabase.rpc('get_unlinked_cashflow_summary', { p_period_start: startDate, p_period_end: endDate }).single(),
+      supabase.rpc('get_pending_cashflow_summary', { p_period_start: startDate, p_period_end: endDate }).single(),
     ])
 
     if (accRes.error) console.error('Detail error accounts:', JSON.stringify(accRes.error, null, 2))
     if (summaryRes.error) console.error('Detail error cashflow summary:', JSON.stringify(summaryRes.error, null, 2))
     if (unlinkedRes.error) console.error('Detail error unlinked summary:', JSON.stringify(unlinkedRes.error, null, 2))
+    if (pendingRes.error) console.error('Detail error pending summary:', JSON.stringify(pendingRes.error, null, 2))
 
     const accounts = (accRes.data as Account[]) || []
     const summaryByAccount = new Map(((summaryRes.data as CashflowSummaryRow[]) || []).map(r => [r.account_id, r]))
@@ -106,6 +115,12 @@ export default function CashFlowPage() {
     setUnlinkedIn(Number(unlinked?.unlinked_in || 0))
     setUnlinkedOut(Number(unlinked?.unlinked_out || 0))
     setUnlinkedCount(Number(unlinked?.unlinked_count || 0))
+
+    const pending = pendingRes.data as { pending_in: number; pending_out: number; pending_count: number; pending_supplier_out: number } | null
+    setPendingIn(Number(pending?.pending_in || 0))
+    setPendingOut(Number(pending?.pending_out || 0))
+    setPendingCount(Number(pending?.pending_count || 0))
+    setPendingSupplierOut(Number(pending?.pending_supplier_out || 0))
 
     // Kelompokkan rekening yang "gabung saldo ke" rekening lain (mis. EDC/QRIS yang muara ke rekening bank utama)
     const byId = new Map(flowList.map(f => [f.id, f]))
@@ -177,6 +192,19 @@ export default function CashFlowPage() {
                 {unlinkedIn > 0 && <>Kas Masuk belum terhubung: <strong>{formatRupiah(unlinkedIn)}</strong>. </>}
                 {unlinkedOut > 0 && <>Kas Keluar belum terhubung: <strong>{formatRupiah(unlinkedOut)}</strong>. </>}
                 Angka di tabel bawah <strong>tidak termasuk</strong> transaksi ini. Isi manual lewat halaman Riwayat Kas Masuk/Kas Keluar supaya laporan lengkap.
+              </p>
+            </div>
+          )}
+
+          {pendingCount > 0 && (
+            <div className="mb-6 p-4 rounded-lg border bg-orange-50 border-orange-200 text-orange-800 text-sm">
+              <p className="font-medium mb-1">⏳ Ada {pendingCount} transaksi bulan ini yang masih menunggu verifikasi Finance — belum ikut dihitung di Saldo Berjalan.</p>
+              <p>
+                {pendingIn > 0 && <>Kas Masuk pending: <strong>{formatRupiah(pendingIn)}</strong>. </>}
+                {pendingOut > 0 && <>Kas Keluar pending: <strong>{formatRupiah(pendingOut)}</strong></>}
+                {pendingSupplierOut > 0 && <> (termasuk <strong>{formatRupiah(pendingSupplierOut)}</strong> pembayaran supplier)</>}
+                . Saldo yang tampil di bawah jadi terlihat lebih besar dari yang sebenarnya sudah keluar/masuk secara riil. Verifikasi dulu di{' '}
+                <a href="/keuangan/approval" className="underline font-medium">Verifikasi Keuangan</a> supaya angkanya lengkap.
               </p>
             </div>
           )}

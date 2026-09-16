@@ -1128,4 +1128,19 @@ Dicek juga halaman laporan keuangan lain (Dashboard Keuangan, Laporan Resmi, Det
 
 ---
 
-*Terakhir diupdate: Sesi 5-6 (2026-09-14/16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris Cash Flow*
+### 69. Fix: Cash Flow Tidak Kasih Tahu Ada Transaksi Pending yang Belum Terhitung
+
+**Dilaporkan Owner:** setelah fix #68, saldo masih terasa tidak sesuai — "uang keluar itu harus cek dari pembayaran supplier juga... bulan September uang cash terlalu banyak, padahal sudah banyak bayar."
+
+**Ditemukan:** Dicek langsung ke database (bukan asumsi) — bulan September ada **9 pembayaran supplier senilai Rp27,7 juta** yang statusnya masih **"Pending"** (menunggu verifikasi Finance di Verifikasi Keuangan), cuma 1 yang sudah "Disetujui" (Rp10,8 juta). Total keseluruhan Kas Keluar pending bulan itu Rp30,7 juta (43 transaksi). Cash Flow memang **sengaja** cuma menghitung status "Disetujui" (supaya tidak salah hitung transaksi yang masih bisa dibatalkan/direvisi) — itu bukan bug, tapi halamannya **tidak memberi tahu** ada uang sebesar itu yang belum ikut terhitung, jadi saldo kelihatan lebih besar dari kenyataan tanpa penjelasan.
+
+**Fix:** Kotak peringatan baru (oranye) di halaman Cash Flow — muncul kalau ada transaksi "Pending" di bulan yang dipilih, menyebutkan total Kas Masuk/Kas Keluar pending (termasuk rincian pembayaran supplier pending), dan link langsung ke Verifikasi Keuangan.
+
+| File | Perubahan |
+|---|---|
+| Database (fungsi `get_pending_cashflow_summary`, migrasi `034_pending_cashflow_summary.sql`) | Ringkasan transaksi pending per periode |
+| `app/(dashboard)/keuangan/cashflow/page.tsx` | Kotak peringatan transaksi pending + link ke Verifikasi Keuangan |
+
+---
+
+*Terakhir diupdate: Sesi 5-6 (2026-09-14/16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan transaksi pending Cash Flow*
