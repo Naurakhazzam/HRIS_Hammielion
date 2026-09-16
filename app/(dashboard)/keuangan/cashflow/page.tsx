@@ -24,12 +24,17 @@ type CashflowSummaryRow = {
   period_out: number
   cumulative_in: number
   cumulative_out: number
+  pending_cumulative_in: number
+  pending_cumulative_out: number
 }
 
 type AccountFlow = Account & {
   periodIn: number
   periodOut: number
   saldoBerjalan: number
+  // Saldo Proyeksi = Saldo Berjalan (Real) + transaksi Pending rekening ini KALAU semua ikut
+  // disetujui — bukan angka resmi, cuma gambaran "kalau semua beres diverifikasi, segini".
+  saldoProyeksi: number
 }
 
 export default function CashFlowPage() {
@@ -43,7 +48,7 @@ export default function CashFlowPage() {
   const [filterMonth, setFilterMonth] = useState(today.slice(0, 7))
 
   const [flows, setFlows] = useState<AccountFlow[]>([])
-  const [groups, setGroups] = useState<{ root: AccountFlow; members: AccountFlow[]; totalSaldo: number; totalPeriodIn: number; totalPeriodOut: number }[]>([])
+  const [groups, setGroups] = useState<{ root: AccountFlow; members: AccountFlow[]; totalSaldo: number; totalSaldoProyeksi: number; totalPeriodIn: number; totalPeriodOut: number }[]>([])
   const [unlinkedIn, setUnlinkedIn] = useState(0)
   const [unlinkedOut, setUnlinkedOut] = useState(0)
   const [unlinkedCount, setUnlinkedCount] = useState(0)
@@ -102,12 +107,16 @@ export default function CashFlowPage() {
       const periodOut = Number(s?.period_out || 0)
       const cumulativeIn = Number(s?.cumulative_in || 0)
       const cumulativeOut = Number(s?.cumulative_out || 0)
+      const pendingCumIn = Number(s?.pending_cumulative_in || 0)
+      const pendingCumOut = Number(s?.pending_cumulative_out || 0)
+      const saldoBerjalan = Number(acc.opening_balance) + cumulativeIn - cumulativeOut
 
       return {
         ...acc,
         periodIn,
         periodOut,
-        saldoBerjalan: Number(acc.opening_balance) + cumulativeIn - cumulativeOut,
+        saldoBerjalan,
+        saldoProyeksi: saldoBerjalan + pendingCumIn - pendingCumOut,
       }
     })
 
@@ -133,12 +142,13 @@ export default function CashFlowPage() {
       }
       return cur
     }
-    const groupMap = new Map<string, { root: AccountFlow; members: AccountFlow[]; totalSaldo: number; totalPeriodIn: number; totalPeriodOut: number }>()
+    const groupMap = new Map<string, { root: AccountFlow; members: AccountFlow[]; totalSaldo: number; totalSaldoProyeksi: number; totalPeriodIn: number; totalPeriodOut: number }>()
     flowList.forEach(f => {
       const root = resolveRoot(f)
-      const g = groupMap.get(root.id) || { root, members: [], totalSaldo: 0, totalPeriodIn: 0, totalPeriodOut: 0 }
+      const g = groupMap.get(root.id) || { root, members: [], totalSaldo: 0, totalSaldoProyeksi: 0, totalPeriodIn: 0, totalPeriodOut: 0 }
       g.members.push(f)
       g.totalSaldo += f.saldoBerjalan
+      g.totalSaldoProyeksi += f.saldoProyeksi
       g.totalPeriodIn += f.periodIn
       g.totalPeriodOut += f.periodOut
       groupMap.set(root.id, g)
@@ -156,6 +166,7 @@ export default function CashFlowPage() {
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
   const totalSaldoBerjalan = flows.reduce((s, f) => s + f.saldoBerjalan, 0)
+  const totalSaldoProyeksi = flows.reduce((s, f) => s + f.saldoProyeksi, 0)
 
   if (roleLoading) return <div className="py-10 text-center text-slate-500">Memuat...</div>
 
@@ -211,11 +222,20 @@ export default function CashFlowPage() {
 
           <div className="mb-6 bg-white p-5 rounded-xl shadow-sm border-2 border-blue-200">
             <div className="flex justify-between items-center mb-1">
-              <h2 className="text-lg font-bold text-slate-800">Total Saldo Berjalan (Semua Rekening/Kas)</h2>
+              <h2 className="text-lg font-bold text-slate-800">Total Saldo (Semua Rekening/Kas)</h2>
               <span className="text-xs text-slate-400">per {asOf}</span>
             </div>
-            <p className={`text-2xl font-bold ${totalSaldoBerjalan >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(totalSaldoBerjalan)}</p>
-            <p className="text-xs text-slate-400 mt-1">Akumulasi saldo berjalan sampai akhir bulan yang dipilih, dari seluruh rekening bank + kas tunai.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+              <div>
+                <p className="text-xs text-slate-500 font-medium uppercase mb-1">Saldo Real (Sudah Diverifikasi)</p>
+                <p className={`text-2xl font-bold ${totalSaldoBerjalan >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(totalSaldoBerjalan)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-orange-500 font-medium uppercase mb-1">Saldo Proyeksi (Kalau Pending Disetujui)</p>
+                <p className={`text-2xl font-bold ${totalSaldoProyeksi >= 0 ? 'text-orange-700' : 'text-red-700'}`}>{formatRupiah(totalSaldoProyeksi)}</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400 mt-2">Saldo Real = akumulasi transaksi yang sudah diverifikasi Finance sampai akhir bulan yang dipilih. Saldo Proyeksi = Saldo Real ditambah semua transaksi yang masih Pending, seandainya semuanya disetujui — bukan angka resmi, cuma gambaran.</p>
           </div>
 
           {groups.length > 0 && (
@@ -232,7 +252,8 @@ export default function CashFlowPage() {
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Digabung Dari</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Masuk (Bulan Ini)</th>
                       <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Keluar (Bulan Ini)</th>
-                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Saldo Berjalan (Gabungan)</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Saldo Real (Gabungan)</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-orange-500 uppercase text-right">Saldo Proyeksi (Gabungan)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -243,6 +264,7 @@ export default function CashFlowPage() {
                         <td className="px-4 py-3 text-sm text-right text-green-700">{formatRupiah(g.totalPeriodIn)}</td>
                         <td className="px-4 py-3 text-sm text-right text-red-700">{formatRupiah(g.totalPeriodOut)}</td>
                         <td className={`px-4 py-3 text-sm text-right font-bold ${g.totalSaldo >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(g.totalSaldo)}</td>
+                        <td className={`px-4 py-3 text-sm text-right font-bold ${g.totalSaldoProyeksi >= 0 ? 'text-orange-700' : 'text-red-700'}`}>{formatRupiah(g.totalSaldoProyeksi)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -261,12 +283,13 @@ export default function CashFlowPage() {
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Per Tanggal</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Masuk (Bulan Ini)</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Kas Keluar (Bulan Ini)</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Saldo Berjalan</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Saldo Real</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-orange-500 uppercase text-right">Saldo Proyeksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {flows.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada rekening/kas. Tambahkan di Setup Kas & Rekening.</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada rekening/kas. Tambahkan di Setup Kas & Rekening.</td></tr>
                   ) : flows.map(f => (
                     <tr key={f.id} className="hover:bg-slate-50 transition">
                       <td className="px-4 py-3 text-sm">
@@ -286,6 +309,7 @@ export default function CashFlowPage() {
                       <td className="px-4 py-3 text-sm text-right text-green-700">{formatRupiah(f.periodIn)}</td>
                       <td className="px-4 py-3 text-sm text-right text-red-700">{formatRupiah(f.periodOut)}</td>
                       <td className={`px-4 py-3 text-sm text-right font-bold ${f.saldoBerjalan >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(f.saldoBerjalan)}</td>
+                      <td className={`px-4 py-3 text-sm text-right font-bold ${f.saldoProyeksi >= 0 ? 'text-orange-700' : 'text-red-700'}`}>{formatRupiah(f.saldoProyeksi)}</td>
                     </tr>
                   ))}
                 </tbody>

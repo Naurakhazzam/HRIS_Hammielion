@@ -1143,4 +1143,17 @@ Dicek juga halaman laporan keuangan lain (Dashboard Keuangan, Laporan Resmi, Det
 
 ---
 
-*Terakhir diupdate: Sesi 5-6 (2026-09-14/16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan transaksi pending Cash Flow*
+### 70. Fitur: Saldo Real vs Saldo Proyeksi di Cash Flow
+
+**Permintaan Owner:** setelah tahu ada transaksi pending yang belum terhitung (#69), minta saldo akhir dibuat 2 angka — yang real (sudah diverifikasi) dan proyeksi (kalau semua pending ikut disetujui).
+
+**Fitur:** Tiap rekening/kas (dan total gabungan, termasuk grup "Saldo Riil per Kantong") sekarang tampilkan 2 kolom saldo: **Saldo Real** (cuma transaksi disetujui, seperti sebelumnya) dan **Saldo Proyeksi** (Saldo Real + semua transaksi Pending rekening itu, seandainya semuanya disetujui — dihitung kumulatif sejak tanggal saldo awal, konsisten dengan cara Saldo Real dihitung).
+
+| File | Perubahan |
+|---|---|
+| Database (fungsi `get_account_cashflow_summary`, migrasi `035_cashflow_pending_projection.sql`) | Tambah `pending_cumulative_in`/`pending_cumulative_out` per rekening |
+| `app/(dashboard)/keuangan/cashflow/page.tsx` | Kolom & kartu Saldo Proyeksi di semua tabel |
+
+---
+
+*Terakhir diupdate: Sesi 6 (2026-09-16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow*
