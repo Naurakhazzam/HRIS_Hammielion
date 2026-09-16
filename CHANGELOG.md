@@ -1156,4 +1156,22 @@ Dicek juga halaman laporan keuangan lain (Dashboard Keuangan, Laporan Resmi, Det
 
 ---
 
-*Terakhir diupdate: Sesi 6 (2026-09-16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow*
+### 71. Rombak Total: Pembelian & Utang Supplier Jadi Satu Ledger per Supplier
+
+**Keluhan Owner:** "Ringkasan Supplier ini membingungkan, tidak ada detail, belanja berapa, bayar berapa, tidak ada tab detail" — halaman lama cuma tabel ringkasan gabungan per supplier tanpa cara menelusuri transaksi apa saja yang membentuk angka itu, dan tab "Catat Pembelian" terpisah cuma menampilkan bulan berjalan.
+
+**Rombak:**
+1. **Satu tampilan, bukan dua tab** — daftar SEMUA supplier aktif (bukan cuma yang punya sisa hutang), klik baris mana pun buka **modal Detail**.
+2. **Modal Detail per supplier**: tombol "➕ Tambah Belanja" & "💰 Bayar Hutang" di atas, ringkasan Total Belanja/Total Pembayaran/Total Sisa Hutang, lalu **ledger gabungan** (tanggal, Nomor Nota/SJ, kolom Pembelian, kolom Pembayaran, Status) — transaksi terbaru di atas, satu tabel untuk beli & bayar bukan dua tabel terpisah. Baris pembayaran "Pending" tetap tampil (ditandai jelas) tapi tidak ikut mengurangi Sisa Hutang.
+3. **Tambah Belanja**: field baru **Nomor Invoice** & **Nomor SJ** (kolom baru di `supplier_purchases`, migrasi `036_supplier_invoice_sj_number.sql`), plus opsi bayar sebagian/lunas langsung seperti sebelumnya.
+4. **Bayar Hutang** — diganti total, dari "bayar borongan otomatis FIFO" jadi **hybrid**: isi nominal total untuk auto-centang nota tertua dulu (FIFO, cepat), TAPI bisa dicentang/dibongkar & diubah manual per nota (kalau mau bayar nota tertentu). Tetap wajib pilih Rekening/Kas — begitu diverifikasi Finance, otomatis mengurangi saldo di Cash Flow.
+
+| File | Perubahan |
+|---|---|
+| Database: `supplier_purchases` (migrasi `036`) | Kolom `invoice_number`, `sj_number` |
+| `app/(dashboard)/keuangan/pembelian/PembelianPageContent.tsx` | Rombak total — satu ledger per supplier, hapus tab lama |
+| `app/(dashboard)/keuangan/pembelian/page.tsx`, `.../input/page.tsx` | Tidak lagi kirim prop `defaultTab` (tab dihapus) |
+
+---
+
+*Terakhir diupdate: Sesi 6 (2026-09-16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier*

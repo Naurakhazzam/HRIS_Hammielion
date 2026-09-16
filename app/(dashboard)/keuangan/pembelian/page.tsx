@@ -1,7 +1,8 @@
 import PembelianSupplierPage from './PembelianPageContent'
 
-// Rute laporan — dibuka dari menu "Laporan Keuangan", default ke tab Ringkasan per Supplier.
-// Untuk mencatat pembelian/bayar, lihat ./input/page.tsx (rute yang sama isinya, beda default tab).
+// Dua rute (ini dan ./input/page.tsx) sama-sama merender komponen yang sama — satu tampilan
+// tunggal (daftar supplier -> klik -> Detail berisi ledger + tambah belanja + bayar hutang),
+// tidak ada lagi tab terpisah, supaya logikanya tidak dobel di dua tempat.
 export default function Page() {
-  return <PembelianSupplierPage defaultTab="ringkasan-supplier" />
+  return <PembelianSupplierPage />
 }
