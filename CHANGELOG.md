@@ -1186,4 +1186,18 @@ Dicek juga halaman laporan keuangan lain (Dashboard Keuangan, Laporan Resmi, Det
 
 ---
 
-*Terakhir diupdate: Sesi 6 (2026-09-16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier*
+### 73. Fitur: Catatan Meeting
+
+**Permintaan Owner:** tempat mencatat hasil meeting supaya tidak lupa, dibagikan ke sesama admin.
+
+**Fitur:** Halaman baru **Catatan Meeting** (`/catatan-meeting`, menu sidebar admin) — daftar catatan (judul, tanggal meeting, peserta, isi, tindak lanjut/to-do), bisa dicari, terlihat oleh semua owner/HR/finance (siapa penulisnya ditampilkan di tiap catatan). Edit/hapus dibatasi ke penulis catatan itu sendiri atau owner.
+
+| File | Perubahan |
+|---|---|
+| Database: `meeting_notes` (migrasi `037_meeting_notes.sql`) | Tabel baru + RLS (baca bersama, edit/hapus penulis/owner) |
+| `app/(dashboard)/catatan-meeting/page.tsx` | Baru — halaman Catatan Meeting |
+| `components/sidebar.tsx` | Menu baru "Catatan Meeting" |
+
+---
+
+*Terakhir diupdate: Sesi 6 (2026-09-16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting*

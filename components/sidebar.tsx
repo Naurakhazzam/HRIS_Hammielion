@@ -125,6 +125,7 @@ const adminNavItems: NavNode[] = [
   { name: 'Ranking Disiplin', href: '/ranking', icon: '🏆' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
   { name: 'Laporan', href: '/laporan', icon: '📄' },
+  { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
   {
     name: 'Setup',
     href: '/setup',
