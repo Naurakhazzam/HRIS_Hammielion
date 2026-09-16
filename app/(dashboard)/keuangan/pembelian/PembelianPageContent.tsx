@@ -489,11 +489,18 @@ export default function PembelianSupplierPage() {
         </div>
       </div>
 
-      {/* ══════════ Modal Detail Supplier ══════════ */}
+      {/* ══════════ Modal Detail Supplier ══════════
+          Struktur flex-column: bagian atas (judul/tombol/ringkasan/peringatan) di LUAR area
+          scroll sama sekali — jadi tidak perlu sticky, memang tidak pernah ikut scroll. Cuma
+          tabel ledger yang scroll sendiri (flex-1 overflow-y-auto), dengan header tabelnya
+          sticky top-0 RELATIF ke area scroll itu (bukan ke seluruh modal) — pola sticky+bg per
+          <th> & border-separate ini yang sudah terbukti jalan di app ini (lihat memory sticky
+          table header), bukan sticky di <tr>. */}
       {detailSupplierId && detailSummary && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-3xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-6">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            {/* Bagian atas — tidak pernah ikut scroll */}
+            <div className="p-6 pb-0 flex-shrink-0">
               <div className="flex items-start justify-between mb-4 pb-3 border-b border-slate-100">
                 <h2 className="text-lg font-semibold text-slate-800">{detailSummary.supplierName}</h2>
                 <button onClick={closeDetail} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
@@ -529,16 +536,19 @@ export default function PembelianSupplierPage() {
                   ⏳ {formatRupiah(detailSummary.totalPending)} pembayaran masih menunggu verifikasi Finance — belum ikut mengurangi Sisa Hutang di atas.
                 </p>
               )}
+            </div>
 
+            {/* Bagian bawah — cuma ini yang scroll */}
+            <div className="flex-1 overflow-y-auto px-6 pb-6 min-h-0">
               <div className="border border-slate-200 rounded-lg overflow-hidden">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 border-b border-slate-200">
+                <table className="w-full text-left text-sm border-separate border-spacing-0">
+                  <thead>
                     <tr>
-                      <th className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
-                      <th className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase">Nota / SJ</th>
-                      <th className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase text-right">Pembelian</th>
-                      <th className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase text-right">Pembayaran</th>
-                      <th className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                      <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase">Tanggal</th>
+                      <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase">Nota / SJ</th>
+                      <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase text-right">Pembelian</th>
+                      <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase text-right">Pembayaran</th>
+                      <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -546,11 +556,11 @@ export default function PembelianSupplierPage() {
                       <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-400 text-sm">Belum ada transaksi.</td></tr>
                     ) : ledgerRows.map(r => (
                       <tr key={r.key} className="hover:bg-slate-50/70">
-                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{new Date(r.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                        <td className="px-3 py-2 text-slate-700">{r.noteRef}</td>
-                        <td className="px-3 py-2 text-right font-medium text-slate-800">{r.pembelian !== null ? formatRupiah(r.pembelian) : '—'}</td>
-                        <td className="px-3 py-2 text-right font-medium text-slate-800">{r.pembayaran !== null ? formatRupiah(r.pembayaran) : '—'}</td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap bg-white">{new Date(r.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                        <td className="px-3 py-2 text-slate-700 bg-white">{r.noteRef}</td>
+                        <td className="px-3 py-2 text-right font-medium text-slate-800 bg-white">{r.pembelian !== null ? formatRupiah(r.pembelian) : '—'}</td>
+                        <td className="px-3 py-2 text-right font-medium text-slate-800 bg-white">{r.pembayaran !== null ? formatRupiah(r.pembayaran) : '—'}</td>
+                        <td className="px-3 py-2 bg-white">
                           {r.status ? (
                             <span className={`text-xs font-medium ${STATUS_LABEL[r.status]?.cls || 'text-slate-500'}`}>{STATUS_LABEL[r.status]?.label || r.status}</span>
                           ) : '—'}

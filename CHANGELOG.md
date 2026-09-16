@@ -1174,4 +1174,16 @@ Dicek juga halaman laporan keuangan lain (Dashboard Keuangan, Laporan Resmi, Det
 
 ---
 
-*Terakhir diupdate: Sesi 6 (2026-09-16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier*
+### 72. Fix: Header Modal Detail Supplier Sekarang Diam Saat Scroll
+
+**Ditemukan Owner:** di modal Detail Supplier (item #71), judul/tombol/ringkasan angka/peringatan pending/header tabel ikut scroll hilang begitu ledger-nya panjang — susah dilihat sedang bicarakan supplier mana saat sudah scroll ke bawah.
+
+**Fix:** Modal diubah jadi struktur flex-column: bagian atas (judul, tombol Tambah Belanja/Bayar Hutang, ringkasan 3 angka, peringatan pending) sekarang **di luar area scroll sama sekali** — bukan sticky, memang tidak pernah ikut bergulir. Cuma tabel ledger yang scroll sendiri di area terpisah, dengan header tabelnya (Tanggal/Nota-SJ/Pembelian/Pembayaran/Status) **sticky** relatif ke area scroll itu — pakai pola yang sudah terbukti di app ini: `border-separate` di `<table>`, `sticky top-0` + `bg-*` di tiap `<th>` (bukan di `<tr>`), dan `bg-white` di tiap `<td>` supaya baris yang discroll tidak tembus pandang di balik header.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/pembelian/PembelianPageContent.tsx` | Modal Detail Supplier: flex-column, header non-scroll + tabel ledger sticky-header sendiri |
+
+---
+
+*Terakhir diupdate: Sesi 6 (2026-09-16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier*
