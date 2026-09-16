@@ -1111,4 +1111,21 @@ Pilih "Lanjut ke Training" atau "Tidak Lolos" otomatis memindahkan status pelama
 
 ---
 
-*Terakhir diupdate: Sesi 5-6 (2026-09-14/16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview*
+### 68. Fix Bug Besar: Saldo Cash Flow per Rekening Salah karena Limit 1000 Baris
+
+**Dilaporkan Owner:** "Cash Flow per Rekening di Laporan Keuangan kenapa tidak berjalan dengan baik?"
+
+**Ditemukan:** `fin_cash_out` sudah punya **1.346 baris** (1.303 berstatus disetujui). Halaman Cash Flow menarik **seluruh riwayat** `fin_cash_in`/`fin_cash_out` (bukan cuma satu bulan — perlu dari `opening_balance_date` tiap rekening sampai akhir bulan yang dipilih, buat hitung Saldo Berjalan kumulatif) ke browser, lalu menjumlahkannya di JavaScript. **Supabase default cuma mengirim maksimal 1000 baris per query** — begitu tabelnya lewat 1000 baris, sebagian transaksi diam-diam tidak ikut ke-fetch (tanpa error apa pun), dan karena query-nya tidak punya `ORDER BY`, baris mana yang "kepotong" pun tidak konsisten antar refresh. Inilah yang bikin Saldo Berjalan terlihat salah.
+
+Dicek juga halaman laporan keuangan lain (Dashboard Keuangan, Laporan Resmi, Detail Laporan per Cabang) — semuanya sudah membatasi query per periode bulan (`gte`/`lte` tanggal), jadi **tidak** kena masalah yang sama. Cash Flow satu-satunya yang butuh riwayat kumulatif sejak awal, bukan cuma satu bulan.
+
+**Fix:** Penjumlahan dipindah ke database lewat 2 fungsi SQL baru (`get_account_cashflow_summary`, `get_unlinked_cashflow_summary` — migrasi `033_fix_cashflow_aggregation_rpc.sql`) yang langsung `SUM` di Postgres, bukan tarik semua baris lalu jumlahkan di JS. Tidak akan kena batas 1000 baris lagi berapa pun banyaknya transaksi ke depannya — sudah dites hasilnya langsung terhadap data live, angkanya masuk akal.
+
+| File | Perubahan |
+|---|---|
+| Database (fungsi `get_account_cashflow_summary`, `get_unlinked_cashflow_summary`, migrasi `033`) | Agregasi SUM dipindah ke SQL |
+| `app/(dashboard)/keuangan/cashflow/page.tsx` | Pakai RPC, bukan fetch semua baris + hitung di JS |
+
+---
+
+*Terakhir diupdate: Sesi 5-6 (2026-09-14/16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris Cash Flow*

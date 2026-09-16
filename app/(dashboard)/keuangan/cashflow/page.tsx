@@ -18,8 +18,13 @@ type Account = {
   is_active: boolean
   settlement_account_id: string | null
 }
-type CashRow = { account_id: string | null; amount: number; transaction_date: string }
-type CashInRow = CashRow & { expense_amount: number; cash_adjustment: number }
+type CashflowSummaryRow = {
+  account_id: string
+  period_in: number
+  period_out: number
+  cumulative_in: number
+  cumulative_out: number
+}
 
 type AccountFlow = Account & {
   periodIn: number
@@ -64,34 +69,30 @@ export default function CashFlowPage() {
     const startDate = localDateStr(new Date(year, month - 1, 1))
     const endDate = localDateStr(new Date(year, month, 0))
 
-    const [accRes, cashInRes, cashOutRes] = await Promise.all([
+    // Penjumlahan dilakukan di database (RPC, SQL SUM) — BUKAN tarik semua baris fin_cash_in/
+    // fin_cash_out ke browser lalu jumlahkan di JS. Supabase default cuma kirim maksimal 1000
+    // baris per query; tabel ini sudah lebih dari itu, jadi cara lama diam-diam memotong sebagian
+    // transaksi (tanpa error) dan bikin Saldo Berjalan salah/tidak konsisten. Lihat migrasi
+    // 033_fix_cashflow_aggregation_rpc.sql.
+    const [accRes, summaryRes, unlinkedRes] = await Promise.all([
       supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_holder_name, account_type, opening_balance, opening_balance_date, is_active, settlement_account_id').order('account_type').order('bank_name'),
-      supabase.from('fin_cash_in').select('account_id, amount, expense_amount, cash_adjustment, transaction_date').eq('status', 'approved').lte('transaction_date', endDate),
-      supabase.from('fin_cash_out').select('account_id, amount, transaction_date').eq('status', 'approved').lte('transaction_date', endDate),
+      supabase.rpc('get_account_cashflow_summary', { p_period_start: startDate, p_period_end: endDate }),
+      supabase.rpc('get_unlinked_cashflow_summary', { p_period_start: startDate, p_period_end: endDate }).single(),
     ])
 
     if (accRes.error) console.error('Detail error accounts:', JSON.stringify(accRes.error, null, 2))
-    if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
-    if (cashOutRes.error) console.error('Detail error cash_out:', JSON.stringify(cashOutRes.error, null, 2))
+    if (summaryRes.error) console.error('Detail error cashflow summary:', JSON.stringify(summaryRes.error, null, 2))
+    if (unlinkedRes.error) console.error('Detail error unlinked summary:', JSON.stringify(unlinkedRes.error, null, 2))
 
     const accounts = (accRes.data as Account[]) || []
-    // Fisik = omzet − pengeluaran + selisih kasir (plus/minus) — inilah yang benar-benar masuk ke rekening/kas
-    const cashIn = ((cashInRes.data as CashInRow[]) || []).map(r => ({ ...r, amount: Number(r.amount) - Number(r.expense_amount || 0) + Number(r.cash_adjustment || 0) }))
-    const cashOut = (cashOutRes.data as CashRow[]) || []
+    const summaryByAccount = new Map(((summaryRes.data as CashflowSummaryRow[]) || []).map(r => [r.account_id, r]))
 
     const flowList: AccountFlow[] = accounts.map(acc => {
-      const inRows = cashIn.filter(r => r.account_id === acc.id)
-      const outRows = cashOut.filter(r => r.account_id === acc.id)
-
-      const periodIn = inRows.filter(r => r.transaction_date >= startDate && r.transaction_date <= endDate)
-        .reduce((s, r) => s + Number(r.amount), 0)
-      const periodOut = outRows.filter(r => r.transaction_date >= startDate && r.transaction_date <= endDate)
-        .reduce((s, r) => s + Number(r.amount), 0)
-
-      const cumulativeIn = inRows.filter(r => r.transaction_date >= acc.opening_balance_date && r.transaction_date <= endDate)
-        .reduce((s, r) => s + Number(r.amount), 0)
-      const cumulativeOut = outRows.filter(r => r.transaction_date >= acc.opening_balance_date && r.transaction_date <= endDate)
-        .reduce((s, r) => s + Number(r.amount), 0)
+      const s = summaryByAccount.get(acc.id)
+      const periodIn = Number(s?.period_in || 0)
+      const periodOut = Number(s?.period_out || 0)
+      const cumulativeIn = Number(s?.cumulative_in || 0)
+      const cumulativeOut = Number(s?.cumulative_out || 0)
 
       return {
         ...acc,
@@ -101,11 +102,10 @@ export default function CashFlowPage() {
       }
     })
 
-    const unlinkedInRows = cashIn.filter(r => !r.account_id && r.transaction_date >= startDate && r.transaction_date <= endDate)
-    const unlinkedOutRows = cashOut.filter(r => !r.account_id && r.transaction_date >= startDate && r.transaction_date <= endDate)
-    setUnlinkedIn(unlinkedInRows.reduce((s, r) => s + Number(r.amount), 0))
-    setUnlinkedOut(unlinkedOutRows.reduce((s, r) => s + Number(r.amount), 0))
-    setUnlinkedCount(unlinkedInRows.length + unlinkedOutRows.length)
+    const unlinked = unlinkedRes.data as { unlinked_in: number; unlinked_out: number; unlinked_count: number } | null
+    setUnlinkedIn(Number(unlinked?.unlinked_in || 0))
+    setUnlinkedOut(Number(unlinked?.unlinked_out || 0))
+    setUnlinkedCount(Number(unlinked?.unlinked_count || 0))
 
     // Kelompokkan rekening yang "gabung saldo ke" rekening lain (mis. EDC/QRIS yang muara ke rekening bank utama)
     const byId = new Map(flowList.map(f => [f.id, f]))
