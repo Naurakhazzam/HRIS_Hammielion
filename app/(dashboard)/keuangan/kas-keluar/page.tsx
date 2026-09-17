@@ -33,6 +33,14 @@ const ADMIN_ROLES = ['owner', 'hr', 'finance']
 // setiap kali ada input manual untuk kategori ini, riwayatnya selalu berujung salah cabang atau dobel.
 const PAYROLL_CATEGORIES = ['payroll', 'gaji_', 'driver_wage', 'helper_wage', 'borongan_wage']
 
+// Kategori yang WAJIB lewat jalur resmi masing-masing, bukan dipilih bebas di sini — kalau
+// dipilih manual di mode "Pengeluaran Biasa", entrinya tidak terhubung ke nota/pengajuan
+// manapun (source_table/source_id kosong), jadi tidak ikut mengurangi Sisa Utang Supplier atau
+// saldo Kasbon di tempat resminya walau uangnya sudah tercatat keluar. Kode kategorinya sendiri
+// tetap valid — cuma disembunyikan dari dropdown ini, tetap dipakai apa adanya oleh alur resmi
+// (Bayar Hutang di Pembelian & Utang Supplier; mode "Cairkan Kasbon" di halaman ini juga).
+const CATEGORIES_WITH_OWN_FLOW = ['pembayaran_supplier', 'kasbon_cair']
+
 export default function InputKasKeluarPage() {
   const supabase = createClient()
 
@@ -237,7 +245,7 @@ export default function InputKasKeluarPage() {
         supabase.from('fin_vehicle_rental_rates').select('id, vehicle_id, rate_per_day, branch_id, account_id, internal_to_branch_id, internal_to_account_id, vehicles(name)').eq('is_active', true),
       ])
       if (bRes.data) setBranches(bRes.data)
-      if (cRes.data) setCategories(cRes.data)
+      if (cRes.data) setCategories(cRes.data.filter(c => !CATEGORIES_WITH_OWN_FLOW.includes(c.code)))
       if (baRes.data) setBankAccounts(baRes.data)
       if (vRes.data) setVehicleRates(vRes.data as any)
       await fetchKasbonApprovedRequests()

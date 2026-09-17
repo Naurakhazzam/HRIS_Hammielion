@@ -1259,4 +1259,16 @@ Nama sub-grup "Setup" yang tadinya dipakai 3x sengaja diberi nama beda-beda (Set
 
 ---
 
-*Terakhir diupdate: Sesi 6 (2026-09-16/17) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan*
+### 78. Fix: Tutup 2 Jalur Bocor Pencatatan Ganda di Kas Keluar
+
+**Ditemukan (diminta Owner untuk diaudit):** kategori **"Pembayaran Supplier"** dan **"Pencairan Kasbon"** di dropdown Kategori halaman Input Kas Keluar (mode "Pengeluaran Biasa") ternyata masih bisa dipilih bebas, padahal keduanya sudah punya jalur resmi masing-masing (Bayar Hutang di Pembelian & Utang Supplier; mode "Cairkan Kasbon" di halaman yang sama). Kalau dipilih manual dari dropdown bebas, entrinya **tidak terhubung ke nota/pengajuan manapun** (`source_id` kosong) — uangnya tercatat keluar di Cash Flow, tapi Sisa Utang Supplier atau saldo Kasbon karyawan **tidak ikut berkurang**, karena tidak ada yang menautkannya. Beda dari kategori gaji (payroll/driver/dll) yang sudah dikunci lebih dulu (wajib konfirmasi "karyawan tidak terdaftar" sebelum boleh input manual).
+
+**Fix:** Kode kategori `pembayaran_supplier` dan `kasbon_cair` disaring keluar dari dropdown Kategori mode "Pengeluaran Biasa" (form tambah baru & edit baris, dua-duanya pakai sumber data yang sama) — kodenya tetap valid di database, tetap dipakai apa adanya oleh jalur resminya masing-masing, cuma disembunyikan dari pilihan bebas ini.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/kas-keluar/page.tsx` | Kategori `pembayaran_supplier` & `kasbon_cair` disaring dari dropdown bebas |
+
+---
+
+*Terakhir diupdate: Sesi 6 (2026-09-16/17) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar*
