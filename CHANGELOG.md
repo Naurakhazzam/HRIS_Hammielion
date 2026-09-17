@@ -1290,4 +1290,18 @@ Nama sub-grup "Setup" yang tadinya dipakai 3x sengaja diberi nama beda-beda (Set
 
 ---
 
-*Terakhir diupdate: Sesi 6-7 (2026-09-16/18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka*
+### 80. Fix Bug Lama: Halaman Daftar Akun Karyawan (`/signup`) Tidak Pernah Bisa Diakses
+
+**Ditemukan:** Owner minta cek ulang alur login & sign up secara menyeluruh. Dicek satu-satu (kode + smoke test HTTP langsung, bukan cuma baca kode) — ternyata `/signup` **tidak pernah** ada di daftar route publik (`PUBLIC_ROUTES`) di `proxy.ts` sejak fitur "Daftar Akun Karyawan" pertama dibuat (beberapa hari lalu, sebelum sesi ini). Akibatnya: karyawan yang **belum punya akun** (berarti belum login) — justru target pengguna utama fitur ini — selalu dilempar balik ke `/login` sebelum sempat melihat form Daftar sama sekali. Link "Belum punya akun? Daftar di sini" di halaman Login pun ikut jadi jalan buntu (klik → langsung dilempar balik ke Login lagi). Fitur ini praktis tidak bisa dipakai sejak awal dibuat.
+
+**Fix:** `/signup` dan `/api/signup` (endpoint submit-nya) ditambahkan ke `PUBLIC_ROUTES`; `/signup` juga ditambahkan ke `AUTH_ROUTES` (supaya user yang sudah login diarahkan ke Dashboard kalau buka halaman ini, bukan malah lihat form daftar lagi). Sudah diverifikasi ulang lewat smoke test HTTP langsung: `/signup` sekarang 200 (sebelumnya 307 redirect ke login).
+
+Login, Lupa Password, dan Reset Password dicek ulang sekalian — semuanya masih utuh dan bekerja seperti seharusnya, tidak ada yang terdampak perubahan-perubahan RLS di sesi ini.
+
+| File | Perubahan |
+|---|---|
+| `proxy.ts` | `/signup` & `/api/signup` masuk `PUBLIC_ROUTES`; `/signup` masuk `AUTH_ROUTES` |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses*

@@ -13,7 +13,11 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // Route yang tidak memerlukan autentikasi
-const PUBLIC_ROUTES = ['/login', '/forgot-password', '/reset-password', '/auth/callback', '/lamaran', '/api/lamaran']
+const PUBLIC_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password', '/auth/callback', '/lamaran', '/api/lamaran', '/api/signup']
+// Bug lama: '/signup' (Daftar Akun Karyawan) TIDAK PERNAH ada di daftar ini sejak fitur itu
+// dibuat — karyawan yang belum punya akun (belum login) yang justru target penggunanya selalu
+// dilempar balik ke /login sebelum sempat lihat form Daftar. '/api/signup' (endpoint submit-nya)
+// juga ikut ditambahkan supaya form-nya benar-benar bisa dipakai selesai-selesai.
 // Catatan: '/reset-password' harus tetap publik meski secara teknis user sudah
 // "login" lewat sesi recovery dari /auth/callback — kalau dianggap AUTH_ROUTE dan
 // di-redirect ke /dashboard, karyawan tidak akan sempat mengisi password baru.
@@ -22,7 +26,7 @@ const PUBLIC_ROUTES = ['/login', '/forgot-password', '/reset-password', '/auth/c
 // lewat pengecekan startsWith() di bawah.
 
 // Route yang hanya bisa diakses sebelum login
-const AUTH_ROUTES = ['/login']
+const AUTH_ROUTES = ['/login', '/signup']
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
