@@ -1246,4 +1246,17 @@ Nama sub-grup "Setup" yang tadinya dipakai 3x sengaja diberi nama beda-beda (Set
 
 ---
 
-*Terakhir diupdate: Sesi 6 (2026-09-16/17) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok*
+### 77. Hapus Menu "Laporan" yang Berdiri Sendiri
+
+**Permintaan Owner:** menu "Laporan" yang berdiri sendiri (tidak masuk kelompok mana pun) dianggap tidak ada gunanya, minta dihapus. Dicek dulu isinya — ternyata halaman ini judulnya "📄 Laporan Penggajian" (bukan laporan umum lintas-fungsi seperti dugaan awal), jadi sempat ditawarkan pindah ke grup Penggajian dulu — tapi Owner tetap pilih hapus total.
+
+**Fix:** Halaman `/laporan` (656 baris, "Laporan Penggajian") dan entri menunya dihapus total. Dicek dulu tidak ada halaman lain yang me-link ke `/laporan`, jadi aman dihapus tanpa link mati.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/laporan/page.tsx` | Dihapus |
+| `components/sidebar.tsx` | Entri menu "Laporan" dihapus |
+
+---
+
+*Terakhir diupdate: Sesi 6 (2026-09-16/17) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan*

@@ -159,7 +159,6 @@ const adminNavItems: NavNode[] = [
       },
     ]
   },
-  { name: 'Laporan', href: '/laporan', icon: '📄' },
   { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
   { name: 'Manajemen User', href: '/users', icon: '🔑' },
 ]
