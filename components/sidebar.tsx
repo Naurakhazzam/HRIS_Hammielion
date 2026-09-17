@@ -25,48 +25,59 @@ function hasActiveDescendant(item: NavNode, pathname: string): boolean {
   return pathname === item.href
 }
 
-// Menu untuk HR, Owner, Finance, Supervisor
+// Menu untuk HR, Owner, Finance, Supervisor — dikelompokkan jadi 4 kelompok besar (SDM/HR,
+// Operasional, Keuangan, Penggajian) atas permintaan Owner, supaya menu yang tadinya flat
+// (13+ item sejajar) lebih gampang ditelusuri. Item lintas-kelompok (Dashboard, Laporan,
+// Catatan Meeting, Manajemen User) sengaja TIDAK dipaksa masuk salah satu kelompok.
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
-  { name: 'Karyawan', href: '/karyawan', icon: '👥' },
   {
-    name: 'Rekrutmen',
-    href: '/rekrutmen',
-    icon: '📝',
+    name: 'SDM / HR',
+    href: '/karyawan',
+    icon: '👥',
     submenu: [
-      { name: 'Pengaturan & QR', href: '/rekrutmen' },
-      { name: 'Daftar Pelamar', href: '/rekrutmen/pelamar' },
+      { name: 'Karyawan', href: '/karyawan' },
+      {
+        name: 'Rekrutmen',
+        href: '/rekrutmen',
+        submenu: [
+          { name: 'Pengaturan & QR', href: '/rekrutmen' },
+          { name: 'Daftar Pelamar', href: '/rekrutmen/pelamar' },
+        ]
+      },
+      {
+        name: 'Absensi',
+        href: '/absensi',
+        submenu: [
+          { name: 'Jadwal Kerja', href: '/absensi/jadwal' },
+          { name: 'Penugasan Shift', href: '/absensi/shift' },
+          { name: 'Rekap Absensi', href: '/absensi/rekap' },
+          { name: 'Import Absensi', href: '/absensi/import' },
+        ]
+      },
+      { name: 'Cuti & Izin', href: '/cuti' },
+      {
+        name: 'KPI',
+        href: '/kpi',
+        submenu: [
+          { name: 'Dashboard KPI', href: '/kpi' },
+          { name: 'Setup Kriteria', href: '/kpi/setup' },
+        ]
+      },
+      { name: 'Ranking Disiplin', href: '/ranking' },
+      {
+        name: 'Setup Cabang & Jabatan',
+        href: '/cabang',
+        submenu: [
+          { name: 'Cabang', href: '/cabang' },
+          { name: 'Jabatan', href: '/jabatan' },
+        ]
+      },
     ]
   },
   {
-    name: 'Absensi',
-    href: '/absensi',
-    icon: '📋',
-    submenu: [
-      { name: 'Jadwal Kerja', href: '/absensi/jadwal' },
-      { name: 'Penugasan Shift', href: '/absensi/shift' },
-      { name: 'Rekap Absensi', href: '/absensi/rekap' },
-      { name: 'Import Absensi', href: '/absensi/import' },
-    ]
-  },
-  { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
-  {
-    name: 'Penggajian',
-    href: '/penggajian',
-    icon: '💰',
-    submenu: [
-      { name: 'Gaji Staff', href: '/penggajian/bulanan' },
-      { name: 'Ringkasan Owner', href: '/penggajian/ringkasan' },
-      { name: 'Gaji Driver', href: '/penggajian/driver' },
-      { name: 'Gajian Bongkar Muat', href: '/penggajian/borongan' },
-      { name: 'Tabungan Loyalitas', href: '/penggajian/loyalitas' },
-      { name: 'Bonus Kinerja', href: '/penggajian/bonus' },
-      { name: 'Kehilangan & Kasir', href: '/penggajian/kehilangan' },
-    ]
-  },
-  {
-    name: 'Keuangan',
-    href: '/keuangan',
+    name: 'Operasional',
+    href: '/keuangan/kas-masuk',
     icon: '💵',
     submenu: [
       {
@@ -97,10 +108,19 @@ const adminNavItems: NavNode[] = [
         ]
       },
       { name: 'Verifikasi Keuangan', href: '/keuangan/approval' },
+      { name: 'Logistik', href: '/keuangan/logistik' },
+      {
+        name: 'Setup Kas & Supplier',
+        href: '/keuangan/rekening',
+        submenu: [
+          { name: 'Setup Kas & Rekening', href: '/keuangan/rekening' },
+          { name: 'Master Supplier', href: '/keuangan/pembelian/supplier' },
+        ]
+      },
     ]
   },
   {
-    name: 'Laporan Keuangan',
+    name: 'Keuangan',
     href: '/keuangan/dashboard',
     icon: '📈',
     submenu: [
@@ -110,39 +130,37 @@ const adminNavItems: NavNode[] = [
       { name: 'Laporan Resmi', href: '/keuangan/laporan' },
       { name: 'Ringkasan Supplier', href: '/keuangan/pembelian' },
       { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
-      { name: 'Logistik', href: '/keuangan/logistik' },
+      { name: 'Kasbon', href: '/kasbon' },
     ]
   },
   {
-    name: 'KPI',
-    href: '/kpi',
-    icon: '📊',
+    name: 'Penggajian',
+    href: '/penggajian/bulanan',
+    icon: '💰',
     submenu: [
-      { name: 'Dashboard KPI', href: '/kpi' },
-      { name: 'Setup Kriteria', href: '/kpi/setup' },
+      { name: 'Gaji Staff', href: '/penggajian/bulanan' },
+      { name: 'Ringkasan Owner', href: '/penggajian/ringkasan' },
+      { name: 'Gaji Driver', href: '/penggajian/driver' },
+      { name: 'Gajian Bongkar Muat', href: '/penggajian/borongan' },
+      { name: 'Tabungan Loyalitas', href: '/penggajian/loyalitas' },
+      { name: 'Bonus Kinerja', href: '/penggajian/bonus' },
+      { name: 'Kehilangan & Kasir', href: '/penggajian/kehilangan' },
+      {
+        name: 'Setup Gaji & Tarif',
+        href: '/penggajian/komponen',
+        submenu: [
+          { name: 'Komponen Gaji', href: '/penggajian/komponen' },
+          { name: 'Bonus Kondisional', href: '/penggajian/bonus-kondisional' },
+          { name: 'Setup Kehilangan', href: '/penggajian/kehilangan/setup' },
+          { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
+          { name: 'Pekerja Lepas', href: '/penggajian/borongan/pekerja' },
+          { name: 'Tarif Bongkar Muat', href: '/penggajian/borongan/tarif' },
+        ]
+      },
     ]
   },
-  { name: 'Ranking Disiplin', href: '/ranking', icon: '🏆' },
-  { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
   { name: 'Laporan', href: '/laporan', icon: '📄' },
   { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
-  {
-    name: 'Setup',
-    href: '/setup',
-    icon: '⚙️',
-    submenu: [
-      { name: 'Cabang', href: '/cabang' },
-      { name: 'Jabatan', href: '/jabatan' },
-      { name: 'Komponen Gaji', href: '/penggajian/komponen' },
-      { name: 'Bonus Kondisional', href: '/penggajian/bonus-kondisional' },
-      { name: 'Setup Kehilangan', href: '/penggajian/kehilangan/setup' },
-      { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
-      { name: 'Pekerja Lepas', href: '/penggajian/borongan/pekerja' },
-      { name: 'Tarif Bongkar Muat', href: '/penggajian/borongan/tarif' },
-      { name: 'Setup Kas & Rekening', href: '/keuangan/rekening' },
-      { name: 'Master Supplier', href: '/keuangan/pembelian/supplier' },
-    ]
-  },
   { name: 'Manajemen User', href: '/users', icon: '🔑' },
 ]
 
@@ -192,26 +210,36 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const isEmployee = ['employee', 'supervisor'].includes(userRole)
   const navItems = isEmployee ? employeeNavItems : adminNavItems
 
+  // Rute Operasional (Level-1 baru) & Keuangan (Level-1 baru, laporan/analisis) sama-sama di
+  // bawah URL /keuangan/*, dan /keuangan/pembelian dipakai DUA rute berbeda (bare = ringkasan
+  // supplier di grup Keuangan, /input & /supplier = catat di grup Operasional) — jadi keduanya
+  // harus saling mengecualikan rute satu sama lain, supaya cuma satu yang auto-expand.
+  const inKeuanganGroup = pathname.startsWith('/keuangan/dashboard') || pathname.startsWith('/keuangan/laporan')
+    || pathname.startsWith('/keuangan/cashflow') || pathname.startsWith('/keuangan/riwayat')
+    || pathname === '/keuangan/pembelian' || pathname.startsWith('/kasbon')
+
   const defaultOpen: Record<string, boolean> = {
+    'SDM / HR':   pathname.startsWith('/karyawan') || pathname.startsWith('/rekrutmen') || pathname.startsWith('/absensi')
+      || pathname.startsWith('/cuti') || pathname.startsWith('/kpi') || pathname.startsWith('/ranking')
+      || pathname.startsWith('/cabang') || pathname.startsWith('/jabatan'),
     'Rekrutmen':  pathname.startsWith('/rekrutmen'),
     'Absensi':    pathname.startsWith('/absensi'),
-    'Penggajian': pathname.startsWith('/penggajian'),
-    // Keuangan (input) & Laporan Keuangan (baca-saja) sama-sama di bawah URL /keuangan/*, dan
-    // /keuangan/pembelian dipakai DUA rute berbeda (bare = ringkasan/laporan, /input = catat) —
-    // jadi keduanya harus saling mengecualikan rute satu sama lain, supaya cuma satu yang
-    // auto-expand, bukan dua-duanya sekaligus, saat membuka salah satu halaman.
-    'Keuangan':   pathname.startsWith('/keuangan')
-      && !pathname.startsWith('/keuangan/dashboard') && !pathname.startsWith('/keuangan/laporan')
-      && !pathname.startsWith('/keuangan/cashflow') && !pathname.startsWith('/keuangan/logistik')
-      && !pathname.startsWith('/keuangan/riwayat') && pathname !== '/keuangan/pembelian',
+    'KPI':        pathname.startsWith('/kpi'),
+    'Setup Cabang & Jabatan': pathname.startsWith('/cabang') || pathname.startsWith('/jabatan'),
+
+    'Operasional': pathname.startsWith('/keuangan') && !inKeuanganGroup,
     'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
     'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
-    'Laporan Keuangan': pathname.startsWith('/keuangan/dashboard') || pathname.startsWith('/keuangan/laporan')
-      || pathname.startsWith('/keuangan/cashflow') || pathname.startsWith('/keuangan/logistik')
-      || pathname.startsWith('/keuangan/riwayat') || pathname === '/keuangan/pembelian',
-    'KPI':        pathname.startsWith('/kpi'),
-    'Setup':      pathname.startsWith('/cabang') || pathname.startsWith('/jabatan') || pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup') || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif') || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional') || pathname.startsWith('/keuangan/rekening') || pathname.startsWith('/keuangan/pembelian/supplier'),
+    'Setup Kas & Supplier': pathname.startsWith('/keuangan/rekening') || pathname.startsWith('/keuangan/pembelian/supplier'),
+
+    'Keuangan':   inKeuanganGroup,
+
+    'Penggajian': pathname.startsWith('/penggajian'),
+    'Setup Gaji & Tarif': pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup')
+      || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif')
+      || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
+
     'Portal Saya': pathname.startsWith('/portal'),
   }
 

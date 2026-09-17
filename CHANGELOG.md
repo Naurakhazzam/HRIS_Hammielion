@@ -1227,4 +1227,23 @@ Dicek juga halaman laporan keuangan lain (Dashboard Keuangan, Laporan Resmi, Det
 
 ---
 
-*Terakhir diupdate: Sesi 6 (2026-09-16/17) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger*
+### 76. Rombak Sidebar Admin Jadi 4 Kelompok Besar
+
+**Permintaan Owner:** menu admin yang tadinya flat (13+ item sejajar: Karyawan, Rekrutmen, Absensi, Cuti, Penggajian, Keuangan, Laporan Keuangan, KPI, Ranking, Kasbon, Laporan, Setup, Manajemen User) dikelompokkan supaya lebih gampang ditelusuri — awalnya diusulkan 2-3 kelompok, disepakati jadi **4 kelompok besar**: SDM/HR, Operasional, Keuangan, Penggajian. Item "Setup" yang tadinya gado-gado (Cabang/Jabatan/Komponen Gaji/dll dicampur satu tempat) dipecah masuk ke kelompok masing-masing.
+
+**Struktur baru:**
+- **SDM / HR** — Karyawan, Rekrutmen, Absensi, Cuti & Izin, KPI, Ranking Disiplin, Setup Cabang & Jabatan
+- **Operasional** — Kas Masuk, Kas Keluar, Pembelian & Utang Supplier, Petty Cash, Modal & Aset, Verifikasi Keuangan, Logistik, Setup Kas & Supplier (dulu top-level "Keuangan")
+- **Keuangan** — Dashboard Keuangan, Detail Laporan per Cabang, Cash Flow per Rekening, Laporan Resmi, Ringkasan Supplier, Riwayat Kas Keluar, **Kasbon** (dulu top-level "Laporan Keuangan" + Kasbon pindah ke sini)
+- **Penggajian** — tetap seperti semula + Setup Gaji & Tarif (Komponen Gaji, Bonus Kondisional, Setup Kehilangan, Tarif & Mobil Driver, Pekerja Lepas, Tarif Bongkar Muat)
+- **Dashboard, Laporan, Catatan Meeting, Manajemen User** — sengaja tetap berdiri sendiri, tidak dipaksa masuk salah satu dari 4 kelompok (lintas-fungsi)
+
+Nama sub-grup "Setup" yang tadinya dipakai 3x sengaja diberi nama beda-beda (Setup Cabang & Jabatan / Setup Kas & Supplier / Setup Gaji & Tarif) — kalau namanya sama persis, state buka/tutup menu di sidebar bentrok (nge-toggle satu ikut nge-toggle yang lain juga, karena statenya di-key pakai nama).
+
+| File | Perubahan |
+|---|---|
+| `components/sidebar.tsx` | `adminNavItems` dirombak jadi 4 kelompok + logic auto-expand disesuaikan |
+
+---
+
+*Terakhir diupdate: Sesi 6 (2026-09-16/17) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok*
