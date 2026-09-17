@@ -574,14 +574,32 @@ export default function PembelianSupplierPage() {
               {detailPurchases.length > 0 && (
                 <div className="mt-4">
                   <p className="text-xs font-medium text-slate-500 mb-2">Kelola pembelian (edit/hapus nota tertentu):</p>
-                  <div className="flex flex-wrap gap-2">
-                    {detailPurchases.map(p => (
-                      <div key={p.id} className="flex items-center gap-1 text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
-                        <span className="text-slate-600">{noteRefOf(p)}</span>
-                        <button onClick={() => openEditModal(p)} className="text-blue-600 hover:underline ml-1">Edit</button>
-                        <button onClick={() => handleDeletePurchase(p)} className="text-red-600 hover:underline">Hapus</button>
-                      </div>
-                    ))}
+                  <div className="space-y-2">
+                    {detailPurchases.map(p => {
+                      const ref = noteRefOf(p)
+                      // Tanggal + nominal SELALU ditampilkan (bukan cuma ref) — banyak pembelian lama
+                      // tidak punya invoice/SJ/keterangan sama sekali, jadi kalau cuma andalkan ref,
+                      // semua barisnya kelihatan sama persis dan tidak bisa dibedakan.
+                      return (
+                        <div key={p.id} className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+                          <div className="text-sm text-slate-700 min-w-0">
+                            <span className="font-medium text-slate-800">{new Date(p.purchase_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                            {' · '}{formatRupiah(p.total_amount)}
+                            {ref !== '—' && <span className="text-slate-500"> · {ref}</span>}
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button onClick={() => openEditModal(p)}
+                              className="text-xs px-3 py-1.5 rounded-lg border font-medium transition text-blue-600 border-blue-200 hover:bg-blue-50">
+                              Edit
+                            </button>
+                            <button onClick={() => handleDeletePurchase(p)}
+                              className="text-xs px-3 py-1.5 rounded-lg border font-medium transition text-red-600 border-red-200 hover:bg-red-50">
+                              Hapus
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}

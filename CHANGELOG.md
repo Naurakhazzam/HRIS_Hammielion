@@ -1200,4 +1200,16 @@ Dicek juga halaman laporan keuangan lain (Dashboard Keuangan, Laporan Resmi, Det
 
 ---
 
-*Terakhir diupdate: Sesi 6 (2026-09-16) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting*
+### 74. Fix: Baris "Kelola Pembelian" Tidak Bisa Dibedakan Satu Sama Lain
+
+**Ditemukan Owner:** di modal Detail Supplier, bagian "Kelola pembelian (edit/hapus nota tertentu)" isinya banyak chip bertuliskan "— Edit Hapus" yang persis sama semua — tidak bisa dibedakan mana yang mana, karena pembelian lama (sebelum ada field Invoice/SJ) tidak punya keterangan apa pun.
+
+**Fix:** Tiap baris sekarang selalu menampilkan **tanggal + nominal** (bukan cuma nomor invoice/SJ yang sering kosong), jadi tetap bisa dibedakan. Sekalian dirapikan atas saran Owner: dari grid chip kecil jadi daftar baris yang lebih besar & lega, tombol Edit/Hapus di sisi kanan tiap baris.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/pembelian/PembelianPageContent.tsx` | Baris "Kelola Pembelian" tampilkan tanggal+nominal, layout diperbesar |
+
+---
+
+*Terakhir diupdate: Sesi 6 (2026-09-16/17) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian*
