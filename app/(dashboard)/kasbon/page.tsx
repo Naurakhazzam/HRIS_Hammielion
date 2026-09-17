@@ -109,8 +109,8 @@ export default function KasbonPage() {
       {activeTab === 'pengajuan' && <TabPengajuan showMessage={showMessage} role={role} myEmployeeId={myEmployeeId} />}
       {activeTab === 'limit' && <TabLimit showMessage={showMessage} />}
       {activeTab === 'riwayat' && <TabRiwayat showMessage={showMessage} />}
-      {activeTab === 'driver' && <TabKasbonDriver showMessage={showMessage} />}
-      {activeTab === 'kenek' && <TabKasbonKenek showMessage={showMessage} />}
+      {activeTab === 'driver' && <TabKasbonDriver showMessage={showMessage} role={role} />}
+      {activeTab === 'kenek' && <TabKasbonKenek showMessage={showMessage} role={role} />}
     </div>
   )
 }
@@ -609,7 +609,7 @@ type DriverKasbonRecord = {
   total_amount: number
   remaining_amount: number
   notes: string | null
-  status: 'active' | 'lunas'
+  status: 'pending_approval' | 'active' | 'lunas'
   created_at: string
   employees?: { full_name: string; employee_code: string }
 }
@@ -626,15 +626,17 @@ type DriverKasbonDeductionRecord = {
   employees?: { full_name: string }
 }
 
-function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error', msg: string) => void }) {
+function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | 'error', msg: string) => void; role: string }) {
   const supabase = createClient()
+  const isOwner = role === 'owner'
   const [kasbons, setKasbons] = useState<DriverKasbonRecord[]>([])
   const [deductions, setDeductions] = useState<DriverKasbonDeductionRecord[]>([])
   const [drivers, setDrivers] = useState<{ id: string; full_name: string; employee_code: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
   const [activeSubTab, setActiveSubTab] = useState<'aktif' | 'tambah' | 'riwayat'>('aktif')
-  const [filterStatus, setFilterStatus] = useState<'active' | 'lunas' | 'all'>('active')
+  const [filterStatus, setFilterStatus] = useState<'pending_approval' | 'active' | 'lunas' | 'all'>('active')
 
   const [form, setForm] = useState({ driver_id: '', total_amount: '', notes: '' })
 
@@ -674,16 +676,28 @@ function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error'
       total_amount: amt,
       remaining_amount: amt,
       notes: form.notes || null,
-      status: 'active',
+      // Wajib disetujui Owner dulu sebelum aktif (dulu langsung 'active' tanpa kontrol apa pun) —
+      // menyamakan level kontrolnya dengan kasbon staff (kasbon_requests).
+      status: 'pending_approval',
     })
     if (error) showMessage('error', 'Gagal: ' + error.message)
     else {
-      showMessage('success', 'Kasbon driver berhasil ditambahkan.')
+      showMessage('success', 'Kasbon driver diajukan, menunggu persetujuan Owner.')
       setForm({ driver_id: '', total_amount: '', notes: '' })
       fetchAll()
       setActiveSubTab('aktif')
+      setFilterStatus('pending_approval')
     }
     setSubmitting(false)
+  }
+
+  async function handleApprove(id: string) {
+    if (!confirm('Setujui kasbon ini supaya aktif?')) return
+    setApprovingId(id)
+    const { error } = await supabase.rpc('approve_driver_kasbon', { p_kasbon_id: id })
+    setApprovingId(null)
+    if (error) showMessage('error', 'Gagal menyetujui: ' + error.message)
+    else { showMessage('success', 'Kasbon disetujui, sekarang aktif.'); fetchAll() }
   }
 
   async function handleLunas(id: string) {
@@ -704,6 +718,7 @@ function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error'
 
   const filtered = filterStatus === 'all' ? kasbons : kasbons.filter(k => k.status === filterStatus)
   const totalAktif = kasbons.filter(k => k.status === 'active').reduce((s, k) => s + Number(k.remaining_amount), 0)
+  const pendingCount = kasbons.filter(k => k.status === 'pending_approval').length
 
   return (
     <div className="space-y-4">
@@ -720,8 +735,15 @@ function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error'
       {/* ── DAFTAR KASBON ── */}
       {activeSubTab === 'aktif' && (
         <div className="space-y-4">
+          {pendingCount > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+              ⏳ Ada <strong>{pendingCount}</strong> kasbon driver menunggu persetujuan Owner sebelum aktif.
+              {!isOwner && ' Cuma Owner yang bisa menyetujui.'}
+            </div>
+          )}
+
           {/* Summary + Filter */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
               <p className="text-xs text-slate-500 uppercase font-medium mb-1">Total Kasbon Aktif</p>
               <p className="text-xl font-bold text-orange-600">{fmtRp(totalAktif)}</p>
@@ -731,6 +753,10 @@ function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error'
               <p className="text-xl font-bold text-slate-800">{kasbons.filter(k => k.status === 'active').length}</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <p className="text-xs text-slate-500 uppercase font-medium mb-1">Menunggu Persetujuan</p>
+              <p className="text-xl font-bold text-amber-600">{pendingCount}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
               <p className="text-xs text-slate-500 uppercase font-medium mb-1">Sudah Lunas</p>
               <p className="text-xl font-bold text-green-600">{kasbons.filter(k => k.status === 'lunas').length}</p>
             </div>
@@ -738,7 +764,7 @@ function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error'
 
           {/* Filter pills */}
           <div className="flex gap-2">
-            {([['active','Aktif'],['lunas','Lunas'],['all','Semua']] as const).map(([v, l]) => (
+            {([['active','Aktif'],['pending_approval','Menunggu'],['lunas','Lunas'],['all','Semua']] as const).map(([v, l]) => (
               <button key={v} onClick={() => setFilterStatus(v)}
                 className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${filterStatus === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
                 {l}
@@ -780,12 +806,22 @@ function TabKasbonDriver({ showMessage }: { showMessage: (t: 'success' | 'error'
                           <span className="truncate block">{k.notes || '—'}</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${k.status === 'active' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
-                            {k.status === 'active' ? 'Aktif' : 'Lunas'}
+                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
+                            k.status === 'active' ? 'bg-orange-100 text-orange-700'
+                              : k.status === 'pending_approval' ? 'bg-amber-100 text-amber-700'
+                              : 'bg-green-100 text-green-700'
+                          }`}>
+                            {k.status === 'active' ? 'Aktif' : k.status === 'pending_approval' ? '⏳ Menunggu' : 'Lunas'}
                           </span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex gap-2">
+                            {k.status === 'pending_approval' && isOwner && (
+                              <button onClick={() => handleApprove(k.id)} disabled={approvingId === k.id}
+                                className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50">
+                                {approvingId === k.id ? 'Menyetujui...' : 'Setujui'}
+                              </button>
+                            )}
                             {k.status === 'active' && (
                               <button onClick={() => handleLunas(k.id)}
                                 className="px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition">
@@ -908,7 +944,7 @@ type HelperKasbonRecord = {
   total_amount: number
   remaining_amount: number
   notes: string | null
-  status: 'active' | 'lunas'
+  status: 'pending_approval' | 'active' | 'lunas'
   created_at: string
   employees?: { full_name: string; employee_code: string }
 }
@@ -925,15 +961,17 @@ type HelperKasbonDeductionRecord = {
   employees?: { full_name: string }
 }
 
-function TabKasbonKenek({ showMessage }: { showMessage: (t: 'success' | 'error', msg: string) => void }) {
+function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'error', msg: string) => void; role: string }) {
   const supabase = createClient()
+  const isOwner = role === 'owner'
   const [kasbons, setKasbons] = useState<HelperKasbonRecord[]>([])
   const [deductions, setDeductions] = useState<HelperKasbonDeductionRecord[]>([])
   const [keneks, setKeneks] = useState<{ id: string; full_name: string; employee_code: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
   const [activeSubTab, setActiveSubTab] = useState<'aktif' | 'tambah' | 'riwayat'>('aktif')
-  const [filterStatus, setFilterStatus] = useState<'active' | 'lunas' | 'all'>('active')
+  const [filterStatus, setFilterStatus] = useState<'pending_approval' | 'active' | 'lunas' | 'all'>('active')
 
   const [form, setForm] = useState({ helper_id: '', total_amount: '', notes: '' })
 
@@ -977,16 +1015,28 @@ function TabKasbonKenek({ showMessage }: { showMessage: (t: 'success' | 'error',
       total_amount: amt,
       remaining_amount: amt,
       notes: form.notes || null,
-      status: 'active',
+      // Wajib disetujui Owner dulu sebelum aktif (dulu langsung 'active' tanpa kontrol apa pun) —
+      // menyamakan level kontrolnya dengan kasbon staff (kasbon_requests).
+      status: 'pending_approval',
     })
     if (error) showMessage('error', 'Gagal: ' + error.message)
     else {
-      showMessage('success', 'Kasbon kenek berhasil ditambahkan.')
+      showMessage('success', 'Kasbon kenek diajukan, menunggu persetujuan Owner.')
       setForm({ helper_id: '', total_amount: '', notes: '' })
       fetchAll()
       setActiveSubTab('aktif')
+      setFilterStatus('pending_approval')
     }
     setSubmitting(false)
+  }
+
+  async function handleApprove(id: string) {
+    if (!confirm('Setujui kasbon ini supaya aktif?')) return
+    setApprovingId(id)
+    const { error } = await supabase.rpc('approve_helper_kasbon', { p_kasbon_id: id })
+    setApprovingId(null)
+    if (error) showMessage('error', 'Gagal menyetujui: ' + error.message)
+    else { showMessage('success', 'Kasbon disetujui, sekarang aktif.'); fetchAll() }
   }
 
   async function handleLunas(id: string) {
@@ -1007,6 +1057,7 @@ function TabKasbonKenek({ showMessage }: { showMessage: (t: 'success' | 'error',
 
   const filtered = filterStatus === 'all' ? kasbons : kasbons.filter(k => k.status === filterStatus)
   const totalAktif = kasbons.filter(k => k.status === 'active').reduce((s, k) => s + Number(k.remaining_amount), 0)
+  const pendingCount = kasbons.filter(k => k.status === 'pending_approval').length
 
   return (
     <div className="space-y-4">
@@ -1023,7 +1074,14 @@ function TabKasbonKenek({ showMessage }: { showMessage: (t: 'success' | 'error',
       {/* ── DAFTAR KASBON ── */}
       {activeSubTab === 'aktif' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
+          {pendingCount > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+              ⏳ Ada <strong>{pendingCount}</strong> kasbon kenek menunggu persetujuan Owner sebelum aktif.
+              {!isOwner && ' Cuma Owner yang bisa menyetujui.'}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
               <p className="text-xs text-slate-500 uppercase font-medium mb-1">Total Kasbon Aktif</p>
               <p className="text-xl font-bold text-orange-600">{fmtRp(totalAktif)}</p>
@@ -1033,13 +1091,17 @@ function TabKasbonKenek({ showMessage }: { showMessage: (t: 'success' | 'error',
               <p className="text-xl font-bold text-slate-800">{kasbons.filter(k => k.status === 'active').length}</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <p className="text-xs text-slate-500 uppercase font-medium mb-1">Menunggu Persetujuan</p>
+              <p className="text-xl font-bold text-amber-600">{pendingCount}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
               <p className="text-xs text-slate-500 uppercase font-medium mb-1">Sudah Lunas</p>
               <p className="text-xl font-bold text-green-600">{kasbons.filter(k => k.status === 'lunas').length}</p>
             </div>
           </div>
 
           <div className="flex gap-2">
-            {([['active','Aktif'],['lunas','Lunas'],['all','Semua']] as const).map(([v, l]) => (
+            {([['active','Aktif'],['pending_approval','Menunggu'],['lunas','Lunas'],['all','Semua']] as const).map(([v, l]) => (
               <button key={v} onClick={() => setFilterStatus(v)}
                 className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${filterStatus === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
                 {l}
@@ -1081,12 +1143,22 @@ function TabKasbonKenek({ showMessage }: { showMessage: (t: 'success' | 'error',
                           <span className="truncate block">{k.notes || '—'}</span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${k.status === 'active' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
-                            {k.status === 'active' ? 'Aktif' : 'Lunas'}
+                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
+                            k.status === 'active' ? 'bg-orange-100 text-orange-700'
+                              : k.status === 'pending_approval' ? 'bg-amber-100 text-amber-700'
+                              : 'bg-green-100 text-green-700'
+                          }`}>
+                            {k.status === 'active' ? 'Aktif' : k.status === 'pending_approval' ? '⏳ Menunggu' : 'Lunas'}
                           </span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex gap-2">
+                            {k.status === 'pending_approval' && isOwner && (
+                              <button onClick={() => handleApprove(k.id)} disabled={approvingId === k.id}
+                                className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50">
+                                {approvingId === k.id ? 'Menyetujui...' : 'Setujui'}
+                              </button>
+                            )}
                             {k.status === 'active' && (
                               <button onClick={() => handleLunas(k.id)}
                                 className="px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition">

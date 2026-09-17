@@ -1271,4 +1271,23 @@ Nama sub-grup "Setup" yang tadinya dipakai 3x sengaja diberi nama beda-beda (Set
 
 ---
 
-*Terakhir diupdate: Sesi 6 (2026-09-16/17) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar*
+### 79. Fix Keamanan + Fitur: Approval Wajib untuk Kasbon Driver & Kenek
+
+**Konteks:** lanjutan audit pencatatan ganda (#78) — Owner tanya apakah kasbon staff/driver/kenek (3 sistem terpisah) bisa disatukan. Digabung penuh terlalu berisiko (potongan driver/kenek mingguan, staff bulanan — beda siklus gajian, menulis ulang 3 halaman payroll sekaligus). Disepakati perbaikan yang aman: samakan level KONTROL-nya saja (wajib approval Owner), tanpa mengubah tabel/jadwal potongan.
+
+**Ditemukan sekalian saat mengerjakan** (bukan cuma soal approval) — RLS `driver_kasbon`, `helper_kasbon`, dan tabel potongannya ternyata **"authenticated full access"** (`USING true`): siapa pun yang login, termasuk karyawan biasa, bisa baca/ubah/hapus langsung lewat API, tanpa peduli role. Ini ikut diperbaiki.
+
+**Fix:**
+1. RLS 4 tabel (`driver_kasbon`, `helper_kasbon`, `driver_kasbon_deductions`, `helper_kasbon_deductions`) dibatasi ke owner/hr/finance — sebelumnya terbuka untuk semua yang login.
+2. Kasbon driver/kenek baru sekarang mulai dari status **`pending_approval`** (dulu langsung `active` tanpa kontrol apa pun) — perlu disetujui dulu lewat fungsi `approve_driver_kasbon`/`approve_helper_kasbon` (Owner-only, dicek di dalam fungsinya sendiri, bukan cuma RLS) sebelum jadi `active` dan bisa dipotong mingguan.
+3. UI Kasbon Driver & Kasbon Kenek: badge status "⏳ Menunggu", tombol "Setujui" (cuma tampil untuk Owner), kartu ringkasan & filter pill baru "Menunggu Persetujuan", dan kotak peringatan kalau ada yang belum disetujui.
+4. Halaman Penggajian Driver/Borongan (potongan mingguan) **tidak perlu diubah** — query-nya sudah `.eq('status','active')`, otomatis mengecualikan yang masih pending.
+
+| File | Perubahan |
+|---|---|
+| Database (RLS 4 tabel, migrasi `038_driver_helper_kasbon_approval.sql`) | RLS dibatasi owner/hr/finance; status baru `pending_approval`; fungsi `approve_driver_kasbon`/`approve_helper_kasbon` |
+| `app/(dashboard)/kasbon/page.tsx` | Alur approval (status awal, badge, tombol Setujui, kartu & filter baru) di Tab Driver & Kenek |
+
+---
+
+*Terakhir diupdate: Sesi 6-7 (2026-09-16/18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka*
