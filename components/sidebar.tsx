@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { isPreviewModeClient, setPreviewMode } from '@/lib/previewMode'
 
 type NavNode = {
   name: string
@@ -195,6 +196,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const supabase = createClient()
   const [userRole, setUserRole] = useState<string>('hr')
   const [loadingRole, setLoadingRole] = useState(true)
+  const [previewMode, setPreviewModeState] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -204,10 +206,20 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
         setLoadingRole(false)
       })
     })
+    setPreviewModeState(isPreviewModeClient())
   }, [])
 
-  const isEmployee = ['employee', 'supervisor'].includes(userRole)
+  // realIsAdmin = role sungguhan (bukan lagi preview) — dipakai untuk tampilkan/sembunyikan
+  // tombol toggle preview itu sendiri, supaya karyawan asli tidak bisa iseng balik ke menu admin.
+  const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
+  const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
   const navItems = isEmployee ? employeeNavItems : adminNavItems
+
+  function togglePreview() {
+    const next = !previewMode
+    setPreviewMode(next)
+    window.location.href = '/dashboard'
+  }
 
   // Rute Operasional (Level-1 baru) & Keuangan (Level-1 baru, laporan/analisis) sama-sama di
   // bawah URL /keuangan/*, dan /keuangan/pembelian dipakai DUA rute berbeda (bare = ringkasan
@@ -384,6 +396,26 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
           })}
         </ul>
       </div>
+
+      {/* Toggle Preview Tampilan Karyawan — cuma untuk admin sungguhan (bukan karyawan asli),
+          supaya bisa cek menu/layout level karyawan tanpa perlu login-logout. Data di dalam
+          halamannya tetap data akun sendiri (RLS tidak bisa dipalsukan dari client), cuma
+          strukur menu & layout-nya yang berubah. */}
+      {realIsAdmin && !loadingRole && (
+        <div className="px-3 pb-4">
+          {previewMode ? (
+            <button onClick={togglePreview}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 transition">
+              🔙 Keluar dari Preview Karyawan
+            </button>
+          ) : (
+            <button onClick={togglePreview}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-medium text-slate-500 border border-dashed border-slate-300 hover:bg-slate-50 hover:text-slate-700 transition">
+              👁️ Preview Tampilan Karyawan
+            </button>
+          )}
+        </div>
+      )}
     </aside>
   )
 }

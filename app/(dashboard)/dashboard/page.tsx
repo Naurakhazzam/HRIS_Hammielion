@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { ANNUAL_LEAVE_QUOTA_DAYS, isEligibleForAnnualLeave, tenureDays, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
 
@@ -18,7 +19,12 @@ export default async function DashboardPage() {
     ? await supabase.from('users').select('role, employee_id, employees(full_name, join_date)').eq('id', user.id).single()
     : { data: null }
 
-  const isEmployeeRole = userData ? ['employee', 'supervisor'].includes(userData.role) : false
+  // "Preview Tampilan Karyawan" (cookie, lihat lib/previewMode.ts) — cuma mengubah TAMPILAN
+  // untuk admin yang sedang cek menu/layout level karyawan; RLS di query bawah tetap mengikuti
+  // role akun sungguhan, jadi data yang muncul tetap data karyawan/employee_id akun ini sendiri.
+  const cookieStore = await cookies()
+  const previewMode = cookieStore.get('previewAsEmployee')?.value === 'true'
+  const isEmployeeRole = (userData ? ['employee', 'supervisor'].includes(userData.role) : false) || previewMode
 
   if (isEmployeeRole && userData?.employee_id) {
     const emp = (userData as any).employees

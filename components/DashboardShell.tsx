@@ -4,12 +4,21 @@ import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import Sidebar from './sidebar'
 import ThemeToggle from './ThemeToggle'
+import { isPreviewModeClient, setPreviewMode } from '@/lib/previewMode'
 
 export default function DashboardShell({ children, userEmail }: { children: React.ReactNode; userEmail: string }) {
   // null = belum disentuh user, ikuti perilaku bawaan (tampil di layar >=768px, sembunyi di bawahnya).
   // true/false = override manual dari tombol hamburger.
   const [forceOpen, setForceOpen] = useState<boolean | null>(null)
+  const [previewMode, setPreviewModeState] = useState(false)
   const pathname = usePathname()
+
+  useEffect(() => { setPreviewModeState(isPreviewModeClient()) }, [])
+
+  function exitPreview() {
+    setPreviewMode(false)
+    window.location.href = '/dashboard'
+  }
 
   // Tutup otomatis setelah pindah halaman, tapi cuma di layar kecil (di layar besar,
   // sidebar yang sengaja dibuka lagi jangan ikut tertutup tiap klik menu — mengganggu).
@@ -99,6 +108,15 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
         </div>
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8 print:overflow-visible print:h-auto print:p-0">
           <div className="max-w-6xl mx-auto">
+            {previewMode && (
+              <div className="mb-4 flex items-center justify-between gap-3 bg-amber-100 border border-amber-300 text-amber-800 rounded-lg px-4 py-2.5 text-sm print:hidden">
+                <span>👁️ Anda sedang <strong>PREVIEW tampilan Karyawan Biasa</strong> — menu & layout sesuai karyawan, tapi data yang muncul tetap data akun Anda sendiri.</span>
+                <button onClick={exitPreview}
+                  className="shrink-0 px-3 py-1 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white transition">
+                  Kembali ke Admin
+                </button>
+              </div>
+            )}
             {children}
           </div>
         </main>

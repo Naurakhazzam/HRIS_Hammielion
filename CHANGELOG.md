@@ -1304,4 +1304,26 @@ Login, Lupa Password, dan Reset Password dicek ulang sekalian — semuanya masih
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses*
+### 81. Fitur: Preview Tampilan Karyawan
+
+**Konteks:** Owner minta cara untuk lihat tampilan menu/layout level karyawan biasa tanpa harus login-logout, supaya bisa cek "apa yang kurang" dari sisi karyawan. Sudah dijelaskan ke Owner (dan disepakati) batasannya: RLS (aturan akses data di database) mengikuti role akun yang **benar-benar login** — tidak bisa dipalsukan dari sisi browser/client. Jadi preview ini **hanya mengubah tampilan menu & layout** menjadi versi karyawan; data yang muncul di dalam halaman tetap data akun Owner sendiri (Owner juga punya `employee_id` sendiri seperti akun lain), bukan data "karyawan biasa" yang representatif. Opsi lain (buat akun demo karyawan sungguhan, seperti pola "Pelamar Demo" di Rekrutmen) ditawarkan tapi tidak dipilih — Owner pilih opsi cepat ini.
+
+**Fitur:** Tombol baru **"👁️ Preview Tampilan Karyawan"** di bagian bawah sidebar, cuma muncul untuk akun yang role aslinya bukan employee/supervisor (jadi karyawan asli tidak akan lihat tombol ini, tidak bisa iseng balik ke menu admin). Saat diaktifkan:
+- Sidebar berubah jadi menu versi karyawan (Dashboard, Portal Saya, Cuti & Izin, Kasbon).
+- Dashboard menampilkan kartu versi karyawan (Jadwal Hari Ini, Sisa Cuti Tahunan, Kasbon Menunggu) memakai data employee milik akun sendiri.
+- Halaman Portal (`/portal/absensi`, `/portal/jadwal`, `/portal/slip-gaji`) yang tadinya menolak akses admin, sekarang bisa dibuka saat mode preview aktif.
+- Banner kuning permanen muncul di atas semua halaman selama preview aktif, dengan tombol "Kembali ke Admin" untuk keluar kapan saja.
+
+Status preview disimpan di cookie (`previewAsEmployee`, bukan `sessionStorage`) supaya bisa dibaca baik oleh komponen client (Sidebar, halaman Portal) maupun Server Component (halaman Dashboard) sekaligus.
+
+| File | Perubahan |
+|---|---|
+| `lib/previewMode.ts` (baru) | Helper cookie: `isPreviewModeClient()`, `setPreviewMode()` |
+| `components/sidebar.tsx` | Tombol toggle preview (admin-only), `isEmployee` ikut mempertimbangkan mode preview |
+| `components/DashboardShell.tsx` | Banner kuning "sedang preview" + tombol keluar |
+| `app/(dashboard)/dashboard/page.tsx` | Baca cookie preview via `next/headers`, tampilkan kartu versi karyawan saat aktif |
+| `app/(dashboard)/portal/absensi/page.tsx`, `portal/jadwal/page.tsx`, `portal/slip-gaji/page.tsx` | Redirect-jika-bukan-employee dilewati saat mode preview aktif |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan*
