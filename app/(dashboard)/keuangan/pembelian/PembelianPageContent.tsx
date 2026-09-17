@@ -189,17 +189,21 @@ export default function PembelianSupplierPage() {
   type LedgerRow = {
     key: string; date: string; noteRef: string
     pembelian: number | null; pembayaran: number | null; status: string | null
+    // Cuma terisi untuk baris 'beli' — dipakai tombol Edit/Hapus langsung di baris tabel,
+    // supaya jelas persis transaksi mana yang mau diubah (bukan daftar terpisah yang harus
+    // dicocokkan manual dengan tabel di atas).
+    purchaseRef: Purchase | null
   }
   const ledgerRows: LedgerRow[] = [
     ...detailPurchases.map(p => ({
       key: `beli-${p.id}`, date: p.purchase_date, noteRef: noteRefOf(p),
-      pembelian: Number(p.total_amount), pembayaran: null, status: null,
+      pembelian: Number(p.total_amount), pembayaran: null, status: null, purchaseRef: p,
     })),
     ...detailPayments.map(pay => {
       const p = detailPurchases.find(x => x.id === pay.source_id)
       return {
         key: `bayar-${pay.id}`, date: pay.transaction_date, noteRef: p ? noteRefOf(p) : '—',
-        pembelian: null, pembayaran: Number(pay.amount), status: pay.status,
+        pembelian: null, pembayaran: Number(pay.amount), status: pay.status, purchaseRef: null,
       }
     }),
   ].sort((a, b) => b.date.localeCompare(a.date))
@@ -498,7 +502,7 @@ export default function PembelianSupplierPage() {
           table header), bukan sticky di <tr>. */}
       {detailSupplierId && detailSummary && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-5xl max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
             {/* Bagian atas — tidak pernah ikut scroll */}
             <div className="p-6 pb-0 flex-shrink-0">
               <div className="flex items-start justify-between mb-4 pb-3 border-b border-slate-100">
@@ -549,11 +553,12 @@ export default function PembelianSupplierPage() {
                       <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase text-right">Pembelian</th>
                       <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase text-right">Pembayaran</th>
                       <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                      <th className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {ledgerRows.length === 0 ? (
-                      <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-400 text-sm">Belum ada transaksi.</td></tr>
+                      <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400 text-sm">Belum ada transaksi.</td></tr>
                     ) : ledgerRows.map(r => (
                       <tr key={r.key} className="hover:bg-slate-50/70">
                         <td className="px-3 py-2 text-slate-600 whitespace-nowrap bg-white">{new Date(r.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
@@ -565,44 +570,25 @@ export default function PembelianSupplierPage() {
                             <span className={`text-xs font-medium ${STATUS_LABEL[r.status]?.cls || 'text-slate-500'}`}>{STATUS_LABEL[r.status]?.label || r.status}</span>
                           ) : '—'}
                         </td>
+                        <td className="px-3 py-2 bg-white text-center whitespace-nowrap">
+                          {r.purchaseRef && (
+                            <div className="flex gap-1.5 justify-center">
+                              <button onClick={() => openEditModal(r.purchaseRef!)}
+                                className="text-xs px-2.5 py-1 rounded-lg border font-medium transition text-blue-600 border-blue-200 hover:bg-blue-50">
+                                Edit
+                              </button>
+                              <button onClick={() => handleDeletePurchase(r.purchaseRef!)}
+                                className="text-xs px-2.5 py-1 rounded-lg border font-medium transition text-red-600 border-red-200 hover:bg-red-50">
+                                Hapus
+                              </button>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-
-              {detailPurchases.length > 0 && (
-                <div className="mt-4">
-                  <p className="text-xs font-medium text-slate-500 mb-2">Kelola pembelian (edit/hapus nota tertentu):</p>
-                  <div className="space-y-2">
-                    {detailPurchases.map(p => {
-                      const ref = noteRefOf(p)
-                      // Tanggal + nominal SELALU ditampilkan (bukan cuma ref) — banyak pembelian lama
-                      // tidak punya invoice/SJ/keterangan sama sekali, jadi kalau cuma andalkan ref,
-                      // semua barisnya kelihatan sama persis dan tidak bisa dibedakan.
-                      return (
-                        <div key={p.id} className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
-                          <div className="text-sm text-slate-700 min-w-0">
-                            <span className="font-medium text-slate-800">{new Date(p.purchase_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-                            {' · '}{formatRupiah(p.total_amount)}
-                            {ref !== '—' && <span className="text-slate-500"> · {ref}</span>}
-                          </div>
-                          <div className="flex gap-2 shrink-0">
-                            <button onClick={() => openEditModal(p)}
-                              className="text-xs px-3 py-1.5 rounded-lg border font-medium transition text-blue-600 border-blue-200 hover:bg-blue-50">
-                              Edit
-                            </button>
-                            <button onClick={() => handleDeletePurchase(p)}
-                              className="text-xs px-3 py-1.5 rounded-lg border font-medium transition text-red-600 border-red-200 hover:bg-red-50">
-                              Hapus
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
