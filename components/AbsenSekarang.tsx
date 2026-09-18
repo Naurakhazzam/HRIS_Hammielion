@@ -59,6 +59,29 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   useEffect(() => { fetchContext() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => stopCamera(), [])
 
+  // Sambungkan stream kamera ke elemen <video> SETELAH benar-benar ter-mount di DOM (step
+  // berubah jadi 'camera') — pakai useEffect, bukan setTimeout, supaya tidak ada balapan waktu
+  // antara video ter-mount vs stream disambungkan. Sebelumnya pakai setTimeout(fn, 0) yang
+  // TIDAK menjamin video sudah ada di DOM saat itu — kalau kalah waktu, stream gagal
+  // tersambung diam-diam dan macet selamanya di "Menyiapkan kamera...".
+  useEffect(() => {
+    if (step !== 'camera' || !streamRef.current || !videoRef.current) return
+    videoRef.current.srcObject = streamRef.current
+    videoRef.current.play().catch(() => { /* diabaikan — atribut autoPlay jadi fallback */ })
+  }, [step])
+
+  // Jaring pengaman: kalau 6 detik berlalu dan kamera masih belum siap (videoWidth masih 0),
+  // proaktif arahkan ke tombol cadangan — jangan biarkan pengguna macet tanpa petunjuk.
+  useEffect(() => {
+    if (step !== 'camera') return
+    const t = setTimeout(() => {
+      if (videoRef.current && !videoRef.current.videoWidth) {
+        showMessage('error', 'Kamera tidak kunjung siap. Coba tombol "Coba Ulang Kamera", atau langsung pakai "Pakai Kamera Bawaan HP" di bawah video.')
+      }
+    }, 6000)
+    return () => clearTimeout(t)
+  }, [step])
+
   async function fetchContext() {
     setLoading(true)
     const { data: emp } = await supabase
@@ -161,15 +184,9 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
       streamRef.current = stream
+      // Penyambungan stream ke elemen <video> ditangani oleh useEffect (lihat atas) setelah
+      // step berubah jadi 'camera' dan videonya benar-benar ter-mount di DOM.
       setStep('camera')
-      // Set srcObject secara manual lewat JS (bukan attribute) kadang tidak otomatis memicu
-      // playback di sebagian browser/WebView Android — video jadi "tersambung" tapi layarnya
-      // hitam karena tidak pernah benar-benar main. Panggil .play() eksplisit untuk memaksanya.
-      setTimeout(() => {
-        if (!videoRef.current) return
-        videoRef.current.srcObject = stream
-        videoRef.current.play().catch(() => { /* diabaikan — atribut autoPlay jadi fallback */ })
-      }, 0)
     } catch (err) {
       // Detail error asli ditampilkan (bukan cuma pesan generik) supaya kelihatan jelas
       // penyebabnya apa — izin ditolak, kamera tidak ada, atau browser/WebView tidak

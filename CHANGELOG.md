@@ -1542,4 +1542,18 @@ Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identita
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail*
+### 94. Fix Bug: Macet Selamanya di "Menyiapkan Kamera..."
+
+**Ditemukan:** Setelah fix-fix sebelumnya, kamera masih bisa macet selamanya di teks "Menyiapkan kamera..." tanpa progres apa pun, tanpa error. Akar masalahnya ternyata bug timing di kode: stream kamera disambungkan ke elemen `<video>` lewat `setTimeout(fn, 0)`, yang **tidak menjamin** elemen video sudah benar-benar ada di halaman saat itu — kalau video belum sempat muncul duluan, penyambungannya gagal diam-diam dan macet selamanya karena tidak ada percobaan ulang.
+
+**Fix:**
+- Penyambungan stream ke video sekarang ditangani lewat `useEffect` (bukan `setTimeout`), yang React jamin baru berjalan SETELAH elemen videonya benar-benar ter-pasang di halaman — menghilangkan potensi gagal diam-diam ini sama sekali.
+- Ditambah jaring pengaman: kalau 6 detik berlalu dan kamera tetap belum siap, sistem otomatis kasih pesan yang mengarahkan ke tombol "Coba Ulang Kamera" / "Pakai Kamera Bawaan HP", supaya pengguna tidak macet tanpa petunjuk.
+
+| File | Perubahan |
+|---|---|
+| `components/AbsenSekarang.tsx` | Ganti `setTimeout` jadi `useEffect` untuk sambung stream video, tambah timeout 6 detik sebagai jaring pengaman |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera*
