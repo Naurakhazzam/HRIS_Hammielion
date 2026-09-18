@@ -2,15 +2,16 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { todayLocalStr } from '@/lib/date'
-import { resolveSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
+import { todayLocalStr, localDateStr } from '@/lib/date'
+import { resolveSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
 
 type Props = { employeeId: string; employeeName: string; onDone?: () => void }
 
 type BranchGeo = { id: string; name: string; latitude: number | null; longitude: number | null; checkin_radius_meters: number }
 type TodayRow = { id: string; check_in: string | null; check_out: string | null; source: string } | null
+type WorkScheduleRow = WorkSchedule & { id: string }
 
-type Step = 'idle' | 'locating' | 'camera' | 'preview' | 'uploading'
+type Step = 'idle' | 'locating' | 'camera' | 'preview' | 'uploading' | 'confirm-swap' | 'pick-date'
 
 // Absen mandiri lewat HP — foto WAJIB diambil langsung dari kamera di dalam halaman ini
 // (getUserMedia + canvas), tidak pernah melewati galeri/file picker OS, supaya tidak bisa kirim
@@ -22,7 +23,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   const [loading, setLoading] = useState(true)
   const [branch, setBranch] = useState<BranchGeo | null>(null)
   const [today, setToday] = useState<TodayRow>(null)
-  const [schedules, setSchedules] = useState<WorkSchedule[]>([])
+  const [schedules, setSchedules] = useState<WorkScheduleRow[]>([])
   const [customCheckIn, setCustomCheckIn] = useState<string | null>(null)
   const [customCheckOut, setCustomCheckOut] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -35,6 +36,16 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   const [geo, setGeo] = useState<{ lat: number; lng: number; distance: number } | null>(null)
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null)
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
+
+  // ── Tukar hari libur (masuk di hari libur -> pilih tanggal pengganti) ──
+  const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
+  const [calendarLoading, setCalendarLoading] = useState(false)
+  // tanggal (YYYY-MM-DD) -> nama rekan SATU CABANG yang libur di tanggal itu (dari RPC, bukan tabel langsung — employee biasa tidak punya akses baca roster orang lain)
+  const [dayoffCalendar, setDayoffCalendar] = useState<Record<string, string>>({})
+  const [ownFutureDayOff, setOwnFutureDayOff] = useState<Set<string>>(new Set())
+  const [selectedReplacementDate, setSelectedReplacementDate] = useState<string | null>(null)
+  const [swapSubmitting, setSwapSubmitting] = useState(false)
+  const [swapError, setSwapError] = useState<string | null>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -56,9 +67,9 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
 
     if (emp?.department_id) {
       const { data: sched } = await supabase.from('work_schedules')
-        .select('check_in_time, check_out_time, detect_until, allow_overtime, applies_to_dept')
+        .select('id, check_in_time, check_out_time, detect_until, allow_overtime, applies_to_dept')
         .eq('applies_to_dept', emp.department_id)
-      setSchedules((sched as WorkSchedule[]) || [])
+      setSchedules((sched as WorkScheduleRow[]) || [])
     }
 
     const { data: att } = await supabase.from('attendances')
@@ -84,11 +95,18 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
     streamRef.current = null
   }
 
-  async function startCheckin() {
+  function startCheckin() {
     if (todayIsDayOff && !today?.check_in) {
-      showMessage('error', 'Hari ini terjadwal LIBUR sesuai jadwal Anda. Kalau jadwal ini sudah digeser/berubah, minta HR update dulu di menu Jadwal & Shift, lalu muat ulang halaman ini.')
+      setStep('confirm-swap')
       return
     }
+    proceedToGeoCheckin()
+  }
+
+  // Dipisah dari startCheckin() supaya confirmSwap() bisa lanjut langsung ke GPS/kamera
+  // begitu tukar libur berhasil, tanpa kena cek todayIsDayOff lagi (closure state di situ
+  // masih nilai lama sesaat sebelum re-render, jadi cek ulang akan salah menganggap masih libur).
+  async function proceedToGeoCheckin() {
     if (!branch?.latitude || !branch?.longitude) {
       showMessage('error', 'Cabang Anda belum diaktifkan untuk absen HP. Hubungi HR.')
       return
@@ -165,7 +183,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
     setCapturedBlob(null)
     if (capturedUrl) URL.revokeObjectURL(capturedUrl)
     setCapturedUrl(null)
-    startCheckin()
+    proceedToGeoCheckin()
   }
 
   function cancelFlow() {
@@ -175,6 +193,79 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
     setCapturedUrl(null)
     setGeo(null)
     setStep('idle')
+  }
+
+  function cancelSwapFlow() {
+    setSelectedReplacementDate(null)
+    setSwapError(null)
+    setStep('idle')
+  }
+
+  async function openDatePicker() {
+    setStep('pick-date')
+    setSelectedReplacementDate(null)
+    setSwapError(null)
+    await loadCalendarMonth(calendarMonth)
+  }
+
+  async function loadCalendarMonth(monthDate: Date) {
+    setCalendarLoading(true)
+    const from = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1)
+    const to = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0)
+    const fromStr = localDateStr(from)
+    const toStr = localDateStr(to)
+
+    // Jadwal libur rekan SATU CABANG SAJA — lewat RPC, karena employee biasa tidak punya
+    // akses baca roster karyawan lain (lihat migrasi get_branch_dayoff_calendar_rpc).
+    const [{ data: branchOff }, { data: ownOff }] = await Promise.all([
+      supabase.rpc('get_branch_dayoff_calendar', { p_from: fromStr, p_to: toStr }),
+      supabase.from('employee_roster').select('date')
+        .eq('employee_id', employeeId).eq('is_day_off', true)
+        .gte('date', fromStr).lte('date', toStr),
+    ])
+
+    const map: Record<string, string> = {}
+    ;(branchOff as { off_date: string; employee_names: string }[] | null)?.forEach(r => { map[r.off_date] = r.employee_names })
+    setDayoffCalendar(map)
+    setOwnFutureDayOff(new Set((ownOff || []).map((r: { date: string }) => r.date)))
+    setCalendarLoading(false)
+  }
+
+  function changeCalendarMonth(delta: number) {
+    const next = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + delta, 1)
+    setCalendarMonth(next)
+    setSelectedReplacementDate(null)
+    loadCalendarMonth(next)
+  }
+
+  async function confirmSwap() {
+    if (!selectedReplacementDate) return
+    setSwapSubmitting(true)
+    setSwapError(null)
+
+    const nowTimeStr = new Date().toTimeString().substring(0, 5)
+    const sched = matchSchedule(nowTimeStr, schedules)
+    if (!sched) {
+      setSwapError('Jadwal kerja departemen Anda belum diatur, hubungi HR dulu.')
+      setSwapSubmitting(false)
+      return
+    }
+
+    const { error } = await supabase.rpc('request_day_off_swap', {
+      p_employee_id: employeeId,
+      p_schedule_id: sched.id,
+      p_replacement_date: selectedReplacementDate,
+    })
+    if (error) {
+      setSwapError(error.message)
+      setSwapSubmitting(false)
+      return
+    }
+
+    setSwapSubmitting(false)
+    setSelectedReplacementDate(null)
+    await fetchContext()
+    proceedToGeoCheckin()
   }
 
   async function submitCheckin() {
@@ -247,8 +338,17 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
 
   const alreadyDoneToday = !!today?.check_in && !!today?.check_out
   const blockedByOtherSource = !!today && today.source !== 'mobile' && !alreadyDoneToday
-  const blockedByDayOff = !!todayIsDayOff && !today?.check_in
-  const nextAction: 'in' | 'out' | null = alreadyDoneToday || blockedByOtherSource || blockedByDayOff ? null : today?.check_in ? 'out' : 'in'
+  const isDayOffToday = !!todayIsDayOff && !today?.check_in
+  const nextAction: 'in' | 'out' | null = alreadyDoneToday || blockedByOtherSource ? null : today?.check_in ? 'out' : 'in'
+
+  // Kalender bulan yang sedang dilihat, dirender jadi grid Minggu—Sabtu.
+  const calYear = calendarMonth.getFullYear()
+  const calMonthIdx = calendarMonth.getMonth()
+  const daysInMonth = new Date(calYear, calMonthIdx + 1, 0).getDate()
+  const firstWeekday = new Date(calYear, calMonthIdx, 1).getDay()
+  const calCells: (number | null)[] = [...Array(firstWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
+  const now0 = new Date()
+  const atOrBeforeCurrentMonth = calYear < now0.getFullYear() || (calYear === now0.getFullYear() && calMonthIdx <= now0.getMonth())
 
   return (
     <div className="bg-white rounded-xl shadow-sm border-2 border-blue-200 p-5 mb-6">
@@ -270,9 +370,9 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
       {blockedByOtherSource && (
         <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">Absen hari ini sudah tercatat lewat {today?.source === 'fingerprint' ? 'mesin fingerprint' : 'input manual'}.</p>
       )}
-      {blockedByDayOff && (
-        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          🛑 Hari ini terjadwal <strong>LIBUR</strong> menurut jadwal Anda. Kalau jadwal ini sudah digeser/berubah, hubungi HR untuk update jadwal dulu di menu Jadwal &amp; Shift, lalu muat ulang halaman ini.
+      {isDayOffToday && step === 'idle' && (
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+          ℹ️ Hari ini terjadwal <strong>LIBUR</strong> menurut jadwal Anda. Kalau tetap absen masuk, Anda akan diminta memilih tanggal pengganti.
         </p>
       )}
 
@@ -281,6 +381,76 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
           className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition">
           {nextAction === 'in' ? '📸 Absen Masuk' : '📸 Absen Pulang'}
         </button>
+      )}
+      {step === 'confirm-swap' && (
+        <div className="space-y-3">
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+            🛑 Hari ini terjadwal <strong>LIBUR</strong> sesuai jadwal Anda. Yakin ingin tetap masuk kerja hari ini? Kalau lanjut, Anda perlu pilih tanggal pengganti untuk libur Anda.
+          </p>
+          <div className="flex gap-2">
+            <button onClick={cancelSwapFlow} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal, Tetap Libur</button>
+            <button onClick={openDatePicker} className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold">Ya, Saya Masuk</button>
+          </div>
+        </div>
+      )}
+      {step === 'pick-date' && (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500">Pilih tanggal pengganti untuk libur Anda hari ini. Tanggal dengan tanda menunjukkan rekan satu cabang yang sudah libur di hari itu.</p>
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={() => changeCalendarMonth(-1)} disabled={atOrBeforeCurrentMonth}
+              className="px-2 py-1 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:cursor-not-allowed">◀</button>
+            <span className="text-sm font-semibold text-slate-700">
+              {calendarMonth.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+            </span>
+            <button type="button" onClick={() => changeCalendarMonth(1)} className="px-2 py-1 text-slate-500 hover:text-slate-800">▶</button>
+          </div>
+          {calendarLoading ? (
+            <div className="text-center py-6 text-sm text-slate-400">Memuat kalender...</div>
+          ) : (
+            <div className="grid grid-cols-7 gap-1 text-center">
+              {['M','S','S','R','K','J','S'].map((d, i) => (
+                <div key={i} className="text-[10px] font-semibold text-slate-400 py-1">{d}</div>
+              ))}
+              {calCells.map((day, i) => {
+                if (day === null) return <div key={`b${i}`} />
+                const dateStr = localDateStr(new Date(calYear, calMonthIdx, day))
+                const isPast = dateStr <= todayLocalStr()
+                const isOwnOff = ownFutureDayOff.has(dateStr)
+                const colleagueNames = dayoffCalendar[dateStr]
+                const isSelected = selectedReplacementDate === dateStr
+                const disabled = isPast || isOwnOff
+                return (
+                  <button key={dateStr} type="button" disabled={disabled}
+                    onClick={() => setSelectedReplacementDate(dateStr)}
+                    title={colleagueNames ? `Libur: ${colleagueNames}` : undefined}
+                    className={`relative aspect-square rounded-lg text-xs flex items-center justify-center transition
+                      ${disabled ? 'text-slate-300 cursor-not-allowed' : 'hover:bg-blue-50 text-slate-700'}
+                      ${isSelected ? 'bg-blue-600 text-white hover:bg-blue-600 font-semibold' : ''}
+                      ${isOwnOff ? 'bg-slate-100' : ''}`}>
+                    {day}
+                    {colleagueNames && !isSelected && (
+                      <span className="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {selectedReplacementDate && (
+            <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+              Tanggal pengganti: <strong>{new Date(selectedReplacementDate + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long' })}</strong>
+              {dayoffCalendar[selectedReplacementDate] ? <> — rekan yang sudah libur: {dayoffCalendar[selectedReplacementDate]}</> : ' — belum ada rekan cabang yang libur di tanggal ini'}
+            </p>
+          )}
+          {swapError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{swapError}</p>}
+          <div className="flex gap-2">
+            <button onClick={cancelSwapFlow} disabled={swapSubmitting} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50">Batal</button>
+            <button onClick={confirmSwap} disabled={!selectedReplacementDate || swapSubmitting}
+              className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
+              {swapSubmitting ? 'Menyimpan...' : 'Pilih & Lanjut Absen'}
+            </button>
+          </div>
+        </div>
       )}
       {step === 'locating' && (
         <div className="text-center py-4 text-sm text-slate-500">Mendeteksi lokasi Anda...</div>

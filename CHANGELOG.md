@@ -1356,4 +1356,24 @@ Status preview disimpan di cookie (`previewAsEmployee`, bukan `sessionStorage`) 
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru)*
+### 83. Fitur: Tukar Hari Libur Saat Absen Masuk di Hari Libur
+
+**Konteks:** Penyempurnaan dari fix #82 (absen HP menolak absen masuk kalau hari itu terjadwal libur). Owner minta itu diubah dari sekadar blokir menjadi alur konfirmasi: kalau karyawan tetap mau masuk di hari liburnya, sistem tanya dulu "yakin?", lalu minta pilih tanggal pengganti — dan kalender pemilihan tanggal itu harus menunjukkan jadwal libur rekan **satu cabang saja** (supaya karyawan bisa memilih tanggal yang tidak bentrok dengan terlalu banyak rekan yang sudah libur).
+
+**Alur baru di Absen HP (`AbsenSekarang`):**
+1. Karyawan tekan "Absen Masuk" di hari yang terjadwal libur → muncul konfirmasi "Yakin ingin tetap masuk kerja hari ini?".
+2. Kalau "Ya" → muncul kalender bulan berjalan (bisa geser ke bulan berikutnya). Tanggal yang sudah ada rekan satu cabang libur ditandai titik kuning (hover/klik untuk lihat nama). Tanggal yang sudah jadi hari libur karyawan itu sendiri otomatis dikunci (tidak bisa dipilih dobel).
+3. Pilih tanggal pengganti → klik "Pilih & Lanjut Absen" → hari ini otomatis jadi hari kerja, tanggal pengganti otomatis jadi hari libur baru, lalu proses absen (GPS + foto) langsung lanjut seperti biasa.
+
+**Kenapa lewat RPC, bukan tulis langsung ke tabel:** Karyawan biasa tidak (dan sengaja tidak) punya akses tulis ke `employee_roster` (cuma HR/Owner) maupun akses baca roster karyawan lain. Dua fungsi database baru dengan validasi ketat di dalamnya menjaga ini tetap aman:
+- `request_day_off_swap` — validasi: pemanggil cuma bisa tukar jadwalnya SENDIRI, hari ini harus benar hari libur, tanggal pengganti harus di masa depan dan belum jadi hari libur yang sama. Dicatat ke tabel baru `roster_swap_logs` untuk jejak audit HR.
+- `get_branch_dayoff_calendar` — cuma kembalikan tanggal + nama, dibatasi ke cabang milik pemanggil sendiri saja (tidak bisa intip cabang lain).
+
+| File | Perubahan |
+|---|---|
+| Migrasi DB (Supabase) | Tabel `roster_swap_logs`, RPC `request_day_off_swap`, RPC `get_branch_dayoff_calendar` |
+| `components/AbsenSekarang.tsx` | Alur konfirmasi + kalender pilih tanggal pengganti, ganti blokir statis jadi interaktif |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk*
