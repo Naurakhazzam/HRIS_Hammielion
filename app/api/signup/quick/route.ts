@@ -19,7 +19,7 @@ async function findEligibleEmployee(employeeCode: string) {
   const { data: emp } = await supabaseAdmin
     .from('employees')
     .select('id, full_name, is_active')
-    .eq('employee_code', String(employeeCode).trim())
+    .eq('employee_code', String(employeeCode).trim().toUpperCase())
     .maybeSingle()
   if (!emp || !emp.is_active) return null
 

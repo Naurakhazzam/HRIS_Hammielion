@@ -106,7 +106,7 @@ function FullVerifyForm() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="employee_code" className="block text-sm font-medium text-slate-700 mb-1.5">Kode Karyawan</label>
-          <input id="employee_code" type="text" required value={employeeCode} onChange={e => setEmployeeCode(e.target.value)}
+          <input id="employee_code" type="text" required value={employeeCode} onChange={e => setEmployeeCode(e.target.value.toUpperCase())}
             placeholder="Contoh: EMP-012" disabled={loading}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50" />
         </div>
@@ -250,7 +250,7 @@ function QuickForm() {
         <div>
           <label htmlFor="qc_employee_code" className="block text-sm font-medium text-slate-700 mb-1.5">Apakah Anda sudah jadi karyawan? Masukkan Kode Karyawan</label>
           <input id="qc_employee_code" type="text" required value={employeeCode}
-            onChange={e => { setEmployeeCode(e.target.value); setCheckedName(null); setCheckError(null) }}
+            onChange={e => { setEmployeeCode(e.target.value.toUpperCase()); setCheckedName(null); setCheckError(null) }}
             onBlur={checkCode}
             placeholder="Contoh: EMP-012" disabled={loading}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50" />

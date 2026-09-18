@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     const { data: emp } = await supabaseAdmin
       .from('employees')
       .select('id, phone, birth_date, is_active')
-      .eq('employee_code', String(employee_code).trim())
+      .eq('employee_code', String(employee_code).trim().toUpperCase())
       .maybeSingle()
 
     if (!emp || !emp.is_active) {
