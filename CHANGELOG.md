@@ -1477,4 +1477,16 @@ Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identita
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan*
+### 89. Fix Bug: Tombol "Ambil Foto" Tidak Berfungsi
+
+**Ditemukan:** Owner lapor tombol "Ambil Foto" di Absen QR/HP kadang tidak bereaksi sama sekali — diklik tapi tidak terjadi apa-apa. Penyebabnya: elemen video kamera butuh waktu singkat (biasanya <1 detik, tapi bisa lebih lama tergantung HP) sebelum `videoWidth`/`videoHeight` benar-benar terisi setelah stream kamera terbuka. Kalau tombol diklik SEBELUM itu, `drawImage` ke canvas gagal — dan karena tidak ada penanganan error di situ, kegagalannya diam-diam, kelihatan seperti tombol tidak berfungsi.
+
+**Fix:** Tombol "Ambil Foto" sekarang terkunci (`disabled`, teks berubah jadi "Menyiapkan kamera...") sampai video benar-benar siap. Ditambah jaring pengaman: kalau tetap gagal, sekarang muncul pesan jelas ("Kamera belum siap...") alih-alih diam saja.
+
+| File | Perubahan |
+|---|---|
+| `components/AbsenSekarang.tsx` | Tombol dikunci sampai video siap (`onLoadedMetadata`), tambah pesan error alih-alih gagal diam-diam |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi*

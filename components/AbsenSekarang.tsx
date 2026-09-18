@@ -36,6 +36,10 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const [geo, setGeo] = useState<{ lat: number; lng: number; distance: number } | null>(null)
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null)
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
+  // Video kamera butuh waktu singkat sebelum videoWidth/videoHeight benar-benar terisi
+  // (metadata belum termuat) — kalau "Ambil Foto" diklik sebelum itu, drawImage ke canvas
+  // gagal diam-diam (throw tanpa pesan). Tombol dikunci sampai video ini benar-benar siap.
+  const [cameraReady, setCameraReady] = useState(false)
 
   // ── Tukar hari libur (masuk di hari libur -> pilih tanggal pengganti) ──
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
@@ -145,6 +149,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   }
 
   async function openCamera() {
+    setCameraReady(false)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
       streamRef.current = stream
@@ -161,11 +166,22 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     const canvas = canvasRef.current
     if (!video || !canvas) return
     if (mode === 'gps' && !geo) return
+    // Jaring pengaman: kalau video belum benar-benar siap (metadata belum termuat), videoWidth/
+    // videoHeight masih 0 dan drawImage akan gagal diam-diam — kasih pesan jelas alih-alih diam.
+    if (!video.videoWidth || !video.videoHeight) {
+      showMessage('error', 'Kamera belum siap sepenuhnya, tunggu 1-2 detik lalu coba lagi.')
+      return
+    }
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    try {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    } catch {
+      showMessage('error', 'Gagal mengambil gambar dari kamera. Coba lagi.')
+      return
+    }
 
     // Watermark bukti: nama, waktu, (jarak dari cabang kalau mode GPS) — menempel di gambarnya sendiri.
     const now = new Date()
@@ -485,10 +501,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       )}
       {step === 'camera' && (
         <div className="space-y-3">
-          <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-lg bg-slate-900 aspect-[3/4] object-cover" />
+          <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setCameraReady(true)}
+            className="w-full rounded-lg bg-slate-900 aspect-[3/4] object-cover" />
           <div className="flex gap-2">
             <button onClick={cancelFlow} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-            <button onClick={takePhoto} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold">Ambil Foto</button>
+            <button onClick={takePhoto} disabled={!cameraReady}
+              className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+              {cameraReady ? 'Ambil Foto' : 'Menyiapkan kamera...'}
+            </button>
           </div>
         </div>
       )}
