@@ -25,6 +25,20 @@ type Employee = {
   positions: { name: string } | null
 }
 
+const RECENT_DAYS = 7
+
+function daysSince(dateStr: string): number {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
+}
+
+function formatRelative(dateStr: string): string {
+  const d = daysSince(dateStr)
+  if (d <= 0) return 'Hari ini'
+  if (d === 1) return 'Kemarin'
+  if (d < 7) return `${d} hari lalu`
+  return new Date(dateStr).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 const ROLE_CONFIG: Record<string, { label: string; color: string }> = {
   owner:      { label: 'Owner',      color: 'bg-purple-100 text-purple-700' },
   hr:         { label: 'HR',         color: 'bg-blue-100 text-blue-700' },
@@ -204,6 +218,27 @@ export default function UsersPage() {
         </div>
       )}
 
+      {/* Ringkasan pendaftar baru — supaya bisa langsung lihat siapa yang baru bikin akun tanpa
+          perlu tanya/cek manual satu-satu di tabel bawah. */}
+      {!loading && (() => {
+        const recent = users.filter(u => daysSince(u.created_at) < RECENT_DAYS)
+        if (recent.length === 0) return null
+        return (
+          <div className="mb-6 bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <p className="text-sm font-semibold text-blue-800 mb-2">🆕 {recent.length} akun baru dalam {RECENT_DAYS} hari terakhir</p>
+            <div className="flex flex-wrap gap-2">
+              {recent.map(u => (
+                <span key={u.id} className="text-xs bg-white border border-blue-200 rounded-lg px-2.5 py-1.5 text-blue-800">
+                  <strong>{u.employees?.full_name || u.email}</strong>
+                  {u.employees?.employee_code ? ` · ${u.employees.employee_code}` : ''}
+                  {' — '}{formatRelative(u.created_at)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Form Buat Akun */}
       {showForm && (
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6 mb-6">
@@ -286,15 +321,16 @@ export default function UsersPage() {
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Karyawan</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Email</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Role</th>
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Terdaftar</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Memuat data...</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">Memuat data...</td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Belum ada akun.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">Belum ada akun.</td></tr>
               ) : (
                 users.map(u => {
                   const roleCfg = ROLE_CONFIG[u.role] ?? { label: u.role, color: 'bg-slate-100 text-slate-600' }
@@ -316,6 +352,12 @@ export default function UsersPage() {
                         <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${roleCfg.color}`}>
                           {roleCfg.label}
                         </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
+                        {formatRelative(u.created_at)}
+                        {daysSince(u.created_at) < RECENT_DAYS && (
+                          <span className="ml-1.5 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">Baru</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${

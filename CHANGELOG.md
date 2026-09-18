@@ -1635,4 +1635,19 @@ Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identita
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera + cetak QR 2 per halaman lebih besar + cetak QR 1/halaman & pilih cabang + verifikasi Daftar Cepat via nama+tanggal lahir + jalur cadangan Kode Karyawan saja + edit data pribadi sendiri di Profil Saya*
+### 100. Fitur: Lihat Akun Baru Daftar di Manajemen User
+
+**Konteks:** Owner sering menanyakan "ada karyawan baru daftar tidak?" — supaya tidak perlu tanya terus, ditambahkan tampilan langsung di menu **Manajemen User** (`/users`).
+
+**Fitur:**
+- Muncul kotak ringkasan biru di atas tabel: **"🆕 N akun baru dalam 7 hari terakhir"**, berisi daftar nama + kode karyawan + kapan daftarnya, langsung kelihatan tanpa perlu buka tabel.
+- Tabel akun sekarang ada kolom **"Terdaftar"** menampilkan kapan tiap akun dibuat ("Hari ini", "Kemarin", "3 hari lalu", dst.), dengan label **"Baru"** untuk yang kurang dari 7 hari.
+- Tabel sudah otomatis terurut dari yang paling baru daftar (tidak berubah, sudah begitu dari awal).
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/users/page.tsx` | Kotak ringkasan akun baru + kolom "Terdaftar" dengan label "Baru" |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera + cetak QR 2 per halaman lebih besar + cetak QR 1/halaman & pilih cabang + verifikasi Daftar Cepat via nama+tanggal lahir + jalur cadangan Kode Karyawan saja + edit data pribadi sendiri di Profil Saya + lihat akun baru daftar di Manajemen User*
