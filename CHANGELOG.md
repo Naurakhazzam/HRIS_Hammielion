@@ -1528,4 +1528,18 @@ Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identita
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive*
+### 93. Perbaikan Diagnostik: Pesan Error Kamera Lebih Detail
+
+**Konteks:** Kamera masih bermasalah di sebagian percobaan meski data & izin sudah benar, dan pesan errornya generik ("Tidak bisa mengakses kamera") sehingga sulit tahu penyebab pastinya — apakah izin ditolak, kamera tidak ada, atau (dugaan kuat) halamannya dibuka dari **dalam aplikasi lain** (WhatsApp/Instagram/aplikasi scan QR pihak ketiga) yang jendela browser-nya sengaja memblokir akses kamera oleh developer aplikasi itu sendiri, di luar kendali kode web mana pun.
+
+**Perbaikan:**
+- Ditambahkan deteksi lebih awal: kalau `navigator.mediaDevices` tidak tersedia sama sekali (ciri khas in-app browser yang membatasi), langsung tampil pesan spesifik yang menyarankan buka lewat Chrome/Safari langsung.
+- Kalau tetap gagal di getUserMedia, pesan error sekarang menampilkan **detail teknis asli** (nama & pesan errornya), bukan cuma kalimat generik — supaya penyebab pastinya kelihatan jelas untuk ditelusuri lebih lanjut.
+
+| File | Perubahan |
+|---|---|
+| `components/AbsenSekarang.tsx` | Deteksi dini `mediaDevices` tidak tersedia + pesan error kamera menampilkan detail teknis asli |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail*

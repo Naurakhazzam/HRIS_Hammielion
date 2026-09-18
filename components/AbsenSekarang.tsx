@@ -151,6 +151,13 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
 
   async function openCamera() {
     setCameraReady(false)
+    // Sebagian in-app browser (WhatsApp/Instagram/aplikasi scan QR pihak ketiga, dll) tidak
+    // menyediakan navigator.mediaDevices sama sekali — deteksi ini duluan supaya pesannya
+    // spesifik, bukan cuma error teknis generik dari catch di bawah.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showMessage('error', 'Browser ini tidak mendukung akses kamera (kemungkinan dibuka dari dalam aplikasi lain seperti WhatsApp/Instagram). Coba buka link ini langsung lewat Chrome atau Safari.')
+      return
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
       streamRef.current = stream
@@ -163,8 +170,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         videoRef.current.srcObject = stream
         videoRef.current.play().catch(() => { /* diabaikan — atribut autoPlay jadi fallback */ })
       }, 0)
-    } catch {
-      showMessage('error', 'Tidak bisa mengakses kamera. Pastikan izin kamera diaktifkan untuk browser ini.')
+    } catch (err) {
+      // Detail error asli ditampilkan (bukan cuma pesan generik) supaya kelihatan jelas
+      // penyebabnya apa — izin ditolak, kamera tidak ada, atau browser/WebView tidak
+      // mendukung getUserMedia sama sekali (mediaDevices undefined, umum di in-app browser).
+      const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      showMessage('error', `Tidak bisa mengakses kamera (${detail}). Kalau ini dibuka dari dalam aplikasi lain (WhatsApp/Instagram/dll), coba buka pakai Chrome/Safari langsung.`)
       setStep('idle')
     }
   }
