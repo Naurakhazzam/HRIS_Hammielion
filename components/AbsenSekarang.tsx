@@ -54,6 +54,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { fetchContext() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => stopCamera(), [])
@@ -168,6 +169,26 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     }
   }
 
+  // Watermark bukti: nama, waktu, (jarak dari cabang kalau mode GPS) — menempel di gambarnya
+  // sendiri. Dipakai bareng oleh jalur live-preview (takePhoto) maupun jalur cadangan kamera
+  // bawaan HP (handleFileCaptured), supaya hasil akhirnya identik dari kedua jalur.
+  function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: number) {
+    const now = new Date()
+    const label1 = employeeName
+    const label2 = `${now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} ${now.toLocaleTimeString('id-ID')}`
+    const label3 = geo ? `${Math.round(geo.distance)}m dari ${branch?.name ?? 'cabang'}` : `QR Absen — ${branch?.name ?? 'cabang'}`
+    const barHeight = Math.max(64, height * 0.12)
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.fillRect(0, height - barHeight, width, barHeight)
+    ctx.fillStyle = '#fff'
+    const fontSize = Math.max(14, Math.round(width / 28))
+    ctx.font = `bold ${fontSize}px sans-serif`
+    ctx.fillText(label1, 12, height - barHeight + fontSize + 4)
+    ctx.font = `${fontSize * 0.8}px sans-serif`
+    ctx.fillText(label2, 12, height - barHeight + fontSize * 2 + 6)
+    ctx.fillText(label3, 12, height - barHeight + fontSize * 3 + 8)
+  }
+
   function takePhoto() {
     const video = videoRef.current
     const canvas = canvasRef.current
@@ -189,22 +210,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       showMessage('error', 'Gagal mengambil gambar dari kamera. Coba lagi.')
       return
     }
-
-    // Watermark bukti: nama, waktu, (jarak dari cabang kalau mode GPS) — menempel di gambarnya sendiri.
-    const now = new Date()
-    const label1 = employeeName
-    const label2 = `${now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} ${now.toLocaleTimeString('id-ID')}`
-    const label3 = geo ? `${Math.round(geo.distance)}m dari ${branch?.name ?? 'cabang'}` : `QR Absen — ${branch?.name ?? 'cabang'}`
-    const barHeight = Math.max(64, canvas.height * 0.12)
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'
-    ctx.fillRect(0, canvas.height - barHeight, canvas.width, barHeight)
-    ctx.fillStyle = '#fff'
-    const fontSize = Math.max(14, Math.round(canvas.width / 28))
-    ctx.font = `bold ${fontSize}px sans-serif`
-    ctx.fillText(label1, 12, canvas.height - barHeight + fontSize + 4)
-    ctx.font = `${fontSize * 0.8}px sans-serif`
-    ctx.fillText(label2, 12, canvas.height - barHeight + fontSize * 2 + 6)
-    ctx.fillText(label3, 12, canvas.height - barHeight + fontSize * 3 + 8)
+    drawWatermark(ctx, canvas.width, canvas.height)
 
     canvas.toBlob(blob => {
       if (!blob) return
@@ -213,6 +219,44 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       stopCamera()
       setStep('preview')
     }, 'image/jpeg', 0.85)
+  }
+
+  // Jalur cadangan kalau live-preview kamera (getUserMedia) tidak jalan di HP tertentu (kelihatan
+  // layar hitam terus walau izin sudah benar — beberapa Android/Chrome punya driver kamera yang
+  // tidak kompatibel dengan cara ini). `capture="user"` pada input file membuka app KAMERA BAWAAN
+  // HP langsung (bukan galeri) di sebagian besar browser modern, jauh lebih kompatibel karena
+  // tidak bergantung ke API preview kamera berbasis web yang rewel.
+  function openNativeCameraFallback() {
+    fileInputRef.current?.click()
+  }
+
+  function handleFileCaptured(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // reset supaya bisa pilih file yang sama lagi nanti kalau perlu
+    if (!file) return
+    stopCamera()
+
+    const objUrl = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const canvas = canvasRef.current
+      if (!canvas) { URL.revokeObjectURL(objUrl); return }
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { URL.revokeObjectURL(objUrl); return }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      drawWatermark(ctx, canvas.width, canvas.height)
+      canvas.toBlob(blob => {
+        URL.revokeObjectURL(objUrl)
+        if (!blob) return
+        setCapturedBlob(blob)
+        setCapturedUrl(URL.createObjectURL(blob))
+        setStep('preview')
+      }, 'image/jpeg', 0.85)
+    }
+    img.onerror = () => { URL.revokeObjectURL(objUrl); showMessage('error', 'Gagal memuat foto dari kamera.') }
+    img.src = objUrl
   }
 
   function retakePhoto() {
@@ -519,7 +563,11 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         <div className="space-y-3">
           <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setCameraReady(true)}
             className="w-full rounded-lg bg-slate-900 aspect-[3/4] object-cover" />
-          <p className="text-[11px] text-slate-400 text-center">Layar kamera hitam/tidak muncul gambar? <button type="button" onClick={restartCamera} className="text-blue-600 hover:underline font-medium">Coba Ulang Kamera</button></p>
+          <p className="text-[11px] text-slate-400 text-center">
+            Layar kamera hitam/tidak muncul gambar? <button type="button" onClick={restartCamera} className="text-blue-600 hover:underline font-medium">Coba Ulang Kamera</button>
+            {' '}atau{' '}
+            <button type="button" onClick={openNativeCameraFallback} className="text-blue-600 hover:underline font-medium">Pakai Kamera Bawaan HP</button>
+          </p>
           <div className="flex gap-2">
             <button onClick={cancelFlow} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
             <button onClick={takePhoto} disabled={!cameraReady}
@@ -542,6 +590,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         </div>
       )}
       <canvas ref={canvasRef} className="hidden" />
+      <input ref={fileInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handleFileCaptured} />
     </div>
   )
 }
