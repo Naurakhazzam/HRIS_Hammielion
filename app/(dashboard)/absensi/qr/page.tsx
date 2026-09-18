@@ -17,7 +17,24 @@ export default function AbsenQrAdminPage() {
   const [cleanupCount, setCleanupCount] = useState<number | null>(null)
   const [cleaning, setCleaning] = useState(false)
 
+  // Cabang mana saja yang mau ikut dicetak — defaultnya semua tercentang (perilaku lama:
+  // cetak semua), tapi bisa dicentang-lepas per cabang sebelum klik Cetak.
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+
   useEffect(() => { fetchBranches(); fetchCleanupCount(); triggerDailyPhotoCleanup() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    setSelected(prev => prev.size === branches.length ? new Set() : new Set(branches.map(b => b.id)))
+  }
 
   function showMsg(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
@@ -43,6 +60,7 @@ export default function AbsenQrAdminPage() {
       return { ...r, dataUrl }
     }))
     setBranches(withQr)
+    setSelected(prev => prev.size > 0 ? prev : new Set(withQr.map(b => b.id))) // default: semua tercentang
     setLoading(false)
   }
 
@@ -84,14 +102,14 @@ export default function AbsenQrAdminPage() {
 
   return (
     <div>
-      {/* Cetak: paksa 2 QR per halaman (bukan ikut grid layar yang bisa 2-3 kolom tergantung
-          lebar), dan halaman baru otomatis dimulai tiap 2 kartu — supaya QR-nya bisa dicetak
-          besar dan jelas, tidak berdesakan kecil-kecil. */}
+      {/* Cetak: paksa 1 QR per halaman (halaman baru otomatis dimulai tiap kartu) — supaya
+          QR-nya bisa dicetak sebesar mungkin, jelas kelihatan dari jarak jauh. Kartu yang tidak
+          dicentang disembunyikan KHUSUS saat cetak (print:hidden), tetap kelihatan di layar
+          supaya masih bisa dicentang ulang kapan saja. */}
       <style>{`
         @media print {
-          .qr-print-grid { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 3rem !important; }
-          .qr-print-card { break-inside: avoid; }
-          .qr-print-card:nth-child(2n) { break-after: page; }
+          .qr-print-grid { display: block !important; }
+          .qr-print-card { break-inside: avoid; break-after: page; }
         }
       `}</style>
 
@@ -121,29 +139,44 @@ export default function AbsenQrAdminPage() {
       {loading ? (
         <div className="text-center py-12 text-slate-500">Memuat...</div>
       ) : (
-        <div className="qr-print-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {branches.map(b => (
-            <div key={b.id} className="qr-print-card bg-white rounded-xl shadow-sm border border-slate-200 p-5 text-center print:shadow-none print:border-2 print:p-10">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1 print:text-lg">QR Absen — Cabang</p>
-              <p className="text-xl font-extrabold text-slate-800 mb-3 print:text-5xl print:mb-6">{b.name}</p>
-              {b.dataUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={b.dataUrl} alt={`QR Absen ${b.name}`} className="mx-auto w-48 h-48 print:w-full print:h-auto print:max-w-none" />
-              ) : (
-                <p className="text-xs text-slate-400 py-12">QR belum tersedia.</p>
-              )}
-              <button onClick={() => regenerateToken(b.id)} disabled={regenerating === b.id}
-                className="mt-3 text-xs text-slate-500 hover:text-red-600 underline print:hidden disabled:opacity-50">
-                {regenerating === b.id ? 'Memproses...' : 'Buat Ulang QR (kalau bocor/hilang)'}
-              </button>
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="mb-3 print:hidden">
+            <button onClick={toggleSelectAll} className="text-xs text-blue-600 hover:underline font-medium">
+              {selected.size === branches.length ? 'Batalkan Semua' : 'Pilih Semua'}
+            </button>
+          </div>
+          <div className="qr-print-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {branches.map(b => {
+              const isSelected = selected.has(b.id)
+              return (
+                <div key={b.id} className={`qr-print-card bg-white rounded-xl shadow-sm border p-5 text-center print:shadow-none print:border-2 print:p-10 ${isSelected ? 'border-slate-200' : 'border-slate-200 opacity-50'} ${!isSelected ? 'print:hidden' : ''}`}>
+                  <label className="flex items-center justify-center gap-2 mb-2 print:hidden cursor-pointer">
+                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelected(b.id)} className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer" />
+                    <span className="text-xs text-slate-500">Ikut dicetak</span>
+                  </label>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1 print:text-lg">QR Absen — Cabang</p>
+                  <p className="text-xl font-extrabold text-slate-800 mb-3 print:text-6xl print:mb-8">{b.name}</p>
+                  {b.dataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={b.dataUrl} alt={`QR Absen ${b.name}`} className="mx-auto w-48 h-48 print:w-2/3 print:h-auto print:max-w-none" />
+                  ) : (
+                    <p className="text-xs text-slate-400 py-12">QR belum tersedia.</p>
+                  )}
+                  <button onClick={() => regenerateToken(b.id)} disabled={regenerating === b.id}
+                    className="mt-3 text-xs text-slate-500 hover:text-red-600 underline print:hidden disabled:opacity-50">
+                    {regenerating === b.id ? 'Memproses...' : 'Buat Ulang QR (kalau bocor/hilang)'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </>
       )}
 
       <div className="mt-6 print:hidden">
-        <button onClick={() => window.print()} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition">
-          🖨️ Cetak Semua QR
+        <button onClick={() => window.print()} disabled={selected.size === 0}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
+          🖨️ Cetak QR Terpilih ({selected.size})
         </button>
       </div>
     </div>

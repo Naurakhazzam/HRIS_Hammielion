@@ -1571,4 +1571,21 @@ Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identita
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera + cetak QR 2 per halaman lebih besar*
+### 96. Cetak QR Absen: 1 per Halaman + Bisa Pilih Cabang Mana yang Dicetak
+
+**Konteks:** Lanjutan dari fix #95 — Owner minta diubah jadi 1 QR per halaman (lebih besar lagi dari 2/halaman), dan ditambah fitur pilih cabang mana saja yang mau ikut dicetak (tidak harus semua cabang sekaligus).
+
+**Fitur:**
+- Cetak sekarang **1 QR per halaman**, ukurannya dibuat semaksimal mungkin.
+- Tiap kartu QR di layar punya **centang "Ikut dicetak"** — defaultnya semua tercentang, bisa dilepas satu-satu kalau cuma mau cetak cabang tertentu (misal QR-nya cuma perlu diganti untuk 1 cabang yang bocor).
+- Tombol **"Pilih Semua" / "Batalkan Semua"** untuk cepat centang/lepas semuanya sekaligus.
+- Tombol cetak menampilkan jumlah yang akan dicetak, misal **"Cetak QR Terpilih (3)"**.
+- Cabang yang tidak dicentang tetap kelihatan di layar (supaya gampang dicentang lagi nanti), cuma disembunyikan khusus saat proses cetak.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/absensi/qr/page.tsx` | Checkbox pilih per cabang + Pilih/Batalkan Semua, layout cetak 1 kolom/1 QR per halaman |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera + cetak QR 2 per halaman lebih besar + cetak QR 1/halaman & pilih cabang*
