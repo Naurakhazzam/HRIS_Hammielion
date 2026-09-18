@@ -1404,4 +1404,22 @@ Status preview disimpan di cookie (`previewAsEmployee`, bukan `sessionStorage`) 
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS*
+### 85. Fitur: Daftar Cepat (Kode Karyawan Saja)
+
+**Konteks:** Owner minta jalur daftar akun kedua yang lebih cepat, di samping form "Verifikasi Lengkap" yang sudah ada (Kode Karyawan + No HP/Tanggal Lahir + email bebas). Jalur baru ini cukup modal **Kode Karyawan saja** — keputusan sadar dari Owner bahwa Kode Karyawan dianggap sudah cukup rahasia (cuma diketahui HR & karyawan bersangkutan), jadi tanpa verifikasi No HP/Tanggal Lahir lagi. Email login-nya juga bukan email bebas, tapi wajib pakai **nama lengkap + domain `@hammielion.com`** (karyawan ketik nama, sistem yang tempelkan domainnya).
+
+**Alur:** Halaman `/signup` sekarang punya 2 tab — "Verifikasi Lengkap" (tidak berubah) dan **"Kode Karyawan Saja"** (baru):
+1. Karyawan isi Kode Karyawan → begitu pindah dari kolom itu (blur), sistem langsung cek dan tampilkan nama yang ditemukan sebagai konfirmasi ("✓ Data ditemukan: Budi Santoso") — atau pesan error generik kalau tidak ketemu/tidak aktif/sudah pernah daftar.
+2. Isi Nama Lengkap → langsung terlihat preview email yang akan dipakai (`budi.santoso@hammielion.com`).
+3. Isi Password + Konfirmasi Password → Daftar.
+4. Setelah berhasil, email login yang dibentuk sistem ditampilkan jelas di layar (supaya karyawan tahu & catat, karena bukan email yang mereka ketik sendiri).
+
+| File | Perubahan |
+|---|---|
+| `lib/emailFromName.ts` (baru) | Rumus bentuk email dari nama (dipakai bareng form & API, supaya preview dan hasil akhir selalu sama) |
+| `app/api/signup/quick/route.ts` (baru) | `GET` untuk lookup nama by Kode Karyawan, `POST` untuk buat akun. Sengaja dinesting di bawah `/api/signup` supaya otomatis ikut aturan publik di `proxy.ts` (pelajaran dari bug #80) |
+| `app/(auth)/signup/page.tsx` | Ditambah tab switch, form lama dipecah jadi komponen `FullVerifyForm`, form baru `QuickForm` |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja*
