@@ -818,8 +818,14 @@ export default function RekapAbsensiPage() {
                           </div>
                         ) : <span className="text-slate-300 text-xs">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">{fmtTs(att.check_in)}</td>
-                      <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">{fmtTs(att.check_out)}</td>
+                      <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">
+                        {fmtTs(att.check_in)}
+                        {att.check_in_photo_url && <a href={att.check_in_photo_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</a>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">
+                        {fmtTs(att.check_out)}
+                        {att.check_out_photo_url && <a href={att.check_out_photo_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</a>}
+                      </td>
                       <td className="px-4 py-3 text-center">
                         {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}
                       </td>
