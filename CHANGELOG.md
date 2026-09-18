@@ -1489,4 +1489,18 @@ Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identita
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi*
+### 90. Fix Bug: Layar Kamera Hitam Setelah Scan QR
+
+**Ditemukan:** Owner lapor setelah scan QR, tombol "Ambil Foto" muncul (jadi kamera sudah dapat izin & tersambung), tapi layar preview-nya **hitam polos**, tidak menampilkan gambar apa pun. Penyebabnya: video kamera di-set sumbernya lewat JavaScript (`srcObject`), yang di sebagian browser/WebView Android tidak otomatis memicu pemutaran video walau ada atribut `autoPlay` — videonya "tersambung" tapi tidak pernah benar-benar main, jadi layarnya tetap hitam.
+
+**Fix:**
+- Ditambahkan pemanggilan `.play()` eksplisit setelah video tersambung, supaya tidak bergantung ke autoplay browser yang tidak selalu konsisten.
+- Ditambahkan tombol **"Coba Ulang Kamera"** kecil di layar kamera — kalau tetap hitam (misal karena aplikasi scan QR belum sempat melepas kamera sepenuhnya), tinggal klik itu untuk minta ulang tanpa keluar dari alur absen.
+
+| File | Perubahan |
+|---|---|
+| `components/AbsenSekarang.tsx` | Panggil `.play()` eksplisit setelah set `srcObject`, tombol "Coba Ulang Kamera" |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam*

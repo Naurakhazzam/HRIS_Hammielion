@@ -154,7 +154,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
       streamRef.current = stream
       setStep('camera')
-      setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream }, 0)
+      // Set srcObject secara manual lewat JS (bukan attribute) kadang tidak otomatis memicu
+      // playback di sebagian browser/WebView Android — video jadi "tersambung" tapi layarnya
+      // hitam karena tidak pernah benar-benar main. Panggil .play() eksplisit untuk memaksanya.
+      setTimeout(() => {
+        if (!videoRef.current) return
+        videoRef.current.srcObject = stream
+        videoRef.current.play().catch(() => { /* diabaikan — atribut autoPlay jadi fallback */ })
+      }, 0)
     } catch {
       showMessage('error', 'Tidak bisa mengakses kamera. Pastikan izin kamera diaktifkan untuk browser ini.')
       setStep('idle')
@@ -222,6 +229,15 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     setCapturedUrl(null)
     setGeo(null)
     setStep('idle')
+  }
+
+  // Kalau kamera nyala tapi layarnya hitam (kadang terjadi karena kamera masih "dipegang"
+  // aplikasi lain, misal aplikasi scan QR yang belum sempat lepas sepenuhnya) — matikan stream
+  // lama dan minta ulang dari awal, tanpa perlu keluar dari alur absen.
+  async function restartCamera() {
+    stopCamera()
+    setCameraReady(false)
+    await openCamera()
   }
 
   function cancelSwapFlow() {
@@ -503,6 +519,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         <div className="space-y-3">
           <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setCameraReady(true)}
             className="w-full rounded-lg bg-slate-900 aspect-[3/4] object-cover" />
+          <p className="text-[11px] text-slate-400 text-center">Layar kamera hitam/tidak muncul gambar? <button type="button" onClick={restartCamera} className="text-blue-600 hover:underline font-medium">Coba Ulang Kamera</button></p>
           <div className="flex gap-2">
             <button onClick={cancelFlow} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
             <button onClick={takePhoto} disabled={!cameraReady}
