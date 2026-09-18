@@ -198,9 +198,12 @@ function QuickForm() {
   async function checkIdentity() {
     setCheckedInfo(null)
     setCheckError(null)
-    if (!fullName.trim() || !birthDate) return
+    // Butuh nama, lalu SALAH SATU dari Tanggal Lahir atau Kode Karyawan (jalur cadangan untuk
+    // karyawan yang belum punya Tanggal Lahir tercatat di HR).
+    if (!fullName.trim() || (!birthDate && !employeeCode.trim())) return
     setChecking(true)
-    const params = new URLSearchParams({ name: fullName.trim(), birth_date: birthDate })
+    const params = new URLSearchParams({ name: fullName.trim() })
+    if (birthDate) params.set('birth_date', birthDate)
     if (employeeCode.trim()) params.set('employee_code', employeeCode.trim())
     const res = await fetch(`/api/signup/quick?${params.toString()}`)
     const data = await res.json()
@@ -248,11 +251,11 @@ function QuickForm() {
   return (
     <>
       <h2 className="text-lg font-semibold text-slate-700 mb-1">Daftar Cepat</h2>
-      <p className="text-xs text-slate-500 mb-6">Khusus karyawan yang sudah terdaftar di data HR. Verifikasi pakai Nama Lengkap &amp; Tanggal Lahir sesuai data HR.</p>
+      <p className="text-xs text-slate-500 mb-6">Khusus karyawan yang sudah terdaftar di data HR. Verifikasi pakai Nama Lengkap &amp; Tanggal Lahir sesuai data HR (atau Kode Karyawan saja kalau Anda belum punya Tanggal Lahir tercatat).</p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="qc_full_name" className="block text-sm font-medium text-slate-700 mb-1.5">Nama Lengkap (sesuai data HR)</label>
+          <label htmlFor="qc_full_name" className="block text-sm font-medium text-slate-700 mb-1.5">Nama Lengkap</label>
           <input id="qc_full_name" type="text" required value={fullName}
             onChange={e => { setFullName(e.target.value); setCheckedInfo(null); setCheckError(null) }}
             onBlur={checkIdentity}
@@ -265,16 +268,19 @@ function QuickForm() {
 
         <div>
           <label htmlFor="qc_birth_date" className="block text-sm font-medium text-slate-700 mb-1.5">Tanggal Lahir (sesuai data HR)</label>
-          <input id="qc_birth_date" type="date" required value={birthDate}
+          <input id="qc_birth_date" type="date" value={birthDate}
             onChange={e => { setBirthDate(e.target.value); setCheckedInfo(null); setCheckError(null) }}
             onBlur={checkIdentity}
             disabled={loading}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+          <p className="text-[11px] text-slate-400 mt-1">Belum punya Tanggal Lahir tercatat di HR? Kosongkan ini, lalu isi Kode Karyawan di bawah sebagai gantinya.</p>
         </div>
 
         <div>
-          <label htmlFor="qc_employee_code" className="block text-sm font-medium text-slate-700 mb-1.5">Kode Karyawan <span className="text-slate-400 font-normal">(opsional — isi kalau diminta HR)</span></label>
-          <input id="qc_employee_code" type="text" value={employeeCode}
+          <label htmlFor="qc_employee_code" className="block text-sm font-medium text-slate-700 mb-1.5">
+            Kode Karyawan {birthDate ? <span className="text-slate-400 font-normal">(opsional — isi kalau diminta HR)</span> : <span className="text-red-500">*</span>}
+          </label>
+          <input id="qc_employee_code" type="text" required={!birthDate} value={employeeCode}
             onChange={e => { setEmployeeCode(e.target.value.toUpperCase()); setCheckedInfo(null); setCheckError(null) }}
             onBlur={checkIdentity}
             placeholder="Contoh: EMP-012" disabled={loading}
