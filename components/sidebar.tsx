@@ -54,6 +54,7 @@ const adminNavItems: NavNode[] = [
           { name: 'Penugasan Shift', href: '/absensi/shift' },
           { name: 'Rekap Absensi', href: '/absensi/rekap' },
           { name: 'Import Absensi', href: '/absensi/import' },
+          { name: 'QR Absen', href: '/absensi/qr' },
         ]
       },
       { name: 'Cuti & Izin', href: '/cuti' },

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { triggerDailyPhotoCleanup } from '@/lib/photoCleanup'
 
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
@@ -99,7 +100,7 @@ export default function RekapAbsensiPage() {
   type IncompleteRow = { id: string; date: string; check_in: string; employee_id: string; employees: { full_name: string } }
   const [incompleteCheckouts, setIncompleteCheckouts] = useState<IncompleteRow[]>([])
 
-  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts() }, [])
+  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); triggerDailyPhotoCleanup() }, [])
   useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
   // Kalau karyawan yang sedang dipilih jadi tidak termasuk lagi setelah Cabang/Departemen
   // diganti, kosongkan lagi pilihannya — supaya tidak nyangkut ke karyawan di luar cakupan filter.

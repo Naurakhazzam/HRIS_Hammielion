@@ -17,6 +17,10 @@ type Attendance = {
   notes: string | null
 }
 
+// Absen HP (GPS+kamera) di-nonaktifkan sementara — diganti Absen QR (scan QR statis per
+// cabang, tanpa GPS). Set true lagi kapan pun untuk mengaktifkannya kembali.
+const SHOW_GPS_CHECKIN = false
+
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -94,7 +98,15 @@ export default function PortalAbsensiPage() {
         <p className="text-sm text-slate-500">Halo, <strong>{myName}</strong>. Rekap kehadiran Anda.</p>
       </div>
 
-      {myEmployeeId && <AbsenSekarang employeeId={myEmployeeId} employeeName={myName} onDone={fetchAttendances} />}
+      {/* Absen HP (GPS+kamera) disembunyikan dulu atas permintaan Owner — digantikan Absen QR
+          (scan QR statis per cabang, tanpa GPS). Komponennya tetap ada, tinggal set true lagi
+          kalau nanti mau dipakai lagi. */}
+      {SHOW_GPS_CHECKIN && myEmployeeId && <AbsenSekarang employeeId={myEmployeeId} employeeName={myName} onDone={fetchAttendances} />}
+      {!SHOW_GPS_CHECKIN && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg px-4 py-3 mb-6">
+          📷 Absen sekarang lewat <strong>scan QR</strong> yang ditempel di cabang Anda — arahkan kamera HP ke QR itu untuk absen masuk/pulang.
+        </div>
+      )}
 
       {/* Filter */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6 flex flex-wrap gap-4 items-center">

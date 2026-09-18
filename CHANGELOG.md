@@ -1376,4 +1376,32 @@ Status preview disimpan di cookie (`previewAsEmployee`, bukan `sessionStorage`) 
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk*
+### 84. Fitur: Absen QR (Menggantikan Sementara Absen HP GPS+Kamera)
+
+**Konteks:** Absen HP dengan GPS+kamera (deteksi lokasi + foto ber-watermark jarak) makan waktu lama untuk dibangun dan dirasa terlalu berat untuk kebutuhan sekarang. Owner minta solusi instant: absen cukup scan QR, sambil ke depannya data absensi "resmi" tetap ditarik dari mesin fingerprint (lewat `/absensi/import` yang sudah ada). Absen HP GPS **disembunyikan dulu** (bukan dihapus — tinggal set `SHOW_GPS_CHECKIN = true` di `portal/absensi/page.tsx` untuk mengaktifkan lagi kapan pun).
+
+**Cara kerja Absen QR:**
+1. HR buka menu **Absensi → QR Absen**, di situ tampil 1 QR per cabang (statis, di-generate dari token acak per cabang) — tinggal cetak & tempel di cabang.
+2. Karyawan scan QR itu pakai kamera HP → diarahkan ke halaman `/absen-qr/<token>` → sistem cek dulu apakah cabang di QR itu cocok dengan cabang karyawan tersebut (kalau beda cabang, ditolak dengan pesan jelas).
+3. Kalau cocok, alur absennya SAMA PERSIS dengan Absen HP sebelumnya (termasuk fitur tukar hari libur dari fix #83) — cuma tanpa deteksi GPS/radius. Tetap wajib foto langsung dari kamera (bukan galeri), tetap otomatis hitung telat/lembur, tetap masuk ke tabel `attendances` yang sama (`source = 'qr'`) supaya semua fitur di atasnya (payroll, rekap) tidak perlu diubah.
+4. QR bisa "dibuat ulang" per cabang kapan saja (misal token-nya kefoto/bocor) — QR lama otomatis tidak berlaku lagi.
+
+**Kenapa token QR disimpan terpisah, bukan di tabel `branches`:** RLS tabel `branches` mengizinkan SEMUA role baca (termasuk karyawan biasa) — kalau token ditaruh di situ, semua karyawan bisa lihat token cabang lain dan absen palsu di cabang yang tidak pernah mereka datangi. Token disimpan di tabel baru `branch_qr_tokens` yang cuma bisa dibaca owner/hr; halaman absen karyawan resolve token lewat RPC `resolve_branch_by_qr_token` yang cuma mengembalikan nama cabang, bukan daftar token.
+
+**Retensi foto (karena tanpa GPS pun tetap ada foto, dan storage Supabase project ini masih paket Free 1GB):** foto absen (check-in & check-out) yang lebih tua dari **60 hari** dihapus otomatis — baik file di storage maupun link-nya di kolom `attendances`, sementara data jam masuk/pulang/telat/lembur **tidak ikut terhapus, tersimpan permanen**. Pembersihan ini dipicu otomatis (dibatasi 1x/hari) tiap kali HR buka halaman Rekap Absensi atau QR Absen, dan juga bisa dijalankan manual kapan saja dari halaman QR Absen.
+
+| File | Perubahan |
+|---|---|
+| Migrasi DB (Supabase) | Tabel `branch_qr_tokens`, RPC `resolve_branch_by_qr_token`, tambah `'qr'` ke CHECK constraint `attendances.source` |
+| `components/AbsenSekarang.tsx` | Ditambah prop `mode: 'gps' \| 'qr'` — mode `qr` melewati semua langkah GPS/radius |
+| `app/(dashboard)/absen-qr/[token]/page.tsx` (baru) | Halaman tujuan scan QR karyawan — validasi token & kecocokan cabang |
+| `app/(dashboard)/absensi/qr/page.tsx` (baru) | Halaman admin: generate/cetak/buat-ulang QR per cabang + panel kebersihan storage foto |
+| `app/api/attendance/cleanup-old-photos/route.ts` (baru) | Hapus foto >60 hari (file storage + link kolom), owner/hr only |
+| `lib/photoCleanup.ts` (baru) | Helper pemicu pembersihan otomatis 1x/hari dari sisi browser |
+| `app/(dashboard)/portal/absensi/page.tsx` | Absen HP GPS disembunyikan (`SHOW_GPS_CHECKIN = false`), diganti info arahan ke Absen QR |
+| `app/(dashboard)/absensi/rekap/page.tsx` | Panggil pemicu pembersihan foto otomatis saat halaman dibuka |
+| `components/sidebar.tsx` | Menu baru "QR Absen" di grup Absensi |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS*

@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr, localDateStr } from '@/lib/date'
 import { resolveSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
 
-type Props = { employeeId: string; employeeName: string; onDone?: () => void }
+type Props = { employeeId: string; employeeName: string; onDone?: () => void; mode?: 'gps' | 'qr' }
 
 type BranchGeo = { id: string; name: string; latitude: number | null; longitude: number | null; checkin_radius_meters: number }
 type TodayRow = { id: string; check_in: string | null; check_out: string | null; source: string } | null
@@ -18,7 +18,7 @@ type Step = 'idle' | 'locating' | 'camera' | 'preview' | 'uploading' | 'confirm-
 // foto lama/hasil edit. Radius dicek di client sebelum kamera dibuka; RLS di database cuma
 // membatasi SIAPA/TANGGAL/SUMBER (lihat migrasi attendances_mobile_checkin_*) — tidak bisa
 // memverifikasi keaslian koordinat GPS yang dikirim browser, itu batas wajar untuk absen berbasis web.
-export default function AbsenSekarang({ employeeId, employeeName, onDone }: Props) {
+export default function AbsenSekarang({ employeeId, employeeName, onDone, mode = 'gps' }: Props) {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [branch, setBranch] = useState<BranchGeo | null>(null)
@@ -107,6 +107,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   // begitu tukar libur berhasil, tanpa kena cek todayIsDayOff lagi (closure state di situ
   // masih nilai lama sesaat sebelum re-render, jadi cek ulang akan salah menganggap masih libur).
   async function proceedToGeoCheckin() {
+    if (mode === 'qr') {
+      // Absen QR: sudah pasti di cabang yang benar (dicek oleh halaman /absen-qr sebelum
+      // komponen ini dirender), jadi tidak perlu GPS — langsung buka kamera.
+      setGeo(null)
+      await openCamera()
+      return
+    }
+
     if (!branch?.latitude || !branch?.longitude) {
       showMessage('error', 'Cabang Anda belum diaktifkan untuk absen HP. Hubungi HR.')
       return
@@ -126,15 +134,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
           return
         }
         setGeo({ lat: pos.coords.latitude, lng: pos.coords.longitude, distance })
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
-          streamRef.current = stream
-          setStep('camera')
-          setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream }, 0)
-        } catch {
-          showMessage('error', 'Tidak bisa mengakses kamera. Pastikan izin kamera diaktifkan untuk browser ini.')
-          setStep('idle')
-        }
+        await openCamera()
       },
       () => {
         showMessage('error', 'Gagal mengambil lokasi GPS. Pastikan izin lokasi diaktifkan, lalu coba lagi.')
@@ -144,21 +144,34 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
     )
   }
 
+  async function openCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+      streamRef.current = stream
+      setStep('camera')
+      setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream }, 0)
+    } catch {
+      showMessage('error', 'Tidak bisa mengakses kamera. Pastikan izin kamera diaktifkan untuk browser ini.')
+      setStep('idle')
+    }
+  }
+
   function takePhoto() {
     const video = videoRef.current
     const canvas = canvasRef.current
-    if (!video || !canvas || !geo) return
+    if (!video || !canvas) return
+    if (mode === 'gps' && !geo) return
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-    // Watermark bukti: nama, waktu, jarak dari cabang — menempel di gambarnya sendiri.
+    // Watermark bukti: nama, waktu, (jarak dari cabang kalau mode GPS) — menempel di gambarnya sendiri.
     const now = new Date()
     const label1 = employeeName
     const label2 = `${now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} ${now.toLocaleTimeString('id-ID')}`
-    const label3 = `${Math.round(geo.distance)}m dari ${branch?.name ?? 'cabang'}`
+    const label3 = geo ? `${Math.round(geo.distance)}m dari ${branch?.name ?? 'cabang'}` : `QR Absen — ${branch?.name ?? 'cabang'}`
     const barHeight = Math.max(64, canvas.height * 0.12)
     ctx.fillStyle = 'rgba(0,0,0,0.55)'
     ctx.fillRect(0, canvas.height - barHeight, canvas.width, barHeight)
@@ -269,7 +282,8 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   }
 
   async function submitCheckin() {
-    if (!capturedBlob || !geo) return
+    if (!capturedBlob) return
+    if (mode === 'gps' && !geo) return
     setStep('uploading')
 
     const isCheckOut = !!today?.check_in && !today?.check_out
@@ -295,9 +309,9 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
         check_out: nowIso,
         overtime_hours: overtimeHours,
         check_out_photo_url: photoUrl,
-        check_out_lat: geo.lat,
-        check_out_lng: geo.lng,
-        check_out_distance_m: Math.round(geo.distance),
+        check_out_lat: geo?.lat ?? null,
+        check_out_lng: geo?.lng ?? null,
+        check_out_distance_m: geo ? Math.round(geo.distance) : null,
       }).eq('id', today.id)
       if (error) { showMessage('error', 'Gagal mencatat absen pulang: ' + error.message); setStep('preview'); return }
       showMessage('success', `Absen pulang tercatat jam ${now.toLocaleTimeString('id-ID')}.`)
@@ -311,12 +325,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
         late_minutes: lateMinutes,
         overtime_hours: 0,
         status: 'present',
-        source: 'mobile',
-        notes: 'Absen HP',
+        source: mode === 'qr' ? 'qr' : 'mobile',
+        notes: mode === 'qr' ? 'Absen QR' : 'Absen HP',
         check_in_photo_url: photoUrl,
-        check_in_lat: geo.lat,
-        check_in_lng: geo.lng,
-        check_in_distance_m: Math.round(geo.distance),
+        check_in_lat: geo?.lat ?? null,
+        check_in_lng: geo?.lng ?? null,
+        check_in_distance_m: geo ? Math.round(geo.distance) : null,
       })
       if (error) { showMessage('error', 'Gagal mencatat absen masuk: ' + error.message); setStep('preview'); return }
       showMessage('success', lateMinutes > 0
@@ -334,10 +348,13 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   }
 
   if (loading) return null
-  if (!branch?.latitude || !branch?.longitude) return null // belum diaktifkan untuk cabang ini — jangan tampilkan apa-apa, fingerprint tetap jalan seperti biasa
+  // Mode GPS: kalau cabang belum diaktifkan (belum ada lat/lng), jangan tampilkan apa-apa —
+  // fingerprint tetap jalan seperti biasa. Mode QR tidak butuh lat/lng sama sekali.
+  if (mode === 'gps' && (!branch?.latitude || !branch?.longitude)) return null
 
+  const ownSource = mode === 'qr' ? 'qr' : 'mobile'
   const alreadyDoneToday = !!today?.check_in && !!today?.check_out
-  const blockedByOtherSource = !!today && today.source !== 'mobile' && !alreadyDoneToday
+  const blockedByOtherSource = !!today && today.source !== ownSource && !alreadyDoneToday
   const isDayOffToday = !!todayIsDayOff && !today?.check_in
   const nextAction: 'in' | 'out' | null = alreadyDoneToday || blockedByOtherSource ? null : today?.check_in ? 'out' : 'in'
 
@@ -353,10 +370,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   return (
     <div className="bg-white rounded-xl shadow-sm border-2 border-blue-200 p-5 mb-6">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-base font-bold text-slate-800">📍 Absen Sekarang</h2>
-        <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">via HP</span>
+        <h2 className="text-base font-bold text-slate-800">{mode === 'qr' ? '📷 Absen QR' : '📍 Absen Sekarang'}</h2>
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">{mode === 'qr' ? `Cabang ${branch?.name ?? ''}` : 'via HP'}</span>
       </div>
-      <p className="text-xs text-slate-500 mb-3">Radius {branch.checkin_radius_meters}m dari {branch.name}. Foto wajib diambil langsung dari kamera saat itu juga.</p>
+      <p className="text-xs text-slate-500 mb-3">
+        {mode === 'qr'
+          ? 'Foto wajib diambil langsung dari kamera saat itu juga.'
+          : `Radius ${branch?.checkin_radius_meters}m dari ${branch?.name}. Foto wajib diambil langsung dari kamera saat itu juga.`}
+      </p>
 
       {message && (
         <div className={`p-3 mb-3 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
@@ -368,7 +389,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
         <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">✓ Absen masuk & pulang hari ini sudah lengkap.</p>
       )}
       {blockedByOtherSource && (
-        <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">Absen hari ini sudah tercatat lewat {today?.source === 'fingerprint' ? 'mesin fingerprint' : 'input manual'}.</p>
+        <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          Absen hari ini sudah tercatat lewat {
+            today?.source === 'fingerprint' ? 'mesin fingerprint'
+            : today?.source === 'manual' ? 'input manual'
+            : today?.source === 'qr' ? 'Absen QR'
+            : 'Absen HP'
+          }.
+        </p>
       )}
       {isDayOffToday && step === 'idle' && (
         <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
