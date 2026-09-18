@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import AbsenSekarang from '@/components/AbsenSekarang'
-import { isPreviewModeClient } from '@/lib/previewMode'
 
 type ResolveResult = { branch_id: string; branch_name: string } | null
 
@@ -29,9 +28,8 @@ export default function AbsenQrPage() {
       .eq('id', user.id).single()
     if (!userData) { setErrorMsg('Data akun tidak ditemukan.'); setLoading(false); return }
 
-    if (!['employee', 'supervisor'].includes(userData.role) && !isPreviewModeClient()) {
-      router.push('/dashboard'); return
-    }
+    // Semua role bisa absen QR pakai akun sendiri — bukan cuma employee/supervisor,
+    // karena owner/hr/finance juga karyawan (lihat fix #87, Portal Saya untuk semua role).
 
     const emp = (userData as any).employees as { full_name: string; branch_id: string } | null
     if (!emp) { setErrorMsg('Data karyawan untuk akun ini tidak ditemukan.'); setLoading(false); return }

@@ -1462,4 +1462,19 @@ Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identita
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role*
+### 88. Fix Bug: Absen QR Selalu Gagal Tersimpan Diam-Diam
+
+**Ditemukan:** Owner coba scan QR sendiri — masuk ke halaman web-nya, tapi absennya tidak pernah tercatat ("tidak terjadi apa-apa"). Ditelusuri, ternyata ada 2 lapis masalah menumpuk:
+1. Halaman `/absen-qr/[token]` masih membatasi akses cuma untuk role `employee`/`supervisor` (pola lama yang kelewat saat fix #87 kemarin merapikan 4 halaman Portal Saya) — Owner langsung dilempar balik ke Dashboard tanpa pesan apa pun.
+2. Yang lebih serius: kebijakan keamanan database (RLS) untuk insert/update absen mandiri ternyata **masih terkunci ke `source = 'mobile'` saja** — padahal Absen QR menulis `source = 'qr'`. Ini bug yang kebawa dari awal fitur Absen QR dibuat (lupa diupdate) — akibatnya **siapa pun** yang scan QR, termasuk karyawan sungguhan nanti, akan **selalu gagal tersimpan**, ditolak database secara diam-diam.
+
+**Fix:** Halaman Absen QR dilonggarkan untuk semua role (konsisten dengan fix #87), dan kebijakan RLS insert/update absen mandiri diperluas menerima `source` `'mobile'` maupun `'qr'`, untuk semua role.
+
+| File | Perubahan |
+|---|---|
+| Migrasi DB (Supabase) | `attendances_mobile_checkin_insert`/`_update` terima `source IN ('mobile','qr')`, semua role |
+| `app/(dashboard)/absen-qr/[token]/page.tsx` | Hapus redirect yang membatasi cuma employee/supervisor |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan*
