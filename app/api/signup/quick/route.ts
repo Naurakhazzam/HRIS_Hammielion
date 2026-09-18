@@ -2,13 +2,19 @@ import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { emailFromName } from '@/lib/emailFromName'
 
-// Jalur "Kode Karyawan Saja" — verifikasi utama pakai Nama Lengkap + Tanggal Lahir (dicocokkan
-// ke data HR). Kode Karyawan biasanya OPSIONAL (cuma untuk membedakan kalau kebetulan ada 2
-// karyawan dengan nama & tanggal lahir sama persis) — KECUALI untuk karyawan yang di data HR-nya
-// memang tidak punya No HP maupun Tanggal Lahir sama sekali (tidak ada cara lain untuk verifikasi
-// mereka): untuk kasus itu, Kode Karyawan SENDIRIAN sudah cukup, Tanggal Lahir boleh dikosongkan.
-// Nama tetap wajib diisi (dipakai bentuk email login), tapi di jalur ini tidak perlu cocok
-// dengan data HR karena verifikasinya sudah lewat Kode Karyawan.
+// Jalur "Sudah Jadi Karyawan (Belum Punya Akun)" — verifikasi TANPA Kode Karyawan sama sekali.
+// Aturan (permintaan Owner): Tanggal Lahir WAJIB cocok dengan data HR, dan minimal SALAH SATU
+// dari Nama Lengkap atau No HP juga harus cocok. Error yang dikembalikan sengaja spesifik per
+// bagian (mis. "Tanggal Lahir tidak cocok") supaya karyawan tahu persis mana yang perlu
+// diperbaiki — bukan pesan generik yang membuat mereka bingung harus mengecek yang mana.
+//
+// Konsekuensi: karyawan yang di data HR-nya TIDAK punya Tanggal Lahir tercatat sama sekali
+// tidak akan pernah bisa lolos jalur ini (Tanggal Lahir wajib cocok, tidak bisa cocok dengan
+// NULL) — HR perlu lengkapi dulu Tanggal Lahir mereka lewat menu Karyawan.
+//
+// Email login dibentuk dari NAMA ASLI YANG TERCATAT DI HR (bukan dari yang diketik user) —
+// supaya tetap konsisten walau yang bikin lolos verifikasi ternyata kecocokan No HP, bukan nama.
+//
 // Nested di bawah /api/signup supaya otomatis ikut PUBLIC_ROUTES di proxy.ts (prefix match) —
 // lihat CHANGELOG #80: '/api/signup' dulu sempat lupa ditambahkan ke situ.
 const supabaseAdmin = createClient(
@@ -17,78 +23,58 @@ const supabaseAdmin = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 )
 
-const genericError = 'Data tidak cocok dengan data HR, tidak aktif, atau sudah pernah dipakai daftar. Hubungi HR.'
-const ambiguousError = 'Ada lebih dari satu karyawan dengan nama & tanggal lahir yang sama — isi juga Kode Karyawan untuk memastikan.'
-const needCodeError = 'Tanggal Lahir wajib diisi, KECUALI kalau Anda memang belum punya Tanggal Lahir tercatat di HR — untuk itu, isi Kode Karyawan sebagai gantinya.'
-const hasOtherDataError = 'Data Anda di HR sudah punya No HP/Tanggal Lahir tercatat — isi Tanggal Lahir untuk verifikasi (Kode Karyawan opsional), bukan dikosongkan.'
+const birthDateMismatchError = 'Tanggal Lahir tidak cocok dengan data HR. Periksa kembali.'
+const nameAndPhoneMismatchError = 'Nama Lengkap dan Nomor HP dua-duanya tidak cocok dengan data HR untuk Tanggal Lahir ini — pastikan salah satunya benar.'
+const ambiguousError = 'Ada lebih dari satu data yang cocok. Hubungi HR untuk verifikasi manual.'
+const alreadyOrInactiveError = 'Karyawan ini sudah terdaftar, atau datanya tidak aktif. Silakan login, atau hubungi HR.'
 
-type EmpRow = { id: string; full_name: string; employee_code: string; phone: string | null; birth_date: string | null; is_active: boolean; positions: { name: string } | null }
+type EmpRow = { id: string; full_name: string; employee_code: string; phone: string | null; positions: { name: string } | null }
 
-async function resolveByNameAndBirthdate(fullName: string, birthDate: string, employeeCode?: string):
+const normalizePhone = (p: string) => p.replace(/\D/g, '')
+
+async function resolveEligible(fullName: string, phone: string, birthDate: string):
   Promise<{ error: string } | { emp: EmpRow }> {
-  let query = supabaseAdmin
+  const { data } = await supabaseAdmin
     .from('employees')
-    .select('id, full_name, employee_code, phone, birth_date, is_active, positions(name)')
-    .ilike('full_name', fullName.trim())
+    .select('id, full_name, employee_code, phone, is_active, positions(name)')
     .eq('birth_date', birthDate)
     .eq('is_active', true)
-  if (employeeCode && employeeCode.trim()) {
-    query = query.eq('employee_code', employeeCode.trim().toUpperCase())
-  }
-  const { data } = await query
-  const candidates = (data as unknown as EmpRow[]) || []
 
-  if (candidates.length === 0) return { error: genericError }
+  const sameBirthdate = (data as unknown as EmpRow[]) || []
+  if (sameBirthdate.length === 0) return { error: birthDateMismatchError }
+
+  const nameNorm = fullName.trim().toLowerCase()
+  const phoneNorm = normalizePhone(phone || '')
+  const candidates = sameBirthdate.filter(e => {
+    const nameMatches = e.full_name.trim().toLowerCase() === nameNorm
+    const phoneMatches = !!phoneNorm && !!e.phone && normalizePhone(e.phone) === phoneNorm
+    return nameMatches || phoneMatches
+  })
+
+  if (candidates.length === 0) return { error: nameAndPhoneMismatchError }
   if (candidates.length > 1) return { error: ambiguousError }
-  return { emp: candidates[0] }
-}
 
-// Jalur cadangan: Tanggal Lahir dikosongkan, verifikasi cuma pakai Kode Karyawan — HANYA
-// diperbolehkan untuk karyawan yang di data HR-nya memang tidak punya No HP maupun Tanggal
-// Lahir sama sekali (kalau ada salah satunya, tetap wajib pakai jalur nama+tanggal lahir).
-async function resolveByCodeOnly(employeeCode: string): Promise<{ error: string } | { emp: EmpRow }> {
-  const { data: emp } = await supabaseAdmin
-    .from('employees')
-    .select('id, full_name, employee_code, phone, birth_date, is_active, positions(name)')
-    .eq('employee_code', employeeCode.trim().toUpperCase())
-    .maybeSingle()
-
-  const row = emp as unknown as EmpRow | null
-  if (!row || !row.is_active) return { error: genericError }
-  if (row.phone || row.birth_date) return { error: hasOtherDataError }
-  return { emp: row }
-}
-
-async function resolveEligible(fullName: string, birthDate: string, employeeCode?: string):
-  Promise<{ error: string } | { emp: EmpRow }> {
-  const result = birthDate
-    ? await resolveByNameAndBirthdate(fullName, birthDate, employeeCode)
-    : employeeCode?.trim()
-      ? await resolveByCodeOnly(employeeCode)
-      : { error: needCodeError }
-
-  if ('error' in result) return result
-
+  const emp = candidates[0]
   const { data: existing } = await supabaseAdmin
     .from('users')
     .select('id')
-    .eq('employee_id', result.emp.id)
+    .eq('employee_id', emp.id)
     .maybeSingle()
-  if (existing) return { error: genericError }
+  if (existing) return { error: alreadyOrInactiveError }
 
-  return result
+  return { emp }
 }
 
-// GET /api/signup/quick?name=...&birth_date=YYYY-MM-DD(opsional)&employee_code=...(opsional)
-// Lookup untuk konfirmasi live di form, sebelum submit.
+// GET /api/signup/quick?name=...&phone=...&birth_date=YYYY-MM-DD — lookup untuk konfirmasi
+// live di form, sebelum submit.
 export async function GET(req: NextRequest) {
-  const name = req.nextUrl.searchParams.get('name')
+  const name = req.nextUrl.searchParams.get('name') || ''
+  const phone = req.nextUrl.searchParams.get('phone') || ''
   const birthDate = req.nextUrl.searchParams.get('birth_date') || ''
-  const employeeCode = req.nextUrl.searchParams.get('employee_code') || undefined
-  if (!name) return NextResponse.json({ error: 'Nama lengkap wajib diisi.' }, { status: 400 })
-  if (!birthDate && !employeeCode) return NextResponse.json({ error: needCodeError }, { status: 400 })
+  if (!birthDate) return NextResponse.json({ error: 'Tanggal Lahir wajib diisi.' }, { status: 400 })
+  if (!name.trim()) return NextResponse.json({ error: 'Nama Lengkap wajib diisi.' }, { status: 400 })
 
-  const result = await resolveEligible(name, birthDate, employeeCode)
+  const result = await resolveEligible(name, phone, birthDate)
   if ('error' in result) return NextResponse.json({ error: result.error }, { status: 400 })
 
   return NextResponse.json({
@@ -100,26 +86,24 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { full_name, birth_date, employee_code, password } = body
+    const { full_name, phone, birth_date, password } = body
 
-    if (!full_name || !password) {
-      return NextResponse.json({ error: 'Nama lengkap dan password wajib diisi.' }, { status: 400 })
-    }
-    if (!birth_date && !employee_code) {
-      return NextResponse.json({ error: needCodeError }, { status: 400 })
+    if (!full_name || !birth_date || !password) {
+      return NextResponse.json({ error: 'Nama Lengkap, Tanggal Lahir, dan password wajib diisi.' }, { status: 400 })
     }
     if (String(password).length < 6) {
       return NextResponse.json({ error: 'Password minimal 6 karakter.' }, { status: 400 })
     }
 
-    const email = emailFromName(full_name)
-    if (!email) {
-      return NextResponse.json({ error: 'Nama tidak valid untuk dijadikan email.' }, { status: 400 })
-    }
-
-    const result = await resolveEligible(full_name, birth_date || '', employee_code)
+    const result = await resolveEligible(full_name, phone || '', birth_date)
     if ('error' in result) return NextResponse.json({ error: result.error }, { status: 400 })
     const emp = result.emp
+
+    // Email dibentuk dari nama ASLI di data HR, bukan dari yang diketik user.
+    const email = emailFromName(emp.full_name)
+    if (!email) {
+      return NextResponse.json({ error: 'Nama di data HR tidak valid untuk dijadikan email. Hubungi HR.' }, { status: 400 })
+    }
 
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,

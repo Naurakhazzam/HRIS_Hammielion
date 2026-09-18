@@ -29,7 +29,7 @@ export default function SignupPage() {
           </button>
           <button type="button" onClick={() => setFormMode('quick')}
             className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition ${formMode === 'quick' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>
-            Kode Karyawan Saja
+            Sudah Jadi Karyawan
           </button>
         </div>
 
@@ -174,16 +174,15 @@ function FullVerifyForm() {
   )
 }
 
-// Jalur cepat: cuma modal Kode Karyawan (dianggap sudah cukup rahasia — keputusan Owner),
-// verifikasi identitas pakai Nama Lengkap + Tanggal Lahir (dicocokkan ke data HR), Kode
-// Karyawan OPSIONAL (cuma dipakai untuk membedakan kalau kebetulan ada 2 karyawan dengan nama
-// & tanggal lahir sama persis). Email login dibentuk dari Nama Lengkap yang sama + domain
-// @hammielion.com (bukan email pribadi bebas seperti tab satunya).
+// Jalur "Sudah Jadi Karyawan" — TANPA Kode Karyawan sama sekali. Verifikasi: Tanggal Lahir
+// WAJIB cocok dengan data HR, dan minimal SALAH SATU dari Nama Lengkap atau No HP juga harus
+// cocok. Email login dibentuk dari nama ASLI yang tercatat di HR (bukan dari yang diketik user)
+// + domain @hammielion.com.
 function QuickForm() {
   const router = useRouter()
   const [fullName, setFullName] = useState('')
+  const [phone, setPhone] = useState('')
   const [birthDate, setBirthDate] = useState('')
-  const [employeeCode, setEmployeeCode] = useState('')
   const [checking, setChecking] = useState(false)
   const [checkedInfo, setCheckedInfo] = useState<{ employee_code: string; position_name: string | null } | null>(null)
   const [checkError, setCheckError] = useState<string | null>(null)
@@ -198,13 +197,10 @@ function QuickForm() {
   async function checkIdentity() {
     setCheckedInfo(null)
     setCheckError(null)
-    // Butuh nama, lalu SALAH SATU dari Tanggal Lahir atau Kode Karyawan (jalur cadangan untuk
-    // karyawan yang belum punya Tanggal Lahir tercatat di HR).
-    if (!fullName.trim() || (!birthDate && !employeeCode.trim())) return
+    if (!fullName.trim() || !birthDate) return
     setChecking(true)
-    const params = new URLSearchParams({ name: fullName.trim() })
-    if (birthDate) params.set('birth_date', birthDate)
-    if (employeeCode.trim()) params.set('employee_code', employeeCode.trim())
+    const params = new URLSearchParams({ name: fullName.trim(), birth_date: birthDate })
+    if (phone.trim()) params.set('phone', phone.trim())
     const res = await fetch(`/api/signup/quick?${params.toString()}`)
     const data = await res.json()
     if (!res.ok) setCheckError(data.error || 'Data tidak valid.')
@@ -221,7 +217,7 @@ function QuickForm() {
     const res = await fetch('/api/signup/quick', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ full_name: fullName, birth_date: birthDate, employee_code: employeeCode || undefined, password }),
+      body: JSON.stringify({ full_name: fullName, phone, birth_date: birthDate, password }),
     })
     const data = await res.json()
     if (!res.ok) {
@@ -250,8 +246,8 @@ function QuickForm() {
 
   return (
     <>
-      <h2 className="text-lg font-semibold text-slate-700 mb-1">Daftar Cepat</h2>
-      <p className="text-xs text-slate-500 mb-6">Khusus karyawan yang sudah terdaftar di data HR. Verifikasi pakai Nama Lengkap &amp; Tanggal Lahir sesuai data HR (atau Kode Karyawan saja kalau Anda belum punya Tanggal Lahir tercatat).</p>
+      <h2 className="text-lg font-semibold text-slate-700 mb-1">Sudah Jadi Karyawan, Belum Punya Akun</h2>
+      <p className="text-xs text-slate-500 mb-6">Tidak perlu Kode Karyawan. Tanggal Lahir wajib sesuai data HR, dan minimal salah satu dari Nama Lengkap atau No HP juga harus sesuai.</p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -267,24 +263,22 @@ function QuickForm() {
         </div>
 
         <div>
-          <label htmlFor="qc_birth_date" className="block text-sm font-medium text-slate-700 mb-1.5">Tanggal Lahir (sesuai data HR)</label>
-          <input id="qc_birth_date" type="date" value={birthDate}
+          <label htmlFor="qc_birth_date" className="block text-sm font-medium text-slate-700 mb-1.5">Tanggal Lahir (wajib sesuai data HR)</label>
+          <input id="qc_birth_date" type="date" required value={birthDate}
             onChange={e => { setBirthDate(e.target.value); setCheckedInfo(null); setCheckError(null) }}
             onBlur={checkIdentity}
             disabled={loading}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-          <p className="text-[11px] text-slate-400 mt-1">Belum punya Tanggal Lahir tercatat di HR? Kosongkan ini, lalu isi Kode Karyawan di bawah sebagai gantinya.</p>
         </div>
 
         <div>
-          <label htmlFor="qc_employee_code" className="block text-sm font-medium text-slate-700 mb-1.5">
-            Kode Karyawan {birthDate ? <span className="text-slate-400 font-normal">(opsional — isi kalau diminta HR)</span> : <span className="text-red-500">*</span>}
-          </label>
-          <input id="qc_employee_code" type="text" required={!birthDate} value={employeeCode}
-            onChange={e => { setEmployeeCode(e.target.value.toUpperCase()); setCheckedInfo(null); setCheckError(null) }}
+          <label htmlFor="qc_phone" className="block text-sm font-medium text-slate-700 mb-1.5">No. HP (sesuai data HR)</label>
+          <input id="qc_phone" type="tel" value={phone}
+            onChange={e => { setPhone(e.target.value); setCheckedInfo(null); setCheckError(null) }}
             onBlur={checkIdentity}
-            placeholder="Contoh: EMP-012" disabled={loading}
+            placeholder="Nomor HP yang tercatat di data HR" disabled={loading}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50" />
+          <p className="text-[11px] text-slate-400 mt-1">Kalau Nama Lengkap di atas sudah pasti persis sama dengan data HR, No HP ini boleh dikosongkan.</p>
           {checking && <p className="text-xs text-slate-400 mt-1">Mengecek...</p>}
           {checkedInfo && (
             <p className="text-xs text-green-600 mt-1">
