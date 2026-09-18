@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { isPreviewModeClient } from '@/lib/previewMode'
 
 type Profile = {
   full_name: string
@@ -59,7 +58,8 @@ export default function PortalProfilPage() {
     const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
     if (!userData) return
 
-    if (!['employee', 'supervisor'].includes(userData.role) && !isPreviewModeClient()) { router.push('/dashboard'); return }
+    // Semua role bisa lihat portal pribadi mereka sendiri — bukan cuma employee/supervisor,
+    // karena owner/hr/finance juga karyawan (punya employee_id sendiri).
 
     const { data } = await supabase.from('employees')
       .select(`

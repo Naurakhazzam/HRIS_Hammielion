@@ -32,6 +32,20 @@ function hasActiveDescendant(item: NavNode, pathname: string): boolean {
 // Catatan Meeting, Manajemen User) sengaja TIDAK dipaksa masuk salah satu kelompok.
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
+  // Owner/HR/Finance juga karyawan (punya employee_id sendiri) — bukan cuma pengelola sistem.
+  // Grup ini kasih mereka akses ke data pribadi sendiri (profil, slip gaji, absensi, jadwal),
+  // sama seperti yang dilihat karyawan biasa di menu "Portal Saya".
+  {
+    name: 'Portal Saya',
+    href: '/portal',
+    icon: '👤',
+    submenu: [
+      { name: 'Profil Saya', href: '/portal/profil' },
+      { name: 'Slip Gaji', href: '/portal/slip-gaji' },
+      { name: 'Rekap Absensi', href: '/portal/absensi' },
+      { name: 'Jadwal Saya', href: '/portal/jadwal' },
+    ]
+  },
   {
     name: 'SDM / HR',
     href: '/karyawan',

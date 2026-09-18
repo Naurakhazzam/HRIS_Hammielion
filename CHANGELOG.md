@@ -1445,4 +1445,21 @@ Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identita
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri)*
+### 87. Fitur: Portal Saya untuk Owner/HR/Finance Juga
+
+**Konteks:** Owner sadar akun HR (Nisa/EMP-009) tidak punya akses ke "Portal Saya" sama sekali — ternyata memang sengaja dibatasi cuma untuk role `employee`/`supervisor` sejak awal dibuat. Owner minta ini diperbaiki: siapa pun yang punya jabatan (termasuk Owner/HR/Finance) tetaplah karyawan juga, jadi wajar kalau mereka juga bisa lihat profil, slip gaji, absensi, dan jadwal miliknya sendiri.
+
+**Fix:**
+- Menu **"Portal Saya"** (Profil Saya, Slip Gaji, Rekap Absensi, Jadwal Saya) sekarang muncul juga di sidebar Owner/HR/Finance, di samping menu admin mereka yang sudah ada — bukan menggantikan.
+- Ke-4 halaman Portal Saya dilonggarkan supaya bisa diakses SEMUA role (sebelumnya redirect otomatis ke Dashboard kalau bukan employee/supervisor).
+- Ditemukan sekalian celah RLS yang senada: role `finance` ternyata tidak punya akses baca `employee_roster` maupun `leave_requests` miliknya sendiri sama sekali (beda dengan owner/hr yang sudah lebih dulu punya akses luas) — kalau dibiarkan, Jadwal Saya & Sisa Cuti finance akan selalu kosong walau datanya ada. Diperbaiki jadi berlaku untuk SEMUA role baca (dan batalkan pengajuan cuti) miliknya sendiri.
+
+| File | Perubahan |
+|---|---|
+| Migrasi DB (Supabase) | `roster_read_self`, `leave_read_self`, `leave_cancel_self` diperluas dari employee/supervisor saja jadi berlaku semua role (tetap dibatasi milik sendiri) |
+| `components/sidebar.tsx` | Grup "Portal Saya" ditambahkan ke menu admin (Owner/HR/Finance) |
+| `app/(dashboard)/portal/{profil,absensi,jadwal,slip-gaji}/page.tsx` | Hapus redirect yang membatasi cuma employee/supervisor |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role*

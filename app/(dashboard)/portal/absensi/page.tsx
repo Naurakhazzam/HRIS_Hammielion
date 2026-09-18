@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import AbsenSekarang from '@/components/AbsenSekarang'
-import { isPreviewModeClient } from '@/lib/previewMode'
 
 type Attendance = {
   id: string
@@ -57,8 +56,6 @@ export default function PortalAbsensiPage() {
 
     const { data: userData } = await supabase.from('users').select('role, employee_id, employees(full_name)').eq('id', user.id).single()
     if (!userData) return
-
-    if (!['employee', 'supervisor'].includes(userData.role) && !isPreviewModeClient()) { router.push('/dashboard'); return }
 
     setMyEmployeeId(userData.employee_id)
     setMyName((userData as any).employees?.full_name || '')

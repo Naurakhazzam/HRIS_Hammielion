@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
-import { isPreviewModeClient } from '@/lib/previewMode'
 
 type RosterRow = {
   id: string
@@ -38,8 +37,6 @@ export default function PortalJadwalPage() {
       .select('role, employee_id, employees(full_name, join_date)')
       .eq('id', user.id).single()
     if (!userData) return
-
-    if (!['employee', 'supervisor'].includes(userData.role) && !isPreviewModeClient()) { router.push('/dashboard'); return }
 
     const emp = (userData as any).employees
     setMyEmployeeId(userData.employee_id)
