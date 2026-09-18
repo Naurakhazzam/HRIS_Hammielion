@@ -1326,4 +1326,34 @@ Status preview disimpan di cookie (`previewAsEmployee`, bukan `sessionStorage`) 
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan*
+### 82. Penyempurnaan Portal Karyawan: Keamanan Data + Fitur Baru
+
+**Konteks:** Owner minta audit menyeluruh portal karyawan (bukan cuma tampilan, tapi juga data — dicek langsung ke database, bukan cuma baca kode) untuk cari apa saja yang masih kurang/berisiko, lalu perbaiki semua yang ditemukan. Ditemukan 2 celah keamanan RLS dan beberapa fitur yang belum ada.
+
+**Fix Keamanan (RLS/Storage):**
+- `kasbon_requests` — SELECT sebelumnya `qual = true` (kebuka penuh): karyawan biasa bisa baca kasbon SEMUA karyawan lain (jumlah, alasan, status). Dibatasi: owner/hr/finance lihat semua, employee/supervisor cuma lihat kasbon miliknya sendiri.
+- `attendance-photos` (storage bucket foto absen HP) — INSERT sebelumnya cuma cek nama bucket, karyawan A bisa upload/timpa foto absen ke folder karyawan B. Dibatasi ke folder `{employee_id}` milik akun sendiri saja, + ditambah batas ukuran file 5MB dan tipe (JPEG/PNG saja).
+- `payrolls` — SELECT untuk lihat slip gaji sendiri sebelumnya cuma berlaku untuk role `employee`, akun `supervisor` selalu lihat "Belum ada slip gaji" walau datanya ada. Ditambahkan.
+
+**Fix Bug:**
+- Absen HP (`AbsenSekarang`) sekarang cek jadwal roster hari itu (`employee_roster.is_day_off`) sebelum membuka kamera — kalau hari ini terjadwal LIBUR, absen masuk diblokir dengan pesan jelas. Karena dibaca live per-tanggal, kalau HR menggeser jadwal libur ke tanggal lain, absen otomatis mengikuti jadwal terbaru tanpa perlu kode tambahan.
+
+**Fitur Baru:**
+- **Peringatan "lupa absen pulang"** di halaman Rekap Absensi (HR/Owner) — daftar absen 14 hari terakhir yang belum ada jam pulang, klik langsung diarahkan ke baris & bulan terkait untuk dikoreksi.
+- **Batalkan pengajuan cuti sendiri** — karyawan yang salah ajukan cuti/izin (status masih Menunggu) sekarang bisa membatalkan sendiri tanpa perlu nunggu HR menolak. Status baru "Dibatalkan" (`cancelled`) dibedakan dari "Ditolak" (`rejected`) supaya tidak terkesan ditolak HR.
+- **Halaman Profil Saya** (`/portal/profil`, menu baru di Portal Saya) — karyawan sekarang bisa lihat data kepegawaian, data pribadi, rekening bank, dan kontak darurat miliknya sendiri (read-only, arahkan ke HR kalau ada yang salah).
+- **Notifikasi status pengajuan** — ikon lonceng di navbar (khusus employee/supervisor) menampilkan status terbaru pengajuan Cuti/Izin & Kasbon yang sudah diproses (disetujui/ditolak/lunas), dengan tanda titik merah untuk yang belum dilihat.
+
+| File | Perubahan |
+|---|---|
+| Migrasi DB (Supabase) | Fix RLS `kasbon_requests`/`payrolls`, fix storage policy `attendance-photos` + batas file, tambah enum value `cancelled` + policy `leave_cancel_self` |
+| `components/AbsenSekarang.tsx` | Cek `employee_roster.is_day_off` sebelum izinkan absen masuk |
+| `app/(dashboard)/absensi/rekap/page.tsx` | Kartu peringatan absen belum pulang + jump-to-row |
+| `app/(dashboard)/cuti/page.tsx` | Tombol Batalkan (self), status Dibatalkan |
+| `app/(dashboard)/portal/profil/page.tsx` (baru) | Halaman profil read-only karyawan |
+| `components/NotifikasiBell.tsx` (baru), `components/DashboardShell.tsx` | Ikon notifikasi status pengajuan |
+| `components/sidebar.tsx` | Menu "Profil Saya" di Portal Saya |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru)*

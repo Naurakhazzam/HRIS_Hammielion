@@ -6,6 +6,7 @@ import Link from 'next/link'
 
 type LeaveRequest = {
   id: string
+  employee_id: string
   leave_type: string
   start_date: string
   end_date: string
@@ -56,7 +57,7 @@ export default function CutiIzinPage() {
     let query = supabase
       .from('leave_requests')
       .select(`
-        id, leave_type, start_date, end_date, total_days, status, document_url, reason,
+        id, employee_id, leave_type, start_date, end_date, total_days, status, document_url, reason,
         employee:employees!leave_requests_employee_id_fkey(full_name, branch_id, branches(name)),
         approver:employees!leave_requests_approved_by_fkey(full_name)
       `)
@@ -132,6 +133,20 @@ export default function CutiIzinPage() {
     }
   }
 
+  async function cancelRequest(id: string) {
+    if (!confirm('Batalkan pengajuan ini?')) return
+    const { error } = await supabase
+      .from('leave_requests')
+      .update({ status: 'cancelled' })
+      .eq('id', id)
+    if (error) {
+      showMessage('error', `Gagal membatalkan: ${error.message}`)
+    } else {
+      showMessage('success', 'Pengajuan dibatalkan.')
+      fetchRequests()
+    }
+  }
+
   // Translasi enum ke teks Indonesia
   const translateLeaveType = (type: string) => {
     const map: Record<string, string> = {
@@ -178,6 +193,7 @@ export default function CutiIzinPage() {
               <option value="pending">Menunggu (Pending)</option>
               <option value="approved">Disetujui (Approved)</option>
               <option value="rejected">Ditolak (Rejected)</option>
+              <option value="cancelled">Dibatalkan</option>
             </select>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -235,9 +251,10 @@ export default function CutiIzinPage() {
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                         req.status === 'approved' ? 'bg-green-100 text-green-800' :
                         req.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                        req.status === 'cancelled' ? 'bg-slate-100 text-slate-500' :
                         'bg-yellow-100 text-yellow-800'
                       }`}>
-                        {req.status === 'approved' ? 'Disetujui' : req.status === 'rejected' ? 'Ditolak' : 'Menunggu'}
+                        {req.status === 'approved' ? 'Disetujui' : req.status === 'rejected' ? 'Ditolak' : req.status === 'cancelled' ? 'Dibatalkan' : 'Menunggu'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -256,6 +273,13 @@ export default function CutiIzinPage() {
                             Tolak
                           </button>
                         </div>
+                      ) : req.status === 'pending' && !isHrOrOwner && req.employee_id === myEmployeeId ? (
+                        <button
+                          onClick={() => cancelRequest(req.id)}
+                          className="text-xs bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200 px-2 py-1 rounded font-medium transition"
+                        >
+                          Batalkan
+                        </button>
                       ) : (
                         <span className="text-xs text-slate-400 italic">
                           {req.status === 'pending' ? 'Menunggu Review' : 'Terkunci'}

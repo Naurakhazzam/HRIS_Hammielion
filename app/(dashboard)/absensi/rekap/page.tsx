@@ -93,7 +93,13 @@ export default function RekapAbsensiPage() {
   const [bulkCatatan, setBulkCatatan]     = useState('')
   const [formData, setFormData] = useState({ employee_id:'', date:new Date().toISOString().split('T')[0], check_in:'', check_out:'', status:'present', notes:'' })
 
-  useEffect(() => { fetchReferenceData(); fetchMyRole() }, [])
+  // Peringatan "lupa absen pulang" — sebelumnya tidak ada cara HR tahu ini kecuali cek manual
+  // satu-satu. Cuma tampilkan hari-hari SEBELUM hari ini (bukan hari ini, karena karyawan
+  // yang belum pulang hari ini kemungkinan masih bekerja, belum tentu lupa).
+  type IncompleteRow = { id: string; date: string; check_in: string; employee_id: string; employees: { full_name: string } }
+  const [incompleteCheckouts, setIncompleteCheckouts] = useState<IncompleteRow[]>([])
+
+  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts() }, [])
   useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
   // Kalau karyawan yang sedang dipilih jadi tidak termasuk lagi setelah Cabang/Departemen
   // diganti, kosongkan lagi pilihannya — supaya tidak nyangkut ke karyawan di luar cakupan filter.
@@ -125,6 +131,31 @@ export default function RekapAbsensiPage() {
     if (dRes.data) setDepartments(dRes.data)
     if (eRes.data) setEmployees(eRes.data)
     if (sRes.data) setSchedules(sRes.data)
+  }
+
+  async function fetchIncompleteCheckouts() {
+    const todayStr = new Date().toISOString().split('T')[0]
+    const from = new Date(); from.setDate(from.getDate() - 14)
+    const { data } = await supabase.from('attendances')
+      .select('id,date,check_in,employee_id,employees(full_name)')
+      .not('check_in', 'is', null)
+      .is('check_out', null)
+      .lt('date', todayStr)
+      .gte('date', from.toISOString().split('T')[0])
+      .order('date', { ascending: false })
+      .limit(30)
+    setIncompleteCheckouts((data as unknown as IncompleteRow[]) || [])
+  }
+
+  // Periode filter di halaman ini pakai siklus tanggal 26–25 (lihat getPeriodLabel), jadi
+  // tanggal 26-31 masuk periode BULAN BERIKUTNYA — hitung dulu supaya baris yang dituju
+  // benar-benar muncul di tabel setelah "Lihat" diklik.
+  function jumpToIncomplete(row: IncompleteRow) {
+    const d = new Date(row.date + 'T00:00:00')
+    const day = d.getDate()
+    const target = new Date(d.getFullYear(), d.getMonth() + (day >= 26 ? 1 : 0), 1)
+    setFilterEmployee(row.employee_id)
+    setFilterMonth(`${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`)
   }
 
   async function fetchAttendances() {
@@ -394,6 +425,7 @@ export default function RekapAbsensiPage() {
     showMsg('success', 'Absensi berhasil diperbarui.')
     setEditModal(null)
     fetchAttendances()
+    fetchIncompleteCheckouts()
     setEditSaving(false)
   }
 
@@ -478,6 +510,20 @@ export default function RekapAbsensiPage() {
       </div>
 
       {message && <div className={`p-4 mb-6 rounded-lg border ${message.type==='success'?'bg-green-50 border-green-200 text-green-700':'bg-red-50 border-red-200 text-red-700'}`}>{message.text}</div>}
+
+      {incompleteCheckouts.length > 0 && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <p className="text-sm font-semibold text-amber-800 mb-2">⚠️ {incompleteCheckouts.length} absen belum ada jam pulang (14 hari terakhir)</p>
+          <div className="flex flex-wrap gap-2">
+            {incompleteCheckouts.map(row => (
+              <button key={row.id} onClick={() => jumpToIncomplete(row)}
+                className="text-xs px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-amber-800 hover:bg-amber-100 transition">
+                {row.employees?.full_name} — {new Date(row.date + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })} ({fmtTs(row.check_in)})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">

@@ -26,6 +26,10 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   const [customCheckIn, setCustomCheckIn] = useState<string | null>(null)
   const [customCheckOut, setCustomCheckOut] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  // null = belum ada jadwal roster untuk hari ini (HR belum atur — biarkan absen jalan seperti biasa).
+  // true/false = roster HARI INI (dibaca ulang tiap fetchContext, jadi kalau HR menggeser jadwal
+  // libur ke tanggal lain, nilai ini otomatis ikut berubah tanpa perlu kode tambahan).
+  const [todayIsDayOff, setTodayIsDayOff] = useState<boolean | null>(null)
 
   const [step, setStep] = useState<Step>('idle')
   const [geo, setGeo] = useState<{ lat: number; lng: number; distance: number } | null>(null)
@@ -61,6 +65,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
       .select('id, check_in, check_out, source')
       .eq('employee_id', employeeId).eq('date', todayLocalStr()).maybeSingle()
     setToday(att)
+
+    const { data: roster } = await supabase.from('employee_roster')
+      .select('is_day_off')
+      .eq('employee_id', employeeId).eq('date', todayLocalStr()).maybeSingle()
+    setTodayIsDayOff(roster ? roster.is_day_off : null)
+
     setLoading(false)
   }
 
@@ -75,6 +85,10 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
   }
 
   async function startCheckin() {
+    if (todayIsDayOff && !today?.check_in) {
+      showMessage('error', 'Hari ini terjadwal LIBUR sesuai jadwal Anda. Kalau jadwal ini sudah digeser/berubah, minta HR update dulu di menu Jadwal & Shift, lalu muat ulang halaman ini.')
+      return
+    }
     if (!branch?.latitude || !branch?.longitude) {
       showMessage('error', 'Cabang Anda belum diaktifkan untuk absen HP. Hubungi HR.')
       return
@@ -233,7 +247,8 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
 
   const alreadyDoneToday = !!today?.check_in && !!today?.check_out
   const blockedByOtherSource = !!today && today.source !== 'mobile' && !alreadyDoneToday
-  const nextAction: 'in' | 'out' | null = alreadyDoneToday || blockedByOtherSource ? null : today?.check_in ? 'out' : 'in'
+  const blockedByDayOff = !!todayIsDayOff && !today?.check_in
+  const nextAction: 'in' | 'out' | null = alreadyDoneToday || blockedByOtherSource || blockedByDayOff ? null : today?.check_in ? 'out' : 'in'
 
   return (
     <div className="bg-white rounded-xl shadow-sm border-2 border-blue-200 p-5 mb-6">
@@ -254,6 +269,11 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone }: Prop
       )}
       {blockedByOtherSource && (
         <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">Absen hari ini sudah tercatat lewat {today?.source === 'fingerprint' ? 'mesin fingerprint' : 'input manual'}.</p>
+      )}
+      {blockedByDayOff && (
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          🛑 Hari ini terjadwal <strong>LIBUR</strong> menurut jadwal Anda. Kalau jadwal ini sudah digeser/berubah, hubungi HR untuk update jadwal dulu di menu Jadwal &amp; Shift, lalu muat ulang halaman ini.
+        </p>
       )}
 
       {step === 'idle' && nextAction && (

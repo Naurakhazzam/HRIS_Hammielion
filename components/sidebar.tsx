@@ -174,6 +174,7 @@ const employeeNavItems: NavNode[] = [
     href: '/portal',
     icon: '👤',
     submenu: [
+      { name: 'Profil Saya', href: '/portal/profil' },
       { name: 'Slip Gaji', href: '/portal/slip-gaji' },
       { name: 'Rekap Absensi', href: '/portal/absensi' },
       { name: 'Jadwal Saya', href: '/portal/jadwal' },
