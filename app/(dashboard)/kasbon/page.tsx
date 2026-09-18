@@ -648,9 +648,10 @@ function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | '
       supabase.from('driver_kasbon')
         .select('*, employees!driver_kasbon_driver_id_fkey(full_name, employee_code)')
         .order('created_at', { ascending: false }),
+      // Termasuk juga karyawan yang merangkap Driver (can_drive=true) — lihat migrasi can_drive.
       supabase.from('employees')
         .select('id, full_name, employee_code')
-        .eq('employee_type', 'driver')
+        .or('employee_type.eq.driver,can_drive.eq.true')
         .eq('is_active', true)
         .order('full_name'),
       supabase.from('driver_kasbon_deductions')

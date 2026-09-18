@@ -154,7 +154,11 @@ export default function PenggajianDriverPage() {
   }
 
   async function fetchMasterData() {
-    const { data: drvData } = await supabase.from('employees').select('id, full_name, branch_id').eq('employee_type', 'driver').eq('is_active', true)
+    // Termasuk juga karyawan yang merangkap Driver (can_drive=true) — misal Kenek yang kadang
+    // jalan jadi Driver, tanpa perlu ubah employee_type utamanya (lihat migrasi can_drive).
+    const { data: drvData } = await supabase.from('employees').select('id, full_name, branch_id')
+      .or('employee_type.eq.driver,can_drive.eq.true')
+      .eq('is_active', true)
     if (drvData) setDrivers(drvData)
 
     const { data: baData } = await supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name')

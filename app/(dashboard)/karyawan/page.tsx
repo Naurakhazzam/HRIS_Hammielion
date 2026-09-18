@@ -16,6 +16,7 @@ type Employee = {
   nik: string | null
   phone: string | null
   employee_type: string
+  can_drive: boolean
   join_date: string | null
   is_active: boolean
   kpi_bonus_max: number
@@ -52,7 +53,7 @@ type Employee = {
 const emptyForm = {
   full_name: '', employee_code: '', nik: '', phone: '',
   branch_id: '', department_id: '', position_id: '',
-  employee_type: 'permanent', join_date: new Date().toISOString().split('T')[0],
+  employee_type: 'permanent', can_drive: false, join_date: new Date().toISOString().split('T')[0],
   kpi_bonus_max: '0',
   birth_date: '', birth_place: '', gender: '', address: '',
   religion: '', marital_status: '', dependants: '0',
@@ -219,7 +220,7 @@ export default function KaryawanPage() {
       full_name: f.full_name, employee_code: f.employee_code,
       nik: f.nik || null, phone: f.phone || null,
       branch_id: f.branch_id, department_id: f.department_id, position_id: f.position_id,
-      employee_type: f.employee_type, join_date: f.join_date,
+      employee_type: f.employee_type, can_drive: f.can_drive, join_date: f.join_date,
       kpi_bonus_max: parseFloat(f.kpi_bonus_max) || 0,
       birth_date: f.birth_date || null, birth_place: f.birth_place || null,
       gender: f.gender || null, address: f.address || null,
@@ -281,7 +282,7 @@ export default function KaryawanPage() {
       full_name: emp.full_name, employee_code: emp.employee_code,
       nik: emp.nik || '', phone: emp.phone || '',
       branch_id: emp.branches?.id || '', department_id: emp.departments?.id || '',
-      position_id: emp.positions?.id || '', employee_type: emp.employee_type,
+      position_id: emp.positions?.id || '', employee_type: emp.employee_type, can_drive: emp.can_drive || false,
       join_date: emp.join_date || '', kpi_bonus_max: String(emp.kpi_bonus_max || 0),
       birth_date: emp.birth_date || '', birth_place: emp.birth_place || '',
       gender: emp.gender || '', address: emp.address || '',
@@ -411,6 +412,13 @@ export default function KaryawanPage() {
                 <option value="">{f.department_id ? '-- Pilih Jabatan --' : 'Pilih Dept Dahulu'}</option>
                 {filteredPositionsFor(f.department_id).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
+            </FormField>
+            <FormField label="Merangkap Jabatan Lain">
+              <label className="flex items-center gap-2 h-[38px]">
+                <input type="checkbox" checked={f.can_drive} onChange={e => setF({ ...f, can_drive: e.target.checked })}
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600" />
+                <span className="text-sm text-slate-600">Bisa jadi Driver (misal Kenek merangkap Driver)</span>
+              </label>
             </FormField>
             <FormField label="Tanggal Bergabung" required>
               <input type="date" required value={f.join_date} onChange={e => setF({ ...f, join_date: e.target.value })} className={inputClass} />
@@ -647,7 +655,10 @@ export default function KaryawanPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-sm font-medium text-slate-700">{emp.positions?.name}</div>
+                      <div className="text-sm font-medium text-slate-700">
+                        {emp.positions?.name}
+                        {emp.can_drive && <span className="ml-1.5 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">+ Driver</span>}
+                      </div>
                       <div className="text-xs text-slate-500">{emp.departments?.name}</div>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">{emp.branches?.name}</td>
@@ -706,9 +717,14 @@ export default function KaryawanPage() {
                 <div>
                   <h3 className="text-lg font-bold text-slate-800">{detailEmployee.full_name}</h3>
                   <p className="text-sm text-slate-500">{detailEmployee.employee_code} · {detailEmployee.positions?.name} · {detailEmployee.branches?.name}</p>
-                  <span className={`inline-flex mt-1 items-center px-2 py-0.5 rounded text-xs font-medium ${detailEmployee.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {detailEmployee.is_active ? 'Aktif' : 'Nonaktif'}
-                  </span>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${detailEmployee.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      {detailEmployee.is_active ? 'Aktif' : 'Nonaktif'}
+                    </span>
+                    {detailEmployee.can_drive && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">Merangkap Driver</span>
+                    )}
+                  </div>
                 </div>
               </div>
 

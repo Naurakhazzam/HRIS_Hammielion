@@ -9,6 +9,7 @@ type Profile = {
   employee_code: string | null
   photo_url: string | null
   nik: string | null
+  can_drive: boolean
   join_date: string | null
   phone: string | null
   birth_date: string | null
@@ -105,7 +106,7 @@ export default function PortalProfilPage() {
   async function fetchProfile(employeeId: string) {
     const { data } = await supabase.from('employees')
       .select(`
-        full_name, employee_code, photo_url, nik, join_date, phone, birth_date, birth_place, gender,
+        full_name, employee_code, photo_url, nik, can_drive, join_date, phone, birth_date, birth_place, gender,
         address, religion, marital_status, dependants, education,
         bank_name, bank_account_number, bank_account_name,
         emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
@@ -257,7 +258,7 @@ export default function PortalProfilPage() {
             <Field label="Nama Lengkap" value={profile.full_name} />
             <Field label="Kode Karyawan" value={profile.employee_code} />
             <Field label="Email Login" value={loginEmail} />
-            <Field label="Jabatan" value={profile.positions?.name} />
+            <Field label="Jabatan" value={profile.can_drive ? `${profile.positions?.name} (merangkap Driver)` : profile.positions?.name} />
             <Field label="Departemen" value={profile.departments?.name} />
             <Field label="Cabang" value={profile.branches?.name} />
             <Field label="Tanggal Bergabung" value={fmtDate(profile.join_date)} />
