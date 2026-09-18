@@ -84,12 +84,14 @@ export default function PortalProfilPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [loginEmail, setLoginEmail] = useState('')
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
+    setLoginEmail(user.email ?? '')
 
     const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
     if (!userData) return
@@ -245,7 +247,7 @@ export default function PortalProfilPage() {
       )}
 
       <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2.5 mb-6">
-        ℹ️ Data Kepegawaian &amp; Rekening Bank cuma bisa dilihat (perlu diubah lewat HR, demi keamanan transfer gaji). Data Pribadi &amp; Kontak Darurat bisa Anda perbarui sendiri.
+        ℹ️ Data Kepegawaian &amp; Rekening Bank cuma bisa dilihat (perlu diubah lewat HR, demi keamanan transfer gaji). Data Pribadi &amp; Kontak Darurat bisa Anda perbarui sendiri. Lupa password? Password tidak bisa ditampilkan (alasan keamanan), tapi bisa diganti kapan saja lewat tombol 🔑 <strong>Perbarui Akun</strong> di navbar.
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -254,6 +256,7 @@ export default function PortalProfilPage() {
           <div className="grid grid-cols-2 gap-4">
             <Field label="Nama Lengkap" value={profile.full_name} />
             <Field label="Kode Karyawan" value={profile.employee_code} />
+            <Field label="Email Login" value={loginEmail} />
             <Field label="Jabatan" value={profile.positions?.name} />
             <Field label="Departemen" value={profile.departments?.name} />
             <Field label="Cabang" value={profile.branches?.name} />
