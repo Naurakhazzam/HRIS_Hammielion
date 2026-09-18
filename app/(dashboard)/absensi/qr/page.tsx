@@ -37,7 +37,9 @@ export default function AbsenQrAdminPage() {
     const withQr = await Promise.all(rows.map(async r => {
       if (!r.token) return r
       const url = `${window.location.origin}/absen-qr/${r.token}`
-      const dataUrl = await QRCode.toDataURL(url, { width: 280, margin: 1 })
+      // width lebih besar dari yang ditampilkan di layar — supaya waktu di-scale besar untuk
+      // cetak (2 per halaman), hasilnya tetap tajam, tidak pecah/blur.
+      const dataUrl = await QRCode.toDataURL(url, { width: 600, margin: 1 })
       return { ...r, dataUrl }
     }))
     setBranches(withQr)
@@ -82,6 +84,17 @@ export default function AbsenQrAdminPage() {
 
   return (
     <div>
+      {/* Cetak: paksa 2 QR per halaman (bukan ikut grid layar yang bisa 2-3 kolom tergantung
+          lebar), dan halaman baru otomatis dimulai tiap 2 kartu — supaya QR-nya bisa dicetak
+          besar dan jelas, tidak berdesakan kecil-kecil. */}
+      <style>{`
+        @media print {
+          .qr-print-grid { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 3rem !important; }
+          .qr-print-card { break-inside: avoid; }
+          .qr-print-card:nth-child(2n) { break-after: page; }
+        }
+      `}</style>
+
       <div className="mb-6 print:hidden">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">QR Absen</h1>
         <p className="text-sm text-slate-500">Cetak & tempel QR ini di masing-masing cabang. Karyawan tinggal scan pakai kamera HP untuk absen masuk/pulang — tanpa perlu deteksi lokasi.</p>
@@ -108,13 +121,14 @@ export default function AbsenQrAdminPage() {
       {loading ? (
         <div className="text-center py-12 text-slate-500">Memuat...</div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="qr-print-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {branches.map(b => (
-            <div key={b.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 text-center print:break-inside-avoid">
-              <p className="font-semibold text-slate-800 mb-3">{b.name}</p>
+            <div key={b.id} className="qr-print-card bg-white rounded-xl shadow-sm border border-slate-200 p-5 text-center print:shadow-none print:border-2 print:p-10">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1 print:text-lg">QR Absen — Cabang</p>
+              <p className="text-xl font-extrabold text-slate-800 mb-3 print:text-5xl print:mb-6">{b.name}</p>
               {b.dataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={b.dataUrl} alt={`QR Absen ${b.name}`} className="mx-auto w-48 h-48" />
+                <img src={b.dataUrl} alt={`QR Absen ${b.name}`} className="mx-auto w-48 h-48 print:w-full print:h-auto print:max-w-none" />
               ) : (
                 <p className="text-xs text-slate-400 py-12">QR belum tersedia.</p>
               )}
