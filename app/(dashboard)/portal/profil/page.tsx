@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 type Profile = {
   full_name: string
   employee_code: string | null
+  photo_url: string | null
   nik: string | null
   join_date: string | null
   phone: string | null
@@ -81,6 +82,8 @@ export default function PortalProfilPage() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -100,7 +103,7 @@ export default function PortalProfilPage() {
   async function fetchProfile(employeeId: string) {
     const { data } = await supabase.from('employees')
       .select(`
-        full_name, employee_code, nik, join_date, phone, birth_date, birth_place, gender,
+        full_name, employee_code, photo_url, nik, join_date, phone, birth_date, birth_place, gender,
         address, religion, marital_status, dependants, education,
         bank_name, bank_account_number, bank_account_name,
         emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
@@ -116,8 +119,29 @@ export default function PortalProfilPage() {
     setTimeout(() => setMessage(null), 5000)
   }
 
+  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoFile(file)
+    setPhotoPreview(URL.createObjectURL(file))
+  }
+
+  // Path berpola "{employee_code}_{timestamp}.{ext}" — sama seperti uploadPhoto() di menu
+  // Karyawan (admin), supaya RLS (yang cek nama file diawali kode karyawan sendiri) bisa
+  // mengenali ini upload milik siapa.
+  async function uploadOwnPhoto(file: File, employeeCode: string): Promise<string | null> {
+    const ext = file.name.split('.').pop()
+    const path = `${employeeCode}_${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from('employee-photos').upload(path, file, { upsert: true })
+    if (error) { showMessage('error', 'Gagal unggah foto: ' + error.message); return null }
+    const { data } = supabase.storage.from('employee-photos').getPublicUrl(path)
+    return data.publicUrl
+  }
+
   function startEditing() {
     if (!profile) return
+    setPhotoFile(null)
+    setPhotoPreview(null)
     setForm({
       phone: profile.phone || '',
       birth_date: profile.birth_date || '',
@@ -143,7 +167,14 @@ export default function PortalProfilPage() {
     const { data: userData } = await supabase.from('users').select('employee_id').eq('id', user.id).single()
     if (!userData) { setSaving(false); return }
 
+    let photoUrl: string | null = null
+    if (photoFile && profile?.employee_code) {
+      photoUrl = await uploadOwnPhoto(photoFile, profile.employee_code)
+      if (!photoUrl) { setSaving(false); return } // uploadOwnPhoto sudah tampilkan pesan errornya
+    }
+
     const { error } = await supabase.rpc('update_own_employee_profile', {
+      p_photo_url: photoUrl,
       p_phone: form.phone || null,
       p_birth_date: form.birth_date || null,
       p_birth_place: form.birth_place || null,
@@ -161,6 +192,9 @@ export default function PortalProfilPage() {
     if (error) {
       showMessage('error', 'Gagal menyimpan: ' + error.message)
     } else {
+      if (photoPreview) URL.revokeObjectURL(photoPreview)
+      setPhotoFile(null)
+      setPhotoPreview(null)
       await fetchProfile(userData.employee_id)
       setEditing(false)
       showMessage('success', 'Data pribadi berhasil diperbarui.')
@@ -174,9 +208,27 @@ export default function PortalProfilPage() {
   return (
     <div>
       <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 mb-1">Profil Saya</h1>
-          <p className="text-sm text-slate-500">Data kepegawaian Anda yang tercatat di sistem.</p>
+        <div className="flex items-center gap-4">
+          <div className="relative shrink-0">
+            <div className="w-16 h-16 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center">
+              {(photoPreview || profile.photo_url) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photoPreview || profile.photo_url!} alt={profile.full_name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl font-bold text-slate-400">{profile.full_name?.charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+            {editing && (
+              <label className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center justify-center text-xs cursor-pointer shadow-sm" title="Ganti foto profil">
+                ✏️
+                <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+              </label>
+            )}
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800 mb-1">Profil Saya</h1>
+            <p className="text-sm text-slate-500">Data kepegawaian Anda yang tercatat di sistem.</p>
+          </div>
         </div>
         {!editing && (
           <button onClick={startEditing}
