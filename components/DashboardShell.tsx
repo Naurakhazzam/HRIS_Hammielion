@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
+import Link from 'next/link'
 import Sidebar from './sidebar'
 import ThemeToggle from './ThemeToggle'
 import NotifikasiBell from './NotifikasiBell'
@@ -82,6 +83,10 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
             </span>
             <NotifikasiBell />
             <ThemeToggle />
+            <Link href="/akun/perbarui" title="Perbarui email & password akun Anda"
+              className="text-xs text-slate-500 hover:text-blue-600 p-2 rounded-lg hover:bg-slate-100 transition">
+              🔑
+            </Link>
             <form action="/auth/logout" method="POST">
               <button
                 type="submit"

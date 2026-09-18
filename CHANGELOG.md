@@ -1422,4 +1422,27 @@ Status preview disimpan di cookie (`previewAsEmployee`, bukan `sessionStorage`) 
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja*
+### 86. Fitur: Perbarui Akun Saya (Ganti Email Standar + Password Sendiri)
+
+**Konteks:** Owner ingin SEMUA 26 akun karyawan (termasuk 5 akun admin Owner/HR/Finance yang sudah ada) dirapikan ke email standar `nama@hammielion.com`, dengan password diketik ulang sendiri oleh masing-masing orang (bukan dibuatkan/dibagikan admin) supaya tidak gampang lupa. Karena domain `@hammielion.com` **cuma dipakai sebagai username, bukan email sungguhan yang bisa menerima pesan** (dikonfirmasi Owner), fitur Lupa Password tidak akan bisa dipakai akun-akun ini — satu-satunya jalan reset kalau lupa adalah admin (Owner/HR) reset manual lewat menu Manajemen User (fitur ini sudah ada dari sebelumnya, jadi ada jaring pengaman).
+
+**Fitur baru — "Perbarui Akun Saya":** tombol 🔑 baru di navbar (semua role, di sebelah tombol tema), buka halaman self-service:
+1. Tampilkan email lama sebagai referensi.
+2. Nama Lengkap (pre-filled dari data karyawan, bisa diedit kalau perlu variasi karena tabrakan nama) → preview email baru real-time.
+3. Password Baru + Konfirmasi — diketik sendiri oleh pemilik akun.
+4. Submit → email & password di Supabase Auth diperbarui langsung (tanpa perlu konfirmasi email, karena memang tidak bisa terkirim), baris `users.email` ikut disesuaikan.
+5. Layar sukses menampilkan email baru dengan peringatan tebal untuk dicatat, lalu otomatis logout supaya pemilik akun langsung coba login ulang pakai kredensial barunya sendiri.
+
+**Karyawan yang belum punya akun sama sekali** (21 dari 26) tidak perlu fitur ini — tinggal pakai **Daftar Cepat** (fitur #85) yang sudah otomatis menerapkan format email & password mandiri yang sama.
+
+Endpoint `/api/akun/perbarui` cuma bisa mengubah akun MILIK SENDIRI — identitas diambil dari sesi login yang sedang aktif, tidak ada parameter id akun lain yang bisa dioper dari luar.
+
+| File | Perubahan |
+|---|---|
+| `app/api/akun/perbarui/route.ts` (baru) | Update email+password akun sendiri lewat service role |
+| `app/(dashboard)/akun/perbarui/page.tsx` (baru) | Halaman self-service, pakai `emailFromName` yang sama dengan Daftar Cepat |
+| `components/DashboardShell.tsx` | Tombol 🔑 "Perbarui Akun" di navbar, semua role |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri)*
