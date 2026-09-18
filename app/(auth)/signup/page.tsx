@@ -175,33 +175,37 @@ function FullVerifyForm() {
 }
 
 // Jalur cepat: cuma modal Kode Karyawan (dianggap sudah cukup rahasia — keputusan Owner),
-// tanpa verifikasi No HP/Tanggal Lahir. Email login dibentuk dari nama yang diketik karyawan
-// sendiri + domain @hammielion.com (bukan email pribadi bebas seperti tab satunya).
+// verifikasi identitas pakai Nama Lengkap + Tanggal Lahir (dicocokkan ke data HR), Kode
+// Karyawan OPSIONAL (cuma dipakai untuk membedakan kalau kebetulan ada 2 karyawan dengan nama
+// & tanggal lahir sama persis). Email login dibentuk dari Nama Lengkap yang sama + domain
+// @hammielion.com (bukan email pribadi bebas seperti tab satunya).
 function QuickForm() {
   const router = useRouter()
+  const [fullName, setFullName] = useState('')
+  const [birthDate, setBirthDate] = useState('')
   const [employeeCode, setEmployeeCode] = useState('')
   const [checking, setChecking] = useState(false)
-  const [checkedName, setCheckedName] = useState<string | null>(null)
+  const [checkedInfo, setCheckedInfo] = useState<{ employee_code: string; position_name: string | null } | null>(null)
   const [checkError, setCheckError] = useState<string | null>(null)
-  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null) // simpan email yang jadi, untuk ditampilkan
   const [loading, setLoading] = useState(false)
 
-  const previewEmail = emailFromName(username)
+  const previewEmail = emailFromName(fullName)
 
-  async function checkCode() {
-    const code = employeeCode.trim()
-    setCheckedName(null)
+  async function checkIdentity() {
+    setCheckedInfo(null)
     setCheckError(null)
-    if (!code) return
+    if (!fullName.trim() || !birthDate) return
     setChecking(true)
-    const res = await fetch(`/api/signup/quick?code=${encodeURIComponent(code)}`)
+    const params = new URLSearchParams({ name: fullName.trim(), birth_date: birthDate })
+    if (employeeCode.trim()) params.set('employee_code', employeeCode.trim())
+    const res = await fetch(`/api/signup/quick?${params.toString()}`)
     const data = await res.json()
-    if (!res.ok) setCheckError(data.error || 'Kode Karyawan tidak valid.')
-    else setCheckedName(data.full_name)
+    if (!res.ok) setCheckError(data.error || 'Data tidak valid.')
+    else setCheckedInfo({ employee_code: data.employee_code, position_name: data.position_name })
     setChecking(false)
   }
 
@@ -214,7 +218,7 @@ function QuickForm() {
     const res = await fetch('/api/signup/quick', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ employee_code: employeeCode, username, password }),
+      body: JSON.stringify({ full_name: fullName, birth_date: birthDate, employee_code: employeeCode || undefined, password }),
     })
     const data = await res.json()
     if (!res.ok) {
@@ -244,29 +248,44 @@ function QuickForm() {
   return (
     <>
       <h2 className="text-lg font-semibold text-slate-700 mb-1">Daftar Cepat</h2>
-      <p className="text-xs text-slate-500 mb-6">Khusus karyawan yang sudah terdaftar di data HR. Cukup masukkan Kode Karyawan Anda.</p>
+      <p className="text-xs text-slate-500 mb-6">Khusus karyawan yang sudah terdaftar di data HR. Verifikasi pakai Nama Lengkap &amp; Tanggal Lahir sesuai data HR.</p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="qc_employee_code" className="block text-sm font-medium text-slate-700 mb-1.5">Apakah Anda sudah jadi karyawan? Masukkan Kode Karyawan</label>
-          <input id="qc_employee_code" type="text" required value={employeeCode}
-            onChange={e => { setEmployeeCode(e.target.value.toUpperCase()); setCheckedName(null); setCheckError(null) }}
-            onBlur={checkCode}
-            placeholder="Contoh: EMP-012" disabled={loading}
+          <label htmlFor="qc_full_name" className="block text-sm font-medium text-slate-700 mb-1.5">Nama Lengkap (sesuai data HR)</label>
+          <input id="qc_full_name" type="text" required value={fullName}
+            onChange={e => { setFullName(e.target.value); setCheckedInfo(null); setCheckError(null) }}
+            onBlur={checkIdentity}
+            placeholder="Nama Lengkap Anda" disabled={loading}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50" />
-          {checking && <p className="text-xs text-slate-400 mt-1">Mengecek...</p>}
-          {checkedName && <p className="text-xs text-green-600 mt-1">✓ Data ditemukan: <strong>{checkedName}</strong></p>}
-          {checkError && <p className="text-xs text-red-600 mt-1">{checkError}</p>}
+          <p className="text-[11px] text-slate-400 mt-1">
+            Email login Anda nanti: <span className="font-medium text-slate-600">{previewEmail || '—'}</span>
+          </p>
         </div>
 
         <div>
-          <label htmlFor="username" className="block text-sm font-medium text-slate-700 mb-1.5">Nama Lengkap (untuk email login)</label>
-          <input id="username" type="text" required value={username} onChange={e => setUsername(e.target.value)}
-            placeholder="Nama Lengkap Anda" disabled={loading}
-            className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-          <p className="text-[11px] text-slate-400 mt-1">
-            Email login Anda: <span className="font-medium text-slate-600">{previewEmail || '—'}</span>
-          </p>
+          <label htmlFor="qc_birth_date" className="block text-sm font-medium text-slate-700 mb-1.5">Tanggal Lahir (sesuai data HR)</label>
+          <input id="qc_birth_date" type="date" required value={birthDate}
+            onChange={e => { setBirthDate(e.target.value); setCheckedInfo(null); setCheckError(null) }}
+            onBlur={checkIdentity}
+            disabled={loading}
+            className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+        </div>
+
+        <div>
+          <label htmlFor="qc_employee_code" className="block text-sm font-medium text-slate-700 mb-1.5">Kode Karyawan <span className="text-slate-400 font-normal">(opsional — isi kalau diminta HR)</span></label>
+          <input id="qc_employee_code" type="text" value={employeeCode}
+            onChange={e => { setEmployeeCode(e.target.value.toUpperCase()); setCheckedInfo(null); setCheckError(null) }}
+            onBlur={checkIdentity}
+            placeholder="Contoh: EMP-012" disabled={loading}
+            className="w-full px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50" />
+          {checking && <p className="text-xs text-slate-400 mt-1">Mengecek...</p>}
+          {checkedInfo && (
+            <p className="text-xs text-green-600 mt-1">
+              ✓ Data ditemukan — Kode: <strong>{checkedInfo.employee_code}</strong>{checkedInfo.position_name ? <>, Jabatan: <strong>{checkedInfo.position_name}</strong></> : null}
+            </p>
+          )}
+          {checkError && <p className="text-xs text-red-600 mt-1">{checkError}</p>}
         </div>
 
         <div>
