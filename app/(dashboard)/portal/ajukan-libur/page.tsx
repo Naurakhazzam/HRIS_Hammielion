@@ -73,9 +73,13 @@ export default function AjukanLiburPage() {
   const weekendPicksUsed = ownRequests.filter(r => r.status !== 'rejected' && isWeekend(r.requested_date)).length
 
   async function toggleDate(dateStr: string, own: OwnRequest | undefined) {
+    if (own) {
+      if (own.status !== 'pending') return // approved tidak bisa dibatalkan di sini
+      const dateLabel = new Date(dateStr + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long' })
+      if (!confirm(`Batalkan pengajuan libur tanggal ${dateLabel}?`)) return
+    }
     setBusyDate(dateStr)
     if (own) {
-      if (own.status !== 'pending') { setBusyDate(null); return } // approved tidak bisa dibatalkan di sini
       const { error } = await supabase.from('roster_pick_requests').delete().eq('id', own.id)
       if (error) showMessage('error', 'Gagal membatalkan: ' + error.message)
       else showMessage('success', 'Pengajuan dibatalkan.')
