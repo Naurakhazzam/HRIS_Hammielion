@@ -13,6 +13,12 @@ type WorkScheduleRow = WorkSchedule & { id: string }
 
 type Step = 'idle' | 'confirm-action' | 'locating' | 'camera' | 'preview' | 'uploading' | 'confirm-swap' | 'pick-date'
 
+// Jarak minimum antara absen masuk & absen pulang — mencegah absen pulang yang terlalu
+// berdekatan (salah pencet atau disengaja memalsukan kehadiran). Dicek di sini (UX, supaya
+// pesannya jelas SEBELUM buka kamera) dan juga di database (RLS attendances_mobile_checkin_update,
+// supaya tidak bisa dilewati lewat jalur lain).
+const MIN_CHECKOUT_GAP_MINUTES = 15
+
 // Absen mandiri lewat HP — foto WAJIB diambil langsung dari kamera di dalam halaman ini
 // (getUserMedia + canvas), tidak pernah melewati galeri/file picker OS, supaya tidak bisa kirim
 // foto lama/hasil edit. Radius dicek di client sebelum kamera dibuka; RLS di database cuma
@@ -126,6 +132,16 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   // Sebelum kamera dibuka, tanya dulu eksplisit "ini absen masuk atau pulang?" — supaya tidak
   // membingungkan kalau karyawan tidak yakin/tidak sempat baca label tombol dengan teliti.
   function askConfirmAction() {
+    // Absen pulang: cek dulu jarak waktu dari absen masuk, sebelum buka kamera — supaya kalau
+    // ditolak, karyawan tidak perlu lewat proses foto dulu baru tahu ditolak di akhir.
+    if (today?.check_in && !today?.check_out) {
+      const minutesSinceCheckIn = (Date.now() - new Date(today.check_in).getTime()) / 60000
+      if (minutesSinceCheckIn < MIN_CHECKOUT_GAP_MINUTES) {
+        const sisaMenit = Math.ceil(MIN_CHECKOUT_GAP_MINUTES - minutesSinceCheckIn)
+        showMessage('error', `Anda baru absen masuk ${Math.floor(minutesSinceCheckIn)} menit lalu. Absen pulang bisa dilakukan minimal ${MIN_CHECKOUT_GAP_MINUTES} menit setelah absen masuk — tunggu ${sisaMenit} menit lagi.`)
+        return
+      }
+    }
     setStep('confirm-action')
   }
 

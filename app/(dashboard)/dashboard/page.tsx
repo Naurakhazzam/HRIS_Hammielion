@@ -30,7 +30,11 @@ export default async function DashboardPage() {
     const emp = (userData as any).employees
     const today = toDateStr(new Date())
 
-    const [{ data: todayRoster }, { data: leaveReqs }, { count: pendingKasbonCount }] = await Promise.all([
+    const now = new Date()
+    const monthStart = toDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
+    const monthEnd = toDateStr(new Date(now.getFullYear(), now.getMonth() + 1, 0))
+
+    const [{ data: todayRoster }, { data: leaveReqs }, { count: pendingKasbonCount }, { count: absentCount }] = await Promise.all([
       supabase.from('employee_roster')
         .select('is_day_off, work_schedules(name, check_in_time, check_out_time)')
         .eq('employee_id', userData.employee_id).eq('date', today).maybeSingle(),
@@ -45,6 +49,11 @@ export default async function DashboardPage() {
         : Promise.resolve({ data: [] as { total_days: number }[] }),
       supabase.from('kasbon_requests').select('id', { count: 'exact', head: true })
         .eq('employee_id', userData.employee_id).eq('status', 'pending'),
+      // "Tidak absen" = status 'absent' (alpha) bulan berjalan — bukan cuti/sakit/izin, itu
+      // beda status dan tidak ikut dihitung di sini.
+      supabase.from('attendances').select('id', { count: 'exact', head: true })
+        .eq('employee_id', userData.employee_id).eq('status', 'absent')
+        .gte('date', monthStart).lte('date', monthEnd),
     ])
 
     const usedDays = (leaveReqs || []).reduce((s, r) => s + Number(r.total_days), 0)
@@ -59,7 +68,7 @@ export default async function DashboardPage() {
           <p className="text-slate-500 text-sm mt-1">Halo, <strong>{emp?.full_name || user?.email}</strong>.</p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
             <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Jadwal Hari Ini</p>
             {!roster ? (
@@ -91,6 +100,12 @@ export default async function DashboardPage() {
             <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Kasbon Menunggu</p>
             <p className="text-2xl font-bold text-slate-700">{pendingKasbonCount ?? 0}</p>
             <Link href="/kasbon" className="text-xs text-blue-600 hover:underline mt-2 inline-block">Lihat kasbon →</Link>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Tidak Absen (Bulan Ini)</p>
+            <p className={`text-2xl font-bold ${(absentCount ?? 0) > 0 ? 'text-red-600' : 'text-slate-700'}`}>{absentCount ?? 0} <span className="text-sm font-normal text-slate-400">hari</span></p>
+            <Link href="/portal/absensi" className="text-xs text-blue-600 hover:underline mt-2 inline-block">Lihat rekap absensi →</Link>
           </div>
         </div>
       </div>
