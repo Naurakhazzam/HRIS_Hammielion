@@ -66,10 +66,11 @@ export default function PersetujuanLiburPage() {
   async function fetchRequests() {
     setLoading(true)
     let query = supabase.from('roster_pick_requests')
-      .select('id, requested_date, period_start, period_end, status, rejection_reason, created_at, employees(full_name, employee_code, branches(name))')
+      .select('id, requested_date, period_start, period_end, status, rejection_reason, created_at, employees!roster_pick_requests_employee_id_fkey(full_name, employee_code, branches(name))')
       .order('requested_date')
     if (!showDecided) query = query.eq('status', 'pending')
-    const { data } = await query
+    const { data, error } = await query
+    if (error) console.error('Gagal memuat pengajuan jadwal libur awal:', JSON.stringify(error, null, 2))
     setRequests((data as unknown as RequestRow[]) || [])
     setLoading(false)
   }
@@ -80,7 +81,8 @@ export default function PersetujuanLiburPage() {
       .select('id, original_date, requested_date, counterpart_id, counterpart_status, status, rejection_reason, created_at, requester:employees!roster_change_requests_requester_id_fkey(full_name, employee_code, department_id), counterpart:employees!roster_change_requests_counterpart_id_fkey(full_name, employee_code, department_id)')
       .order('created_at')
     if (!showDecidedChange) query = query.eq('status', 'pending_approval')
-    const { data } = await query
+    const { data, error } = await query
+    if (error) console.error('Gagal memuat pengajuan ganti libur:', JSON.stringify(error, null, 2))
     setChangeRequests((data as unknown as ChangeRequestRow[]) || [])
     setLoadingChange(false)
   }, [supabase, showDecidedChange])

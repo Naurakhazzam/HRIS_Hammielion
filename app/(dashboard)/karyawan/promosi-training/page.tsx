@@ -32,10 +32,11 @@ export default function PromosiTrainingPage() {
   async function fetchRows() {
     setLoading(true)
     let query = supabase.from('training_promotion_candidates')
-      .select('id, eligible_since, status, rejection_reason, decided_at, created_at, employees(full_name, employee_code, join_date, branches(name), positions(name))')
+      .select('id, eligible_since, status, rejection_reason, decided_at, created_at, employees!training_promotion_candidates_employee_id_fkey(full_name, employee_code, join_date, branches(name), positions(name))')
       .order('eligible_since')
     if (!showDecided) query = query.eq('status', 'pending')
-    const { data } = await query
+    const { data, error } = await query
+    if (error) console.error('Gagal memuat kandidat promosi training:', JSON.stringify(error, null, 2))
     setRows((data as unknown as CandidateRow[]) || [])
     setLoading(false)
   }

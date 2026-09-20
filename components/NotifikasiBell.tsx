@@ -66,7 +66,7 @@ export default function NotifikasiBell() {
       setVisible(true)
       setSeenMap(loadSeenMap())
       const { data: candidates } = await supabase.from('training_promotion_candidates')
-        .select('id, eligible_since, employees(full_name)')
+        .select('id, eligible_since, employees!training_promotion_candidates_employee_id_fkey(full_name)')
         .eq('status', 'pending')
         .order('eligible_since')
       const adminItems: NotifItem[] = ((candidates as unknown as { id: string; eligible_since: string; employees: { full_name: string } | null }[]) || []).map(r => ({
