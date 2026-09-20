@@ -18,6 +18,7 @@ export default function AjukanLiburPage() {
   const [employeeId, setEmployeeId] = useState('')
   const [ownRequests, setOwnRequests] = useState<OwnRequest[]>([])
   const [colleagueNames, setColleagueNames] = useState<Record<string, string>>({})
+  const [branchEmployeeCount, setBranchEmployeeCount] = useState<number | null>(null)
   const [busyDate, setBusyDate] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -34,7 +35,11 @@ export default function AjukanLiburPage() {
     const { data: userData } = await supabase.from('users').select('employee_id').eq('id', user.id).single()
     if (!userData) return
     setEmployeeId(userData.employee_id)
-    await fetchData(userData.employee_id)
+    const [, { data: count }] = await Promise.all([
+      fetchData(userData.employee_id),
+      supabase.rpc('get_my_branch_employee_count'),
+    ])
+    setBranchEmployeeCount(typeof count === 'number' ? count : null)
     setLoading(false)
   }
 
@@ -60,6 +65,12 @@ export default function AjukanLiburPage() {
   }
 
   const activeCount = ownRequests.filter(r => r.status !== 'rejected').length
+  // Weekend (Sabtu/Minggu) jadi primadona karena toko buka tiap hari — cabang dengan LEBIH DARI
+  // 2 karyawan aktif dibatasi cuma boleh 1 pilihan weekend per periode, supaya tidak ada yang
+  // "menguasai" weekend terus-menerus tiap bulan. Cabang kecil (<=2 orang) dikecualikan.
+  const isWeekend = (dateStr: string) => [0, 6].includes(new Date(dateStr + 'T00:00:00').getDay())
+  const weekendCapActive = (branchEmployeeCount ?? 0) > 2
+  const weekendPicksUsed = ownRequests.filter(r => r.status !== 'rejected' && isWeekend(r.requested_date)).length
 
   async function toggleDate(dateStr: string, own: OwnRequest | undefined) {
     setBusyDate(dateStr)
@@ -71,6 +82,11 @@ export default function AjukanLiburPage() {
     } else {
       if (activeCount >= MAX_PICKS) {
         showMessage('error', `Sudah mencapai maksimal ${MAX_PICKS} pengajuan untuk periode ini.`)
+        setBusyDate(null)
+        return
+      }
+      if (weekendCapActive && isWeekend(dateStr) && weekendPicksUsed >= 1) {
+        showMessage('error', 'Maksimal 1 tanggal weekend (Sabtu/Minggu) per periode — supaya weekend bisa bergantian dengan rekan sekantor.')
         setBusyDate(null)
         return
       }
@@ -105,10 +121,15 @@ export default function AjukanLiburPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex items-center justify-between">
-        <span className="text-sm text-slate-600">Terpakai: <strong className={activeCount >= MAX_PICKS ? 'text-red-600' : 'text-blue-600'}>{activeCount}</strong> / {MAX_PICKS}</span>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <span className="text-sm text-slate-600">Terpakai: <strong className={activeCount >= MAX_PICKS ? 'text-red-600' : 'text-blue-600'}>{activeCount}</strong> / {MAX_PICKS}
+          {weekendCapActive && <span className="ml-3 text-slate-400">· Weekend: <strong className={weekendPicksUsed >= 1 ? 'text-red-600' : 'text-blue-600'}>{weekendPicksUsed}</strong> / 1</span>}
+        </span>
         <span className="text-xs text-slate-400">Tanda kuning = ada rekan lain (cabang mana pun) yang juga libur/mengajukan di tanggal itu</span>
       </div>
+      {weekendCapActive && (
+        <p className="text-xs text-slate-400 mb-4 -mt-2">Maksimal 1 tanggal weekend (Sabtu/Minggu) per periode, supaya weekend bergantian dengan rekan sekantor.</p>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="divide-y divide-slate-100">
@@ -117,15 +138,23 @@ export default function AjukanLiburPage() {
             const names = colleagueNames[dateStr]
             const d = new Date(dateStr + 'T00:00:00')
             const isPast = dateStr <= todayLocalStr()
-            const disabled = isPast || busyDate === dateStr || (own?.status === 'approved')
+            const isWeekendDay = isWeekend(dateStr)
+            const weekendCapBlocks = weekendCapActive && isWeekendDay && !own && weekendPicksUsed >= 1
+            const disabled = isPast || busyDate === dateStr || (own?.status === 'approved') || weekendCapBlocks
             return (
               <div key={dateStr} className={`flex items-center justify-between px-4 py-2.5 ${own ? (own.status === 'approved' ? 'bg-green-50/50' : 'bg-blue-50/50') : ''}`}>
                 <div>
                   <p className="text-sm font-medium text-slate-800">
                     {d.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long' })}
+                    {isWeekendDay && weekendCapActive && (
+                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-medium align-middle">Weekend</span>
+                    )}
                   </p>
                   {names && (
                     <p className="text-xs text-amber-600 mt-0.5">⚠️ Rekan juga libur: {names} — koordinasi dulu, atau tetap lanjut kalau tidak masalah.</p>
+                  )}
+                  {weekendCapBlocks && (
+                    <p className="text-xs text-slate-400 mt-0.5">Jatah weekend periode ini sudah terpakai.</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
