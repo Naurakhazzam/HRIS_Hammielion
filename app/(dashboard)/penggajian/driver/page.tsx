@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import RupiahInput from '@/components/RupiahInput'
 
-type Employee = { id: string; full_name: string }
+type Employee = { id: string; full_name: string; branch_id: string | null }
 type DriverEmployee = { id: string; full_name: string; branch_id: string | null }
 type Vehicle = { id: string; name: string; plate_number: string | null }
 type Route = { id: string; name: string }
@@ -18,6 +18,7 @@ type DeliveryTrip = {
   driver_earning: number
   helper_earning: number
   payment_status: string
+  helper_payment_status: string
   driver_id: string | null
   helper_id: string | null
   driver: { full_name: string } | null
@@ -43,6 +44,9 @@ type HelperKasbon = {
   notes: string | null
   status: 'active' | 'lunas'
 }
+
+type SavedDeduction = { id: string; kasbon_id: string; deduction_amount: number; remaining_after: number; cash_out_id: string | null }
+type SavedFine = { id: string; amount: number; reason: string; cash_out_id: string | null }
 
 type KasbonDeductionForm = { kasbon_id: string; amount: string }
 type DriverFineForm = { tempId: string; amount: string; reason: string }
@@ -73,6 +77,14 @@ export default function PenggajianDriverPage() {
   const [payDriverAccountId, setPayDriverAccountId] = useState('')
   const [payDriverSubmitting, setPayDriverSubmitting] = useState(false)
 
+  // Tandai Lunas & Catat Kas Keluar (kenek) — sebelumnya kenek sama sekali tidak punya jalur
+  // pencairan resmi (halaman Kas Keluar melarang input manual utk kategori helper_wage tapi
+  // di sini belum ada tombolnya), jadi gaji kenek tidak bisa dicatat lewat jalur manapun.
+  const [payKenekOpen, setPayKenekOpen] = useState(false)
+  const [payKenekDate, setPayKenekDate] = useState('')
+  const [payKenekAccountId, setPayKenekAccountId] = useState('')
+  const [payKenekSubmitting, setPayKenekSubmitting] = useState(false)
+
   const [detailDriver, setDetailDriver] = useState<{
     driverName: string
     driverId: string
@@ -80,8 +92,8 @@ export default function PenggajianDriverPage() {
     weekStart: string
     trips: DeliveryTrip[]
     activeKasbons: DriverKasbon[]
-    savedKasbonDeductions: { kasbon_id: string; deduction_amount: number; remaining_after: number }[]
-    savedFines: { id: string; amount: number; reason: string }[]
+    savedKasbonDeductions: SavedDeduction[]
+    savedFines: SavedFine[]
   } | null>(null)
 
   const [kasbonForms, setKasbonForms] = useState<KasbonDeductionForm[]>([])
@@ -95,8 +107,8 @@ export default function PenggajianDriverPage() {
     weekStart: string
     trips: DeliveryTrip[]
     activeKasbons: HelperKasbon[]
-    savedKasbonDeductions: { kasbon_id: string; deduction_amount: number; remaining_after: number }[]
-    savedFines: { id: string; amount: number; reason: string }[]
+    savedKasbonDeductions: SavedDeduction[]
+    savedFines: SavedFine[]
   } | null>(null)
 
   const [kenekKasbonForms, setKenekKasbonForms] = useState<KasbonDeductionForm[]>([])
@@ -166,16 +178,27 @@ export default function PenggajianDriverPage() {
 
     const { data: allPerm } = await supabase
       .from('employees')
-      .select('id, full_name, departments(name)')
+      .select('id, full_name, branch_id, departments(name)')
       .eq('employee_type', 'permanent')
       .eq('is_active', true)
+
+    // Termasuk juga Driver yang merangkap Kenek (can_help=true) — mirror can_drive di atas,
+    // supaya Driver yang kadang ikut jadi kenek di trip orang lain bisa dipilih juga.
+    const { data: helperDrivers } = await supabase
+      .from('employees')
+      .select('id, full_name, branch_id')
+      .eq('employee_type', 'driver')
+      .eq('can_help', true)
+      .eq('is_active', true)
+
     if (allPerm) {
       const gudangWorkers = allPerm.filter((p: any) => {
         const dept = Array.isArray(p.departments) ? p.departments[0] : p.departments
         return dept?.name === 'Team Gudang'
       })
-      const toEmployee = (arr: any[]) => arr.map(p => ({ id: p.id, full_name: p.full_name }))
-      setHelpers(gudangWorkers.length > 0 ? toEmployee(gudangWorkers) : toEmployee(allPerm))
+      const toEmployee = (arr: any[]) => arr.map(p => ({ id: p.id, full_name: p.full_name, branch_id: p.branch_id }))
+      const baseHelpers = gudangWorkers.length > 0 ? toEmployee(gudangWorkers) : toEmployee(allPerm)
+      setHelpers([...baseHelpers, ...(helperDrivers || [])])
     }
 
     const { data: vData } = await supabase.from('vehicles').select('*').eq('is_active', true).order('name')
@@ -189,7 +212,7 @@ export default function PenggajianDriverPage() {
     let query = supabase
       .from('delivery_trips')
       .select(`
-        id, trip_date, has_helper, driver_earning, helper_earning, payment_status,
+        id, trip_date, has_helper, driver_earning, helper_earning, payment_status, helper_payment_status,
         driver_id, helper_id,
         driver:employees!delivery_trips_driver_id_fkey(full_name),
         helper:employees!delivery_trips_helper_id_fkey(full_name),
@@ -228,6 +251,10 @@ export default function PenggajianDriverPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!myEmployeeId) { showMessage('error', 'Sesi tidak valid.'); return }
+    if (formData.helper_id && formData.helper_id === formData.driver_id) {
+      showMessage('error', 'Driver dan Kenek tidak boleh orang yang sama pada satu trip.')
+      return
+    }
     setSubmitting(true)
     setMessage(null)
 
@@ -361,15 +388,17 @@ export default function PenggajianDriverPage() {
     setSavingPotongan(false)
   }
 
-  async function handleDeleteFine(fineId: string) {
+  async function handleDeleteFine(fineId: string, cashOutId: string | null) {
     if (!detailDriver) return
+    if (cashOutId) { showMessage('error', 'Denda ini sudah tercatat di pembayaran yang sudah lunas, tidak bisa dibatalkan.'); return }
     if (!confirm('Hapus denda ini?')) return
     await supabase.from('driver_fines').delete().eq('id', fineId)
     await openDetailDriver(detailDriver.driverName, detailDriver.driverId)
   }
 
-  async function handleDeleteKasbonDeduction(dedId: string, kasbonId: string, deductionAmount: number) {
+  async function handleDeleteKasbonDeduction(dedId: string, kasbonId: string, deductionAmount: number, cashOutId: string | null) {
     if (!detailDriver) return
+    if (cashOutId) { showMessage('error', 'Potongan ini sudah tercatat di pembayaran yang sudah lunas, tidak bisa dibatalkan.'); return }
     if (!confirm('Batalkan potongan kasbon minggu ini? Saldo kasbon akan dikembalikan.')) return
     // Ambil data potongan dulu
     const { data: ded } = await supabase.from('driver_kasbon_deductions').select('remaining_after, deduction_amount').eq('id', dedId).single()
@@ -400,9 +429,15 @@ export default function PenggajianDriverPage() {
     const unpaidTrips = detailDriver.trips.filter(t => t.payment_status === 'unpaid')
     if (unpaidTrips.length === 0) { showMessage('error', 'Tidak ada trip yang belum lunas minggu ini.'); return }
 
+    // Hanya potongan yang BELUM pernah dinetkan ke pembayaran manapun (cash_out_id masih null) —
+    // supaya kalau minggu ini sudah pernah "Tandai Lunas" sebelumnya, potongan yang sudah
+    // dipotong di pembayaran itu tidak ikut terpotong lagi dobel di pembayaran ini.
+    const pendingKasbonDeductions = detailDriver.savedKasbonDeductions.filter(d => !d.cash_out_id)
+    const pendingFines = detailDriver.savedFines.filter(f => !f.cash_out_id)
+
     const totalUpahUnpaid = unpaidTrips.reduce((acc, t) => acc + Number(t.driver_earning), 0)
-    const totalKasbon = detailDriver.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
-    const totalDenda = detailDriver.savedFines.reduce((s, f) => s + Number(f.amount), 0)
+    const totalKasbon = pendingKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
+    const totalDenda = pendingFines.reduce((s, f) => s + Number(f.amount), 0)
     const netAmount = totalUpahUnpaid - totalKasbon - totalDenda
     if (netAmount <= 0) { showMessage('error', 'Gaji bersih harus lebih besar dari Rp0. Cek potongan minggu ini.'); return }
 
@@ -416,7 +451,7 @@ export default function PenggajianDriverPage() {
     const potonganNote = (totalKasbon > 0 || totalDenda > 0)
       ? ` (upah ${formatRupiah(totalUpahUnpaid)}${totalDenda > 0 ? ` - denda ${formatRupiah(totalDenda)}` : ''}${totalKasbon > 0 ? ` - kasbon ${formatRupiah(totalKasbon)}` : ''})`
       : ''
-    const { error: coErr } = await supabase.from('fin_cash_out').insert({
+    const { data: cashOutRow, error: coErr } = await supabase.from('fin_cash_out').insert({
       branch_id: driverBranchId,
       category: 'driver_wage',
       amount: netAmount,
@@ -426,16 +461,87 @@ export default function PenggajianDriverPage() {
       input_by: myUserId,
       verified_by: myUserId,
       status: 'approved',
-    })
+    }).select('id').single()
     if (coErr) {
       showMessage('error', 'Trip sudah ditandai lunas, tapi gagal mencatat Kas Keluar: ' + coErr.message)
     } else {
+      // Kunci potongan yang baru saja dinetkan ke pembayaran ini, supaya tidak terhitung lagi nanti.
+      if (pendingKasbonDeductions.length > 0) {
+        await supabase.from('driver_kasbon_deductions').update({ cash_out_id: cashOutRow.id }).in('id', pendingKasbonDeductions.map(d => d.id))
+      }
+      if (pendingFines.length > 0) {
+        await supabase.from('driver_fines').update({ cash_out_id: cashOutRow.id }).in('id', pendingFines.map(f => f.id))
+      }
       showMessage('success', `Gaji driver ${detailDriver.driverName} berhasil dilunasi dan tercatat di Kas Keluar (${formatRupiah(netAmount)}).`)
       setPayDriverOpen(false)
       await openDetailDriver(detailDriver.driverName, detailDriver.driverId)
       fetchTrips()
     }
     setPayDriverSubmitting(false)
+  }
+
+  function openPayKenekModal() {
+    if (!detailKenek) return
+    setPayKenekDate(new Date().toISOString().slice(0, 10))
+    setPayKenekAccountId('')
+    setPayKenekOpen(true)
+  }
+
+  // Tandai Lunas & Catat Kas Keluar (kenek) — jalur resmi satu-satunya utk mencatat gaji kenek,
+  // sama seperti driver: cabang otomatis dari data karyawan, nominal otomatis net.
+  async function confirmPayKenek() {
+    if (!detailKenek || !myUserId) return
+    if (!payKenekAccountId) { showMessage('error', 'Pilih rekening/kas sumber dulu.'); return }
+    if (!payKenekDate) { showMessage('error', 'Tanggal wajib diisi.'); return }
+
+    const unpaidTrips = detailKenek.trips.filter(t => t.helper_payment_status === 'unpaid')
+    if (unpaidTrips.length === 0) { showMessage('error', 'Tidak ada trip yang belum lunas minggu ini.'); return }
+
+    const pendingKasbonDeductions = detailKenek.savedKasbonDeductions.filter(d => !d.cash_out_id)
+    const pendingFines = detailKenek.savedFines.filter(f => !f.cash_out_id)
+
+    const totalUpahUnpaid = unpaidTrips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
+    const totalKasbon = pendingKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
+    const totalDenda = pendingFines.reduce((s, f) => s + Number(f.amount), 0)
+    const netAmount = totalUpahUnpaid - totalKasbon - totalDenda
+    if (netAmount <= 0) { showMessage('error', 'Gaji bersih harus lebih besar dari Rp0. Cek potongan minggu ini.'); return }
+
+    const helperBranchId = helpers.find(h => h.id === detailKenek.helperId)?.branch_id
+    if (!helperBranchId) { showMessage('error', 'Cabang kenek ini tidak ditemukan di data karyawan. Perbaiki data karyawan dulu.'); return }
+
+    setPayKenekSubmitting(true)
+    const { error: updErr } = await supabase.from('delivery_trips').update({ helper_payment_status: 'paid' }).in('id', unpaidTrips.map(t => t.id))
+    if (updErr) { showMessage('error', 'Gagal menandai trip lunas: ' + updErr.message); setPayKenekSubmitting(false); return }
+
+    const potonganNote = (totalKasbon > 0 || totalDenda > 0)
+      ? ` (upah ${formatRupiah(totalUpahUnpaid)}${totalDenda > 0 ? ` - denda ${formatRupiah(totalDenda)}` : ''}${totalKasbon > 0 ? ` - kasbon ${formatRupiah(totalKasbon)}` : ''})`
+      : ''
+    const { data: cashOutRow, error: coErr } = await supabase.from('fin_cash_out').insert({
+      branch_id: helperBranchId,
+      category: 'helper_wage',
+      amount: netAmount,
+      description: `Gaji kenek ${detailKenek.helperName} minggu ${detailKenek.weekStart}${potonganNote}`,
+      transaction_date: payKenekDate,
+      account_id: payKenekAccountId,
+      input_by: myUserId,
+      verified_by: myUserId,
+      status: 'approved',
+    }).select('id').single()
+    if (coErr) {
+      showMessage('error', 'Trip sudah ditandai lunas, tapi gagal mencatat Kas Keluar: ' + coErr.message)
+    } else {
+      if (pendingKasbonDeductions.length > 0) {
+        await supabase.from('helper_kasbon_deductions').update({ cash_out_id: cashOutRow.id }).in('id', pendingKasbonDeductions.map(d => d.id))
+      }
+      if (pendingFines.length > 0) {
+        await supabase.from('helper_fines').update({ cash_out_id: cashOutRow.id }).in('id', pendingFines.map(f => f.id))
+      }
+      showMessage('success', `Gaji kenek ${detailKenek.helperName} berhasil dilunasi dan tercatat di Kas Keluar (${formatRupiah(netAmount)}).`)
+      setPayKenekOpen(false)
+      await openDetailKenek(detailKenek.helperName, detailKenek.helperId, detailKenek.trips)
+      fetchTrips()
+    }
+    setPayKenekSubmitting(false)
   }
 
   function handlePrintSlip() {
@@ -591,15 +697,17 @@ export default function PenggajianDriverPage() {
     setSavingKenekPotongan(false)
   }
 
-  async function handleDeleteKenekFine(fineId: string) {
+  async function handleDeleteKenekFine(fineId: string, cashOutId: string | null) {
     if (!detailKenek) return
+    if (cashOutId) { showMessage('error', 'Denda ini sudah tercatat di pembayaran yang sudah lunas, tidak bisa dibatalkan.'); return }
     if (!confirm('Hapus denda ini?')) return
     await supabase.from('helper_fines').delete().eq('id', fineId)
     await openDetailKenek(detailKenek.helperName, detailKenek.helperId, detailKenek.trips)
   }
 
-  async function handleDeleteKenekKasbonDeduction(dedId: string, kasbonId: string) {
+  async function handleDeleteKenekKasbonDeduction(dedId: string, kasbonId: string, cashOutId: string | null) {
     if (!detailKenek) return
+    if (cashOutId) { showMessage('error', 'Potongan ini sudah tercatat di pembayaran yang sudah lunas, tidak bisa dibatalkan.'); return }
     if (!confirm('Batalkan potongan kasbon minggu ini? Saldo kasbon akan dikembalikan.')) return
     const { data: ded } = await supabase.from('helper_kasbon_deductions').select('remaining_after, deduction_amount').eq('id', dedId).single()
     if (ded) {
@@ -613,8 +721,8 @@ export default function PenggajianDriverPage() {
   function handlePrintKenekSlip() {
     if (!detailKenek) return
     const totalUpah = detailKenek.trips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
-    const paidCount = detailKenek.trips.filter(t => t.payment_status === 'paid').length
-    const unpaidCount = detailKenek.trips.filter(t => t.payment_status === 'unpaid').length
+    const paidCount = detailKenek.trips.filter(t => t.helper_payment_status === 'paid').length
+    const unpaidCount = detailKenek.trips.filter(t => t.helper_payment_status === 'unpaid').length
     const totalKasbon = detailKenek.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
     const totalDenda = detailKenek.savedFines.reduce((s, f) => s + Number(f.amount), 0)
     const gajiB = totalUpah - totalKasbon - totalDenda
@@ -625,7 +733,7 @@ export default function PenggajianDriverPage() {
         <td>${t.delivery_routes?.name ?? '-'}</td>
         <td>${t.vehicles?.name ?? '-'}</td>
         <td>${t.driver?.full_name ?? '-'}</td>
-        <td class="center"><span class="badge ${t.payment_status === 'paid' ? 'green' : 'yellow'}">${t.payment_status === 'paid' ? 'Lunas' : 'Belum'}</span></td>
+        <td class="center"><span class="badge ${t.helper_payment_status === 'paid' ? 'green' : 'yellow'}">${t.helper_payment_status === 'paid' ? 'Lunas' : 'Belum'}</span></td>
         <td class="right">${formatRupiah(t.helper_earning)}</td>
       </tr>`).join('')
 
@@ -869,7 +977,7 @@ export default function PenggajianDriverPage() {
               {Object.entries(groupedByHelper).map(([helperName, helperGroup]) => {
                 const { trips: helperTrips, helperId } = helperGroup
                 const totalEarning = helperTrips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
-                const paidCount = helperTrips.filter(t => t.payment_status === 'paid').length
+                const paidCount = helperTrips.filter(t => t.helper_payment_status === 'paid').length
                 const unpaidCount = helperTrips.length - paidCount
                 const allPaid = unpaidCount === 0
 
@@ -1067,8 +1175,12 @@ export default function PenggajianDriverPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-red-600">-{formatRupiah(d.deduction_amount)}</span>
-                            <button onClick={() => handleDeleteKasbonDeduction(d.id, d.kasbon_id, d.deduction_amount)}
-                              className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                            {d.cash_out_id ? (
+                              <span className="text-xs text-slate-400" title="Sudah tercatat di pembayaran yang lunas">🔒</span>
+                            ) : (
+                              <button onClick={() => handleDeleteKasbonDeduction(d.id, d.kasbon_id, d.deduction_amount, d.cash_out_id)}
+                                className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1080,8 +1192,12 @@ export default function PenggajianDriverPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-red-600">-{formatRupiah(f.amount)}</span>
-                            <button onClick={() => handleDeleteFine(f.id)}
-                              className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                            {f.cash_out_id ? (
+                              <span className="text-xs text-slate-400" title="Sudah tercatat di pembayaran yang lunas">🔒</span>
+                            ) : (
+                              <button onClick={() => handleDeleteFine(f.id, f.cash_out_id)}
+                                className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1210,8 +1326,8 @@ export default function PenggajianDriverPage() {
     {payDriverOpen && detailDriver && (() => {
       const unpaidTrips = detailDriver.trips.filter(t => t.payment_status === 'unpaid')
       const totalUpahUnpaid = unpaidTrips.reduce((acc, t) => acc + Number(t.driver_earning), 0)
-      const totalKasbon = detailDriver.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
-      const totalDenda = detailDriver.savedFines.reduce((s, f) => s + Number(f.amount), 0)
+      const totalKasbon = detailDriver.savedKasbonDeductions.filter(d => !d.cash_out_id).reduce((s, d) => s + Number(d.deduction_amount), 0)
+      const totalDenda = detailDriver.savedFines.filter(f => !f.cash_out_id).reduce((s, f) => s + Number(f.amount), 0)
       const netAmount = totalUpahUnpaid - totalKasbon - totalDenda
       return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60">
@@ -1262,6 +1378,62 @@ export default function PenggajianDriverPage() {
       )
     })()}
 
+    {/* Modal Tandai Lunas & Catat Kas Keluar (Kenek) */}
+    {payKenekOpen && detailKenek && (() => {
+      const unpaidTrips = detailKenek.trips.filter(t => t.helper_payment_status === 'unpaid')
+      const totalUpahUnpaid = unpaidTrips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
+      const totalKasbon = detailKenek.savedKasbonDeductions.filter(d => !d.cash_out_id).reduce((s, d) => s + Number(d.deduction_amount), 0)
+      const totalDenda = detailKenek.savedFines.filter(f => !f.cash_out_id).reduce((s, f) => s + Number(f.amount), 0)
+      const netAmount = totalUpahUnpaid - totalKasbon - totalDenda
+      return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+              <h2 className="text-base font-bold text-slate-700">Tandai Lunas: Metode &amp; Sumber Pembayaran</h2>
+              <button onClick={() => setPayKenekOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-sm text-slate-600">{detailKenek.helperName} — {detailKenek.weekLabel} ({unpaidTrips.length} trip belum lunas)</p>
+
+              <div className="bg-slate-50 rounded-xl p-3 space-y-1 text-sm">
+                <div className="flex justify-between"><span className="text-slate-500">Upah (belum lunas)</span><span className="font-medium">{formatRupiah(totalUpahUnpaid)}</span></div>
+                {totalDenda > 0 && <div className="flex justify-between text-red-600"><span>Denda</span><span>-{formatRupiah(totalDenda)}</span></div>}
+                {totalKasbon > 0 && <div className="flex justify-between text-red-600"><span>Potongan Kasbon</span><span>-{formatRupiah(totalKasbon)}</span></div>}
+                <div className="flex justify-between font-bold text-green-700 pt-1 border-t border-slate-200"><span>Gaji Bersih (Kas Keluar)</span><span>{formatRupiah(netAmount)}</span></div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Pembayaran <span className="text-red-500">*</span></label>
+                <input type="date" required value={payKenekDate} onChange={e => setPayKenekDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
+                <select required value={payKenekAccountId} onChange={e => setPayKenekAccountId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                  <option value="">-- Pilih Rekening/Kas --</option>
+                  {bankAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setPayKenekOpen(false)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-lg transition">
+                  Batal
+                </button>
+                <button onClick={confirmPayKenek} disabled={payKenekSubmitting || !payKenekAccountId || netAmount <= 0}
+                  className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                  {payKenekSubmitting ? 'Memproses...' : 'Konfirmasi Lunas'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400">Nominal Kas Keluar otomatis dihitung net (upah − denda − kasbon) dan cabangnya otomatis ikut data karyawan — tidak bisa diketik manual.</p>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+
     {/* Modal Detail Kenek */}
     {detailKenek && (() => {
       const totalUpah = detailKenek.trips.reduce((acc, t) => acc + Number(t.helper_earning), 0)
@@ -1270,12 +1442,18 @@ export default function PenggajianDriverPage() {
       const totalKenekPotongan = totalKenekKasbon + totalKenekDenda
       const kenekGajiB = totalUpah - totalKenekPotongan
       const hasKenekSavedDeductions = detailKenek.savedKasbonDeductions.length > 0 || detailKenek.savedFines.length > 0
+      const unpaidKenekCount = detailKenek.trips.filter(t => t.helper_payment_status === 'unpaid').length
       return (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/50 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4">
-            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200 flex-wrap gap-2">
               <h2 className="text-base font-bold text-slate-700">Detail Upah Kenek</h2>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                {unpaidKenekCount > 0 && (
+                  <button onClick={openPayKenekModal} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg transition">
+                    💰 Tandai Lunas &amp; Catat Kas Keluar
+                  </button>
+                )}
                 <button onClick={handlePrintKenekSlip} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium rounded-lg transition">
                   🖨️ Cetak Slip
                 </button>
@@ -1307,8 +1485,8 @@ export default function PenggajianDriverPage() {
                 </div>
                 <div className="bg-green-50 rounded-xl p-3 text-center">
                   <p className="text-xs text-slate-500 mb-1">Status</p>
-                  <p className="text-sm font-bold text-green-700">{detailKenek.trips.filter(t => t.payment_status === 'paid').length} Lunas</p>
-                  <p className="text-xs text-red-500">{detailKenek.trips.filter(t => t.payment_status === 'unpaid').length} Belum</p>
+                  <p className="text-sm font-bold text-green-700">{detailKenek.trips.filter(t => t.helper_payment_status === 'paid').length} Lunas</p>
+                  <p className="text-xs text-red-500">{detailKenek.trips.filter(t => t.helper_payment_status === 'unpaid').length} Belum</p>
                 </div>
               </div>
 
@@ -1332,8 +1510,8 @@ export default function PenggajianDriverPage() {
                         <td className="px-4 py-2.5 text-slate-600 text-xs">{t.vehicles?.name ?? '-'}</td>
                         <td className="px-4 py-2.5 text-slate-600 text-xs">{t.driver?.full_name ?? '-'}</td>
                         <td className="px-4 py-2.5 text-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${t.payment_status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                            {t.payment_status === 'paid' ? 'Lunas' : 'Belum'}
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${t.helper_payment_status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                            {t.helper_payment_status === 'paid' ? 'Lunas' : 'Belum'}
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-right font-medium text-slate-800">{formatRupiah(t.helper_earning)}</td>
@@ -1362,8 +1540,12 @@ export default function PenggajianDriverPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-red-600">-{formatRupiah(d.deduction_amount)}</span>
-                            <button onClick={() => handleDeleteKenekKasbonDeduction(d.id, d.kasbon_id)}
-                              className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                            {d.cash_out_id ? (
+                              <span className="text-xs text-slate-400" title="Sudah tercatat di pembayaran yang lunas">🔒</span>
+                            ) : (
+                              <button onClick={() => handleDeleteKenekKasbonDeduction(d.id, d.kasbon_id, d.cash_out_id)}
+                                className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1375,8 +1557,12 @@ export default function PenggajianDriverPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-red-600">-{formatRupiah(f.amount)}</span>
-                            <button onClick={() => handleDeleteKenekFine(f.id)}
-                              className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                            {f.cash_out_id ? (
+                              <span className="text-xs text-slate-400" title="Sudah tercatat di pembayaran yang lunas">🔒</span>
+                            ) : (
+                              <button onClick={() => handleDeleteKenekFine(f.id, f.cash_out_id)}
+                                className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                            )}
                           </div>
                         </div>
                       ))}

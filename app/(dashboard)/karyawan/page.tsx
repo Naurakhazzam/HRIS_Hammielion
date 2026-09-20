@@ -17,6 +17,7 @@ type Employee = {
   phone: string | null
   employee_type: string
   can_drive: boolean
+  can_help: boolean
   join_date: string | null
   is_active: boolean
   kpi_bonus_max: number
@@ -53,7 +54,7 @@ type Employee = {
 const emptyForm = {
   full_name: '', employee_code: '', nik: '', phone: '',
   branch_id: '', department_id: '', position_id: '',
-  employee_type: 'permanent', can_drive: false, join_date: new Date().toISOString().split('T')[0],
+  employee_type: 'permanent', can_drive: false, can_help: false, join_date: new Date().toISOString().split('T')[0],
   kpi_bonus_max: '0',
   birth_date: '', birth_place: '', gender: '', address: '',
   religion: '', marital_status: '', dependants: '0',
@@ -220,7 +221,7 @@ export default function KaryawanPage() {
       full_name: f.full_name, employee_code: f.employee_code,
       nik: f.nik || null, phone: f.phone || null,
       branch_id: f.branch_id, department_id: f.department_id, position_id: f.position_id,
-      employee_type: f.employee_type, can_drive: f.can_drive, join_date: f.join_date,
+      employee_type: f.employee_type, can_drive: f.can_drive, can_help: f.can_help, join_date: f.join_date,
       kpi_bonus_max: parseFloat(f.kpi_bonus_max) || 0,
       birth_date: f.birth_date || null, birth_place: f.birth_place || null,
       gender: f.gender || null, address: f.address || null,
@@ -283,6 +284,7 @@ export default function KaryawanPage() {
       nik: emp.nik || '', phone: emp.phone || '',
       branch_id: emp.branches?.id || '', department_id: emp.departments?.id || '',
       position_id: emp.positions?.id || '', employee_type: emp.employee_type, can_drive: emp.can_drive || false,
+      can_help: emp.can_help || false,
       join_date: emp.join_date || '', kpi_bonus_max: String(emp.kpi_bonus_max || 0),
       birth_date: emp.birth_date || '', birth_place: emp.birth_place || '',
       gender: emp.gender || '', address: emp.address || '',
@@ -414,11 +416,18 @@ export default function KaryawanPage() {
               </select>
             </FormField>
             <FormField label="Merangkap Jabatan Lain">
-              <label className="flex items-center gap-2 h-[38px]">
-                <input type="checkbox" checked={f.can_drive} onChange={e => setF({ ...f, can_drive: e.target.checked })}
-                  className="w-4 h-4 rounded border-slate-300 text-blue-600" />
-                <span className="text-sm text-slate-600">Bisa jadi Driver (misal Kenek merangkap Driver)</span>
-              </label>
+              <div className="flex flex-col gap-1.5 justify-center min-h-[38px]">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={f.can_drive} onChange={e => setF({ ...f, can_drive: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600" />
+                  <span className="text-sm text-slate-600">Bisa jadi Driver (misal Kenek merangkap Driver)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={f.can_help} onChange={e => setF({ ...f, can_help: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600" />
+                  <span className="text-sm text-slate-600">Bisa jadi Kenek (misal Driver merangkap Kenek)</span>
+                </label>
+              </div>
             </FormField>
             <FormField label="Tanggal Bergabung" required>
               <input type="date" required value={f.join_date} onChange={e => setF({ ...f, join_date: e.target.value })} className={inputClass} />
@@ -658,6 +667,7 @@ export default function KaryawanPage() {
                       <div className="text-sm font-medium text-slate-700">
                         {emp.positions?.name}
                         {emp.can_drive && <span className="ml-1.5 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">+ Driver</span>}
+                        {emp.can_help && <span className="ml-1.5 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">+ Kenek</span>}
                       </div>
                       <div className="text-xs text-slate-500">{emp.departments?.name}</div>
                     </td>
@@ -723,6 +733,9 @@ export default function KaryawanPage() {
                     </span>
                     {detailEmployee.can_drive && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">Merangkap Driver</span>
+                    )}
+                    {detailEmployee.can_help && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">Merangkap Kenek</span>
                     )}
                   </div>
                 </div>
