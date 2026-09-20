@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
 
 type Payroll = {
   id: string
@@ -53,7 +54,7 @@ export default function PortalSlipGajiPage() {
   const [myName, setMyName] = useState('')
   const [selectedPayroll, setSelectedPayroll] = useState<Payroll | null>(null)
   const [filterYear, setFilterYear] = useState(new Date().getFullYear())
-  const [lateDetails, setLateDetails] = useState<{ date: string; late_minutes: number; deduction: number }[]>([])
+  const [lateDetails, setLateDetails] = useState<{ date: string; late_minutes: number; deduction: number; tolerated: boolean }[]>([])
   const [lateRate, setLateRate] = useState(0)
   const [loadingLate, setLoadingLate] = useState(false)
 
@@ -100,7 +101,7 @@ export default function PortalSlipGajiPage() {
 
     const { data: atts } = await supabase
       .from('attendances')
-      .select('date, late_minutes')
+      .select('date, late_minutes, source')
       .eq('employee_id', myEmployeeId)
       .gte('date', firstDay)
       .lte('date', lastDay)
@@ -110,7 +111,8 @@ export default function PortalSlipGajiPage() {
     setLateDetails((atts || []).map(a => ({
       date: a.date,
       late_minutes: Number(a.late_minutes),
-      deduction: Number(a.late_minutes) * rate
+      deduction: chargeableLateMinutes(Number(a.late_minutes), a.source) * rate,
+      tolerated: isLateTolerated(Number(a.late_minutes), a.source),
     })))
     setLoadingLate(false)
   }
@@ -323,7 +325,11 @@ export default function PortalSlipGajiPage() {
                                 <span>└</span>
                                 <span>{new Date(d.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span>
                                 <span>{d.late_minutes} mnt</span>
-                                {lateRate > 0 && <span>= <span className="text-red-400">{fmtRp(d.deduction)}</span></span>}
+                                {d.tolerated ? (
+                                  <span className="text-green-600">toleransi absen QR, tidak dipotong</span>
+                                ) : (
+                                  lateRate > 0 && <span>= <span className="text-red-400">{fmtRp(d.deduction)}</span></span>
+                                )}
                               </div>
                             ))}
                           </div>

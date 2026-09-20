@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import { todayLocalStr } from '@/lib/date'
+import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -171,7 +172,7 @@ export default function PenggajianBulananPage() {
 
   // ── State: modal detail slip (Part 5) ──
   const [selectedPayroll, setSelectedPayroll] = useState<Payroll | null>(null)
-  const [lateDetails, setLateDetails] = useState<{ date: string; late_minutes: number; deduction: number }[]>([])
+  const [lateDetails, setLateDetails] = useState<{ date: string; late_minutes: number; deduction: number; tolerated: boolean }[]>([])
   const [lateRate, setLateRate] = useState(0)
 
   // ── State: absensi tidak lengkap (cuma absen datang atau cuma pulang) ──
@@ -660,7 +661,7 @@ export default function PenggajianBulananPage() {
 
     const [scRes, attRes, kpiRes, klRes, empRes, loyBalRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1),
-      supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
+      supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes, source').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
       supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
@@ -749,7 +750,7 @@ export default function PenggajianBulananPage() {
     const otHours  = (!otApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[])
       .filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && (silent ? Number(a.overtime_hours ?? 0) > 0 : validatedOtDates.has(a.date)))
       .reduce((s: number, a: any) => s + (silent ? roundOvertimeHours(Number(a.overtime_hours ?? 0)) : (validatedOtDates.get(a.date) ?? roundOvertimeHours(Number(a.overtime_hours ?? 0)))), 0)
-    const latMins  = (!lateApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0)
+    const latMins  = (!lateApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + chargeableLateMinutes(Number(a.late_minutes ?? 0), a.source), 0)
     const otTotal  = otHours * otRate
     const latDed   = latMins * latRate
     const kpi      = flatSalaryForEmp ? 0 : Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
@@ -1288,7 +1289,7 @@ export default function PenggajianBulananPage() {
 
     const { data: atts } = await supabase
       .from('attendances')
-      .select('date, late_minutes')
+      .select('date, late_minutes, source')
       .eq('employee_id', p.employee_id)
       .gte('date', effectiveStart)
       .lte('date', lastDay)
@@ -1298,7 +1299,8 @@ export default function PenggajianBulananPage() {
     const details = (atts || []).map(a => ({
       date: a.date,
       late_minutes: Number(a.late_minutes),
-      deduction: Number(a.late_minutes) * rate
+      deduction: chargeableLateMinutes(Number(a.late_minutes), a.source) * rate,
+      tolerated: isLateTolerated(Number(a.late_minutes), a.source),
     }))
 
     setLateDetails(details)
@@ -1676,7 +1678,7 @@ export default function PenggajianBulananPage() {
     const lateDed = Number(p.late_deduction)
     const lateDetailHtml = lateDetails.length > 0
       ? `<div class="detail-block">
-          ${lateDetails.map(d => `<div class="detail-row"><span>${fmtDate(d.date)}</span><span>${d.late_minutes} mnt × ${fmtR(lateRate)}/mnt = <span class="ded-detail">${fmtR(d.deduction)}</span></span></div>`).join('')}
+          ${lateDetails.map(d => `<div class="detail-row"><span>${fmtDate(d.date)}</span><span>${d.tolerated ? `${d.late_minutes} mnt (toleransi absen QR, tidak dipotong)` : `${d.late_minutes} mnt × ${fmtR(lateRate)}/mnt = <span class="ded-detail">${fmtR(d.deduction)}</span>`}</span></div>`).join('')}
           <div class="detail-total">Total: ${lateDetails.reduce((s,d)=>s+d.late_minutes,0)} menit</div>
          </div>` : ''
 
@@ -2580,7 +2582,11 @@ export default function PenggajianBulananPage() {
                               <span>└</span>
                               <span>{new Date(d.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span>
                               <span>{d.late_minutes} mnt</span>
-                              {lateRate > 0 && <span>× {formatRupiah(lateRate)}/mnt = <span className="text-red-400">{formatRupiah(d.deduction)}</span></span>}
+                              {d.tolerated ? (
+                                <span className="text-green-600">toleransi absen QR, tidak dipotong</span>
+                              ) : (
+                                lateRate > 0 && <span>× {formatRupiah(lateRate)}/mnt = <span className="text-red-400">{formatRupiah(d.deduction)}</span></span>
+                              )}
                             </div>
                           ))}
                           <div className="text-xs text-slate-500 font-semibold flex gap-2 mt-1 pt-1 border-t border-slate-100">

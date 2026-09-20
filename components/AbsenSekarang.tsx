@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr, localDateStr } from '@/lib/date'
 import { resolveSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
+import { QR_LATE_TOLERANCE_MINUTES } from '@/lib/lateTolerance'
 
 type Props = { employeeId: string; employeeName: string; onDone?: () => void; mode?: 'gps' | 'qr' }
 
@@ -459,9 +460,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         check_in_distance_m: geo ? Math.round(geo.distance) : null,
       })
       if (error) { showMessage('error', 'Gagal mencatat absen masuk: ' + error.message); setStep('preview'); return }
-      showMessage('success', lateMinutes > 0
-        ? `Absen masuk tercatat jam ${now.toLocaleTimeString('id-ID')} — telat ${lateMinutes} menit.`
-        : `Absen masuk tercatat jam ${now.toLocaleTimeString('id-ID')}.`)
+      const jamStr = now.toLocaleTimeString('id-ID')
+      if (lateMinutes <= 0) {
+        showMessage('success', `Absen masuk tercatat jam ${jamStr}.`)
+      } else if (mode === 'qr' && lateMinutes <= QR_LATE_TOLERANCE_MINUTES) {
+        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit (masih dalam toleransi ${QR_LATE_TOLERANCE_MINUTES} menit, tidak dipotong).`)
+      } else {
+        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit, kena potongan keterlambatan.`)
+      }
     }
 
     if (capturedUrl) URL.revokeObjectURL(capturedUrl)
