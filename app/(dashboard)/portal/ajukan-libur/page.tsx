@@ -115,6 +115,16 @@ export default function AjukanLiburPage() {
         <p className="text-sm text-slate-500">Pilih maksimal {MAX_PICKS} tanggal libur untuk periode <strong>{rosterPeriodLabel(period.start, period.end)}</strong>. Perlu disetujui HR/Owner sebelum resmi.</p>
       </div>
 
+      {weekendCapActive && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex gap-3">
+          <span className="text-xl leading-none">📅</span>
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Aturan Libur Weekend</p>
+            <p className="text-sm text-amber-700 mt-0.5">Cabang Anda ramai (lebih dari 2 karyawan), jadi setiap orang cuma boleh pilih <strong>1 tanggal Sabtu/Minggu</strong> dari {MAX_PICKS} pengajuan libur per periode. Ini supaya weekend bisa bergantian dengan rekan sekantor, tidak dikuasai orang yang sama terus setiap bulan. Sisanya bebas pilih hari kerja biasa.</p>
+          </div>
+        </div>
+      )}
+
       {message && (
         <div className={`p-3 mb-4 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
           {message.text}
@@ -127,9 +137,6 @@ export default function AjukanLiburPage() {
         </span>
         <span className="text-xs text-slate-400">Tanda kuning = ada rekan lain (cabang mana pun) yang juga libur/mengajukan di tanggal itu</span>
       </div>
-      {weekendCapActive && (
-        <p className="text-xs text-slate-400 mb-4 -mt-2">Maksimal 1 tanggal weekend (Sabtu/Minggu) per periode, supaya weekend bergantian dengan rekan sekantor.</p>
-      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="divide-y divide-slate-100">

@@ -1893,8 +1893,9 @@ Sekaligus menambahkan fitur baru yang diminta: **toleransi 5 menit khusus absen 
 **Konteks:** Owner menemukan pola tidak adil — Rijal Rijaldi (Toko Pusat, 7 karyawan) mengajukan 4 hari liburnya untuk periode depan, dan **ke-4nya jatuh di weekend** (3 Sabtu + 1 Minggu). Karena toko buka setiap hari, weekend jadi hari primadona — kalau 1 orang terus-menerus menguasai weekend, rekan lain di cabang yang sama tidak pernah kebagian giliran. Aturan baru: di cabang dengan **lebih dari 2 karyawan aktif**, satu karyawan cuma boleh pilih **1 tanggal weekend (Sabtu/Minggu)** dari maksimal 4 pengajuan liburnya per periode. Cabang kecil (2 karyawan atau kurang) dikecualikan — tidak ada rekan yang dirugikan kalau cuma sendiri/berdua. Berlaku untuk periode mendatang (tidak menyentuh pengajuan yang sudah ada).
 
 **Fitur:**
-- Halaman **Portal Saya → Ajukan Libur** menampilkan penghitung "Weekend: 0/1" (khusus cabang yang kena aturan ini), tanggal Sabtu/Minggu ditandai label "Weekend", dan begitu jatah weekend habis, tanggal weekend lain otomatis tidak bisa dipilih lagi (dengan keterangan alasannya).
+- Halaman **Portal Saya → Ajukan Libur** menampilkan banner penjelasan yang jelas begitu halaman dibuka (khusus cabang yang kena aturan ini) — supaya karyawan langsung paham aturannya sendiri tanpa perlu dijelaskan manual oleh Owner/HR. Ditambah penghitung "Weekend: 0/1", label "Weekend" di tanggal Sabtu/Minggu, dan begitu jatah habis, tanggal weekend lain otomatis tidak bisa dipilih lagi (dengan keterangan alasannya).
 - Aturan ini ditegakkan juga di level database (bukan cuma tampilan) — jadi tidak bisa dilewati lewat jalur lain.
+- 4 pengajuan Rijal Rijaldi yang sudah terlanjur (semuanya weekend, sebelum aturan ini ada) dihapus atas persetujuan Owner — dia diminta mengajukan ulang sesuai aturan baru.
 
 | File | Perubahan |
 |---|---|
