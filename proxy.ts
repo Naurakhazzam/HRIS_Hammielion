@@ -13,7 +13,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // Route yang tidak memerlukan autentikasi
-const PUBLIC_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password', '/auth/callback', '/lamaran', '/api/lamaran', '/api/signup']
+const PUBLIC_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password', '/auth/callback', '/lamaran', '/api/lamaran', '/api/signup', '/daftar-baru', '/api/invite']
 // Bug lama: '/signup' (Daftar Akun Karyawan) TIDAK PERNAH ada di daftar ini sejak fitur itu
 // dibuat — karyawan yang belum punya akun (belum login) yang justru target penggunanya selalu
 // dilempar balik ke /login sebelum sempat lihat form Daftar. '/api/signup' (endpoint submit-nya)

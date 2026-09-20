@@ -54,6 +54,7 @@ const adminNavItems: NavNode[] = [
     icon: '👥',
     submenu: [
       { name: 'Karyawan', href: '/karyawan' },
+      { name: 'Undang Karyawan Baru', href: '/karyawan/undang' },
       { name: 'Promosi Training', href: '/karyawan/promosi-training' },
       {
         name: 'Rekrutmen',
