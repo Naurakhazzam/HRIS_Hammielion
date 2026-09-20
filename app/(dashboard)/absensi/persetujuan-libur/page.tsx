@@ -68,7 +68,9 @@ export default function PersetujuanLiburPage() {
     let query = supabase.from('roster_pick_requests')
       .select('id, requested_date, period_start, period_end, status, rejection_reason, created_at, employees!roster_pick_requests_employee_id_fkey(full_name, employee_code, branches(name))')
       .order('requested_date')
-    if (!showDecided) query = query.eq('status', 'pending')
+    // 'draft' = belum diajukan karyawan ke HR (belum genap 4 tanggal) — jangan pernah ikut
+    // tampil di sini, bukan cuma disaring lewat toggle "sudah diproses".
+    query = showDecided ? query.neq('status', 'draft') : query.eq('status', 'pending')
     const { data, error } = await query
     if (error) console.error('Gagal memuat pengajuan jadwal libur awal:', JSON.stringify(error, null, 2))
     setRequests((data as unknown as RequestRow[]) || [])

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { getUpcomingRosterPeriod, rosterPeriodLabel, datesInRange } from '@/lib/rosterPeriod'
 import { todayLocalStr, localDateStr } from '@/lib/date'
 
-type OwnRequest = { id: string; requested_date: string; status: 'pending' | 'approved' | 'rejected'; rejection_reason: string | null }
+type OwnRequest = { id: string; requested_date: string; status: 'draft' | 'pending' | 'approved' | 'rejected'; rejection_reason: string | null }
 
 const MAX_PICKS = 4
 
@@ -20,6 +20,7 @@ export default function AjukanLiburPage() {
   const [colleagueNames, setColleagueNames] = useState<Record<string, string>>({})
   const [branchEmployeeCount, setBranchEmployeeCount] = useState<number | null>(null)
   const [busyDate, setBusyDate] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const period = getUpcomingRosterPeriod()
@@ -74,18 +75,18 @@ export default function AjukanLiburPage() {
 
   async function toggleDate(dateStr: string, own: OwnRequest | undefined) {
     if (own) {
-      if (own.status !== 'pending') return // approved tidak bisa dibatalkan di sini
+      if (own.status !== 'draft' && own.status !== 'pending') return // approved tidak bisa dibatalkan di sini
       const dateLabel = new Date(dateStr + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long' })
-      if (!confirm(`Batalkan pengajuan libur tanggal ${dateLabel}?`)) return
+      if (!confirm(`Batalkan pilihan libur tanggal ${dateLabel}?`)) return
     }
     setBusyDate(dateStr)
     if (own) {
       const { error } = await supabase.from('roster_pick_requests').delete().eq('id', own.id)
       if (error) showMessage('error', 'Gagal membatalkan: ' + error.message)
-      else showMessage('success', 'Pengajuan dibatalkan.')
+      else showMessage('success', 'Pilihan dibatalkan.')
     } else {
       if (activeCount >= MAX_PICKS) {
-        showMessage('error', `Sudah mencapai maksimal ${MAX_PICKS} pengajuan untuk periode ini.`)
+        showMessage('error', `Sudah mencapai maksimal ${MAX_PICKS} tanggal untuk periode ini.`)
         setBusyDate(null)
         return
       }
@@ -99,13 +100,30 @@ export default function AjukanLiburPage() {
         period_start: periodStartStr,
         period_end: periodEndStr,
         requested_date: dateStr,
-        status: 'pending',
+        status: 'draft',
       })
-      if (error) showMessage('error', 'Gagal mengajukan: ' + error.message)
-      else showMessage('success', `Tanggal ${new Date(dateStr + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long' })} diajukan sebagai libur.`)
+      if (error) showMessage('error', 'Gagal memilih tanggal: ' + error.message)
+      else showMessage('success', `Tanggal ${new Date(dateStr + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long' })} dipilih. Belum terkirim ke HR sampai keempat tanggal terisi dan Anda klik "Ajukan ke HR".`)
     }
     await fetchData(employeeId)
     setBusyDate(null)
+  }
+
+  // Wajib genap 4/4 dulu baru bisa dikirim ke HR sekaligus — sebelum itu semua pilihan
+  // berstatus 'draft' dan tidak kelihatan sama sekali oleh HR.
+  const hasDraft = ownRequests.some(r => r.status === 'draft')
+  const readyToSubmit = activeCount === MAX_PICKS && hasDraft
+  const alreadySubmitted = activeCount === MAX_PICKS && !hasDraft
+
+  async function submitAll() {
+    if (!readyToSubmit) return
+    if (!confirm(`Ajukan ${MAX_PICKS} tanggal libur ini ke HR/Owner? Tidak bisa diubah lagi kecuali dibatalkan satu-satu.`)) return
+    setSubmitting(true)
+    const { error } = await supabase.rpc('submit_roster_picks', { p_period_start: periodStartStr })
+    if (error) showMessage('error', 'Gagal mengajukan: ' + error.message)
+    else showMessage('success', 'Berhasil diajukan ke HR/Owner, tinggal menunggu keputusan.')
+    await fetchData(employeeId)
+    setSubmitting(false)
   }
 
   if (loading) return <div className="text-center py-12 text-slate-500">Memuat...</div>
@@ -116,7 +134,7 @@ export default function AjukanLiburPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Ajukan Jadwal Libur</h1>
-        <p className="text-sm text-slate-500">Pilih maksimal {MAX_PICKS} tanggal libur untuk periode <strong>{rosterPeriodLabel(period.start, period.end)}</strong>. Perlu disetujui HR/Owner sebelum resmi.</p>
+        <p className="text-sm text-slate-500">Wajib pilih tepat {MAX_PICKS} tanggal libur untuk periode <strong>{rosterPeriodLabel(period.start, period.end)}</strong> sebelum bisa diajukan ke HR/Owner — belum bisa diproses kalau belum genap {MAX_PICKS}/{MAX_PICKS}.</p>
       </div>
 
       {weekendCapActive && (
@@ -135,11 +153,21 @@ export default function AjukanLiburPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <span className="text-sm text-slate-600">Terpakai: <strong className={activeCount >= MAX_PICKS ? 'text-red-600' : 'text-blue-600'}>{activeCount}</strong> / {MAX_PICKS}
-          {weekendCapActive && <span className="ml-3 text-slate-400">· Weekend: <strong className={weekendPicksUsed >= 1 ? 'text-red-600' : 'text-blue-600'}>{weekendPicksUsed}</strong> / 1</span>}
-        </span>
-        <span className="text-xs text-slate-400">Tanda kuning = ada rekan lain (cabang mana pun) yang juga libur/mengajukan di tanggal itu</span>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <span className="text-sm text-slate-600">Terpilih: <strong className={activeCount >= MAX_PICKS ? 'text-green-600' : 'text-blue-600'}>{activeCount}</strong> / {MAX_PICKS}
+            {weekendCapActive && <span className="ml-3 text-slate-400">· Weekend: <strong className={weekendPicksUsed >= 1 ? 'text-red-600' : 'text-blue-600'}>{weekendPicksUsed}</strong> / 1</span>}
+          </span>
+          <p className="text-xs text-slate-400 mt-0.5">Tanda kuning = ada rekan lain (cabang mana pun) yang juga libur/mengajukan di tanggal itu</p>
+        </div>
+        {alreadySubmitted ? (
+          <span className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium whitespace-nowrap">✓ Sudah diajukan, menunggu HR/Owner</span>
+        ) : (
+          <button onClick={submitAll} disabled={!readyToSubmit || submitting}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+            {submitting ? 'Mengajukan...' : `Ajukan ke HR (${activeCount}/${MAX_PICKS})`}
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -175,17 +203,20 @@ export default function AjukanLiburPage() {
                   {own?.status === 'pending' && (
                     <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 font-medium">Menunggu HR</span>
                   )}
+                  {own?.status === 'draft' && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-500 font-medium">Draf</span>
+                  )}
                   <button
                     onClick={() => toggleDate(dateStr, own)}
                     disabled={disabled}
                     className={`text-xs px-3 py-1.5 rounded-lg font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed ${
-                      own?.status === 'pending'
+                      own?.status === 'draft' || own?.status === 'pending'
                         ? 'bg-red-600 border-red-600 text-white hover:bg-red-700'
                         : own
                         ? 'border-slate-200 text-slate-400'
                         : 'border-blue-200 text-blue-600 hover:bg-blue-50'
                     }`}>
-                    {busyDate === dateStr ? '...' : own ? (own.status === 'approved' ? 'Terkunci' : 'Batalkan') : 'Ajukan Libur'}
+                    {busyDate === dateStr ? '...' : own ? (own.status === 'approved' ? 'Terkunci' : 'Batalkan') : 'Pilih'}
                   </button>
                 </div>
               </div>
