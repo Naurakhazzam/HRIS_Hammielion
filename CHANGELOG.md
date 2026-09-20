@@ -1936,9 +1936,9 @@ Sekaligus menambahkan fitur baru yang diminta: **toleransi 5 menit khusus absen 
 **Konteks:** Owner capek input data pribadi karyawan baru satu-per-satu manual. Sekarang bisa didelegasikan ke karyawan itu sendiri — Owner/HR cukup tentukan penempatan (cabang, posisi, tipe karyawan), sistem buatkan link sekali pakai, karyawan baru yang isi data pribadinya sendiri + bikin password sendiri. Beda dari `/signup` yang sudah ada (itu untuk karyawan yang datanya SUDAH ada di HR) — ini khusus untuk yang benar-benar baru, belum ada baris datanya sama sekali.
 
 **Fitur:**
-- Halaman baru **SDM/HR → Undang Karyawan Baru** — HR pilih Cabang, Posisi, Tipe Karyawan (default Training, karena ada auto-promosi ke Tetap setelah 3 bulan), dan Tanggal Bergabung, lalu dapat link sekali pakai (berlaku 14 hari) untuk disalin & dikirim ke karyawan baru. Ada riwayat undangan (Menunggu Diisi / Sudah Dipakai / Dibatalkan) dengan tombol Salin Link dan Batalkan.
+- Halaman baru **SDM/HR → Undang Karyawan Baru** — HR pilih Cabang, Posisi, Tipe Karyawan (default Training, karena ada auto-promosi ke Tetap setelah 3 bulan), dan Tanggal Bergabung, lalu dapat link sekali pakai (berlaku **1x24 jam**) untuk disalin & dikirim ke karyawan baru. Ada riwayat undangan (Menunggu Diisi / Sudah Dipakai / Dibatalkan) dengan tombol Salin Link dan Batalkan.
 - Halaman publik baru **`/daftar-baru/[token]`** — karyawan baru buka link, lihat penempatannya (cabang & posisi, read-only), isi data pribadi lengkap (NIK, tanggal lahir, alamat, data bank, kontak darurat, dll — field yang sama dengan yang dipakai form Tambah Karyawan manual), dan buat password sendiri. Email login otomatis dibuat dari nama lengkapnya (format `nama@hammielion.com`).
-- Link otomatis tidak bisa dipakai lagi setelah berhasil dipakai sekali, kadaluarsa setelah 14 hari, atau dibatalkan manual oleh HR — pesan errornya spesifik per kondisi.
+- Link otomatis tidak bisa dipakai lagi setelah berhasil dipakai sekali, kadaluarsa setelah 1x24 jam, atau dibatalkan manual oleh HR — pesan errornya spesifik per kondisi.
 - Kode karyawan (EMP-XXX) di-generate otomatis, sama seperti form Tambah Karyawan manual.
 
 | File | Perubahan |

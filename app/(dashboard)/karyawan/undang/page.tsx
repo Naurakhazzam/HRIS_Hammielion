@@ -159,7 +159,7 @@ export default function UndangKaryawanPage() {
 
         {newLink && (
           <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-xs text-blue-700 mb-1.5">Kirim link ini ke karyawan baru (berlaku 14 hari, sekali pakai):</p>
+            <p className="text-xs text-blue-700 mb-1.5">Kirim link ini ke karyawan baru (berlaku 1x24 jam, sekali pakai):</p>
             <div className="flex gap-2">
               <input readOnly value={newLink} onClick={e => (e.target as HTMLInputElement).select()}
                 className="flex-1 px-3 py-2 border border-blue-300 rounded-lg text-xs bg-white" />
