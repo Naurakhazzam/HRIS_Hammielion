@@ -401,12 +401,22 @@ function TabLimit({ showMessage }: { showMessage: (t: 'success' | 'error', msg: 
       .order('full_name')
     if (empData) setEmployees(empData as unknown as Employee[])
 
-    // Saldo aktif = kasbon_limits.current_balance — sumber yang sama dipakai Penggajian Bulanan
-    // (potongan gaji) dan Input Kas Keluar (pencairan), supaya angkanya selalu sinkron di mana pun
-    // ditampilkan. Bukan dihitung dari kasbon_requests, karena alur pengajuan formal itu tidak
-    // dipakai — pencairan & potongan kasbon selama ini lewat Kas Keluar & Payroll langsung.
-    const { data: klData } = await supabase.from('kasbon_limits').select('employee_id, current_balance')
-    if (klData) setBalances(Object.fromEntries(klData.map(r => [r.employee_id, Number(r.current_balance)])))
+    // Saldo aktif dihitung dari kasbon_requests (amount_requested - total_deducted, yang sudah
+    // disetujui & dicairkan) — sumber yang sama dipakai Penggajian Bulanan untuk memotong gaji
+    // (lihat applyKasbonDeductionFifo). kasbon_limits.current_balance TIDAK dipakai lagi di sini:
+    // kolom itu sudah tidak ditulis oleh Penggajian Bulanan sejak fix potongan kasbon FIFO, jadi
+    // angkanya beku dan tidak sinkron dengan saldo yang sebenarnya.
+    const { data: reqData } = await supabase
+      .from('kasbon_requests')
+      .select('employee_id, amount_requested, total_deducted')
+      .eq('status', 'approved')
+      .not('disbursed_at', 'is', null)
+    const saldoMap: Record<string, number> = {}
+    ;(reqData || []).forEach((r: any) => {
+      const saldo = Number(r.amount_requested) - Number(r.total_deducted)
+      saldoMap[r.employee_id] = (saldoMap[r.employee_id] || 0) + Math.max(0, saldo)
+    })
+    setBalances(saldoMap)
     setLoading(false)
   }
 
@@ -980,13 +990,21 @@ function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'e
 
   async function fetchAll() {
     setLoading(true)
-    const [{ data: kData }, { data: allPerm }, { data: dedData }] = await Promise.all([
+    const [{ data: kData }, { data: allPerm }, { data: helperDrivers }, { data: dedData }] = await Promise.all([
       supabase.from('helper_kasbon')
         .select('*, employees!helper_kasbon_helper_id_fkey(full_name, employee_code)')
         .order('created_at', { ascending: false }),
       supabase.from('employees')
         .select('id, full_name, employee_code, departments(name)')
         .eq('employee_type', 'permanent')
+        .eq('is_active', true)
+        .order('full_name'),
+      // Termasuk juga Driver yang merangkap Kenek (can_help=true) — mirror can_drive di
+      // Penggajian Driver, supaya Driver yang kadang jadi kenek bisa dibuatkan kasbon kenek juga.
+      supabase.from('employees')
+        .select('id, full_name, employee_code')
+        .eq('employee_type', 'driver')
+        .eq('can_help', true)
         .eq('is_active', true)
         .order('full_name'),
       supabase.from('helper_kasbon_deductions')
@@ -999,7 +1017,8 @@ function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'e
       const dept = Array.isArray(p.departments) ? p.departments[0] : p.departments
       return dept?.name === 'Team Gudang'
     })
-    setKeneks((gudangWorkers.length > 0 ? gudangWorkers : (allPerm || [])) as any)
+    const baseKeneks = gudangWorkers.length > 0 ? gudangWorkers : (allPerm || [])
+    setKeneks([...baseKeneks, ...(helperDrivers || [])] as any)
     setDeductions((dedData || []) as HelperKasbonDeductionRecord[])
     setLoading(false)
   }
