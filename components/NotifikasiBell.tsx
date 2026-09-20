@@ -30,7 +30,7 @@ function saveSeenMap(map: Record<string, string>) {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  approved: 'Disetujui', rejected: 'Ditolak', lunas: 'Lunas',
+  approved: 'Disetujui', rejected: 'Ditolak', lunas: 'Lunas', cancelled: 'Dibatalkan',
 }
 
 export default function NotifikasiBell() {
@@ -63,7 +63,7 @@ export default function NotifikasiBell() {
     setVisible(true)
     setSeenMap(loadSeenMap())
 
-    const [leaveRes, kasbonRes] = await Promise.all([
+    const [leaveRes, kasbonRes, myChangeRes, incomingSwapRes] = await Promise.all([
       supabase.from('leave_requests')
         .select('id, status, leave_type, start_date, created_at')
         .eq('employee_id', userData.employee_id)
@@ -74,6 +74,8 @@ export default function NotifikasiBell() {
         .eq('employee_id', userData.employee_id)
         .neq('status', 'pending')
         .order('created_at', { ascending: false }).limit(15),
+      supabase.rpc('get_my_day_off_change_requests'),
+      supabase.rpc('get_incoming_day_off_swap_requests'),
     ])
 
     const leaveItems: NotifItem[] = (leaveRes.data || []).map(r => ({
@@ -90,8 +92,26 @@ export default function NotifikasiBell() {
       date: r.created_at,
       href: '/kasbon',
     }))
+    // Ganti hari libur — status akhir pengajuan sendiri (approved/rejected/cancelled).
+    const myChangeItems: NotifItem[] = ((myChangeRes.data as { id: string; status: string; created_at: string }[]) || [])
+      .filter(r => r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled')
+      .map(r => ({
+        key: `daychange-${r.id}`,
+        status: r.status,
+        label: `Pengajuan Ganti Libur — ${STATUS_LABEL[r.status] ?? r.status}`,
+        date: r.created_at,
+        href: '/portal/ganti-libur',
+      }))
+    // Permintaan tukar dari rekan yang butuh respons — selalu dianggap "belum dibaca" selama masih pending.
+    const incomingSwapItems: NotifItem[] = ((incomingSwapRes.data as { id: string; requester_name: string; created_at: string }[]) || []).map(r => ({
+      key: `swapask-${r.id}`,
+      status: 'pending',
+      label: `${r.requester_name} minta tukar hari libur dengan Anda`,
+      date: r.created_at,
+      href: '/portal/ganti-libur',
+    }))
 
-    const all = [...leaveItems, ...kasbonItems].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20)
+    const all = [...leaveItems, ...kasbonItems, ...myChangeItems, ...incomingSwapItems].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20)
     setItems(all)
   }
 

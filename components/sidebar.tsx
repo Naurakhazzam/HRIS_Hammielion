@@ -45,6 +45,7 @@ const adminNavItems: NavNode[] = [
       { name: 'Rekap Absensi', href: '/portal/absensi' },
       { name: 'Jadwal Saya', href: '/portal/jadwal' },
       { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
+      { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
     ]
   },
   {
@@ -196,6 +197,7 @@ const employeeNavItems: NavNode[] = [
       { name: 'Rekap Absensi', href: '/portal/absensi' },
       { name: 'Jadwal Saya', href: '/portal/jadwal' },
       { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
+      { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
     ]
   },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
