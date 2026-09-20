@@ -453,7 +453,7 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     // 3. Ambil % karyawan aktif di cabang
     const { data: sharesData } = await supabase
       .from('loss_employee_shares')
-      .select('employee_id, share_percent, created_at, is_active, employees!loss_employee_shares_employee_id_fkey(id, full_name, employee_code, positions(name))')
+      .select('employee_id, share_percent, created_at, is_active, employees!loss_employee_shares_employee_id_fkey(id, full_name, employee_code, position_id, positions(name))')
       .eq('branch_id', selectedBranch)
       .eq('is_active', true)
 
@@ -566,13 +566,13 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
 
     for (const p of preview) {
       // Cari payroll karyawan di periode ini
-      const { data: payroll } = await supabase.from('payrolls').select('id, gross_total, net_total, late_deduction, kasbon_deduction, loyalitas_deduction, conditional_bonus')
+      const { data: payroll } = await supabase.from('payrolls').select('id, gross_total, net_total, late_deduction, kasbon_deduction, loyalitas_deduction, absent_deduction, conditional_bonus')
         .eq('employee_id', p.empId).eq('period_month', filterMonth).eq('period_year', filterYear).single()
       if (!payroll) continue
 
       const newInvLoss = p.invLoss
       const newKasirLoss = p.kasirLoss
-      const newNet = Number(payroll.gross_total) - Number(payroll.late_deduction) - Number(payroll.kasbon_deduction) - Number(payroll.loyalitas_deduction ?? 0) - newInvLoss - newKasirLoss
+      const newNet = Number(payroll.gross_total) - Number(payroll.late_deduction) - Number(payroll.kasbon_deduction) - Number(payroll.loyalitas_deduction ?? 0) - Number(payroll.absent_deduction ?? 0) - newInvLoss - newKasirLoss
 
       await supabase.from('payrolls').update({
         inventory_loss_deduction: newInvLoss,
