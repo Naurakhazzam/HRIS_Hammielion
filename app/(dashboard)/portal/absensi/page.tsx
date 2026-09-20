@@ -27,6 +27,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   absent:     { label: 'Absen',   color: 'bg-red-100 text-red-700' },
   leave:      { label: 'Cuti',    color: 'bg-blue-100 text-blue-700' },
   sick:       { label: 'Sakit',   color: 'bg-orange-100 text-orange-700' },
+  sick_doc:   { label: 'Sakit+Surat', color: 'bg-orange-100 text-orange-700' },
   permission: { label: 'Izin',    color: 'bg-purple-100 text-purple-700' },
 }
 
@@ -84,7 +85,7 @@ export default function PortalAbsensiPage() {
   const totalMenitLambat = attendances.reduce((s, a) => s + Number(a.late_minutes), 0)
   const totalLembur    = attendances.reduce((s, a) => s + Number(a.overtime_hours), 0)
   const totalAbsen     = attendances.filter(a => a.status === 'absent').length
-  const totalCutiIzin  = attendances.filter(a => ['leave', 'sick', 'permission'].includes(a.status)).length
+  const totalCutiIzin  = attendances.filter(a => ['leave', 'sick', 'sick_doc', 'permission'].includes(a.status)).length
 
   const yearOptions = [today.getFullYear() - 1, today.getFullYear()]
 

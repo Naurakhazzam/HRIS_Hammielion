@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS } from '@/lib/escalatingDeduction'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,8 +54,6 @@ type SummaryRow = {
   alphaDays: number
   kurangLiburDays: number
   kurangLiburAmount: number
-  lebihLiburDays: number
-  lebihLiburDeduction: number
   sickDeduction: number
   izinDeduction: number
   alphaDeduction: number
@@ -179,10 +178,11 @@ export default function RingkasanOwnerPage() {
       const joinDateVal = emp?.join_date ?? null
       const validAtts = (atts || []).filter((a: any) => !joinDateVal || a.date >= joinDateVal)
       const recordedDates = new Set(validAtts.map((a: any) => a.date))
-      const sickDays = validAtts.filter((a: any) => a.status === 'sick').length
-      const izinDays = validAtts.filter((a: any) => a.status === 'permission').length
-      const alphaDays = validAtts.filter((a: any) => a.status === 'absent').length
-      const leaveDays = validAtts.filter((a: any) => a.status === 'leave').length
+      // Izin Duka/Periksa + Sakit tanpa surat digabung 1 kelompok (eskalasi per kejadian).
+      // Cuti Tahunan ('leave') tidak lagi ikut kuota/potongan sama sekali.
+      const izinGroupDates = validAtts.filter((a: any) => a.status === 'sick' || a.status === 'permission').map((a: any) => a.date as string)
+      const explicitAlphaDates = validAtts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
+      const sickDocDays = validAtts.filter((a: any) => a.status === 'sick_doc').length
       const totalLateMinutes = validAtts.reduce((s: number, a: any) => s + Number(a.late_minutes || 0), 0)
 
       const allDates: string[] = []
@@ -190,7 +190,7 @@ export default function RingkasanOwnerPage() {
       const endD = new Date(lastDay + 'T12:00:00')
       while (cur <= endD) { allDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`); cur.setDate(cur.getDate()+1) }
       const totalPeriodDays = allDates.length
-      const emptyDays = allDates.filter(d => (!joinDateVal || d >= joinDateVal) && !recordedDates.has(d)).length
+      const emptyDateList = allDates.filter(d => (!joinDateVal || d >= joinDateVal) && !recordedDates.has(d))
 
       const isTraining = emp?.employee_type === 'training'
       let proRataFactor = 1
@@ -203,21 +203,25 @@ export default function RingkasanOwnerPage() {
         }
       }
       const kuotaLibur = Math.round(4 * proRataFactor)
-      const totalLiburDiambil = emptyDays + leaveDays
-      const lebihLiburDays = Math.max(totalLiburDiambil - kuotaLibur, 0)
+      const freeEmptyUsed = Math.min(emptyDateList.length, kuotaLibur)
+      const excessEmptyDates = emptyDateList.slice(freeEmptyUsed)
 
-      // Rincian potongan tidak hadir — dihitung langsung dari data absensi
-      // asli (bukan angka gabungan di slip), supaya Sakit/Izin/Alpha/Libur
-      // Lebih selalu konsisten dengan yang tertulis di Catatan.
+      // Rincian potongan tidak hadir — dihitung langsung dari data absensi asli (bukan angka
+      // gabungan di slip), supaya Sakit/Izin/Alpha selalu konsisten dengan yang tertulis di
+      // Catatan. Sama persis dengan rumus di Slip Gaji Bulanan (izin & alpha per-kejadian).
       const gajiAwal = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0)
       const dailyRate = Math.round(gajiAwal / 26)
+      const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, IZIN_GROUP_MULTIPLIERS)
+      const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, ALPHA_GROUP_MULTIPLIERS)
+      const sickDays = sickDocDays
+      const izinDays = izinGroupDates.length
+      const alphaDays = alphaGroup.blocks.reduce((s, b) => s + b.dates.length, 0)
       const sick1Free  = Math.min(sickDays, 1)
       const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
       const sick4Full  = Math.max(0, sickDays - 3)
       const sickDeduction = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
-      const izinDeduction = izinDays * dailyRate
-      const alphaDeduction = Math.round(alphaDays * dailyRate * 1.5)
-      const lebihLiburDeduction = lebihLiburDays * dailyRate
+      const izinDeduction = izinGroup.total
+      const alphaDeduction = alphaGroup.total
 
       const invLossTotal = lossTotalByBranch[emp?.branch_id || ''] || 0
       const cashierLossTotal = cashierTotalByBranch[emp?.branch_id || ''] || 0
@@ -232,7 +236,6 @@ export default function RingkasanOwnerPage() {
         gajiAwal,
         sickDays, izinDays, alphaDays,
         kurangLiburDays: Number(p.libur_compensation_days || 0), kurangLiburAmount: Number(p.libur_compensation_amount || 0),
-        lebihLiburDays, lebihLiburDeduction,
         sickDeduction, izinDeduction, alphaDeduction,
         totalLateMinutes, lateDeduction: Number(p.late_deduction || 0),
         kasbonDeduction: Number(p.kasbon_deduction || 0), loyalitasDeduction: Number(p.loyalitas_deduction || 0),
@@ -254,17 +257,16 @@ export default function RingkasanOwnerPage() {
 
   function buildCatatan(r: SummaryRow): string[] {
     const notes: string[] = []
-    if (r.lebihLiburDays > 0) notes.push(`Libur lebih ${r.lebihLiburDays} hari (dipotong)`)
     if (r.kurangLiburDays > 0) notes.push(`Libur kurang ${r.kurangLiburDays} hari (dapat kompensasi)`)
-    if (r.sickDays > 0) notes.push(`Sakit ${r.sickDays} hari`)
-    if (r.izinDays > 0) notes.push(`Izin ${r.izinDays} hari`)
-    if (r.alphaDays > 0) notes.push(`Alpha ${r.alphaDays} hari`)
+    if (r.sickDays > 0) notes.push(`Sakit dengan surat ${r.sickDays} hari`)
+    if (r.izinDays > 0) notes.push(`Izin/Sakit tanpa surat ${r.izinDays} hari (eskalasi per kejadian)`)
+    if (r.alphaDays > 0) notes.push(`Alpha (termasuk hari kosong di luar kuota) ${r.alphaDays} hari`)
     if (r.totalLateMinutes > 0) notes.push(`Telat ${fmtJam(r.totalLateMinutes)}`)
     return notes
   }
 
   function absenDeductionTotal(r: SummaryRow): number {
-    return r.sickDeduction + r.izinDeduction + r.alphaDeduction + r.lebihLiburDeduction
+    return r.sickDeduction + r.izinDeduction + r.alphaDeduction
   }
 
   const totalGajiAwal = rows.reduce((s, r) => s + r.gajiAwal, 0)
@@ -331,10 +333,9 @@ export default function RingkasanOwnerPage() {
                 <div>
                   <p className="font-semibold text-red-600 uppercase mb-1">Potongan</p>
                   {r.lateDeduction > 0 && <div className="flex justify-between"><span>Keterlambatan ({fmtJam(r.totalLateMinutes)})</span><span>-{fmtRp(r.lateDeduction)}</span></div>}
-                  {r.sickDeduction > 0 && <div className="flex justify-between"><span>Sakit ({r.sickDays} hari)</span><span>-{fmtRp(r.sickDeduction)}</span></div>}
-                  {r.izinDeduction > 0 && <div className="flex justify-between"><span>Izin ({r.izinDays} hari)</span><span>-{fmtRp(r.izinDeduction)}</span></div>}
+                  {r.sickDeduction > 0 && <div className="flex justify-between"><span>Sakit+Surat ({r.sickDays} hari)</span><span>-{fmtRp(r.sickDeduction)}</span></div>}
+                  {r.izinDeduction > 0 && <div className="flex justify-between"><span>Izin/Sakit ({r.izinDays} hari)</span><span>-{fmtRp(r.izinDeduction)}</span></div>}
                   {r.alphaDeduction > 0 && <div className="flex justify-between"><span>Alpha ({r.alphaDays} hari)</span><span>-{fmtRp(r.alphaDeduction)}</span></div>}
-                  {r.lebihLiburDeduction > 0 && <div className="flex justify-between"><span>Libur Lebih ({r.lebihLiburDays} hari)</span><span>-{fmtRp(r.lebihLiburDeduction)}</span></div>}
                   {r.kasbonDeduction > 0 && <div className="flex justify-between"><span>Kasbon</span><span>-{fmtRp(r.kasbonDeduction)}</span></div>}
                   {r.loyalitasDeduction > 0 && <div className="flex justify-between"><span>Tabungan Loyalitas</span><span>-{fmtRp(r.loyalitasDeduction)}</span></div>}
                   {r.invLossDeduction > 0 && <div className="flex justify-between"><span>Kehilangan Barang (~{r.invLossPercent}% dr {fmtRp(r.invLossTotal)})</span><span>-{fmtRp(r.invLossDeduction)}</span></div>}
@@ -421,10 +422,9 @@ export default function RingkasanOwnerPage() {
                                 <p className="font-semibold text-red-600 uppercase mb-2">Rincian Potongan</p>
                                 <div className="space-y-1 text-slate-600">
                                   {r.lateDeduction > 0 && <div className="flex justify-between"><span>Keterlambatan ({fmtJam(r.totalLateMinutes)})</span><span className="text-red-500">-{fmtRp(r.lateDeduction)}</span></div>}
-                                  {r.sickDeduction > 0 && <div className="flex justify-between"><span>Sakit ({r.sickDays} hari)</span><span className="text-red-500">-{fmtRp(r.sickDeduction)}</span></div>}
-                                  {r.izinDeduction > 0 && <div className="flex justify-between"><span>Izin ({r.izinDays} hari)</span><span className="text-red-500">-{fmtRp(r.izinDeduction)}</span></div>}
+                                  {r.sickDeduction > 0 && <div className="flex justify-between"><span>Sakit+Surat ({r.sickDays} hari)</span><span className="text-red-500">-{fmtRp(r.sickDeduction)}</span></div>}
+                                  {r.izinDeduction > 0 && <div className="flex justify-between"><span>Izin/Sakit ({r.izinDays} hari)</span><span className="text-red-500">-{fmtRp(r.izinDeduction)}</span></div>}
                                   {r.alphaDeduction > 0 && <div className="flex justify-between"><span>Alpha ({r.alphaDays} hari)</span><span className="text-red-500">-{fmtRp(r.alphaDeduction)}</span></div>}
-                                  {r.lebihLiburDeduction > 0 && <div className="flex justify-between"><span>Libur Lebih ({r.lebihLiburDays} hari)</span><span className="text-red-500">-{fmtRp(r.lebihLiburDeduction)}</span></div>}
                                   {r.kasbonDeduction > 0 && <div className="flex justify-between"><span>Kasbon</span><span className="text-red-500">-{fmtRp(r.kasbonDeduction)}</span></div>}
                                   {r.loyalitasDeduction > 0 && <div className="flex justify-between"><span>Tabungan Loyalitas</span><span className="text-red-500">-{fmtRp(r.loyalitasDeduction)}</span></div>}
                                   {r.invLossDeduction > 0 && <div className="flex justify-between"><span>Kehilangan Barang (~{r.invLossPercent}% dari {fmtRp(r.invLossTotal)})</span><span className="text-red-500">-{fmtRp(r.invLossDeduction)}</span></div>}

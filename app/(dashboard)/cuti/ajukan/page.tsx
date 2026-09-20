@@ -4,8 +4,26 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
+import { groupContiguousDates, IZIN_GROUP_MULTIPLIERS } from '@/lib/escalatingDeduction'
 
 type Employee = { id: string; full_name: string }
+
+// Periode berjalan (26-25) yang MENAUNGI hari ini — beda dari periode MENDATANG yang dipakai
+// fitur Ajukan Libur. Dipakai untuk hitung sudah berapa kejadian Izin Duka/Periksa/Sakit-tanpa-
+// surat karyawan ini di periode ini, supaya bisa diperingatkan sebelum submit.
+function getCurrentPeriodRange(): { start: string; end: string } {
+  const now = new Date()
+  let startMonth = now.getDate() >= 26 ? now.getMonth() : now.getMonth() - 1
+  let startYear = now.getFullYear()
+  if (startMonth < 0) { startMonth = 11; startYear -= 1 }
+  const start = new Date(startYear, startMonth, 26)
+  let endMonth = startMonth + 1
+  let endYear = startYear
+  if (endMonth > 11) { endMonth = 0; endYear += 1 }
+  const end = new Date(endYear, endMonth, 25)
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return { start: fmt(start), end: fmt(end) }
+}
 
 export default function AjukanCutiPage() {
   const router = useRouter()
@@ -26,6 +44,10 @@ export default function AjukanCutiPage() {
   const [annualEligibility, setAnnualEligibility] = useState<{
     loading: boolean; joinDate: string | null; usedDays: number
   }>({ loading: false, joinDate: null, usedDays: 0 })
+
+  // Sudah berapa kejadian Izin Duka/Periksa/Sakit-tanpa-surat karyawan ini di periode berjalan —
+  // dipakai untuk memperingatkan pengali eskalasi yang akan berlaku kalau mereka ajukan lagi.
+  const [izinOccurrenceCount, setIzinOccurrenceCount] = useState(0)
 
   const [formData, setFormData] = useState({
     employee_id: '',
@@ -62,7 +84,20 @@ export default function AjukanCutiPage() {
   useEffect(() => {
     if (!formData.employee_id) { setAnnualEligibility({ loading: false, joinDate: null, usedDays: 0 }); return }
     fetchAnnualEligibility(formData.employee_id)
+    fetchIzinOccurrenceCount(formData.employee_id)
   }, [formData.employee_id])
+
+  async function fetchIzinOccurrenceCount(employeeId: string) {
+    const { start, end } = getCurrentPeriodRange()
+    const { data } = await supabase
+      .from('attendances')
+      .select('date')
+      .eq('employee_id', employeeId)
+      .in('status', ['sick', 'permission'])
+      .gte('date', start).lte('date', end)
+    const dates = (data || []).map(a => a.date as string)
+    setIzinOccurrenceCount(groupContiguousDates(dates).length)
+  }
 
   async function fetchAnnualEligibility(employeeId: string) {
     // Reset joinDate/usedDays (bukan cuma loading:true) supaya kalau HR ganti karyawan dengan
@@ -323,6 +358,16 @@ export default function AjukanCutiPage() {
             <span className="text-sm font-medium text-slate-700">Total Hari Diajukan:</span>
             <span className="text-lg font-bold text-blue-600">{totalDays} Hari</span>
           </div>
+
+          {(formData.leave_type === 'sick' || formData.leave_type === 'permission' || formData.leave_type === 'bereaved') && izinOccurrenceCount > 0 && (
+            <div className="bg-orange-50 text-orange-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-orange-200">
+              <span>📊</span>
+              <p>
+                Periode ini Anda sudah punya <strong>{izinOccurrenceCount} kejadian</strong> Izin Duka/Periksa/Sakit-tanpa-surat (dihitung gabungan, per kejadian terpisah).
+                Kalau pengajuan ini jadi kejadian baru, potongannya <strong>{IZIN_GROUP_MULTIPLIERS[Math.min(izinOccurrenceCount, IZIN_GROUP_MULTIPLIERS.length - 1)]}× gaji harian</strong> (naik dari kejadian sebelumnya, mentok di {IZIN_GROUP_MULTIPLIERS[IZIN_GROUP_MULTIPLIERS.length - 1]}×).
+              </p>
+            </div>
+          )}
 
           {isLateNotice && (
             <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-amber-200">

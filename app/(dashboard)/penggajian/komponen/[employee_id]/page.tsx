@@ -35,7 +35,6 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
     meal_allowance: '0',
     special_allowance: '0',
     overtime_rate_per_hour: '0',
-    late_penalty_per_minute: '0',
     effective_date: new Date().toISOString().split('T')[0]
   })
 
@@ -85,7 +84,6 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
           meal_allowance: latest.meal_allowance.toString(),
           special_allowance: (latest.special_allowance ?? 0).toString(),
           overtime_rate_per_hour: latest.overtime_rate_per_hour.toString(),
-          late_penalty_per_minute: latest.late_penalty_per_minute.toString(),
           effective_date: new Date().toISOString().split('T')[0] // default ke hari ini
         })
       } else {
@@ -152,7 +150,6 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
       meal_allowance: parseFloat(formData.meal_allowance) || 0,
       special_allowance: parseFloat(formData.special_allowance) || 0,
       overtime_rate_per_hour: parseFloat(formData.overtime_rate_per_hour) || 0,
-      late_penalty_per_minute: parseFloat(formData.late_penalty_per_minute) || 0,
       effective_date: formattedDate
     }
 
@@ -268,13 +265,8 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Potongan Telat / Menit (Rp)</label>
-              <RupiahInput
-                value={formData.late_penalty_per_minute}
-                onChange={(v) => setFormData({...formData, late_penalty_per_minute: v})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
+            <div className="bg-slate-50 border border-slate-200 rounded p-2.5">
+              <p className="text-xs text-slate-500">Potongan Telat / Menit sekarang <strong>satu tarif untuk semua staff</strong> — atur di <Link href="/penggajian/komponen" className="text-blue-600 hover:underline">Kelola Gaji Standar</Link>, bukan di sini lagi.</p>
             </div>
 
             <div className="pt-2">

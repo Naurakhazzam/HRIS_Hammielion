@@ -15,7 +15,7 @@ type EmployeeWithSalary = {
   effective_date: string | null
 }
 
-type SalaryDefault = { id: string; label: string; base_salary: number; position_allowance: number; meal_allowance: number }
+type SalaryDefault = { id: string; label: string; base_salary: number; position_allowance: number; meal_allowance: number; late_penalty_per_minute: number }
 
 export default function SetupKomponenGajiPage() {
   const [employees, setEmployees] = useState<EmployeeWithSalary[]>([])
@@ -30,6 +30,8 @@ export default function SetupKomponenGajiPage() {
   const [showDefaultEditor, setShowDefaultEditor] = useState(false)
   const [defaultForm, setDefaultForm] = useState<Record<string, { base_salary: string; position_allowance: string; meal_allowance: string }>>({})
   const [savingDefaultId, setSavingDefaultId] = useState<string | null>(null)
+  const [universalLateRate, setUniversalLateRate] = useState('1000')
+  const [savingLateRate, setSavingLateRate] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const supabase = createClient()
 
@@ -53,7 +55,7 @@ export default function SetupKomponenGajiPage() {
       supabase.from('salary_components')
         .select('employee_id, base_salary, effective_date')
         .order('effective_date', { ascending: false }),
-      supabase.from('salary_defaults').select('id, label, base_salary, position_allowance, meal_allowance').order('label'),
+      supabase.from('salary_defaults').select('id, label, base_salary, position_allowance, meal_allowance, late_penalty_per_minute').order('label'),
     ])
 
     if (empError) { console.error(empError); setLoading(false); return }
@@ -79,6 +81,7 @@ export default function SetupKomponenGajiPage() {
     const formInit: typeof defaultForm = {}
     defs.forEach(d => { formInit[d.id] = { base_salary: String(d.base_salary), position_allowance: String(d.position_allowance), meal_allowance: String(d.meal_allowance) } })
     setDefaultForm(formInit)
+    if (defs[0]) setUniversalLateRate(String(defs[0].late_penalty_per_minute))
     setLoading(false)
   }
 
@@ -123,6 +126,18 @@ export default function SetupKomponenGajiPage() {
     setSavingDefaultId(null)
   }
 
+  async function saveUniversalLateRate() {
+    setSavingLateRate(true)
+    // Berlaku untuk SEMUA baris Gaji Standar sekaligus — memang cuma 1 tarif untuk semua staff,
+    // bukan per-label. Tidak menyentuh salary_components siapa pun; perhitungan gaji langsung
+    // baca dari sini (lihat lib penggajian), jadi begitu disimpan langsung berlaku bulan berjalan.
+    const { error } = await supabase.from('salary_defaults').update({ late_penalty_per_minute: Number(universalLateRate) || 0 })
+    if (error) showMsg('error', 'Gagal menyimpan tarif keterlambatan: ' + error.message)
+    else showMsg('success', 'Tarif keterlambatan universal diperbarui — langsung berlaku untuk semua staff.')
+    await fetchData()
+    setSavingLateRate(false)
+  }
+
   async function applyDefaultToSelected() {
     const def = defaults.find(d => d.id === applyDefaultId)
     if (!def) { showMsg('error', 'Pilih gaji standar dulu.'); return }
@@ -149,7 +164,7 @@ export default function SetupKomponenGajiPage() {
       }
       const { error } = existing
         ? await supabase.from('salary_components').update(payload).eq('id', existing.id)
-        : await supabase.from('salary_components').insert([{ ...payload, special_allowance: 0, overtime_rate_per_hour: 0, late_penalty_per_minute: 0 }])
+        : await supabase.from('salary_components').insert([{ ...payload, special_allowance: 0, overtime_rate_per_hour: 0 }])
 
       if (error) failCount++
       else successCount++
@@ -219,6 +234,22 @@ export default function SetupKomponenGajiPage() {
                 </div>
               )
             })}
+          </div>
+
+          <div className="mt-5 pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+            <div className="sm:col-span-1">
+              <p className="text-sm font-semibold text-slate-800">Tarif Keterlambatan</p>
+              <p className="text-xs text-slate-500">Berlaku untuk semua staff, bukan per orang</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500 block mb-1">Rp / menit</label>
+              <input type="number" value={universalLateRate} onChange={e => setUniversalLateRate(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+            </div>
+            <button onClick={saveUniversalLateRate} disabled={savingLateRate}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition disabled:opacity-50 w-fit">
+              {savingLateRate ? '...' : 'Simpan Tarif Universal'}
+            </button>
           </div>
         </div>
       )}

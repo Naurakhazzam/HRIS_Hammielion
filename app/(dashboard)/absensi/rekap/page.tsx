@@ -15,10 +15,10 @@ type Attendance = {
   employees: { full_name: string; branch_id: string; department_id: string; custom_check_in_time: string | null; custom_check_out_time: string | null; branches: { name: string }; departments: { name: string } }
 }
 
-const STATUS_LABEL: { [k: string]: string } = { present:'Hadir', absent:'Alpha', sick:'Sakit', permission:'Izin', leave:'Libur' }
+const STATUS_LABEL: { [k: string]: string } = { present:'Hadir', absent:'Alpha', sick:'Sakit', sick_doc:'Sakit+Surat', permission:'Izin', leave:'Libur' }
 const STATUS_COLOR: { [k: string]: string } = {
   present:'bg-green-100 text-green-800', absent:'bg-red-100 text-red-800',
-  sick:'bg-blue-100 text-blue-800', permission:'bg-yellow-100 text-yellow-800', leave:'bg-slate-100 text-slate-600'
+  sick:'bg-blue-100 text-blue-800', sick_doc:'bg-blue-100 text-blue-800', permission:'bg-yellow-100 text-yellow-800', leave:'bg-slate-100 text-slate-600'
 }
 // Baris dengan notes "Belum Masuk (Training)" atau "Resign" ditampilkan khusus
 function getStatusDisplay(att: { status: string; notes: string | null }) {
@@ -447,7 +447,7 @@ export default function RekapAbsensiPage() {
   const totalLembur = Math.round(validAtts.reduce((s,a)=>s+Number(a.overtime_hours??0),0) * 100) / 100
   const totalHadir  = validAtts.filter(a=>a.status==='present').length
   const totalAlpha  = validAtts.filter(a=>a.status==='absent').length
-  const totalSakit  = validAtts.filter(a=>a.status==='sick').length
+  const totalSakit  = validAtts.filter(a=>a.status==='sick' || a.status==='sick_doc').length
   const totalIzinDB  = validAtts.filter(a=>a.status==='permission').length
   const totalLiburDB = validAtts.filter(a=>a.status==='leave').length
   const formEmps = formBranchId ? employees.filter(e=>e.branch_id===formBranchId) : employees

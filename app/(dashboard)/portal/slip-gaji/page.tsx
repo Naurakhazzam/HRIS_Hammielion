@@ -88,16 +88,14 @@ export default function PortalSlipGajiPage() {
     const firstDay = start.toISOString().split('T')[0]
     const lastDay  = end.toISOString().split('T')[0]
 
-    const { data: salComp } = await supabase
-      .from('salary_components')
+    // Tarif keterlambatan sekarang universal (Gaji Standar), bukan per-karyawan lagi.
+    const { data: lateDef } = await supabase
+      .from('salary_defaults')
       .select('late_penalty_per_minute')
-      .eq('employee_id', myEmployeeId)
-      .lte('effective_date', firstDay)
-      .order('effective_date', { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
-    const rate = Number(salComp?.late_penalty_per_minute ?? 0)
+    const rate = Number(lateDef?.late_penalty_per_minute ?? 0)
     setLateRate(rate)
 
     const { data: atts } = await supabase

@@ -157,9 +157,11 @@ export default function RankingPage() {
       return {
         employee: emp,
         late_minutes:   empAtts.reduce((s: number, a: any) => s + Number(a.late_minutes ?? 0), 0),
-        izin_days:      empAtts.filter((a: any) => a.status === 'permission').length + autoIzin,
-        sakit_days:     empAtts.filter((a: any) => a.status === 'sick').length,
-        alpha_days:     empAtts.filter((a: any) => a.status === 'absent').length,
+        izin_days:      empAtts.filter((a: any) => a.status === 'permission').length,
+        sakit_days:     empAtts.filter((a: any) => a.status === 'sick' || a.status === 'sick_doc').length,
+        // Hari kosong tanpa keterangan di luar kuota sekarang dianggap Alpha (bukan izin) —
+        // konsisten dengan aturan potongan gaji terbaru.
+        alpha_days:     empAtts.filter((a: any) => a.status === 'absent').length + autoIzin,
         overtime_hours: empAtts.reduce((s: number, a: any) => s + Number(a.overtime_hours ?? 0), 0),
       }
     })
