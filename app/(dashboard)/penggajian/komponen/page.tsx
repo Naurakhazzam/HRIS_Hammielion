@@ -155,6 +155,24 @@ export default function SetupKomponenGajiPage() {
         .select('id, special_allowance')
         .eq('employee_id', empId).eq('effective_date', applyDate).maybeSingle()
 
+      // Kalau baris baru (bukan koreksi hari yang sama), bawa serta tunjangan khusus &
+      // tarif lembur dari baris terakhir karyawan ini — bukan di-reset ke 0. Modal
+      // konfirmasi eksplisit bilang "tunjangan khusus masing-masing tidak ikut berubah".
+      let carrySpecial = 0
+      let carryOvertime = 0
+      if (!existing) {
+        const { data: latest } = await supabase.from('salary_components')
+          .select('special_allowance, overtime_rate_per_hour')
+          .eq('employee_id', empId)
+          .order('effective_date', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (latest) {
+          carrySpecial = Number(latest.special_allowance) || 0
+          carryOvertime = Number(latest.overtime_rate_per_hour) || 0
+        }
+      }
+
       const payload = {
         employee_id: empId,
         effective_date: applyDate,
@@ -164,7 +182,7 @@ export default function SetupKomponenGajiPage() {
       }
       const { error } = existing
         ? await supabase.from('salary_components').update(payload).eq('id', existing.id)
-        : await supabase.from('salary_components').insert([{ ...payload, special_allowance: 0, overtime_rate_per_hour: 0 }])
+        : await supabase.from('salary_components').insert([{ ...payload, special_allowance: carrySpecial, overtime_rate_per_hour: carryOvertime }])
 
       if (error) failCount++
       else successCount++

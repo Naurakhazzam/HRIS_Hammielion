@@ -232,7 +232,7 @@ export default function PenggajianBulananPage() {
     base: number; pos: number; meal: number; special: number; otHours: number; otTotal: number; kpiBonus: number
     conditionalBonus: number
     loyalitasDed: number; latDed: number; latMinutes: number; latRate: number
-    kasbonSaldo: number; kasbonDed: number
+    kasbonDed: number
     absentDays: number; absentDed: number; absentRatePerDay: number
     absentBreakdown: AbsentBreakdownDetail | null
     liburCompDays: number; liburKompensasi: number
@@ -681,11 +681,10 @@ export default function PenggajianBulananPage() {
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, klRes, empRes, loyBalRes, lateDefRes] = await Promise.all([
+    const [scRes, attRes, kpiRes, empRes, loyBalRes, lateDefRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes, source').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
-      supabase.from('kasbon_limits').select('current_balance').eq('employee_id', empId).maybeSingle(),
       supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
       supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
@@ -784,7 +783,6 @@ export default function PenggajianBulananPage() {
     const kpi      = flatSalaryForEmp ? 0 : Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
     const loyalitas = flatSalaryForEmp ? 0 : Number((emp as any).loyalitas_per_month ?? 0)
     const loyDurasi = Number((emp as any).loyalitas_duration_months ?? 0)
-    const saldo    = Number(klRes.data?.current_balance ?? 0)
 
     // ── Cek auto-cairkan tabungan loyalitas ──────────────────────────────────
     const loyBal = loyBalRes.data as any
@@ -912,7 +910,7 @@ export default function PenggajianBulananPage() {
       positionName: (emp.positions as any)?.name ?? '—', branchName: (emp.branches as any)?.name ?? '—',
       base, pos, meal, special, otHours, otTotal, kpiBonus: kpi,
       loyalitasDed: loyalitas, latDed, latMinutes: latMins, latRate,
-      kasbonSaldo: saldo, kasbonDed,
+      kasbonDed,
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
       liburCompDays: kurangLibur, liburKompensasi,
       invLoss, cashierLoss: cashLoss,
@@ -932,15 +930,6 @@ export default function PenggajianBulananPage() {
     if (!slipPreview) return
     setFinalizing(true)
     const p = slipPreview
-
-    // Update kasbon saldo jika ada potongan
-    if (p.kasbonDed > 0) {
-      const { data: kl } = await supabase.from('kasbon_limits').select('id, current_balance').eq('employee_id', p.employeeId).single()
-      if (kl) {
-        const newBal = Math.max(0, Number(kl.current_balance) - p.kasbonDed)
-        await supabase.from('kasbon_limits').update({ current_balance: newBal, updated_at: new Date().toISOString() }).eq('id', kl.id)
-      }
-    }
 
     const { data: insertedPayroll, error } = await supabase.from('payrolls').insert({
       employee_id: p.employeeId, period_month: filterMonth, period_year: filterYear,
