@@ -11,7 +11,7 @@ type BranchGeo = { id: string; name: string; latitude: number | null; longitude:
 type TodayRow = { id: string; check_in: string | null; check_out: string | null; source: string } | null
 type WorkScheduleRow = WorkSchedule & { id: string }
 
-type Step = 'idle' | 'locating' | 'camera' | 'preview' | 'uploading' | 'confirm-swap' | 'pick-date'
+type Step = 'idle' | 'confirm-action' | 'locating' | 'camera' | 'preview' | 'uploading' | 'confirm-swap' | 'pick-date'
 
 // Absen mandiri lewat HP — foto WAJIB diambil langsung dari kamera di dalam halaman ini
 // (getUserMedia + canvas), tidak pernah melewati galeri/file picker OS, supaya tidak bisa kirim
@@ -121,6 +121,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   function stopCamera() {
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
+  }
+
+  // Sebelum kamera dibuka, tanya dulu eksplisit "ini absen masuk atau pulang?" — supaya tidak
+  // membingungkan kalau karyawan tidak yakin/tidak sempat baca label tombol dengan teliti.
+  function askConfirmAction() {
+    setStep('confirm-action')
   }
 
   function startCheckin() {
@@ -509,10 +515,28 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       )}
 
       {step === 'idle' && nextAction && (
-        <button onClick={startCheckin}
+        <button onClick={askConfirmAction}
           className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition">
           {nextAction === 'in' ? '📸 Absen Masuk' : '📸 Absen Pulang'}
         </button>
+      )}
+      {step === 'confirm-action' && nextAction && (
+        <div className="space-y-3">
+          <div className="text-center py-2">
+            <p className="text-sm text-slate-500 mb-1">Konfirmasi dulu, ini absen apa?</p>
+            <p className={`text-xl font-bold ${nextAction === 'in' ? 'text-green-700' : 'text-blue-700'}`}>
+              {nextAction === 'in' ? '🟢 ABSEN MASUK' : '🔵 ABSEN PULANG'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">{employeeName} — {new Date().toLocaleTimeString('id-ID')}</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setStep('idle')} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+            <button onClick={startCheckin}
+              className={`flex-1 py-2 text-white rounded-lg text-sm font-semibold transition ${nextAction === 'in' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+              Ya, Benar
+            </button>
+          </div>
+        </div>
       )}
       {step === 'confirm-swap' && (
         <div className="space-y-3">
