@@ -44,6 +44,7 @@ const adminNavItems: NavNode[] = [
       { name: 'Slip Gaji', href: '/portal/slip-gaji' },
       { name: 'Rekap Absensi', href: '/portal/absensi' },
       { name: 'Jadwal Saya', href: '/portal/jadwal' },
+      { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
     ]
   },
   {
@@ -69,6 +70,7 @@ const adminNavItems: NavNode[] = [
           { name: 'Rekap Absensi', href: '/absensi/rekap' },
           { name: 'Import Absensi', href: '/absensi/import' },
           { name: 'QR Absen', href: '/absensi/qr' },
+          { name: 'Persetujuan Libur', href: '/absensi/persetujuan-libur' },
         ]
       },
       { name: 'Cuti & Izin', href: '/cuti' },
@@ -193,6 +195,7 @@ const employeeNavItems: NavNode[] = [
       { name: 'Slip Gaji', href: '/portal/slip-gaji' },
       { name: 'Rekap Absensi', href: '/portal/absensi' },
       { name: 'Jadwal Saya', href: '/portal/jadwal' },
+      { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
     ]
   },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
