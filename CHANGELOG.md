@@ -1831,4 +1831,45 @@ Sekaligus menambahkan fitur baru yang diminta: **toleransi 5 menit khusus absen 
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18 s/d 20) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera + cetak QR 2 per halaman lebih besar + cetak QR 1/halaman & pilih cabang + verifikasi Daftar Cepat via nama+tanggal lahir + jalur cadangan Kode Karyawan saja + edit data pribadi sendiri di Profil Saya + lihat akun baru daftar di Manajemen User + upload foto profil sendiri + fix RLS foto karyawan terbuka + tampilkan email login di Profil Saya + karyawan bisa merangkap jabatan Driver + rombak verifikasi Sudah Jadi Karyawan tanpa Kode Karyawan + fix foto absen tidak muncul di mode Semua Karyawan + konfirmasi eksplisit absen masuk/pulang + pengaman jarak waktu absen + kartu Tidak Absen di dashboard + fitur Pengajuan Jadwal Libur Awal + fix kasbon driver/kenek tidak muncul di Verifikasi Keuangan + fitur Pengajuan Ganti Hari Libur dengan tukar mutual + fix bug edit keterlambatan tidak tersimpan + toleransi 5 menit absen QR*
+### 112. Fitur: Auto-Promosi Training → Staff Tetap (dengan Verifikasi)
+
+**Konteks:** Owner ingin karyawan training otomatis naik status jadi staff tetap begitu masa kerjanya lewat 3 bulan — dihitung berdasarkan periode 26–25 (bukan bulan kalender), sama seperti seluruh siklus roster/payroll di sistem ini. Contoh: masuk 10 Oktober → lewat 26 Oktober = 1 bulan, lewat 26 November = 2 bulan, lewat 26 Desember = 3 bulan → memenuhi syarat naik jadi tetap. Owner juga minta ini TIDAK langsung otomatis mengubah status tanpa sepengetahuan HR — harus ada notifikasi dan verifikasi dulu.
+
+**Fitur:**
+- Job harian (pg_cron) mengecek semua karyawan `training` setiap hari, begitu masa kerjanya lewat 3 periode cutoff otomatis masuk antrean "Promosi Training" — TIDAK langsung mengubah status karyawan.
+- Halaman baru **SDM/HR → Promosi Training** — HR/Owner Setujui (baru status karyawan benar-benar berubah jadi Staff Tetap) atau Tunda (dengan alasan wajib, status tetap training).
+- Notifikasi (ikon lonceng) muncul untuk role Owner/HR begitu ada kandidat baru menunggu verifikasi — bell ini sebelumnya cuma aktif untuk karyawan/supervisor, sekarang aktif juga untuk admin.
+
+| File | Perubahan |
+|---|---|
+| Migrasi DB (Supabase) | Fungsi `cutoff_periods_completed`, tabel `training_promotion_candidates`, RPC `decide_training_promotion`, job cron harian `generate_training_promotion_candidates` |
+| `app/(dashboard)/karyawan/promosi-training/page.tsx` (baru) | Halaman verifikasi HR/Owner |
+| `components/sidebar.tsx` | Menu "Promosi Training" di grup SDM/HR |
+| `components/NotifikasiBell.tsx` | Notifikasi untuk Owner/HR saat ada kandidat pending |
+
+---
+
+### 113. Fitur: Gaji Standar Staff & Team Toko + Tunjangan Khusus
+
+**Konteks:** Owner mengeluhkan harus input gaji pokok & tunjangan satu-persatu untuk setiap staff/Team Toko, padahal angkanya sama semua (gapok 600rb + tunjangan 600rb) — cuma "tunjangan khusus" yang memang beda per orang untuk kasus tertentu. Berlaku untuk semua Staff & Team Toko, TIDAK untuk driver/kenek (yang memang sudah punya sistem upah sendiri, terpisah dari `salary_components`).
+
+**Fitur:**
+- Kolom baru **Tunjangan Khusus** di Komponen Gaji — terpisah dari Tunjangan Jabatan/Tetap, khusus untuk pengecualian per orang. Muncul sebagai baris tersendiri di semua slip gaji (admin & karyawan).
+- **Gaji Standar** — acuan gapok+tunjangan yang bisa diedit HR (menu "Kelola Gaji Standar" di halaman Komponen Gaji), dipakai untuk:
+  - **Autofill** — form karyawan baru yang belum punya gaji otomatis terisi angka standar, HR tinggal cek/simpan.
+  - **Terapkan ke Karyawan Terpilih** — pilih banyak karyawan sekaligus (centang), sekali klik langsung menyamakan gaji pokok & tunjangan mereka ke angka standar, tanpa ketik ulang satu-satu. Tunjangan khusus masing-masing tidak ikut berubah.
+  - Mengubah angka Gaji Standar TIDAK otomatis mengubah gaji siapa pun yang sudah diatur — tetap harus lewat "Terapkan" secara sadar, supaya tidak ada perubahan gaji yang tidak disengaja.
+- Sekalian dibenahi bug lama: form edit Komponen Gaji per-karyawan dulu selalu menimpa baris riwayat TERAKHIR apa pun tanggal efektifnya — sekarang baris baru hanya ditambah kalau tanggal efektifnya benar-benar beda, kalau sama berarti koreksi ke baris itu (riwayat kenaikan gaji jadi tersimpan benar).
+
+| File | Perubahan |
+|---|---|
+| Migrasi DB (Supabase) | Kolom `salary_components.special_allowance` & `payrolls.special_allowance`, tabel `salary_defaults` (seed "Standar Staff & Team Toko" 600rb+600rb) |
+| `app/(dashboard)/penggajian/komponen/page.tsx` | Bulk-select + "Terapkan Gaji Standar" + editor Gaji Standar |
+| `app/(dashboard)/penggajian/komponen/[employee_id]/page.tsx` | Field Tunjangan Khusus, autofill dari Gaji Standar, fix bug timpa riwayat |
+| `app/(dashboard)/penggajian/bulanan/page.tsx` | Tunjangan Khusus ikut kalkulasi gaji, daily rate, slip, cetak |
+| `app/(dashboard)/penggajian/ringkasan/page.tsx` | Tunjangan Khusus ikut rincian gaji awal |
+| `app/(dashboard)/portal/slip-gaji/page.tsx` | Tunjangan Khusus tampil di slip gaji karyawan |
+
+---
+
+*Terakhir diupdate: Sesi 7 (2026-09-18 s/d 20) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera + cetak QR 2 per halaman lebih besar + cetak QR 1/halaman & pilih cabang + verifikasi Daftar Cepat via nama+tanggal lahir + jalur cadangan Kode Karyawan saja + edit data pribadi sendiri di Profil Saya + lihat akun baru daftar di Manajemen User + upload foto profil sendiri + fix RLS foto karyawan terbuka + tampilkan email login di Profil Saya + karyawan bisa merangkap jabatan Driver + rombak verifikasi Sudah Jadi Karyawan tanpa Kode Karyawan + fix foto absen tidak muncul di mode Semua Karyawan + konfirmasi eksplisit absen masuk/pulang + pengaman jarak waktu absen + kartu Tidak Absen di dashboard + fitur Pengajuan Jadwal Libur Awal + fix kasbon driver/kenek tidak muncul di Verifikasi Keuangan + fitur Pengajuan Ganti Hari Libur dengan tukar mutual + fix bug edit keterlambatan tidak tersimpan + toleransi 5 menit absen QR + auto-promosi training ke staff tetap + gaji standar staff/Team Toko & tunjangan khusus*

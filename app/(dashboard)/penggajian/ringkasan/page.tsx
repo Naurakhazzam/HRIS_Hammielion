@@ -15,6 +15,7 @@ type PayrollRow = {
   base_salary: number
   position_allowance: number
   meal_allowance: number
+  special_allowance: number
   overtime_total: number
   kpi_bonus: number
   conditional_bonus: number
@@ -125,7 +126,7 @@ export default function RingkasanOwnerPage() {
       .from('payrolls')
       .select(`
         id, employee_id, period_month, period_year,
-        base_salary, position_allowance, meal_allowance,
+        base_salary, position_allowance, meal_allowance, special_allowance,
         overtime_total, kpi_bonus, conditional_bonus, extra_bonus_total,
         libur_compensation_days, libur_compensation_amount,
         late_deduction, kasbon_deduction, loyalitas_deduction,
@@ -208,7 +209,7 @@ export default function RingkasanOwnerPage() {
       // Rincian potongan tidak hadir — dihitung langsung dari data absensi
       // asli (bukan angka gabungan di slip), supaya Sakit/Izin/Alpha/Libur
       // Lebih selalu konsisten dengan yang tertulis di Catatan.
-      const gajiAwal = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance)
+      const gajiAwal = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0)
       const dailyRate = Math.round(gajiAwal / 26)
       const sick1Free  = Math.min(sickDays, 1)
       const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))

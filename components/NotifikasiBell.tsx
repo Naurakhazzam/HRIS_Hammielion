@@ -58,7 +58,27 @@ export default function NotifikasiBell() {
     const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
     if (!userData) return
 
-    const isEmployee = ['employee', 'supervisor'].includes(userData.role) || isPreviewModeClient()
+    const isPreview = isPreviewModeClient()
+    const isEmployee = ['employee', 'supervisor'].includes(userData.role) || isPreview
+    const isAdmin = ['owner', 'hr'].includes(userData.role) && !isPreview
+
+    if (isAdmin) {
+      setVisible(true)
+      setSeenMap(loadSeenMap())
+      const { data: candidates } = await supabase.from('training_promotion_candidates')
+        .select('id, eligible_since, employees(full_name)')
+        .eq('status', 'pending')
+        .order('eligible_since')
+      const adminItems: NotifItem[] = ((candidates as unknown as { id: string; eligible_since: string; employees: { full_name: string } | null }[]) || []).map(r => ({
+        key: `trainingpromo-${r.id}`,
+        status: 'pending',
+        label: `${r.employees?.full_name} siap dipromosikan jadi Staff Tetap — perlu verifikasi`,
+        date: r.eligible_since,
+        href: '/karyawan/promosi-training',
+      }))
+      setItems(adminItems)
+    }
+
     if (!isEmployee || !userData.employee_id) return
     setVisible(true)
     setSeenMap(loadSeenMap())

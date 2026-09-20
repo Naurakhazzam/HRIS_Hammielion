@@ -12,6 +12,7 @@ type Payroll = {
   base_salary: number
   position_allowance: number
   meal_allowance: number
+  special_allowance: number
   overtime_total: number
   kpi_bonus: number
   conditional_bonus: number
@@ -158,7 +159,7 @@ export default function PortalSlipGajiPage() {
       .from('payrolls')
       .select(`
         id, period_month, period_year,
-        base_salary, position_allowance, meal_allowance,
+        base_salary, position_allowance, meal_allowance, special_allowance,
         overtime_total, kpi_bonus, conditional_bonus,
         late_deduction, kasbon_deduction, loyalitas_deduction,
         inventory_loss_deduction, cashier_loss_deduction,
@@ -299,6 +300,7 @@ export default function PortalSlipGajiPage() {
                       ['Gaji Pokok',         selectedPayroll.base_salary],
                       ['Tunjangan Jabatan',  selectedPayroll.position_allowance],
                       ['Tunjangan Tetap',    selectedPayroll.meal_allowance],
+                      ['Tunjangan Khusus',   selectedPayroll.special_allowance ?? 0],
                       ['Upah Lembur',        selectedPayroll.overtime_total],
                       ['Bonus KPI',          selectedPayroll.kpi_bonus],
                       ['Bonus Kondisional',  selectedPayroll.conditional_bonus ?? 0],

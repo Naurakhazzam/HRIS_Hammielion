@@ -13,6 +13,7 @@ type SalaryComponent = {
   base_salary: number
   position_allowance: number
   meal_allowance: number
+  special_allowance: number
   overtime_rate_per_hour: number
   late_penalty_per_minute: number
   effective_date: string
@@ -32,6 +33,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
     base_salary: '',
     position_allowance: '0',
     meal_allowance: '0',
+    special_allowance: '0',
     overtime_rate_per_hour: '0',
     late_penalty_per_minute: '0',
     effective_date: new Date().toISOString().split('T')[0]
@@ -73,18 +75,31 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
       showMessage('error', 'Gagal memuat histori gaji: ' + salaryError.message)
     } else {
       setHistory(salaryData || [])
-      
-      // Jika ada data lama, set default value form dari data terbaru
+
       if (salaryData && salaryData.length > 0) {
+        // Sudah ada riwayat — isi form dari data terbaru seperti biasa.
         const latest = salaryData[0]
         setFormData({
           base_salary: latest.base_salary.toString(),
           position_allowance: latest.position_allowance.toString(),
           meal_allowance: latest.meal_allowance.toString(),
+          special_allowance: (latest.special_allowance ?? 0).toString(),
           overtime_rate_per_hour: latest.overtime_rate_per_hour.toString(),
           late_penalty_per_minute: latest.late_penalty_per_minute.toString(),
           effective_date: new Date().toISOString().split('T')[0] // default ke hari ini
         })
+      } else {
+        // Belum ada riwayat sama sekali (karyawan baru) — bantu isi dari Gaji Standar supaya
+        // HR tidak perlu ketik ulang angka yang sama seperti karyawan lain.
+        const { data: def } = await supabase.from('salary_defaults').select('base_salary, position_allowance, meal_allowance').order('label').limit(1).maybeSingle()
+        if (def) {
+          setFormData(f => ({
+            ...f,
+            base_salary: def.base_salary.toString(),
+            position_allowance: def.position_allowance.toString(),
+            meal_allowance: def.meal_allowance.toString(),
+          }))
+        }
       }
     }
 
@@ -119,13 +134,15 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
       return
     }
 
-    // Cek apakah sudah ada record untuk karyawan ini
+    // Cari baris dengan tanggal efektif PERSIS SAMA — kalau ada, berarti ini koreksi untuk
+    // tanggal yang sama (ditimpa); kalau beda, ini perubahan baru jadi ditambah baris riwayat
+    // baru. (Sebelumnya kode ini selalu menimpa baris TERAKHIR apa pun tanggal efektifnya,
+    // jadi histori kenaikan gaji tidak pernah benar-benar tersimpan berjenjang.)
     const { data: existing } = await supabase
       .from('salary_components')
       .select('id')
       .eq('employee_id', employee_id)
-      .order('effective_date', { ascending: false })
-      .limit(1)
+      .eq('effective_date', formattedDate)
       .maybeSingle()
 
     const payload = {
@@ -133,6 +150,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
       base_salary: baseSalaryNum,
       position_allowance: parseFloat(formData.position_allowance) || 0,
       meal_allowance: parseFloat(formData.meal_allowance) || 0,
+      special_allowance: parseFloat(formData.special_allowance) || 0,
       overtime_rate_per_hour: parseFloat(formData.overtime_rate_per_hour) || 0,
       late_penalty_per_minute: parseFloat(formData.late_penalty_per_minute) || 0,
       effective_date: formattedDate
@@ -147,7 +165,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
       console.error('Supabase error:', error.message, error.details, error.hint)
       showMessage('error', `Gagal menyimpan komponen gaji: ${error.message} (Detail: ${error.details || '-'})`)
     } else {
-      showMessage('success', 'Komponen gaji berhasil diperbarui. Baris histori baru telah ditambahkan.')
+      showMessage('success', existing ? 'Komponen gaji untuk tanggal efektif ini diperbarui.' : 'Baris riwayat gaji baru ditambahkan.')
       fetchData(employee_id) // Refresh list
     }
     setSubmitting(false)
@@ -232,6 +250,16 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
             </div>
 
             <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Tunj. Khusus (Rp)</label>
+              <RupiahInput
+                value={formData.special_allowance}
+                onChange={(v) => setFormData({...formData, special_allowance: v})}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              <p className="text-[10px] text-slate-500 mt-1">Khusus karyawan ini saja — beda dari gaji standar yang sama untuk sesama posisi.</p>
+            </div>
+
+            <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Tarif Lembur / Jam (Rp)</label>
               <RupiahInput
                 value={formData.overtime_rate_per_hour}
@@ -273,6 +301,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tgl Efektif</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Gaji Pokok</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Tunjangan</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Tunj. Khusus</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Rate Lembur/Jam</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Denda/Mnt</th>
                 </tr>
@@ -280,7 +309,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
               <tbody className="divide-y divide-slate-100">
                 {history.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada riwayat gaji untuk karyawan ini.</td>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada riwayat gaji untuk karyawan ini.</td>
                   </tr>
                 ) : (
                   history.map((h, i) => (
@@ -297,6 +326,9 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
                       <td className="px-4 py-3 text-right">
                         <div className="text-xs text-slate-600">Jab: {formatRupiah(h.position_allowance)}</div>
                         <div className="text-xs text-slate-600 mt-0.5">Mkn: {formatRupiah(h.meal_allowance)}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-slate-700">
+                        {h.special_allowance > 0 ? formatRupiah(h.special_allowance) : <span className="text-slate-300">—</span>}
                       </td>
                       <td className="px-4 py-3 text-right text-sm text-slate-600">
                         {formatRupiah(h.overtime_rate_per_hour)}

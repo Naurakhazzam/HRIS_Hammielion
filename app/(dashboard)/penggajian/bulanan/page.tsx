@@ -18,6 +18,7 @@ type Payroll = {
   base_salary: number
   position_allowance: number
   meal_allowance: number
+  special_allowance: number
   overtime_total: number
   kpi_bonus: number
   late_deduction: number
@@ -207,7 +208,7 @@ export default function PenggajianBulananPage() {
   type SlipPreview = {
     employeeId: string; employeeName: string; employeeCode: string
     positionName: string; branchName: string
-    base: number; pos: number; meal: number; otHours: number; otTotal: number; kpiBonus: number
+    base: number; pos: number; meal: number; special: number; otHours: number; otTotal: number; kpiBonus: number
     conditionalBonus: number
     loyalitasDed: number; latDed: number; latMinutes: number; latRate: number
     kasbonSaldo: number; kasbonDed: number
@@ -428,7 +429,7 @@ export default function PenggajianBulananPage() {
       .from('payrolls')
       .select(`
         id, employee_id, period_month, period_year,
-        base_salary, position_allowance, meal_allowance,
+        base_salary, position_allowance, meal_allowance, special_allowance,
         overtime_total, kpi_bonus, late_deduction,
         kasbon_deduction, loyalitas_deduction, conditional_bonus,
         inventory_loss_deduction, cashier_loss_deduction,
@@ -717,6 +718,7 @@ export default function PenggajianBulananPage() {
     const baseRaw  = Number(sc.base_salary ?? 0)
     const posRaw   = Number(sc.position_allowance ?? 0)
     const mealRaw  = Number(sc.meal_allowance ?? 0)
+    const specialRaw = Number(sc.special_allowance ?? 0)
     const otRate   = Number(sc.overtime_rate_per_hour ?? 0)
     const latRate  = Number(sc.late_penalty_per_minute ?? 0)
     const joinDateVal = (emp as any).join_date ?? null
@@ -742,6 +744,7 @@ export default function PenggajianBulananPage() {
     const base = Math.round(baseRaw * proRataFactor)
     const pos  = Math.round(posRaw  * proRataFactor)
     const meal = Math.round(mealRaw * proRataFactor)
+    const special = Math.round(specialRaw * proRataFactor)
     // Hanya lembur yang sudah dicentang valid (cocok surat lembur fisik ter-ACC) yang dihitung
     // Karyawan dengan overtime_applicable/late_penalty_applicable = false (diatur di Data Karyawan)
     // dikecualikan total dari perhitungan ini, terlepas dari checklist/data absensi apa pun.
@@ -771,8 +774,9 @@ export default function PenggajianBulananPage() {
     }
 
     // ── Hitung potongan tidak hadir (frontend, rumus baku) ──────────────────
-    // Daily rate = total semua komponen ÷ 26
-    const dailyRate = Math.round((base + pos + meal) / 26)
+    // Daily rate = total semua komponen ÷ 26 — tunjangan khusus ikut dihitung, diperlakukan
+    // sama seperti tunjangan jabatan/tetap (bagian dari gaji rutin, bukan bonus insidental).
+    const dailyRate = Math.round((base + pos + meal + special) / 26)
 
     // Pisahkan status dari data attendance
     // Exclude hari sebelum bergabung dan record "Belum Masuk (Training)" lama
@@ -876,13 +880,13 @@ export default function PenggajianBulananPage() {
       .filter(c => latestChecked[c.id])
       .reduce((s, c) => s + Number(c.nominal_amount), 0)
 
-    const gross = base + pos + meal + otTotal + kpi + loyAutoRelease + conditionalBonus + liburKompensasi
+    const gross = base + pos + meal + special + otTotal + kpi + loyAutoRelease + conditionalBonus + liburKompensasi
     const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyAutoRelease > 0 ? 0 : loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
 
     const preview: SlipPreview = {
       employeeId: empId, employeeName: emp.full_name, employeeCode: emp.employee_code,
       positionName: (emp.positions as any)?.name ?? '—', branchName: (emp.branches as any)?.name ?? '—',
-      base, pos, meal, otHours, otTotal, kpiBonus: kpi,
+      base, pos, meal, special, otHours, otTotal, kpiBonus: kpi,
       loyalitasDed: loyalitas, latDed, latMinutes: latMins, latRate,
       kasbonSaldo: saldo, kasbonDed,
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
@@ -916,7 +920,7 @@ export default function PenggajianBulananPage() {
 
     const { data: insertedPayroll, error } = await supabase.from('payrolls').insert({
       employee_id: p.employeeId, period_month: filterMonth, period_year: filterYear,
-      base_salary: p.base, position_allowance: p.pos, meal_allowance: p.meal,
+      base_salary: p.base, position_allowance: p.pos, meal_allowance: p.meal, special_allowance: p.special,
       overtime_total: p.otTotal, kpi_bonus: p.kpiBonus,
       conditional_bonus: p.conditionalBonus,
       late_deduction: p.latDed, kasbon_deduction: p.kasbonDed,
@@ -1453,14 +1457,14 @@ export default function PenggajianBulananPage() {
     const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
 
     const [scRes, attRes, empRes] = await Promise.all([
-      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
+      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
       supabase.from('employees').select('join_date, employee_type').eq('id', p.employee_id).single(),
     ])
 
     const sc = scRes.data?.[0]
     const joinDateVal = empRes.data?.join_date ?? null
-    const dailyRate = sc ? Math.round((Number(sc.base_salary)+Number(sc.position_allowance)+Number(sc.meal_allowance))/26) : 0
+    const dailyRate = sc ? Math.round((Number(sc.base_salary)+Number(sc.position_allowance)+Number(sc.meal_allowance)+Number(sc.special_allowance ?? 0))/26) : 0
 
     // Buang record & tanggal sebelum karyawan bergabung
     const atts = (attRes.data || []).filter((a: any) => !joinDateVal || a.date >= joinDateVal)
@@ -1556,7 +1560,7 @@ export default function PenggajianBulananPage() {
 
     // Update payroll: conditional_bonus + recalc gross & net
     const p = bonusModal
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + totalBonus
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + totalBonus
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const { error: updateErr } = await supabase
@@ -1610,7 +1614,7 @@ export default function PenggajianBulananPage() {
     if (insertErr) { showMessage('error', 'Gagal menyimpan bonus: ' + insertErr.message); setExtraBonusSaving(false); return }
 
     const newExtraTotal = Number(p.extra_bonus_total ?? 0) + amt
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + newExtraTotal
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + newExtraTotal
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const wasFinalized = p.status === 'pending_approval' || p.status === 'approved'
@@ -1767,6 +1771,7 @@ export default function PenggajianBulananPage() {
       <tr><td>Gaji Pokok</td><td>${Number(p.base_salary)>0?fmtR(Number(p.base_salary)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Tunjangan Jabatan</td><td>${Number(p.position_allowance)>0?fmtR(Number(p.position_allowance)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Tunjangan Tetap</td><td>${Number(p.meal_allowance)>0?fmtR(Number(p.meal_allowance)):'<span class="zero">—</span>'}</td></tr>
+      ${Number(p.special_allowance ?? 0) > 0 ? `<tr><td>Tunjangan Khusus</td><td>${fmtR(Number(p.special_allowance))}</td></tr>` : ''}
       <tr><td>Upah Lembur${otDetailHtml}</td><td>${otTotal>0?fmtR(otTotal):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus KPI</td><td>${Number(p.kpi_bonus)>0?fmtR(Number(p.kpi_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus Kondisional</td><td>${Number((p as any).conditional_bonus??0)>0?fmtR(Number((p as any).conditional_bonus)):'<span class="zero">—</span>'}</td></tr>
@@ -2081,7 +2086,7 @@ export default function PenggajianBulananPage() {
                 </tr>
               ) : (
                 payrolls.map(p => {
-                  const totalTunjangan = Number(p.position_allowance) + Number(p.meal_allowance)
+                  const totalTunjangan = Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0)
                   const statusCfg = STATUS_CONFIG[p.status] ?? STATUS_CONFIG.draft
 
                   return (
@@ -2506,6 +2511,7 @@ export default function PenggajianBulananPage() {
                     ['Gaji Pokok',           selectedPayroll.base_salary],
                     ['Tunjangan Jabatan',    selectedPayroll.position_allowance],
                     ['Tunjangan Tetap',      selectedPayroll.meal_allowance],
+                    ['Tunjangan Khusus',     selectedPayroll.special_allowance ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>
@@ -3069,6 +3075,7 @@ export default function PenggajianBulananPage() {
                     ['Gaji Pokok', slipPreview.base],
                     ['Tunjangan Jabatan', slipPreview.pos],
                     ['Tunjangan Tetap', slipPreview.meal],
+                    ...(slipPreview.special > 0 ? [['Tunjangan Khusus', slipPreview.special]] : []),
                     ['Upah Lembur', slipPreview.otTotal],
                     ['Bonus KPI', slipPreview.kpiBonus],
                     ...(slipPreview.conditionalBonus > 0 ? [['Bonus Kondisional', slipPreview.conditionalBonus]] : []),
