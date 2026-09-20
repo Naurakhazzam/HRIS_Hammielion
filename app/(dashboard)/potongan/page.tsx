@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { getCurrentPeriodRangeStr, rosterPeriodLabel } from '@/lib/rosterPeriod'
 import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, type EscalatingResult } from '@/lib/escalatingDeduction'
+import { isPreviewModeClient } from '@/lib/previewMode'
 
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
 
@@ -143,7 +144,9 @@ export default function AturanPotonganPage() {
     const { data: lateDef } = await supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle()
     setLateRate(Number(lateDef?.late_penalty_per_minute ?? 0))
 
-    const admin = ['owner', 'hr', 'finance'].includes(userData.role)
+    // Mode "Preview Tampilan Karyawan" harus tetap tampil sebagai karyawan (data diri sendiri saja),
+    // bukan tabel semua orang, meskipun role akun asli owner/hr/finance.
+    const admin = ['owner', 'hr', 'finance'].includes(userData.role) && !isPreviewModeClient()
     setIsAdmin(admin)
 
     if (admin) await fetchAllEmployees()
