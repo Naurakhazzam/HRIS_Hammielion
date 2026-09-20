@@ -70,7 +70,7 @@ type DeliveryTripRow = {
 
 // Kategori Kas Keluar yang berasal dari penggajian — dikelompokkan jadi satu bagian tersendiri
 // ("Rincian Penggajian"), bukan tercampur di daftar kategori umum.
-const PAYROLL_CATEGORIES = ['payroll', 'gaji_', 'driver_wage', 'helper_wage', 'borongan_wage', 'gaji_freelance']
+const PAYROLL_CATEGORIES = ['payroll', 'gaji_', 'driver_wage', 'helper_wage', 'borongan_wage', 'gaji_freelance', 'bonus_', 'loyalitas_cair']
 
 export default function LaporanDetailPage() {
   const supabase = createClient()

@@ -31,7 +31,7 @@ const ADMIN_ROLES = ['owner', 'hr', 'finance']
 
 // Kategori yang seharusnya lahir dari slip gaji resmi (Tandai Lunas), bukan diketik bebas di sini —
 // setiap kali ada input manual untuk kategori ini, riwayatnya selalu berujung salah cabang atau dobel.
-const PAYROLL_CATEGORIES = ['payroll', 'gaji_', 'driver_wage', 'helper_wage', 'borongan_wage']
+const PAYROLL_CATEGORIES = ['payroll', 'gaji_', 'driver_wage', 'helper_wage', 'borongan_wage', 'bonus_', 'loyalitas_cair']
 
 // Kategori yang WAJIB lewat jalur resmi masing-masing, bukan dipilih bebas di sini — kalau
 // dipilih manual di mode "Pengeluaran Biasa", entrinya tidak terhubung ke nota/pengajuan

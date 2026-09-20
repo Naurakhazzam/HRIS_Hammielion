@@ -9,11 +9,14 @@ type Employee = {
   employee_code: string
   full_name: string
   employee_type: string
+  branch_id: string | null
   loyalitas_per_month: number
   loyalitas_duration_months: number
   branches: { name: string } | null
   positions: { name: string } | null
 }
+
+type BankAccount = { id: string; bank_name: string; account_number: string | null; account_type: string }
 
 type LoyalitasBalance = {
   id: string
@@ -55,7 +58,11 @@ export default function TabunganLoyalitasPage() {
   const [loading, setLoading] = useState(true)
   const [myRole, setMyRole] = useState('')
   const [myEmployeeId, setMyEmployeeId] = useState('')
+  const [myUserId, setMyUserId] = useState('')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  const [releaseDate, setReleaseDate] = useState('')
+  const [releaseAccountId, setReleaseAccountId] = useState('')
 
   // Edit setup per karyawan
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -76,9 +83,12 @@ export default function TabunganLoyalitasPage() {
     setLoading(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
+      setMyUserId(user.id)
       const { data: me } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
       if (me) { setMyRole(me.role); setMyEmployeeId(me.employee_id) }
     }
+    const { data: baData } = await supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name')
+    if (baData) setBankAccounts(baData)
     await Promise.all([fetchEmployees(), fetchBalances(), fetchTransactions()])
     setLoading(false)
   }
@@ -86,7 +96,7 @@ export default function TabunganLoyalitasPage() {
   async function fetchEmployees() {
     const { data } = await supabase
       .from('employees')
-      .select('id, employee_code, full_name, employee_type, loyalitas_per_month, loyalitas_duration_months, branches(name), positions(name)')
+      .select('id, employee_code, full_name, employee_type, branch_id, loyalitas_per_month, loyalitas_duration_months, branches(name), positions(name)')
       .eq('is_active', true)
       .eq('employee_type', 'permanent')
       .order('full_name')
@@ -151,8 +161,17 @@ export default function TabunganLoyalitasPage() {
   async function handleAction(e: React.FormEvent) {
     e.preventDefault()
     if (!actionModal) return
-    setActionSubmitting(true)
     const { emp, bal, type } = actionModal
+
+    // Cairkan = uang benar-benar keluar, jadi wajib rekening/kas sumber & tercatat di Kas Keluar.
+    // Hanguskan tidak — dana batal dibayarkan, tidak ada arus kas.
+    if (type === 'release') {
+      if (!releaseAccountId) { showMsg('error', 'Pilih rekening/kas sumber dulu.'); return }
+      if (!releaseDate) { showMsg('error', 'Tanggal wajib diisi.'); return }
+      if (!emp.branch_id) { showMsg('error', 'Cabang karyawan ini tidak ditemukan di data karyawan. Perbaiki data karyawan dulu.'); return }
+    }
+
+    setActionSubmitting(true)
     const newStatus = type === 'release' ? 'released' : 'forfeited'
 
     const { error: balErr } = await supabase.from('loyalitas_balances').update({
@@ -167,6 +186,25 @@ export default function TabunganLoyalitasPage() {
       employee_id: emp.id, type: type === 'release' ? 'release' : 'forfeit',
       amount: bal.total_withheld, notes: actionNotes || null, created_by: myEmployeeId || null
     })
+
+    if (type === 'release') {
+      const { error: coErr } = await supabase.from('fin_cash_out').insert({
+        branch_id: emp.branch_id,
+        category: 'loyalitas_cair',
+        amount: bal.total_withheld,
+        description: `Pencairan tabungan loyalitas ${emp.full_name}${actionNotes ? ' — ' + actionNotes : ''}`,
+        transaction_date: releaseDate,
+        account_id: releaseAccountId,
+        input_by: myUserId || null,
+        verified_by: myUserId || null,
+        status: 'approved',
+      })
+      if (coErr) {
+        showMsg('error', 'Saldo sudah tercatat cair, tapi gagal mencatat Kas Keluar: ' + coErr.message)
+        setActionSubmitting(false)
+        return
+      }
+    }
 
     showMsg('success', `Tabungan loyalitas ${emp.full_name} berhasil di-${type === 'release' ? 'cairkan' : 'hanguskan'}.`)
     setActionModal(null); setActionNotes('')
@@ -274,7 +312,7 @@ export default function TabunganLoyalitasPage() {
                   {/* Aksi */}
                   {canApprove && bal && bal.status === 'active' && bal.total_withheld > 0 && (
                     <div className="flex gap-2 mt-3">
-                      <button onClick={() => { setActionModal({ emp, bal, type: 'release' }); setActionNotes('') }}
+                      <button onClick={() => { setActionModal({ emp, bal, type: 'release' }); setActionNotes(''); setReleaseDate(new Date().toISOString().slice(0, 10)); setReleaseAccountId('') }}
                         className="px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded-lg transition">
                         Cairkan Manual
                       </button>
@@ -443,6 +481,25 @@ export default function TabunganLoyalitasPage() {
                 </div>
               )}
               <form onSubmit={handleAction} className="space-y-4">
+                {actionModal.type === 'release' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Tanggal Pembayaran <span className="text-red-500">*</span></label>
+                      <input type="date" required value={releaseDate} onChange={e => setReleaseDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
+                      <select required value={releaseAccountId} onChange={e => setReleaseAccountId(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                        <option value="">-- Pilih Rekening/Kas --</option>
+                        {bankAccounts.map(a => (
+                          <option key={a.id} value={a.id}>{a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Catatan / Alasan <span className="text-red-500">*</span></label>
                   <textarea required rows={3} value={actionNotes} onChange={e => setActionNotes(e.target.value)}
@@ -454,7 +511,7 @@ export default function TabunganLoyalitasPage() {
                     className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">
                     Batal
                   </button>
-                  <button type="submit" disabled={actionSubmitting}
+                  <button type="submit" disabled={actionSubmitting || (actionModal.type === 'release' && !releaseAccountId)}
                     className={`px-6 py-2 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50 ${actionModal.type === 'release' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
                     {actionSubmitting ? 'Memproses...' : actionModal.type === 'release' ? 'Konfirmasi Cairkan' : 'Konfirmasi Hanguskan'}
                   </button>

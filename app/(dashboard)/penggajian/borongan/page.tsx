@@ -6,6 +6,8 @@ import Link from 'next/link'
 
 type FreelanceWorker = { id: string; full_name: string }
 type GudangEmployee = { id: string; full_name: string }
+type Branch = { id: string; name: string }
+type BankAccount = { id: string; bank_name: string; account_number: string | null; account_type: string }
 
 type Participant = {
   freelance_worker_id: string | null
@@ -23,6 +25,7 @@ type LoadingEntry = {
   total_earning: number
   payment_status: string
   description: string | null
+  branch_id: string | null
   loading_entry_participants: Participant[]
 }
 
@@ -40,14 +43,27 @@ export default function RekapBoronganPage() {
   const [filterStatus, setFilterStatus] = useState('')
   
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null)
+  const [myUserId, setMyUserId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+
+  // Tandai Lunas & Catat Kas Keluar — sebelumnya "Lunasi Tagihan" cuma ubah status,
+  // tidak pernah mencatat Kas Keluar sama sekali (padahal kategori borongan_wage
+  // diblokir dari input manual). Sekarang wajib pilih rekening & tanggal, lalu
+  // insert fin_cash_out per cabang (satu batch bisa mencakup entri lintas cabang).
+  const [payBoronganOpen, setPayBoronganOpen] = useState(false)
+  const [payBoronganDate, setPayBoronganDate] = useState('')
+  const [payBoronganAccountId, setPayBoronganAccountId] = useState('')
+  const [payBoronganSubmitting, setPayBoronganSubmitting] = useState(false)
 
   const supabase = createClient()
 
   const [formData, setFormData] = useState({
     entry_date: new Date().toISOString().split('T')[0],
     total_kg: '',
-    description: ''
+    description: '',
+    branch_id: ''
   })
   // Kunci partisipan yang dicentang, format "fw:<id>" atau "emp:<id>"
   const [selectedWorkerKeys, setSelectedWorkerKeys] = useState<string[]>([])
@@ -58,7 +74,7 @@ export default function RekapBoronganPage() {
 
   // Edit modal state
   const [editEntry, setEditEntry] = useState<LoadingEntry | null>(null)
-  const [editForm, setEditForm] = useState({ entry_date: '', total_kg: '', rate_per_kg: '', description: '' })
+  const [editForm, setEditForm] = useState({ entry_date: '', total_kg: '', rate_per_kg: '', description: '', branch_id: '' })
   const [editSelectedWorkerKeys, setEditSelectedWorkerKeys] = useState<string[]>([])
   const [editSubmitting, setEditSubmitting] = useState(false)
 
@@ -101,6 +117,8 @@ export default function RekapBoronganPage() {
       fetchWorkers()
       fetchGudangEmployees()
     })
+    fetchBranches()
+    fetchBankAccounts()
   }, [])
 
   // Refetch entries when filter changes, but only if week is set
@@ -113,11 +131,22 @@ export default function RekapBoronganPage() {
   async function fetchMyUser() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
+      setMyUserId(user.id)
       const { data } = await supabase.from('users').select('employee_id').eq('id', user.id).single()
       if (data) {
         setMyEmployeeId(data.employee_id)
       }
     }
+  }
+
+  async function fetchBranches() {
+    const { data } = await supabase.from('branches').select('id, name').order('name')
+    if (data) setBranches(data)
+  }
+
+  async function fetchBankAccounts() {
+    const { data } = await supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name')
+    if (data) setBankAccounts(data)
   }
 
   async function fetchWorkers() {
@@ -143,7 +172,7 @@ export default function RekapBoronganPage() {
     setLoading(true)
     let query = supabase
       .from('loading_entries')
-      .select('id, entry_date, total_kg, rate_per_kg, total_earning, payment_status, description, loading_entry_participants(freelance_worker_id, employee_id, share_amount, freelance_workers(full_name), employees(full_name))')
+      .select('id, entry_date, total_kg, rate_per_kg, total_earning, payment_status, description, branch_id, loading_entry_participants(freelance_worker_id, employee_id, share_amount, freelance_workers(full_name), employees(full_name))')
       .order('entry_date', { ascending: false })
       .order('created_at', { ascending: false })
 
@@ -201,6 +230,11 @@ export default function RekapBoronganPage() {
       return
     }
 
+    if (!formData.branch_id) {
+      showMessage('error', 'Pilih cabang dulu.')
+      return
+    }
+
     setSubmitting(true)
     setMessage(null)
 
@@ -224,7 +258,8 @@ export default function RekapBoronganPage() {
         total_earning: totalEarning,
         payment_status: 'unpaid',
         created_by: myEmployeeId,
-        description: formData.description.trim()
+        description: formData.description.trim(),
+        branch_id: formData.branch_id
       })
       .select('id')
       .single()
@@ -279,13 +314,56 @@ export default function RekapBoronganPage() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
-  async function markAsPaid() {
+  function openPayBoronganModal() {
     if (selectedIds.length === 0) return
-    if (!myEmployeeId) return
-    
-    if (!confirm(`Tandai ${selectedIds.length} entri sebagai Lunas?`)) return
-    
-    setSubmitting(true)
+    setPayBoronganDate(new Date().toISOString().slice(0, 10))
+    setPayBoronganAccountId('')
+    setPayBoronganOpen(true)
+  }
+
+  // Tandai Lunas & Catat Kas Keluar — satu-satunya jalur resmi, supaya upah bongkar muat
+  // benar-benar tercatat sebagai kas keluar (sebelumnya cuma ubah status, tidak pernah
+  // insert fin_cash_out sama sekali). Dikelompokkan per cabang karena satu batch pilihan
+  // bisa mencakup entri dari cabang yang berbeda.
+  async function confirmPayBorongan() {
+    if (selectedIds.length === 0 || !myEmployeeId) return
+    if (!payBoronganAccountId) { showMessage('error', 'Pilih rekening/kas sumber dulu.'); return }
+    if (!payBoronganDate) { showMessage('error', 'Tanggal wajib diisi.'); return }
+
+    const selectedEntries = entries.filter(ent => selectedIds.includes(ent.id))
+    const missingBranch = selectedEntries.find(ent => !ent.branch_id)
+    if (missingBranch) {
+      showMessage('error', `Entri tanggal ${new Date(missingBranch.entry_date).toLocaleDateString('id-ID')} belum ada cabangnya. Edit entri itu dulu untuk memilih cabang.`)
+      return
+    }
+
+    setPayBoronganSubmitting(true)
+
+    const totalByBranch: Record<string, number> = {}
+    selectedEntries.forEach(ent => {
+      const b = ent.branch_id as string
+      totalByBranch[b] = (totalByBranch[b] || 0) + Number(ent.total_earning)
+    })
+
+    for (const [branchId, amount] of Object.entries(totalByBranch)) {
+      const { error: coErr } = await supabase.from('fin_cash_out').insert({
+        branch_id: branchId,
+        category: 'borongan_wage',
+        amount,
+        description: `Upah Bongkar Muat (${selectedEntries.filter(e => e.branch_id === branchId).length} entri)`,
+        transaction_date: payBoronganDate,
+        account_id: payBoronganAccountId,
+        input_by: myUserId,
+        verified_by: myUserId,
+        status: 'approved',
+      })
+      if (coErr) {
+        showMessage('error', `Gagal mencatat Kas Keluar (cabang sebagian sudah tercatat): ${coErr.message}`)
+        setPayBoronganSubmitting(false)
+        return
+      }
+    }
+
     const { error } = await supabase
       .from('loading_entries')
       .update({
@@ -296,14 +374,14 @@ export default function RekapBoronganPage() {
       .in('id', selectedIds)
 
     if (error) {
-      console.error('Detail error:', JSON.stringify(error, null, 2))
-      showMessage('error', 'Gagal memproses pembayaran: ' + error.message)
+      showMessage('error', 'Kas Keluar sudah tercatat, tapi gagal menandai entri lunas: ' + error.message)
     } else {
-      showMessage('success', `${selectedIds.length} tagihan berhasil dilunasi.`)
+      showMessage('success', `${selectedIds.length} tagihan berhasil dilunasi dan tercatat di Kas Keluar.`)
       setSelectedIds([])
+      setPayBoronganOpen(false)
       fetchEntries()
     }
-    setSubmitting(false)
+    setPayBoronganSubmitting(false)
   }
 
   function openEditModal(ent: LoadingEntry) {
@@ -312,7 +390,8 @@ export default function RekapBoronganPage() {
       entry_date: ent.entry_date,
       total_kg: String(ent.total_kg),
       rate_per_kg: String(ent.rate_per_kg),
-      description: ent.description || ''
+      description: ent.description || '',
+      branch_id: ent.branch_id || ''
     })
     setEditSelectedWorkerKeys(
       ent.loading_entry_participants.map(p =>
@@ -327,6 +406,11 @@ export default function RekapBoronganPage() {
 
     if (editSelectedWorkerKeys.length === 0) {
       showMessage('error', 'Pilih minimal satu pekerja yang ikut serta.')
+      return
+    }
+
+    if (!editForm.branch_id) {
+      showMessage('error', 'Pilih cabang dulu.')
       return
     }
 
@@ -347,7 +431,8 @@ export default function RekapBoronganPage() {
         total_kg: kgNum,
         rate_per_kg: rateNum,
         total_earning: totalEarning,
-        description: editForm.description.trim()
+        description: editForm.description.trim(),
+        branch_id: editForm.branch_id
       })
       .eq('id', editEntry.id)
 
@@ -500,13 +585,26 @@ export default function RekapBoronganPage() {
             </div>
 
             <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
+              <select
+                required
+                value={formData.branch_id}
+                onChange={(e) => setFormData({...formData, branch_id: e.target.value})}
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+              >
+                <option value="">-- Pilih Cabang --</option>
+                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+
+            <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Kerja <span className="text-red-500">*</span></label>
-              <input 
-                type="date" 
-                required 
-                value={formData.entry_date} 
+              <input
+                type="date"
+                required
+                value={formData.entry_date}
                 onChange={(e) => setFormData({...formData, entry_date: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
@@ -613,7 +711,7 @@ export default function RekapBoronganPage() {
               <div className="flex items-center gap-3">
                 {selectedIds.length > 0 && (
                   <button
-                    onClick={markAsPaid}
+                    onClick={openPayBoronganModal}
                     disabled={submitting}
                     className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition whitespace-nowrap"
                   >
@@ -797,6 +895,19 @@ export default function RekapBoronganPage() {
               </div>
 
               <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
+                <select
+                  required
+                  value={editForm.branch_id}
+                  onChange={(e) => setEditForm({ ...editForm, branch_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">-- Pilih Cabang --</option>
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Tanggal Kerja <span className="text-red-500">*</span></label>
                 <input
                   type="date" required
@@ -863,6 +974,59 @@ export default function RekapBoronganPage() {
         </div>
       </div>
     )}
+
+    {/* Modal Tandai Lunas & Catat Kas Keluar */}
+    {payBoronganOpen && (() => {
+      const selectedEntries = entries.filter(ent => selectedIds.includes(ent.id))
+      const totalAmount = selectedEntries.reduce((s, e) => s + Number(e.total_earning), 0)
+      const branchCount = new Set(selectedEntries.map(e => e.branch_id).filter(Boolean)).size
+      return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+              <h2 className="text-base font-bold text-slate-700">Tandai Lunas: Metode &amp; Sumber Pembayaran</h2>
+              <button onClick={() => setPayBoronganOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-sm text-slate-600">{selectedEntries.length} entri belum lunas{branchCount > 1 ? ` (lintas ${branchCount} cabang)` : ''}</p>
+
+              <div className="bg-slate-50 rounded-xl p-3 space-y-1 text-sm">
+                <div className="flex justify-between font-bold text-green-700"><span>Total Kas Keluar</span><span>{formatRupiah(totalAmount)}</span></div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Pembayaran <span className="text-red-500">*</span></label>
+                <input type="date" required value={payBoronganDate} onChange={e => setPayBoronganDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
+                <select required value={payBoronganAccountId} onChange={e => setPayBoronganAccountId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                  <option value="">-- Pilih Rekening/Kas --</option>
+                  {bankAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setPayBoronganOpen(false)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-lg transition">
+                  Batal
+                </button>
+                <button onClick={confirmPayBorongan} disabled={payBoronganSubmitting || !payBoronganAccountId}
+                  className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                  {payBoronganSubmitting ? 'Memproses...' : 'Konfirmasi Lunas'}
+                </button>
+              </div>
+              {branchCount > 1 && (
+                <p className="text-[11px] text-slate-400">Entri lintas cabang akan dicatat sebagai beberapa baris Kas Keluar — satu per cabang.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )
+    })()}
 
     <style>{`
       @media print {

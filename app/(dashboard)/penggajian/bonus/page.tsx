@@ -695,7 +695,25 @@ function TabSiklus({ showMessage }: { showMessage: (type: 'success'|'error', tex
   const [allocForm, setAllocForm] = useState<Record<string, string>>({})
   const [submittingAlloc, setSubmittingAlloc] = useState(false)
 
+  // Cairkan Bonus Siklus -> Kas Keluar (per cabang, karena satu siklus bisa mencakup karyawan lintas cabang)
+  const [bankAccounts, setBankAccounts] = useState<{ id: string; bank_name: string; account_number: string | null; account_type: string }[]>([])
+  const [myUserId, setMyUserId] = useState('')
+  const [payBonusCycle, setPayBonusCycle] = useState<BonusCycle | null>(null)
+  const [payBonusDate, setPayBonusDate] = useState('')
+  const [payBonusAccountId, setPayBonusAccountId] = useState('')
+  const [payBonusSubmitting, setPayBonusSubmitting] = useState(false)
+
   useEffect(() => { fetchCycles() }, [filterStatus])
+
+  useEffect(() => {
+    async function initPay() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) setMyUserId(user.id)
+      const { data: baData } = await supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name')
+      if (baData) setBankAccounts(baData)
+    }
+    initPay()
+  }, [])
 
   async function fetchCycles() {
     setLoading(true)
@@ -789,16 +807,12 @@ function TabSiklus({ showMessage }: { showMessage: (type: 'success'|'error', tex
     setSubmittingAlloc(false)
   }
 
-  async function updateCycleStatus(cycleId: string, status: 'ready_to_pay' | 'paid') {
-    if (status === 'paid') {
-      if (!confirm('Cairkan bonus siklus ini? Semua alokasi akan ditandai Lunas.')) return
-    } else {
-      if (!confirm('Tandai siklus ini siap cair?')) return
-    }
+  async function updateCycleStatus(cycleId: string, status: 'ready_to_pay') {
+    if (!confirm('Tandai siklus ini siap cair?')) return
 
     const { error } = await supabase
       .from('bonus_cycles')
-      .update({ status, payout_date: status === 'paid' ? new Date().toISOString() : null })
+      .update({ status })
       .eq('id', cycleId)
 
     if (error) {
@@ -806,21 +820,89 @@ function TabSiklus({ showMessage }: { showMessage: (type: 'success'|'error', tex
       return
     }
 
-    if (status === 'paid') {
-      await supabase
-        .from('bonus_employee_allocations')
-        .update({ status: 'paid', paid_at: new Date().toISOString() })
-        .eq('bonus_cycle_id', cycleId)
-        .eq('status', 'pending')
-    }
-
     showMessage('success', `Status siklus berhasil diperbarui menjadi ${status}.`)
     fetchCycles()
-    if (expandedCycleId === cycleId) {
-      setExpandedCycleId(null)
-    }
   }
-  
+
+  function openPayBonusModal(cycle: BonusCycle) {
+    setPayBonusCycle(cycle)
+    setPayBonusDate(new Date().toISOString().slice(0, 10))
+    setPayBonusAccountId('')
+  }
+
+  // Cairkan Bonus Siklus -> insert fin_cash_out (satu baris per cabang, karena alokasi
+  // di satu siklus bisa mencakup karyawan dari cabang yang berbeda-beda).
+  async function confirmPayBonus() {
+    if (!payBonusCycle) return
+    if (!payBonusAccountId) { showMessage('error', 'Pilih rekening/kas sumber dulu.'); return }
+    if (!payBonusDate) { showMessage('error', 'Tanggal wajib diisi.'); return }
+
+    const pending = allocations.filter(a => a.status === 'pending')
+    if (pending.length === 0) { showMessage('error', 'Tidak ada alokasi menunggu di siklus ini.'); return }
+
+    setPayBonusSubmitting(true)
+
+    const { data: empBranches, error: empErr } = await supabase
+      .from('employees')
+      .select('id, branch_id')
+      .in('id', pending.map(a => a.employee_id))
+    if (empErr) { showMessage('error', 'Gagal ambil data cabang karyawan: ' + empErr.message); setPayBonusSubmitting(false); return }
+
+    const branchOf: Record<string, string | null> = {}
+    ;(empBranches || []).forEach((e: any) => { branchOf[e.id] = e.branch_id })
+
+    const missingBranch = pending.find(a => !branchOf[a.employee_id])
+    if (missingBranch) {
+      showMessage('error', `Cabang untuk ${missingBranch.employees?.full_name || 'salah satu karyawan'} tidak ditemukan di data karyawan. Perbaiki data karyawan dulu.`)
+      setPayBonusSubmitting(false)
+      return
+    }
+
+    const totalByBranch: Record<string, number> = {}
+    pending.forEach(a => {
+      const b = branchOf[a.employee_id] as string
+      totalByBranch[b] = (totalByBranch[b] || 0) + Number(a.allocated_amount)
+    })
+
+    const cycleLabel = `${payBonusCycle.bonus_rules?.name || 'Bonus'} — siklus ${payBonusCycle.cycle_label}`
+    for (const [branchId, amount] of Object.entries(totalByBranch)) {
+      const { error: coErr } = await supabase.from('fin_cash_out').insert({
+        branch_id: branchId,
+        category: 'bonus_',
+        amount,
+        description: `Pencairan ${cycleLabel}`,
+        transaction_date: payBonusDate,
+        account_id: payBonusAccountId,
+        input_by: myUserId || null,
+        verified_by: myUserId || null,
+        status: 'approved',
+      })
+      if (coErr) {
+        showMessage('error', `Gagal mencatat Kas Keluar (cabang sebagian sudah tercatat): ${coErr.message}`)
+        setPayBonusSubmitting(false)
+        return
+      }
+    }
+
+    const { error: cycleErr } = await supabase
+      .from('bonus_cycles')
+      .update({ status: 'paid', payout_date: new Date().toISOString() })
+      .eq('id', payBonusCycle.id)
+    if (cycleErr) { showMessage('error', 'Kas Keluar sudah tercatat, tapi gagal update status siklus: ' + cycleErr.message); setPayBonusSubmitting(false); return }
+
+    await supabase
+      .from('bonus_employee_allocations')
+      .update({ status: 'paid', paid_at: new Date().toISOString() })
+      .eq('bonus_cycle_id', payBonusCycle.id)
+      .eq('status', 'pending')
+
+    showMessage('success', `Bonus siklus berhasil dicairkan dan tercatat di Kas Keluar.`)
+    setPayBonusCycle(null)
+    setExpandedCycleId(null)
+    fetchCycles()
+    setPayBonusSubmitting(false)
+  }
+
   async function forfeitAllocation(allocId: string) {
     if (!confirm('Tandai alokasi ini sebagai hangus? (Misal karyawan resign)')) return
     const { error } = await supabase
@@ -1038,7 +1120,7 @@ function TabSiklus({ showMessage }: { showMessage: (type: 'success'|'error', tex
                               </button>
                             )}
                             {(isAccumulating || isReady) && allocations.some(a => a.status === 'pending') && (
-                              <button onClick={() => updateCycleStatus(cycle.id, 'paid')} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium text-sm rounded-lg transition shadow-sm">
+                              <button onClick={() => openPayBonusModal(cycle)} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium text-sm rounded-lg transition shadow-sm">
                                 Cairkan Bonus Siklus Ini
                               </button>
                             )}
@@ -1053,6 +1135,56 @@ function TabSiklus({ showMessage }: { showMessage: (type: 'success'|'error', tex
           })}
         </div>
       )}
+
+      {/* Modal Cairkan Bonus Siklus -> Kas Keluar */}
+      {payBonusCycle && (() => {
+        const pending = allocations.filter(a => a.status === 'pending')
+        const totalPending = pending.reduce((s, a) => s + Number(a.allocated_amount), 0)
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
+                <h2 className="text-base font-bold text-slate-700">Cairkan Bonus: Metode &amp; Sumber Pembayaran</h2>
+                <button onClick={() => setPayBonusCycle(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-sm text-slate-600">{payBonusCycle.bonus_rules?.name} — siklus {payBonusCycle.cycle_label} ({pending.length} karyawan menunggu)</p>
+
+                <div className="bg-slate-50 rounded-xl p-3 space-y-1 text-sm">
+                  <div className="flex justify-between font-bold text-green-700"><span>Total Dicairkan</span><span>{fmtRp(totalPending)}</span></div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Pembayaran <span className="text-red-500">*</span></label>
+                  <input type="date" required value={payBonusDate} onChange={e => setPayBonusDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
+                  <select required value={payBonusAccountId} onChange={e => setPayBonusAccountId(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                    <option value="">-- Pilih Rekening/Kas --</option>
+                    {bankAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button onClick={() => setPayBonusCycle(null)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-lg transition">
+                    Batal
+                  </button>
+                  <button onClick={confirmPayBonus} disabled={payBonusSubmitting || !payBonusAccountId}
+                    className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                    {payBonusSubmitting ? 'Memproses...' : 'Konfirmasi Cairkan'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">Kalau alokasi mencakup karyawan lintas cabang, Kas Keluar akan dicatat sebagai beberapa baris — satu per cabang, sesuai data karyawan.</p>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
