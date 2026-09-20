@@ -564,11 +564,19 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
     if (!confirm(`Apply potongan kehilangan ke ${preview.length} karyawan untuk payroll ${MONTHS[filterMonth-1]} ${filterYear}?`)) return
     setApplying(true)
 
+    let appliedCount = 0
+    let skippedCount = 0
+
     for (const p of preview) {
       // Cari payroll karyawan di periode ini
-      const { data: payroll } = await supabase.from('payrolls').select('id, gross_total, net_total, late_deduction, kasbon_deduction, loyalitas_deduction, absent_deduction, conditional_bonus')
+      const { data: payroll } = await supabase.from('payrolls').select('id, status, gross_total, net_total, late_deduction, kasbon_deduction, loyalitas_deduction, absent_deduction, conditional_bonus')
         .eq('employee_id', p.empId).eq('period_month', filterMonth).eq('period_year', filterYear).single()
       if (!payroll) continue
+
+      // Payroll yang sudah approved/paid sudah tercatat & (kalau paid) sudah masuk Kas Keluar
+      // dengan net_total lama — menimpanya diam-diam bikin catatan Kas Keluar tidak sinkron lagi
+      // dengan net_total yang ditampilkan. Cuma boleh apply ke slip yang masih draft.
+      if (payroll.status !== 'draft') { skippedCount++; continue }
 
       const newInvLoss = p.invLoss
       const newKasirLoss = p.kasirLoss
@@ -579,9 +587,14 @@ function TabRekap({ showMsg }: { showMsg: (t: 'success'|'error', m: string) => v
         cashier_loss_deduction: newKasirLoss,
         net_total: newNet
       }).eq('id', payroll.id)
+      appliedCount++
     }
 
-    showMsg('success', `Potongan berhasil diapply ke ${preview.length} karyawan.`)
+    if (skippedCount === 0) {
+      showMsg('success', `Potongan berhasil diapply ke ${appliedCount} karyawan.`)
+    } else {
+      showMsg('success', `Potongan diapply ke ${appliedCount} karyawan. ${skippedCount} dilewati karena slip gajinya sudah tidak berstatus draft (approved/paid) — perlu penyesuaian manual kalau perlu.`)
+    }
     setApplying(false)
   }
 

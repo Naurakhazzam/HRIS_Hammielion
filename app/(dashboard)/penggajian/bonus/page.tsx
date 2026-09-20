@@ -772,9 +772,15 @@ function TabSiklus({ showMessage }: { showMessage: (type: 'success'|'error', tex
   }
 
   async function handleSaveAllocations(cycle: any) {
+    const totalForm = Object.values(allocForm).reduce((acc, val) => acc + (Number(val) || 0), 0)
+    if (totalForm > cycle.total_accumulated) {
+      showMessage('error', `Total alokasi (${fmtRp(totalForm)}) melebihi total akumulasi siklus (${fmtRp(cycle.total_accumulated)}). Kurangi dulu sebelum menyimpan.`)
+      return
+    }
+
     setSubmittingAlloc(true)
     const payloads: any[] = []
-    
+
     for (const [empId, valStr] of Object.entries(allocForm)) {
       const amt = Number(valStr)
       if (amt > 0 || (amt === 0 && allocations.some(a => a.employee_id === empId))) {

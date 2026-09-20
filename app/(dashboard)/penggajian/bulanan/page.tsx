@@ -1000,6 +1000,29 @@ export default function PenggajianBulananPage() {
     }
     setKasbonSaving(prev => ({ ...prev, [p.id]: true }))
 
+    // Pastikan nominal yang disimpan selalu bisa dipotong UTUH lewat FIFO cicilan (lihat
+    // applyKasbonDeductionFifo, dipanggil saat slip 'paid') — kalau tidak, sisa yang tidak pas
+    // satu cicilan penuh akan terpotong dari gaji tapi tidak ikut mengurangi utang tercatat.
+    const { data: pending } = await supabase
+      .from('kasbon_deductions')
+      .select('amount')
+      .eq('employee_id', p.employee_id)
+      .eq('status', 'pending')
+      .order('deduction_year', { ascending: true })
+      .order('deduction_month', { ascending: true })
+
+    let achievable = 0
+    for (const d of pending || []) {
+      if (achievable + Number(d.amount) > newKasbon) break
+      achievable += Number(d.amount)
+    }
+
+    if (newKasbon > achievable) {
+      showMessage('error', `Nominal tidak pas dengan cicilan kasbon yang tersedia. Maksimal yang bisa dipotong utuh sekarang: ${formatRupiah(achievable)}.`)
+      setKasbonSaving(prev => ({ ...prev, [p.id]: false }))
+      return
+    }
+
     // Recalculate net_total — pakai calcNet agar semua potongan ikut terhitung
     const newNet = calcNet({ ...p, kasbon_deduction: newKasbon })
 

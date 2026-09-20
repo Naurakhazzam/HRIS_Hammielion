@@ -26,6 +26,7 @@ type PayrollRow = {
   late_deduction: number
   kasbon_deduction: number
   loyalitas_deduction: number
+  absent_deduction: number
   inventory_loss_deduction: number
   cashier_loss_deduction: number
   gross_total: number
@@ -57,6 +58,8 @@ type SummaryRow = {
   sickDeduction: number
   izinDeduction: number
   alphaDeduction: number
+  absentDeductionRecorded: number
+  absentMismatch: boolean
   totalLateMinutes: number
   lateDeduction: number
   kasbonDeduction: number
@@ -128,7 +131,7 @@ export default function RingkasanOwnerPage() {
         base_salary, position_allowance, meal_allowance, special_allowance,
         overtime_total, kpi_bonus, conditional_bonus, extra_bonus_total,
         libur_compensation_days, libur_compensation_amount,
-        late_deduction, kasbon_deduction, loyalitas_deduction,
+        late_deduction, kasbon_deduction, loyalitas_deduction, absent_deduction,
         inventory_loss_deduction, cashier_loss_deduction,
         gross_total, net_total, status,
         employee:employees!payrolls_employee_id_fkey(
@@ -229,6 +232,14 @@ export default function RingkasanOwnerPage() {
       const overtimeTotal = Number(p.overtime_total || 0)
       const bonusTotal = Number(p.kpi_bonus||0) + Number(p.conditional_bonus||0) + Number(p.extra_bonus_total||0) + Number(p.libur_compensation_amount||0)
 
+      // Rincian Sakit/Izin/Alpha di atas direkonstruksi dari data absensi SAAT INI, bukan dibaca
+      // dari slip — kalau absensi periode ini diedit setelah gaji difinalisasi, rekonstruksinya
+      // bisa beda dari absent_deduction yang benar-benar dipakai waktu itu (dan yang beneran
+      // dipotong dari gaji). Total resmi tetap pakai absent_deduction tercatat, supaya Total
+      // Potongan di laporan ini selalu rekonsil dengan gross_total - net_total yang sebenarnya.
+      const absentDeductionRecorded = Number(p.absent_deduction || 0)
+      const absentMismatch = Math.round(sickDeduction + izinDeduction + alphaDeduction) !== Math.round(absentDeductionRecorded)
+
       return {
         payrollId: p.id, employeeId: p.employee_id,
         name: emp?.full_name ?? '—', position: emp?.positions?.name ?? '—',
@@ -236,7 +247,7 @@ export default function RingkasanOwnerPage() {
         gajiAwal,
         sickDays, izinDays, alphaDays,
         kurangLiburDays: Number(p.libur_compensation_days || 0), kurangLiburAmount: Number(p.libur_compensation_amount || 0),
-        sickDeduction, izinDeduction, alphaDeduction,
+        sickDeduction, izinDeduction, alphaDeduction, absentDeductionRecorded, absentMismatch,
         totalLateMinutes, lateDeduction: Number(p.late_deduction || 0),
         kasbonDeduction: Number(p.kasbon_deduction || 0), loyalitasDeduction: Number(p.loyalitas_deduction || 0),
         invLossDeduction: Number(p.inventory_loss_deduction || 0),
@@ -266,7 +277,7 @@ export default function RingkasanOwnerPage() {
   }
 
   function absenDeductionTotal(r: SummaryRow): number {
-    return r.sickDeduction + r.izinDeduction + r.alphaDeduction
+    return r.absentDeductionRecorded
   }
 
   const totalGajiAwal = rows.reduce((s, r) => s + r.gajiAwal, 0)
@@ -329,6 +340,9 @@ export default function RingkasanOwnerPage() {
                 <span className="font-bold text-slate-900">{fmtRp(r.netTotal)}</span>
               </div>
               {notes.length > 0 && <p className="text-xs text-amber-700 mt-1">{notes.join(' · ')}</p>}
+              {r.absentMismatch && (
+                <p className="text-xs text-red-600 mt-1">⚠ Absensi periode ini berubah setelah gaji difinalisasi — rincian Sakit/Izin/Alpha di bawah cuma rekonstruksi terbaru. Potongan tidak hadir yang benar-benar dipakai: {fmtRp(r.absentDeductionRecorded)}.</p>
+              )}
               <div className="grid grid-cols-2 gap-x-8 mt-2 text-xs text-slate-600">
                 <div>
                   <p className="font-semibold text-red-600 uppercase mb-1">Potongan</p>
@@ -417,6 +431,9 @@ export default function RingkasanOwnerPage() {
                       {isOpen && (
                         <tr className="bg-slate-50/60">
                           <td colSpan={7} className="px-6 py-4">
+                            {r.absentMismatch && (
+                              <p className="text-xs text-red-600 mb-3">⚠ Absensi periode ini berubah setelah gaji difinalisasi — rincian Sakit/Izin/Alpha di bawah cuma rekonstruksi terbaru. Potongan tidak hadir yang benar-benar dipakai: {fmtRp(r.absentDeductionRecorded)}.</p>
+                            )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
                               <div>
                                 <p className="font-semibold text-red-600 uppercase mb-2">Rincian Potongan</p>
