@@ -14,8 +14,20 @@ type LeaveRequest = {
   status: string
   document_url: string | null
   reason: string | null
+  created_at: string
   employee: { full_name: string; branches: { name: string } }
   approver?: { full_name: string } | null
+}
+
+// Izin "pilihan" (annual/permission) yang diajukan kurang dari H-2 sebelum tanggal mulai
+// (dihitung dari kapan pengajuan dibuat) otomatis dicatat Alpha begitu disetujui — lihat RPC
+// approve_leave_request. Badge ini cuma pengingat visual di sini, logikanya sudah ditegakkan
+// di database supaya konsisten dari jalur mana pun approve-nya dipanggil.
+function isLateNotice(req: Pick<LeaveRequest, 'leave_type' | 'start_date' | 'created_at'>): boolean {
+  if (req.leave_type !== 'annual' && req.leave_type !== 'permission') return false
+  const created = new Date(req.created_at)
+  const minStart = new Date(created.getFullYear(), created.getMonth(), created.getDate() + 2)
+  return new Date(req.start_date + 'T00:00:00') < minStart
 }
 
 export default function CutiIzinPage() {
@@ -57,7 +69,7 @@ export default function CutiIzinPage() {
     let query = supabase
       .from('leave_requests')
       .select(`
-        id, employee_id, leave_type, start_date, end_date, total_days, status, document_url, reason,
+        id, employee_id, leave_type, start_date, end_date, total_days, status, document_url, reason, created_at,
         employee:employees!leave_requests_employee_id_fkey(full_name, branch_id, branches(name)),
         approver:employees!leave_requests_approved_by_fkey(full_name)
       `)
@@ -238,6 +250,9 @@ export default function CutiIzinPage() {
                         <a href={req.document_url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline inline-flex items-center gap-1 mt-1">
                           📎 Lihat Surat
                         </a>
+                      )}
+                      {req.status === 'pending' && isLateNotice(req) && (
+                        <p className="text-[11px] text-amber-600 font-medium mt-1">⚠️ Kurang dari H-2 — akan jadi Alpha (1.5x) kalau disetujui</p>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">

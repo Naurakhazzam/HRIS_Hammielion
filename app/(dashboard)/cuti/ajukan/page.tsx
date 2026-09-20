@@ -48,6 +48,12 @@ export default function AjukanCutiPage() {
   const totalDays = calcTotalDays(formData.start_date, formData.end_date)
   const isSickWarning = formData.leave_type === 'sick' && totalDays > 1
 
+  // Izin "pilihan" (annual/permission) minimal H-2 dari HARI INI (bukan tanggal mulai vs hari
+  // ini saja, tapi memang selalu dibandingkan ke hari ini karena baru dicek saat form diisi).
+  // Sakit & duka dikecualikan — sifatnya memang mendadak, tidak bisa direncanakan.
+  const minNoticeDate = (() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().split('T')[0] })()
+  const isLateNotice = (formData.leave_type === 'annual' || formData.leave_type === 'permission') && formData.start_date < minNoticeDate
+
   useEffect(() => {
     fetchMyUserAndEmployees()
   }, [])
@@ -317,6 +323,17 @@ export default function AjukanCutiPage() {
             <span className="text-sm font-medium text-slate-700">Total Hari Diajukan:</span>
             <span className="text-lg font-bold text-blue-600">{totalDays} Hari</span>
           </div>
+
+          {isLateNotice && (
+            <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-amber-200">
+              <span>⚠️</span>
+              <p>
+                <strong>Kurang dari H-2.</strong> Cuti Tahunan/Izin Periksa-Keperluan wajib diajukan minimal 2 hari sebelum tanggal mulai.
+                Kalau tetap dikirim dan disetujui, hari ini akan dicatat sebagai <strong>Alpha (potongan 1.5x)</strong>, bukan izin biasa.
+                Kalau ini keadaan darurat, pilih jenis Sakit atau Izin Duka Keluarga (tidak kena aturan ini).
+              </p>
+            </div>
+          )}
 
           {isSickWarning && (
             <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm flex gap-2 items-start border border-red-100">
