@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { todayLocalStr, localDateStr } from '@/lib/date'
+import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 type OwnDayOff = { date: string }
 type Colleague = { employee_id: string; full_name: string; employee_code: string }
@@ -52,6 +53,7 @@ export default function GantiLiburPage() {
 
   const [loading, setLoading] = useState(true)
   const [employeeId, setEmployeeId] = useState('')
+  const [previewReadOnly, setPreviewReadOnly] = useState(false)
   const [ownDayOffs, setOwnDayOffs] = useState<OwnDayOff[]>([])
   const [myRequests, setMyRequests] = useState<MyRequest[]>([])
   const [incomingSwaps, setIncomingSwaps] = useState<IncomingSwap[]>([])
@@ -68,21 +70,56 @@ export default function GantiLiburPage() {
 
   const minFuture = minAllowedFutureDate()
 
-  const fetchData = useCallback(async (empId: string) => {
+  // Preview Tampilan Karyawan: get_my_day_off_change_requests()/get_incoming_day_off_swap_requests()
+  // selalu berbasis identitas pemanggil (SECURITY DEFINER), jadi tidak bisa dipakai untuk lihat
+  // punya Rahmat Saleh — diganti query langsung ke roster_change_requests (owner/hr sudah punya
+  // akses baca penuh lewat RLS) saat sedang preview.
+  const fetchData = useCallback(async (empId: string, previewing: boolean) => {
     const today = todayLocalStr()
-    const [{ data: offs }, { data: reqs }, { data: incoming }] = await Promise.all([
+    const [{ data: offs }, reqs, incoming] = await Promise.all([
       supabase.from('employee_roster')
         .select('date')
         .eq('employee_id', empId).eq('is_day_off', true)
         .gt('date', today).order('date'),
-      supabase.rpc('get_my_day_off_change_requests'),
-      supabase.rpc('get_incoming_day_off_swap_requests'),
+      previewing
+        ? supabase.from('roster_change_requests')
+            .select('id, original_date, requested_date, counterpart_id, counterpart_status, status, rejection_reason, created_at')
+            .eq('requester_id', empId).order('created_at', { ascending: false })
+            .then(async r => {
+              const rows = (r.data as any[]) || []
+              const ids = [...new Set(rows.map(x => x.counterpart_id).filter(Boolean))]
+              const names: Record<string, string> = {}
+              if (ids.length) {
+                const { data: emps } = await supabase.from('employees').select('id, full_name').in('id', ids)
+                ;(emps || []).forEach((e: any) => { names[e.id] = e.full_name })
+              }
+              return rows.map(x => ({ ...x, counterpart_name: x.counterpart_id ? (names[x.counterpart_id] || null) : null })) as MyRequest[]
+            })
+        : supabase.rpc('get_my_day_off_change_requests').then(r => (r.data as MyRequest[]) || []),
+      previewing
+        ? supabase.from('roster_change_requests')
+            .select('id, requester_id, original_date, requested_date, created_at')
+            .eq('counterpart_id', empId).eq('status', 'pending_counterpart').order('created_at')
+            .then(async r => {
+              const rows = (r.data as any[]) || []
+              const ids = [...new Set(rows.map(x => x.requester_id))]
+              const info: Record<string, { full_name: string; employee_code: string }> = {}
+              if (ids.length) {
+                const { data: emps } = await supabase.from('employees').select('id, full_name, employee_code').in('id', ids)
+                ;(emps || []).forEach((e: any) => { info[e.id] = e })
+              }
+              return rows.map(x => ({
+                id: x.id, requester_name: info[x.requester_id]?.full_name || '—', requester_code: info[x.requester_id]?.employee_code || '—',
+                original_date: x.original_date, requested_date: x.requested_date, created_at: x.created_at,
+              })) as IncomingSwap[]
+            })
+        : supabase.rpc('get_incoming_day_off_swap_requests').then(r => (r.data as IncomingSwap[]) || []),
     ])
     // Hanya tampilkan hari libur yang secara teori masih bisa diajukan (H-2 dari tanggal itu
     // sendiri) — kalau kurang dari itu, pengajuan pasti ditolak RPC, jadi tidak usah ditawarkan.
     setOwnDayOffs(((offs as OwnDayOff[]) || []).filter(o => o.date >= minFuture))
-    setMyRequests((reqs as MyRequest[]) || [])
-    setIncomingSwaps((incoming as IncomingSwap[]) || [])
+    setMyRequests(reqs)
+    setIncomingSwaps(incoming)
   }, [supabase, minFuture])
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -90,10 +127,13 @@ export default function GantiLiburPage() {
   async function init() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
-    const { data: userData } = await supabase.from('users').select('employee_id').eq('id', user.id).single()
+    const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
     if (!userData) return
-    setEmployeeId(userData.employee_id)
-    await fetchData(userData.employee_id)
+    const previewing = ['owner', 'hr', 'finance'].includes(userData.role) && isPreviewModeClient()
+    setPreviewReadOnly(previewing)
+    const effectiveId = previewing ? PREVIEW_EMPLOYEE_ID : userData.employee_id
+    setEmployeeId(effectiveId)
+    await fetchData(effectiveId, previewing)
     setLoading(false)
   }
 
@@ -116,6 +156,7 @@ export default function GantiLiburPage() {
   }
 
   async function submitRequest() {
+    if (previewReadOnly) return
     if (!originalDate || !newDate) { showMessage('error', 'Pilih tanggal libur lama dan tanggal baru dulu.'); return }
     if (collision.length > 0 && !selectedCounterpart) { showMessage('error', 'Tanggal itu sudah jadi libur rekan — pilih siapa yang diajak tukar.'); return }
     setSubmitting(true)
@@ -130,26 +171,28 @@ export default function GantiLiburPage() {
       showMessage('success', collision.length > 0 ? 'Diajukan — menunggu respon rekan yang diajak tukar.' : 'Diajukan — menunggu persetujuan HR/Owner.')
       setOriginalDate(''); setNewDate(''); setCollision([]); setCollisionChecked(false); setSelectedCounterpart('')
     }
-    await fetchData(employeeId)
+    await fetchData(employeeId, previewReadOnly)
     setSubmitting(false)
   }
 
   async function respond(id: string, accept: boolean) {
+    if (previewReadOnly) return
     if (!confirm(accept ? 'Terima permintaan tukar libur ini?' : 'Tolak permintaan tukar libur ini?')) return
     setRespondingId(id)
     const { error } = await supabase.rpc('respond_day_off_swap', { p_request_id: id, p_accept: accept })
     if (error) showMessage('error', 'Gagal merespon: ' + error.message)
     else showMessage('success', accept ? 'Diterima — diteruskan ke HR/Owner untuk keputusan akhir.' : 'Ditolak, pengajuan rekan dibatalkan.')
-    await fetchData(employeeId)
+    await fetchData(employeeId, previewReadOnly)
     setRespondingId(null)
   }
 
   async function cancelRequest(id: string) {
+    if (previewReadOnly) return
     if (!confirm('Batalkan pengajuan ganti libur ini?')) return
     const { error } = await supabase.from('roster_change_requests').delete().eq('id', id)
     if (error) showMessage('error', 'Gagal membatalkan: ' + error.message)
     else showMessage('success', 'Pengajuan dibatalkan.')
-    await fetchData(employeeId)
+    await fetchData(employeeId, previewReadOnly)
   }
 
   if (loading) return <div className="text-center py-12 text-slate-500">Memuat...</div>
@@ -169,6 +212,12 @@ export default function GantiLiburPage() {
         </div>
       )}
 
+      {previewReadOnly && (
+        <div className="bg-slate-100 border border-slate-200 text-slate-600 text-sm rounded-lg px-4 py-2.5 mb-6">
+          🔒 Mode Preview — halaman ini baca-saja, tombol Ajukan/Terima/Tolak/Batalkan dinonaktifkan.
+        </div>
+      )}
+
       {incomingSwaps.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
           <h2 className="text-sm font-semibold text-amber-800 mb-3">🔔 Permintaan Tukar Libur dari Rekan — Perlu Respon Anda</h2>
@@ -180,9 +229,9 @@ export default function GantiLiburPage() {
                   <p className="text-xs text-slate-500 mt-1">Anda melepas libur <strong>{fmtDate(s.requested_date)}</strong>, dan mendapat ganti libur <strong>{fmtDate(s.original_date)}</strong> sebagai gantinya.</p>
                 </div>
                 <div className="flex gap-2 shrink-0">
-                  <button onClick={() => respond(s.id, true)} disabled={respondingId === s.id}
+                  <button onClick={() => respond(s.id, true)} disabled={respondingId === s.id || previewReadOnly}
                     className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg font-medium transition disabled:opacity-50">Terima</button>
-                  <button onClick={() => respond(s.id, false)} disabled={respondingId === s.id}
+                  <button onClick={() => respond(s.id, false)} disabled={respondingId === s.id || previewReadOnly}
                     className="text-xs bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 px-3 py-1.5 rounded-lg font-medium transition disabled:opacity-50">Tolak</button>
                 </div>
               </div>
@@ -231,7 +280,7 @@ export default function GantiLiburPage() {
               <p className="text-xs text-green-600">✓ Tanggal itu masih kosong — bisa langsung diajukan ke HR/Owner tanpa perlu tukar.</p>
             )}
 
-            <button onClick={submitRequest} disabled={submitting || !originalDate || !newDate}
+            <button onClick={submitRequest} disabled={submitting || !originalDate || !newDate || previewReadOnly}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50">
               {submitting ? 'Mengajukan...' : 'Ajukan Ganti Libur'}
             </button>
@@ -261,7 +310,7 @@ export default function GantiLiburPage() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}>{cfg.label}</span>
-                  {(r.status === 'pending_counterpart' || r.status === 'pending_approval') && (
+                  {(r.status === 'pending_counterpart' || r.status === 'pending_approval') && !previewReadOnly && (
                     <button onClick={() => cancelRequest(r.id)} className="text-xs text-red-500 hover:underline">Batalkan</button>
                   )}
                 </div>

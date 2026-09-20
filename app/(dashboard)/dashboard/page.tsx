@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { ANNUAL_LEAVE_QUOTA_DAYS, isEligibleForAnnualLeave, tenureDays, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
+import { PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 export const metadata: Metadata = {
   title: 'Dashboard — Hammielion HRIS',
@@ -19,15 +20,20 @@ export default async function DashboardPage() {
     ? await supabase.from('users').select('role, employee_id, employees(full_name, join_date)').eq('id', user.id).single()
     : { data: null }
 
-  // "Preview Tampilan Karyawan" (cookie, lihat lib/previewMode.ts) — cuma mengubah TAMPILAN
-  // untuk admin yang sedang cek menu/layout level karyawan; RLS di query bawah tetap mengikuti
-  // role akun sungguhan, jadi data yang muncul tetap data karyawan/employee_id akun ini sendiri.
+  // "Preview Tampilan Karyawan" (cookie, lihat lib/previewMode.ts) — mengubah TAMPILAN untuk
+  // admin yang sedang cek menu/layout level karyawan, DAN mengganti data yang ditampilkan ke
+  // employee sungguhan (Rahmat Saleh, PREVIEW_EMPLOYEE_ID) supaya lebih representatif — bukan
+  // employee_id akun admin sendiri yang biasanya kosong/tidak lengkap.
   const cookieStore = await cookies()
   const previewMode = cookieStore.get('previewAsEmployee')?.value === 'true'
+    && (userData ? ['owner', 'hr', 'finance'].includes(userData.role) : false)
   const isEmployeeRole = (userData ? ['employee', 'supervisor'].includes(userData.role) : false) || previewMode
+  const effectiveEmployeeId = previewMode ? PREVIEW_EMPLOYEE_ID : userData?.employee_id
 
-  if (isEmployeeRole && userData?.employee_id) {
-    const emp = (userData as any).employees
+  if (isEmployeeRole && effectiveEmployeeId) {
+    const emp = previewMode
+      ? (await supabase.from('employees').select('full_name, join_date').eq('id', effectiveEmployeeId).single()).data
+      : (userData as any).employees
     const today = toDateStr(new Date())
 
     const now = new Date()
@@ -37,22 +43,22 @@ export default async function DashboardPage() {
     const [{ data: todayRoster }, { data: leaveReqs }, { count: pendingKasbonCount }, { count: absentCount }] = await Promise.all([
       supabase.from('employee_roster')
         .select('is_day_off, work_schedules(name, check_in_time, check_out_time)')
-        .eq('employee_id', userData.employee_id).eq('date', today).maybeSingle(),
+        .eq('employee_id', effectiveEmployeeId).eq('date', today).maybeSingle(),
       emp?.join_date
         ? (() => {
             const { start, end } = getCurrentLeaveYear(emp.join_date)
             return supabase.from('leave_requests').select('total_days')
-              .eq('employee_id', userData.employee_id).eq('leave_type', 'annual')
+              .eq('employee_id', effectiveEmployeeId).eq('leave_type', 'annual')
               .in('status', ['pending', 'approved'])
               .gte('start_date', toDateStr(start)).lte('start_date', toDateStr(end))
           })()
         : Promise.resolve({ data: [] as { total_days: number }[] }),
       supabase.from('kasbon_requests').select('id', { count: 'exact', head: true })
-        .eq('employee_id', userData.employee_id).eq('status', 'pending'),
+        .eq('employee_id', effectiveEmployeeId).eq('status', 'pending'),
       // "Tidak absen" = status 'absent' (alpha) bulan berjalan — bukan cuti/sakit/izin, itu
       // beda status dan tidak ikut dihitung di sini.
       supabase.from('attendances').select('id', { count: 'exact', head: true })
-        .eq('employee_id', userData.employee_id).eq('status', 'absent')
+        .eq('employee_id', effectiveEmployeeId).eq('status', 'absent')
         .gte('date', monthStart).lte('date', monthEnd),
     ])
 

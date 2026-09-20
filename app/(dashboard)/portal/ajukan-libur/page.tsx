@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { getUpcomingRosterPeriod, rosterPeriodLabel, datesInRange } from '@/lib/rosterPeriod'
 import { todayLocalStr, localDateStr } from '@/lib/date'
+import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 type OwnRequest = { id: string; requested_date: string; status: 'draft' | 'pending' | 'approved' | 'rejected'; rejection_reason: string | null }
 
@@ -16,6 +17,7 @@ export default function AjukanLiburPage() {
 
   const [loading, setLoading] = useState(true)
   const [employeeId, setEmployeeId] = useState('')
+  const [previewReadOnly, setPreviewReadOnly] = useState(false)
   const [ownRequests, setOwnRequests] = useState<OwnRequest[]>([])
   const [colleagueNames, setColleagueNames] = useState<Record<string, string>>({})
   const [branchEmployeeCount, setBranchEmployeeCount] = useState<number | null>(null)
@@ -33,12 +35,28 @@ export default function AjukanLiburPage() {
   async function init() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
-    const { data: userData } = await supabase.from('users').select('employee_id').eq('id', user.id).single()
+    const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
     if (!userData) return
-    setEmployeeId(userData.employee_id)
-    const [, { data: count }] = await Promise.all([
-      fetchData(userData.employee_id),
-      supabase.rpc('get_my_branch_employee_count'),
+
+    // Preview Tampilan Karyawan: tampilkan data Rahmat Saleh (contoh nyata), tapi baca-saja —
+    // submit/pilih/batalkan dinonaktifkan karena RPC/insert di halaman ini tetap menyasar
+    // employee_id akun admin yang login sungguhan, bukan Rahmat Saleh.
+    const previewing = ['owner', 'hr', 'finance'].includes(userData.role) && isPreviewModeClient()
+    setPreviewReadOnly(previewing)
+    const effectiveId = previewing ? PREVIEW_EMPLOYEE_ID : userData.employee_id
+    setEmployeeId(effectiveId)
+
+    const [, count] = await Promise.all([
+      fetchData(effectiveId),
+      previewing
+        ? (async () => {
+            const { data: emp } = await supabase.from('employees').select('branch_id').eq('id', effectiveId).single()
+            if (!emp?.branch_id) return null
+            const { count: c } = await supabase.from('employees').select('id', { count: 'exact', head: true })
+              .eq('branch_id', emp.branch_id).eq('is_active', true)
+            return c
+          })()
+        : supabase.rpc('get_my_branch_employee_count').then(r => r.data),
     ])
     setBranchEmployeeCount(typeof count === 'number' ? count : null)
     setLoading(false)
@@ -74,6 +92,7 @@ export default function AjukanLiburPage() {
   const weekendPicksUsed = ownRequests.filter(r => r.status !== 'rejected' && isWeekend(r.requested_date)).length
 
   async function toggleDate(dateStr: string, own: OwnRequest | undefined) {
+    if (previewReadOnly) return
     if (own) {
       if (own.status !== 'draft' && own.status !== 'pending') return // approved tidak bisa dibatalkan di sini
       const dateLabel = new Date(dateStr + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long' })
@@ -116,7 +135,7 @@ export default function AjukanLiburPage() {
   const alreadySubmitted = activeCount === MAX_PICKS && !hasDraft
 
   async function submitAll() {
-    if (!readyToSubmit) return
+    if (!readyToSubmit || previewReadOnly) return
     if (!confirm(`Ajukan ${MAX_PICKS} tanggal libur ini ke HR/Owner? Tidak bisa diubah lagi kecuali dibatalkan satu-satu.`)) return
     setSubmitting(true)
     const { error } = await supabase.rpc('submit_roster_picks', { p_period_start: periodStartStr })
@@ -136,6 +155,12 @@ export default function AjukanLiburPage() {
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Ajukan Jadwal Libur</h1>
         <p className="text-sm text-slate-500">Wajib pilih tepat {MAX_PICKS} tanggal libur untuk periode <strong>{rosterPeriodLabel(period.start, period.end)}</strong> sebelum bisa diajukan ke HR/Owner — belum bisa diproses kalau belum genap {MAX_PICKS}/{MAX_PICKS}.</p>
       </div>
+
+      {previewReadOnly && (
+        <div className="bg-slate-100 border border-slate-200 text-slate-600 text-sm rounded-lg px-4 py-2.5 mb-6">
+          🔒 Mode Preview — halaman ini baca-saja, tombol Pilih/Batalkan/Ajukan dinonaktifkan.
+        </div>
+      )}
 
       {weekendCapActive && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex gap-3">
@@ -163,7 +188,7 @@ export default function AjukanLiburPage() {
         {alreadySubmitted ? (
           <span className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium whitespace-nowrap">✓ Sudah diajukan, menunggu HR/Owner</span>
         ) : (
-          <button onClick={submitAll} disabled={!readyToSubmit || submitting}
+          <button onClick={submitAll} disabled={!readyToSubmit || submitting || previewReadOnly}
             className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
             {submitting ? 'Mengajukan...' : `Ajukan ke HR (${activeCount}/${MAX_PICKS})`}
           </button>
@@ -179,7 +204,7 @@ export default function AjukanLiburPage() {
             const isPast = dateStr <= todayLocalStr()
             const isWeekendDay = isWeekend(dateStr)
             const weekendCapBlocks = weekendCapActive && isWeekendDay && !own && weekendPicksUsed >= 1
-            const disabled = isPast || busyDate === dateStr || (own?.status === 'approved') || weekendCapBlocks
+            const disabled = isPast || busyDate === dateStr || (own?.status === 'approved') || weekendCapBlocks || previewReadOnly
             return (
               <div key={dateStr} className={`flex items-center justify-between px-4 py-2.5 ${own ? (own.status === 'approved' ? 'bg-green-50/50' : 'bg-blue-50/50') : ''}`}>
                 <div>

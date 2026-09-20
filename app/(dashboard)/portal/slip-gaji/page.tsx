@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
+import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 type Payroll = {
   id: string
@@ -75,6 +76,14 @@ export default function PortalSlipGajiPage() {
 
     const { data: userData } = await supabase.from('users').select('role, employee_id, employees(full_name)').eq('id', user.id).single()
     if (!userData) return
+
+    // Preview Tampilan Karyawan: tampilkan data Rahmat Saleh (contoh nyata), bukan akun admin sendiri.
+    if (['owner', 'hr', 'finance'].includes(userData.role) && isPreviewModeClient()) {
+      const { data: emp } = await supabase.from('employees').select('full_name').eq('id', PREVIEW_EMPLOYEE_ID).single()
+      setMyEmployeeId(PREVIEW_EMPLOYEE_ID)
+      setMyName(emp?.full_name || '')
+      return
+    }
 
     setMyEmployeeId(userData.employee_id)
     setMyName((userData as any).employees?.full_name || '')

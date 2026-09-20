@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { getCurrentPeriodRangeStr, rosterPeriodLabel } from '@/lib/rosterPeriod'
 import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, type EscalatingResult } from '@/lib/escalatingDeduction'
-import { isPreviewModeClient } from '@/lib/previewMode'
+import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
 
@@ -144,12 +144,16 @@ export default function AturanPotonganPage() {
     const { data: lateDef } = await supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle()
     setLateRate(Number(lateDef?.late_penalty_per_minute ?? 0))
 
-    // Mode "Preview Tampilan Karyawan" harus tetap tampil sebagai karyawan (data diri sendiri saja),
-    // bukan tabel semua orang, meskipun role akun asli owner/hr/finance.
-    const admin = ['owner', 'hr', 'finance'].includes(userData.role) && !isPreviewModeClient()
+    // Mode "Preview Tampilan Karyawan" harus tetap tampil sebagai karyawan (bukan tabel semua
+    // orang), dan datanya diganti ke Rahmat Saleh (contoh nyata) — bukan employee_id akun admin
+    // sendiri — lihat lib/previewMode.ts.
+    const realAdmin = ['owner', 'hr', 'finance'].includes(userData.role)
+    const previewing = realAdmin && isPreviewModeClient()
+    const admin = realAdmin && !previewing
     setIsAdmin(admin)
 
     if (admin) await fetchAllEmployees()
+    else if (previewing) await fetchPreviewStatus(PREVIEW_EMPLOYEE_ID)
     else if (userData.employee_id) await fetchMyStatus(userData.employee_id)
 
     setLoading(false)
@@ -161,13 +165,40 @@ export default function AturanPotonganPage() {
       supabase.from('attendances').select('date, status').eq('employee_id', empId).gte('date', period.start).lte('date', period.end),
     ])
     const s = (summary as SalarySummary[] | null)?.[0] ?? null
+    applyStatus(s, atts || [])
+  }
+
+  // Dipakai admin saat Preview — get_my_salary_summary() RPC selalu mengembalikan data
+  // pemanggil sendiri, jadi untuk lihat data Rahmat Saleh, admin (yang sudah punya akses baca
+  // penuh lewat RLS owner/hr/finance) query tabel langsung, bukan lewat RPC.
+  async function fetchPreviewStatus(empId: string) {
+    const [{ data: emp }, { data: sc }, { data: atts }] = await Promise.all([
+      supabase.from('employees').select('overtime_applicable, branches(name), departments(name)').eq('id', empId).single(),
+      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
+        .eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('attendances').select('date, status').eq('employee_id', empId).gte('date', period.start).lte('date', period.end),
+    ])
+    const base = Number(sc?.base_salary ?? 0), pos = Number(sc?.position_allowance ?? 0)
+    const meal = Number(sc?.meal_allowance ?? 0), special = Number(sc?.special_allowance ?? 0)
+    const dailyRate = Math.round((base + pos + meal + special) / 26)
+    const deptName = (emp as any)?.departments?.name ?? null
+    const s: SalarySummary = {
+      base_salary: base, position_allowance: pos, meal_allowance: meal, special_allowance: special,
+      daily_rate: dailyRate, overtime_rate_per_hour: Number(sc?.overtime_rate_per_hour ?? 0),
+      overtime_eligible: (emp as any)?.overtime_applicable !== false && deptName !== 'Team Gudang',
+      branch_name: (emp as any)?.branches?.name ?? null, department_name: deptName,
+    }
+    applyStatus(s, atts || [])
+  }
+
+  function applyStatus(s: SalarySummary | null, atts: { date: string; status: string }[]) {
     setMySummary(s)
     const dailyRate = s?.daily_rate ?? 0
-    const izinDates = (atts || []).filter(a => a.status === 'sick' || a.status === 'permission').map(a => a.date as string)
-    const alphaDates = (atts || []).filter(a => a.status === 'absent').map(a => a.date as string)
+    const izinDates = atts.filter(a => a.status === 'sick' || a.status === 'permission').map(a => a.date)
+    const alphaDates = atts.filter(a => a.status === 'absent').map(a => a.date)
     setMyIzin(calcEscalatingDeduction(izinDates, dailyRate, IZIN_GROUP_MULTIPLIERS))
     setMyAlpha(calcEscalatingDeduction(alphaDates, dailyRate, ALPHA_GROUP_MULTIPLIERS))
-    setMySickDoc((atts || []).filter(a => a.status === 'sick_doc').length)
+    setMySickDoc(atts.filter(a => a.status === 'sick_doc').length)
   }
 
   async function fetchAllEmployees() {

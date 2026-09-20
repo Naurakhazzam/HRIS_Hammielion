@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
+import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 type RosterRow = {
   id: string
@@ -38,13 +39,18 @@ export default function PortalJadwalPage() {
       .eq('id', user.id).single()
     if (!userData) return
 
-    const emp = (userData as any).employees
-    setMyEmployeeId(userData.employee_id)
+    // Preview Tampilan Karyawan: tampilkan data Rahmat Saleh (contoh nyata), bukan akun admin sendiri.
+    const previewing = ['owner', 'hr', 'finance'].includes(userData.role) && isPreviewModeClient()
+    const emp = previewing
+      ? (await supabase.from('employees').select('full_name, join_date').eq('id', PREVIEW_EMPLOYEE_ID).single()).data
+      : (userData as any).employees
+    const effectiveId = previewing ? PREVIEW_EMPLOYEE_ID : userData.employee_id
+    setMyEmployeeId(effectiveId)
     setMyName(emp?.full_name || '')
 
     await Promise.all([
-      fetchRoster(userData.employee_id),
-      emp?.join_date ? fetchLeaveInfo(userData.employee_id, emp.join_date) : Promise.resolve(),
+      fetchRoster(effectiveId),
+      emp?.join_date ? fetchLeaveInfo(effectiveId, emp.join_date) : Promise.resolve(),
     ])
     setLoading(false)
   }

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 type Profile = {
   full_name: string
@@ -86,20 +87,27 @@ export default function PortalProfilPage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [loginEmail, setLoginEmail] = useState('')
+  const [previewReadOnly, setPreviewReadOnly] = useState(false)
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
-    setLoginEmail(user.email ?? '')
 
     const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
     if (!userData) return
 
+    // Preview Tampilan Karyawan: tampilkan profil Rahmat Saleh (contoh nyata), baca-saja —
+    // update_own_employee_profile selalu menyasar employee_id akun admin sendiri, jadi edit
+    // dinonaktifkan supaya tidak sengaja menimpa profil admin sambil mengira sedang edit punya Rahmat.
+    const previewing = ['owner', 'hr', 'finance'].includes(userData.role) && isPreviewModeClient()
+    setPreviewReadOnly(previewing)
+    if (!previewing) setLoginEmail(user.email ?? '')
+
     // Semua role bisa lihat & edit sebagian data pribadinya sendiri — bukan cuma
     // employee/supervisor, karena owner/hr/finance juga karyawan (punya employee_id sendiri).
-    await fetchProfile(userData.employee_id)
+    await fetchProfile(previewing ? PREVIEW_EMPLOYEE_ID : userData.employee_id)
     setLoading(false)
   }
 
@@ -142,7 +150,7 @@ export default function PortalProfilPage() {
   }
 
   function startEditing() {
-    if (!profile) return
+    if (!profile || previewReadOnly) return
     setPhotoFile(null)
     setPhotoPreview(null)
     setForm({
@@ -164,6 +172,7 @@ export default function PortalProfilPage() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
+    if (previewReadOnly) return
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -233,7 +242,7 @@ export default function PortalProfilPage() {
             <p className="text-sm text-slate-500">Data kepegawaian Anda yang tercatat di sistem.</p>
           </div>
         </div>
-        {!editing && (
+        {!editing && !previewReadOnly && (
           <button onClick={startEditing}
             className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition">
             ✏️ Edit Data Pribadi
@@ -244,6 +253,12 @@ export default function PortalProfilPage() {
       {message && (
         <div className={`p-3 mb-6 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
           {message.text}
+        </div>
+      )}
+
+      {previewReadOnly && (
+        <div className="bg-slate-100 border border-slate-200 text-slate-600 text-sm rounded-lg px-4 py-2.5 mb-6">
+          🔒 Mode Preview — halaman ini baca-saja, tombol Edit dinonaktifkan.
         </div>
       )}
 

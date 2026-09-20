@@ -117,7 +117,7 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
           <div className="max-w-6xl mx-auto">
             {previewMode && (
               <div className="mb-4 flex items-center justify-between gap-3 bg-amber-100 border border-amber-300 text-amber-800 rounded-lg px-4 py-2.5 text-sm print:hidden">
-                <span>👁️ Anda sedang <strong>PREVIEW tampilan Karyawan Biasa</strong> — menu & layout sesuai karyawan, tapi data yang muncul tetap data akun Anda sendiri.</span>
+                <span>👁️ Anda sedang <strong>PREVIEW tampilan Karyawan Biasa</strong> — menu & data yang tampil adalah contoh nyata milik <strong>Rahmat Saleh</strong>. Tombol submit/aksi dinonaktifkan (read-only), supaya tidak sengaja mengubah data sungguhan.</span>
                 <button onClick={exitPreview}
                   className="shrink-0 px-3 py-1 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white transition">
                   Kembali ke Admin
