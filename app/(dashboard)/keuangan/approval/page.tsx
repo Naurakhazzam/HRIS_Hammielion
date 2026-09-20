@@ -72,8 +72,22 @@ type PendingKasbon = {
   created_at: string
   employees: { full_name: string; employee_code: string; departments: { name: string } | null }
 }
+// Kasbon Driver & Kenek — dari 2 tabel TERPISAH (driver_kasbon, helper_kasbon), beda dari
+// kasbon_requests (kasbon karyawan biasa) di atas. Sebelumnya tidak pernah muncul di halaman
+// ini sama sekali (cuma bisa diproses lewat menu Kasbon), digabung ke sini biar HR/Owner
+// tidak kelewat — approve tetap lewat RPC approve_driver_kasbon/approve_helper_kasbon yang
+// sudah ada (dibatasi role Owner), "Hapus" untuk menolak (tidak ada status "ditolak" formal
+// untuk 2 tabel ini, sama seperti alur yang sudah ada di menu Kasbon).
+type PendingDriverHelperKasbon = {
+  id: string
+  kind: 'driver' | 'helper'
+  amount_requested: number
+  reason: string | null
+  created_at: string
+  employees: { full_name: string; employee_code: string } | null
+}
 
-type Tab = 'kas_keluar' | 'kas_masuk' | 'hpp' | 'modal_cabang' | 'aset' | 'kasbon'
+type Tab = 'kas_keluar' | 'kas_masuk' | 'hpp' | 'modal_cabang' | 'aset' | 'kasbon' | 'kasbon_driver_kenek'
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Tunai', transfer: 'Transfer', campuran: 'Campuran' }
 const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni',
@@ -93,6 +107,8 @@ export default function ApprovalKasKeluarPage() {
   const [modalItems, setModalItems] = useState<PendingModal[]>([])
   const [asetItems, setAsetItems] = useState<PendingAset[]>([])
   const [kasbonItems, setKasbonItems] = useState<PendingKasbon[]>([])
+  const [driverHelperKasbonItems, setDriverHelperKasbonItems] = useState<PendingDriverHelperKasbon[]>([])
+  const [dhBusyId, setDhBusyId] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
@@ -123,7 +139,7 @@ export default function ApprovalKasKeluarPage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [coRes, ciRes, hpRes, baseRes, snapRes, assetRes, contractRes, kasbonRes] = await Promise.all([
+    const [coRes, ciRes, hpRes, baseRes, snapRes, assetRes, contractRes, kasbonRes, driverKasbonRes, helperKasbonRes] = await Promise.all([
       supabase.from('fin_cash_out')
         .select('id, branch_id, status, amount, description, transaction_date, branches(name), fin_cash_out_categories(label), input_user:users!fin_cash_out_input_by_fkey(email), fin_bank_accounts(bank_name, account_number, account_type)')
         .in('status', ['pending', 'revisi']).order('transaction_date', { ascending: false }),
@@ -148,6 +164,12 @@ export default function ApprovalKasKeluarPage() {
       supabase.from('kasbon_requests')
         .select('id, employee_id, amount_requested, reason, created_at, employees(full_name, employee_code, departments(name))')
         .eq('status', 'pending').order('created_at', { ascending: false }),
+      supabase.from('driver_kasbon')
+        .select('id, total_amount, notes, created_at, employees!driver_kasbon_driver_id_fkey(full_name, employee_code)')
+        .eq('status', 'pending_approval').order('created_at', { ascending: false }),
+      supabase.from('helper_kasbon')
+        .select('id, total_amount, notes, created_at, employees!helper_kasbon_helper_id_fkey(full_name, employee_code)')
+        .eq('status', 'pending_approval').order('created_at', { ascending: false }),
     ])
     if (coRes.error) console.error('Detail error kas_keluar:', JSON.stringify(coRes.error, null, 2))
     else setCashOut((coRes.data as unknown as PendingCashOut[]) || [])
@@ -182,6 +204,18 @@ export default function ApprovalKasKeluarPage() {
 
     if (kasbonRes.error) console.error('Detail error kasbon:', JSON.stringify(kasbonRes.error, null, 2))
     else setKasbonItems((kasbonRes.data as unknown as PendingKasbon[]) || [])
+
+    if (driverKasbonRes.error) console.error('Detail error kasbon driver:', JSON.stringify(driverKasbonRes.error, null, 2))
+    if (helperKasbonRes.error) console.error('Detail error kasbon kenek:', JSON.stringify(helperKasbonRes.error, null, 2))
+    const driverItems: PendingDriverHelperKasbon[] = ((driverKasbonRes.data as unknown[]) || []).map((r) => {
+      const row = r as { id: string; total_amount: number; notes: string | null; created_at: string; employees: { full_name: string; employee_code: string } | null }
+      return { id: row.id, kind: 'driver', amount_requested: row.total_amount, reason: row.notes, created_at: row.created_at, employees: row.employees }
+    })
+    const helperItems: PendingDriverHelperKasbon[] = ((helperKasbonRes.data as unknown[]) || []).map((r) => {
+      const row = r as { id: string; total_amount: number; notes: string | null; created_at: string; employees: { full_name: string; employee_code: string } | null }
+      return { id: row.id, kind: 'helper', amount_requested: row.total_amount, reason: row.notes, created_at: row.created_at, employees: row.employees }
+    })
+    setDriverHelperKasbonItems([...driverItems, ...helperItems])
 
     setLoading(false)
   }, [supabase])
@@ -229,7 +263,7 @@ export default function ApprovalKasKeluarPage() {
     setSelectedIds([])
   }
 
-  const LABEL_BY_TAB: Record<Tab, string> = { kas_keluar: 'Kas Keluar', kas_masuk: 'Kas Masuk', hpp: 'HPP', modal_cabang: 'Modal Cabang', aset: 'Aset & Kontrak', kasbon: 'Kasbon' }
+  const LABEL_BY_TAB: Record<Tab, string> = { kas_keluar: 'Kas Keluar', kas_masuk: 'Kas Masuk', hpp: 'HPP', modal_cabang: 'Modal Cabang', aset: 'Aset & Kontrak', kasbon: 'Kasbon', kasbon_driver_kenek: 'Kasbon Driver/Kenek' }
   // Tabel & kolom status per tab sederhana (single-table)
   const SIMPLE_TABLE_BY_TAB: Partial<Record<Tab, string>> = { kas_keluar: 'fin_cash_out', kas_masuk: 'fin_cash_in', hpp: 'fin_hpp_entries' }
 
@@ -335,6 +369,28 @@ export default function ApprovalKasKeluarPage() {
     setProcessing(false)
   }
 
+  async function handleDriverHelperApprove(item: PendingDriverHelperKasbon) {
+    if (!confirm(`Setujui kasbon ${item.kind === 'driver' ? 'driver' : 'kenek'} ini supaya aktif?`)) return
+    setDhBusyId(item.id)
+    const rpc = item.kind === 'driver' ? 'approve_driver_kasbon' : 'approve_helper_kasbon'
+    const { error } = await supabase.rpc(rpc, { p_kasbon_id: item.id })
+    if (error) showMessage('error', 'Gagal menyetujui: ' + error.message)
+    else { showMessage('success', 'Kasbon disetujui, sekarang aktif.'); fetchAll() }
+    setDhBusyId(null)
+  }
+
+  async function handleDriverHelperReject(item: PendingDriverHelperKasbon) {
+    // Tidak ada status "ditolak" formal untuk driver_kasbon/helper_kasbon (sama seperti alur
+    // yang sudah ada di menu Kasbon) — menolak berarti menghapus pengajuannya.
+    if (!confirm('Hapus pengajuan kasbon ini (menolaknya)?')) return
+    setDhBusyId(item.id)
+    const table = item.kind === 'driver' ? 'driver_kasbon' : 'helper_kasbon'
+    const { error } = await supabase.from(table).delete().eq('id', item.id)
+    if (error) showMessage('error', 'Gagal menghapus: ' + error.message)
+    else { showMessage('success', 'Pengajuan kasbon dihapus.'); fetchAll() }
+    setDhBusyId(null)
+  }
+
   const formatRupiah = (angka: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
 
@@ -359,6 +415,9 @@ export default function ApprovalKasKeluarPage() {
   const filteredKasbon = kasbonItems.filter(en =>
     !q || `${en.employees?.full_name} ${en.reason || ''}`.toLowerCase().includes(q)
   )
+  const filteredDriverHelperKasbon = driverHelperKasbonItems.filter(en =>
+    !q || `${en.employees?.full_name} ${en.reason || ''}`.toLowerCase().includes(q)
+  )
 
   const currentList: { id: string }[] =
     tab === 'kas_keluar' ? filteredCashOut :
@@ -366,7 +425,8 @@ export default function ApprovalKasKeluarPage() {
     tab === 'hpp' ? filteredHpp :
     tab === 'modal_cabang' ? filteredModal :
     tab === 'aset' ? filteredAset :
-    filteredKasbon
+    tab === 'kasbon' ? filteredKasbon :
+    filteredDriverHelperKasbon
   const currentIds = currentList.map((en) => en.id)
   const hasActiveFilter = q.length > 0 || filterBranch.length > 0
 
@@ -401,7 +461,7 @@ export default function ApprovalKasKeluarPage() {
       )}
 
       <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6 flex-wrap">
-        {(['kas_keluar', 'kas_masuk', 'hpp', 'modal_cabang', 'aset', 'kasbon'] as Tab[]).map(t => (
+        {(['kas_keluar', 'kas_masuk', 'hpp', 'modal_cabang', 'aset', 'kasbon', 'kasbon_driver_kenek'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab === t ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             {LABEL_BY_TAB[t]} ({
@@ -410,7 +470,8 @@ export default function ApprovalKasKeluarPage() {
               t === 'hpp' ? hpp.length :
               t === 'modal_cabang' ? modalItems.length :
               t === 'aset' ? asetItems.length :
-              kasbonItems.length
+              t === 'kasbon' ? kasbonItems.length :
+              driverHelperKasbonItems.length
             })
           </button>
         ))}
@@ -425,7 +486,7 @@ export default function ApprovalKasKeluarPage() {
             placeholder="Cari berdasarkan keterangan..."
             className="w-full sm:w-72 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
           />
-          {tab !== 'kasbon' && (
+          {tab !== 'kasbon' && tab !== 'kasbon_driver_kenek' && (
             <select
               value={filterBranch}
               onChange={(e) => setFilterBranch(e.target.value)}
@@ -440,6 +501,12 @@ export default function ApprovalKasKeluarPage() {
           <div className="p-4 border-b border-slate-200 bg-slate-50">
             <span className="text-sm text-slate-500">
               {canApproveKasbon ? 'Setujui/Tolak per pengajuan — butuh rencana cicilan, jadi tidak bisa diproses massal.' : 'Persetujuan kasbon dibatasi untuk role Owner.'}
+            </span>
+          </div>
+        ) : tab === 'kasbon_driver_kenek' ? (
+          <div className="p-4 border-b border-slate-200 bg-slate-50">
+            <span className="text-sm text-slate-500">
+              {canApproveKasbon ? 'Setujui/Tolak per pengajuan — kasbon driver & kenek diproses lewat menu Kasbon, ini cuma pengingat.' : 'Persetujuan kasbon dibatasi untuk role Owner.'}
             </span>
           </div>
         ) : (
@@ -464,23 +531,24 @@ export default function ApprovalKasKeluarPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-white border-b border-slate-200">
-                {tab !== 'kasbon' && (
+                {tab !== 'kasbon' && tab !== 'kasbon_driver_kenek' && (
                   <th className="px-4 py-3 w-10 text-center">
                     <input type="checkbox" onChange={handleSelectAll}
                       checked={selectedIds.length > 0 && selectedIds.length === currentIds.length}
                       className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                   </th>
                 )}
-                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">{tab === 'aset' ? 'Nama/Aset' : tab === 'kasbon' ? 'Karyawan' : 'Tanggal'}</th>
-                {tab !== 'kasbon' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>}
+                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">{tab === 'aset' ? 'Nama/Aset' : (tab === 'kasbon' || tab === 'kasbon_driver_kenek') ? 'Karyawan' : 'Tanggal'}</th>
+                {tab !== 'kasbon' && tab !== 'kasbon_driver_kenek' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Cabang</th>}
                 {tab === 'kasbon' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Departemen</th>}
+                {tab === 'kasbon_driver_kenek' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Jenis</th>}
                 {tab === 'kas_keluar' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Kategori</th>}
                 {tab === 'kas_masuk' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Metode</th>}
                 {tab === 'modal_cabang' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Jenis</th>}
                 {tab === 'aset' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Jenis</th>}
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Jumlah</th>
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Keterangan</th>
-                {tab !== 'kasbon' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Input Oleh</th>}
+                {tab !== 'kasbon' && tab !== 'kasbon_driver_kenek' && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Input Oleh</th>}
                 <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>
               </tr>
             </thead>
@@ -622,7 +690,7 @@ export default function ApprovalKasKeluarPage() {
                     </div>
                   </td>
                 </tr>
-              )) : filteredKasbon.map(en => (
+              )) : tab === 'kasbon' ? filteredKasbon.map(en => (
                 <tr key={en.id} className="hover:bg-slate-50 transition">
                   <td className="px-4 py-3 text-sm">
                     <p className="font-medium text-slate-800">{en.employees?.full_name}</p>
@@ -638,6 +706,28 @@ export default function ApprovalKasKeluarPage() {
                           disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
                         <button onClick={() => { setKasbonRejectModal(en); setKasbonRejectReason('') }}
                           disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">⏳ Menunggu Owner</span>
+                    )}
+                  </td>
+                </tr>
+              )) : filteredDriverHelperKasbon.map(en => (
+                <tr key={en.id} className="hover:bg-slate-50 transition">
+                  <td className="px-4 py-3 text-sm">
+                    <p className="font-medium text-slate-800">{en.employees?.full_name}</p>
+                    <p className="text-xs text-slate-500">{en.employees?.employee_code} · diajukan {new Date(en.created_at).toLocaleDateString('id-ID')}</p>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-700">{en.kind === 'driver' ? 'Driver' : 'Kenek'}</td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(en.amount_requested)}</td>
+                  <td className="px-4 py-3 text-sm text-slate-500">{en.reason || '—'}</td>
+                  <td className="px-4 py-3 text-center">
+                    {canApproveKasbon ? (
+                      <div className="flex gap-1 justify-center">
+                        <button onClick={() => handleDriverHelperApprove(en)} disabled={dhBusyId === en.id}
+                          className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition disabled:opacity-50">Setujui</button>
+                        <button onClick={() => handleDriverHelperReject(en)} disabled={dhBusyId === en.id}
+                          className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition disabled:opacity-50">Tolak</button>
                       </div>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">⏳ Menunggu Owner</span>
