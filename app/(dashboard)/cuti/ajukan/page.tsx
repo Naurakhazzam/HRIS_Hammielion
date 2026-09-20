@@ -5,25 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
 import { groupContiguousDates, IZIN_GROUP_MULTIPLIERS } from '@/lib/escalatingDeduction'
+import { getCurrentPeriodRangeStr } from '@/lib/rosterPeriod'
 
 type Employee = { id: string; full_name: string }
-
-// Periode berjalan (26-25) yang MENAUNGI hari ini — beda dari periode MENDATANG yang dipakai
-// fitur Ajukan Libur. Dipakai untuk hitung sudah berapa kejadian Izin Duka/Periksa/Sakit-tanpa-
-// surat karyawan ini di periode ini, supaya bisa diperingatkan sebelum submit.
-function getCurrentPeriodRange(): { start: string; end: string } {
-  const now = new Date()
-  let startMonth = now.getDate() >= 26 ? now.getMonth() : now.getMonth() - 1
-  let startYear = now.getFullYear()
-  if (startMonth < 0) { startMonth = 11; startYear -= 1 }
-  const start = new Date(startYear, startMonth, 26)
-  let endMonth = startMonth + 1
-  let endYear = startYear
-  if (endMonth > 11) { endMonth = 0; endYear += 1 }
-  const end = new Date(endYear, endMonth, 25)
-  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  return { start: fmt(start), end: fmt(end) }
-}
 
 export default function AjukanCutiPage() {
   const router = useRouter()
@@ -88,7 +72,7 @@ export default function AjukanCutiPage() {
   }, [formData.employee_id])
 
   async function fetchIzinOccurrenceCount(employeeId: string) {
-    const { start, end } = getCurrentPeriodRange()
+    const { start, end } = getCurrentPeriodRangeStr()
     const { data } = await supabase
       .from('attendances')
       .select('date')

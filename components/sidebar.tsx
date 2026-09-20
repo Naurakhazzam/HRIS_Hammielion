@@ -77,6 +77,7 @@ const adminNavItems: NavNode[] = [
         ]
       },
       { name: 'Cuti & Izin', href: '/cuti' },
+      { name: 'Aturan Potongan Gaji', href: '/potongan' },
       {
         name: 'KPI',
         href: '/kpi',
@@ -203,6 +204,7 @@ const employeeNavItems: NavNode[] = [
     ]
   },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
+  { name: 'Aturan Potongan Gaji', href: '/potongan', icon: '📉' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
 ]
 
