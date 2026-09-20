@@ -179,8 +179,10 @@ export default function AjukanLiburPage() {
                     onClick={() => toggleDate(dateStr, own)}
                     disabled={disabled}
                     className={`text-xs px-3 py-1.5 rounded-lg font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed ${
-                      own
-                        ? 'border-red-200 text-red-600 hover:bg-red-50'
+                      own?.status === 'pending'
+                        ? 'bg-red-600 border-red-600 text-white hover:bg-red-700'
+                        : own
+                        ? 'border-slate-200 text-slate-400'
                         : 'border-blue-200 text-blue-600 hover:bg-blue-50'
                     }`}>
                     {busyDate === dateStr ? '...' : own ? (own.status === 'approved' ? 'Terkunci' : 'Batalkan') : 'Ajukan Libur'}
