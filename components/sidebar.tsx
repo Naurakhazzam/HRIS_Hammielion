@@ -75,6 +75,7 @@ const adminNavItems: NavNode[] = [
           { name: 'Import Absensi', href: '/absensi/import' },
           { name: 'QR Absen', href: '/absensi/qr' },
           { name: 'Persetujuan Libur', href: '/absensi/persetujuan-libur' },
+          { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
         ]
       },
       { name: 'Cuti & Izin', href: '/cuti' },
@@ -219,6 +220,7 @@ const employeeNavItems: NavNode[] = [
       { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
     ]
   },
+  { name: 'Kalender Libur', href: '/absensi/kalender-libur', icon: '📅' },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
   { name: 'Aturan Potongan Gaji', href: '/potongan', icon: '📉' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
