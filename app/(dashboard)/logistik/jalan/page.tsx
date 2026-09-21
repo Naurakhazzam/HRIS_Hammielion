@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import LogisticsCameraCapture from '@/components/LogisticsCameraCapture'
+import { toWaLink } from '@/lib/whatsapp'
 
 type PlanSummary = {
   id: string
@@ -27,7 +28,7 @@ type PlanStore = {
   store_id: string
   sequence_order: number
   status: string
-  logistics_stores: { name: string; address: string | null } | null
+  logistics_stores: { name: string; address: string | null; phone: string | null } | null
 }
 
 type ActionMode = null | 'kirim' | 'gagal' | 'tunda'
@@ -109,7 +110,7 @@ export default function JalanPengirimanPage() {
 
   async function fetchPlanStores(planId: string) {
     const { data } = await supabase.from('logistics_plan_stores')
-      .select('id, store_id, sequence_order, status, logistics_stores(name, address)')
+      .select('id, store_id, sequence_order, status, logistics_stores(name, address, phone)')
       .eq('plan_id', planId).order('sequence_order')
     setPlanStores((data as unknown as PlanStore[]) || [])
   }
@@ -309,6 +310,12 @@ export default function JalanPengirimanPage() {
               <p className="text-xs text-slate-500 mb-1">Toko Aktif ({planStores.findIndex(ps => ps.id === activeStore.id) + 1} dari {planStores.length})</p>
               <h2 className="text-lg font-bold text-slate-800 mb-1">{activeStore.logistics_stores?.name}</h2>
               {activeStore.logistics_stores?.address && <p className="text-sm text-slate-500 mb-2">{activeStore.logistics_stores.address}</p>}
+              {activeStore.logistics_stores?.phone && (
+                <a href={toWaLink(activeStore.logistics_stores.phone)} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 text-xs font-semibold rounded-lg transition">
+                  💬 Hubungi via WhatsApp — {activeStore.logistics_stores.phone}
+                </a>
+              )}
 
               {!actionMode && (
                 <div className="grid grid-cols-3 gap-2 mt-4">

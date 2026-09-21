@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { toWaLink } from '@/lib/whatsapp'
 
-type Store = { id: string; name: string; address: string | null; is_active: boolean }
+type Store = { id: string; name: string; address: string | null; phone: string | null; is_active: boolean }
 
 export default function MasterTokoPage() {
   const supabase = createClient()
@@ -15,6 +16,7 @@ export default function MasterTokoPage() {
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
+  const [phone, setPhone] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -53,13 +55,14 @@ export default function MasterTokoPage() {
   }
 
   function resetForm() {
-    setName(''); setAddress(''); setEditingId(null)
+    setName(''); setAddress(''); setPhone(''); setEditingId(null)
   }
 
   function openEdit(s: Store) {
     setEditingId(s.id)
     setName(s.name)
     setAddress(s.address || '')
+    setPhone(s.phone || '')
     setShowForm(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -67,7 +70,7 @@ export default function MasterTokoPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
-    const payload = { name: name.trim(), address: address.trim() || null }
+    const payload = { name: name.trim(), address: address.trim() || null, phone: phone.trim() || null }
 
     const { error } = editingId
       ? await supabase.from('logistics_stores').update(payload).eq('id', editingId)
@@ -140,6 +143,12 @@ export default function MasterTokoPage() {
               <input type="text" value={address} onChange={e => setAddress(e.target.value)} placeholder="Opsional"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Nomor Telepon / WhatsApp</label>
+              <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="Misal: 0812xxxxxxx"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              <p className="text-xs text-slate-400">Dipakai driver untuk hubungi toko langsung lewat WhatsApp.</p>
+            </div>
             <div className="md:col-span-2 pt-2 flex justify-end gap-3">
               {editingId && (
                 <button type="button" onClick={() => { resetForm(); setShowForm(false) }}
@@ -162,19 +171,28 @@ export default function MasterTokoPage() {
             <tr className="border-b border-slate-100 bg-slate-50">
               <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Nama Toko</th>
               <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Alamat</th>
+              <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">WhatsApp</th>
               <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
               {canManage && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {loading ? (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400 text-sm">Memuat data...</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">Memuat data...</td></tr>
             ) : stores.length === 0 ? (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada toko.</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada toko.</td></tr>
             ) : stores.map(s => (
               <tr key={s.id} className="hover:bg-slate-50 transition">
                 <td className="px-4 py-3 text-sm font-medium text-slate-800">{s.name}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{s.address || '—'}</td>
+                <td className="px-4 py-3 text-sm">
+                  {s.phone ? (
+                    <a href={toWaLink(s.phone)} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-green-600 hover:underline font-medium">
+                      💬 {s.phone}
+                    </a>
+                  ) : <span className="text-slate-400">—</span>}
+                </td>
                 <td className="px-4 py-3 text-center">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                     {s.is_active ? 'Aktif' : 'Nonaktif'}
