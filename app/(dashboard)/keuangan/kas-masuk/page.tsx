@@ -530,11 +530,11 @@ export default function KasMasukPage() {
             const totalOmzetSelisihTab = selisihApproved.reduce((s, r) => s + Number(r.amount), 0)
             const totalPengeluaranSelisihTab = selisihApproved.reduce((s, r) => s + Number(r.expense_amount), 0)
             const totalDiterimaSelisihTab = selisihApproved.reduce((s, r) => s + Number(r.amount) - Number(r.expense_amount) + Number(r.cash_adjustment), 0)
-            const selisihOnly = selisihRows.filter(r => r.cash_adjustment !== 0)
-            const totalPlus = selisihOnly.filter(r => r.cash_adjustment > 0).reduce((s, r) => s + r.cash_adjustment, 0)
-            const totalMinus = selisihOnly.filter(r => r.cash_adjustment < 0).reduce((s, r) => s + r.cash_adjustment, 0)
-            const filtered = selisihOnly.filter(r => selisihTypeFilter === 'all' ? true : selisihTypeFilter === 'plus' ? r.cash_adjustment > 0 : r.cash_adjustment < 0)
-            const sorted = [...filtered].sort((a, b) => selisihSortDir === 'desc' ? b.cash_adjustment - a.cash_adjustment : a.cash_adjustment - b.cash_adjustment)
+            const selisihOnly = selisihRows.filter(r => Number(r.cash_adjustment) !== 0)
+            const totalPlus = selisihOnly.filter(r => Number(r.cash_adjustment) > 0).reduce((s, r) => s + Number(r.cash_adjustment), 0)
+            const totalMinus = selisihOnly.filter(r => Number(r.cash_adjustment) < 0).reduce((s, r) => s + Number(r.cash_adjustment), 0)
+            const filtered = selisihOnly.filter(r => selisihTypeFilter === 'all' ? true : selisihTypeFilter === 'plus' ? Number(r.cash_adjustment) > 0 : Number(r.cash_adjustment) < 0)
+            const sorted = [...filtered].sort((a, b) => selisihSortDir === 'desc' ? Number(b.cash_adjustment) - Number(a.cash_adjustment) : Number(a.cash_adjustment) - Number(b.cash_adjustment))
             return (
               <div className="space-y-4">
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4">
@@ -746,7 +746,7 @@ export default function KasMasukPage() {
                         ) : (
                           <div>
                             <span className={`font-semibold ${(r.expense_amount > 0 || r.cash_adjustment < 0) ? 'text-red-600' : r.cash_adjustment > 0 ? 'text-green-600' : 'text-slate-800'}`}>
-                              {formatRupiah(r.amount - r.expense_amount + r.cash_adjustment)}
+                              {formatRupiah(Number(r.amount) - Number(r.expense_amount) + Number(r.cash_adjustment))}
                             </span>
                             {r.expense_amount !== 0 && (
                               <div className="text-[10px] text-slate-400">−{formatRupiah(r.expense_amount)} pengeluaran</div>

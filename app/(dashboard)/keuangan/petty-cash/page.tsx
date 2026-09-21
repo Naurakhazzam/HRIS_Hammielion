@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { todayLocalStr } from '@/lib/date'
+import { todayLocalStr, localDateStr } from '@/lib/date'
 import RupiahInput from '@/components/RupiahInput'
 
 const OWNER_ROLES = ['owner', 'hr', 'finance']
@@ -208,7 +208,7 @@ export default function PettyCashPage() {
     setPrintMonth(filterMonth)
     const [y, m] = filterMonth.split('-').map(Number)
     setPrintFrom(`${filterMonth}-01`)
-    setPrintTo(new Date(y, m, 0).toISOString().slice(0, 10))
+    setPrintTo(localDateStr(new Date(y, m, 0)))
     setPrintMode('bulan')
     setPrintModalOpen(true)
   }
@@ -218,7 +218,7 @@ export default function PettyCashPage() {
     if (printMode === 'bulan') {
       const [y, m] = printMonth.split('-').map(Number)
       startDate = `${printMonth}-01`
-      endDate = new Date(y, m, 0).toISOString().slice(0, 10)
+      endDate = localDateStr(new Date(y, m, 0))
       periodLabel = new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
     } else {
       startDate = printFrom

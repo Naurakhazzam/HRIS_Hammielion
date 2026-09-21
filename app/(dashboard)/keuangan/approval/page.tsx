@@ -327,16 +327,26 @@ export default function ApprovalKasKeluarPage() {
     if (!dpm || dpm <= 0) { showMessage('error', 'Masukkan cicilan yang valid.'); return }
     setProcessing(true)
 
-    const { error } = await supabase.from('kasbon_requests').update({
+    // .eq('status', 'pending') + cek jumlah baris yang benar-benar ter-update mencegah dua
+    // admin yang menyetujui pengajuan yang sama nyaris bersamaan sama-sama lolos dan
+    // sama-sama insert cicilan kasbon_deductions (dobel-catat cicilan untuk 1 pengajuan).
+    const { data: updatedRows, error } = await supabase.from('kasbon_requests').update({
       status: 'approved',
       approved_by: myUserId,
       approved_at: new Date().toISOString(),
       deduction_per_month: dpm,
       deduction_start_month: kasbonApproveForm.deduction_start_month,
       deduction_start_year: kasbonApproveForm.deduction_start_year,
-    }).eq('id', kasbonApproveModal.id)
+    }).eq('id', kasbonApproveModal.id).eq('status', 'pending').select('id')
 
     if (error) { showMessage('error', 'Gagal menyetujui: ' + error.message); setProcessing(false); return }
+    if (!updatedRows || updatedRows.length === 0) {
+      showMessage('error', 'Pengajuan ini sudah diproses (bukan pending lagi) — kemungkinan sudah disetujui/ditolak orang lain. Silakan refresh.')
+      setKasbonApproveModal(null)
+      fetchAll()
+      setProcessing(false)
+      return
+    }
 
     // Auto-generate kasbon_deductions, satu baris per cicilan
     const totalCicilan = Math.ceil(kasbonApproveModal.amount_requested / dpm)

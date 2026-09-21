@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { todayLocalStr } from '@/lib/date'
+import { todayLocalStr, localDateStr } from '@/lib/date'
 import { canEditCashOut, canDeleteCashOut, saveCashOutEdit } from '@/lib/finCashOut'
 import RupiahInput from '@/components/RupiahInput'
 import Link from 'next/link'
@@ -120,7 +120,7 @@ export default function InputKasKeluarPage() {
     setLoadingVehicleDays(true)
     const [y, m] = vehicleMonth.split('-').map(Number)
     const startDate = `${vehicleMonth}-01`
-    const endDate = new Date(y, m, 0).toISOString().slice(0, 10)
+    const endDate = localDateStr(new Date(y, m, 0))
     supabase.from('delivery_trips').select('trip_date').eq('vehicle_id', rate.vehicle_id).gte('trip_date', startDate).lte('trip_date', endDate)
       .then(({ data }) => {
         const uniqueDays = new Set((data || []).map(d => d.trip_date)).size
@@ -282,7 +282,7 @@ export default function InputKasKeluarPage() {
       const vehicleName = rate.vehicles?.name || 'Kendaraan'
       const total = rate.rate_per_day * daysNum
       const [y, m] = vehicleMonth.split('-').map(Number)
-      const endDate = new Date(y, m, 0).toISOString().slice(0, 10)
+      const endDate = localDateStr(new Date(y, m, 0))
       const monthLabel = new Date(y, m - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
 
       const { error: outErr } = await supabase.from('fin_cash_out').insert({
