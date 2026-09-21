@@ -201,6 +201,9 @@ const adminNavItems: NavNode[] = [
 // Menu untuk Karyawan (employee/supervisor) — sengaja TIDAK menyertakan Keuangan: RLS di
 // database sudah menolak akses role employee ke semua tabel fin_*/supplier_purchases, jadi
 // menampilkan menunya di sini cuma bikin karyawan buka halaman kosong tanpa penjelasan.
+// "Pengiriman Logistik" disisipkan lewat getEmployeeNavItems (bukan di sini) karena cuma
+// boleh muncul untuk karyawan yang Driver/Kenek (employees.can_drive/can_help) — bukan
+// berdasarkan role, karena Driver/Kenek di tabel users tetap ber-role 'employee' biasa.
 const employeeNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
   {
@@ -221,6 +224,18 @@ const employeeNavItems: NavNode[] = [
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
 ]
 
+function getEmployeeNavItems(isDriverOrKenek: boolean): NavNode[] {
+  if (!isDriverOrKenek) return employeeNavItems
+  // Disisip setelah Portal Saya, cuma link ke aplikasi lapangan (bukan submenu admin
+  // lengkap seperti Dashboard/Rencana/Laporan/Master Toko) — RLS di halaman itu sendiri
+  // sudah membatasi datanya ke rencana milik driver/kenek yang bersangkutan.
+  return [
+    ...employeeNavItems.slice(0, 2),
+    { name: 'Pengiriman Logistik', href: '/logistik/jalan', icon: '🚚' },
+    ...employeeNavItems.slice(2),
+  ]
+}
+
 type SidebarProps = {
   // null = ikuti perilaku bawaan (tampil >=768px, sembunyi di bawahnya).
   // true = paksa tampil (overlay di layar kecil, in-flow di layar besar).
@@ -235,12 +250,20 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [userRole, setUserRole] = useState<string>('hr')
   const [loadingRole, setLoadingRole] = useState(true)
   const [previewMode, setPreviewModeState] = useState(false)
+  const [isDriverOrKenek, setIsDriverOrKenek] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
-      supabase.from('users').select('role').eq('id', user.id).single().then(({ data }) => {
-        if (data) setUserRole(data.role)
+      supabase.from('users').select('role, employee_id').eq('id', user.id).single().then(({ data }) => {
+        if (data) {
+          setUserRole(data.role)
+          if (data.employee_id) {
+            supabase.from('employees').select('can_drive, can_help').eq('id', data.employee_id).single().then(({ data: emp }) => {
+              if (emp) setIsDriverOrKenek(!!emp.can_drive || !!emp.can_help)
+            })
+          }
+        }
         setLoadingRole(false)
       })
     })
@@ -251,7 +274,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // tombol toggle preview itu sendiri, supaya karyawan asli tidak bisa iseng balik ke menu admin.
   const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
   const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
-  const navItems = isEmployee ? employeeNavItems : adminNavItems
+  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek) : adminNavItems
 
   function togglePreview() {
     const next = !previewMode
