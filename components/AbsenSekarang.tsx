@@ -707,8 +707,11 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       )}
       {step === 'camera' && (
         <div className="space-y-3">
+          {/* Cermin cuma di tampilan LIVE ini (CSS saja) supaya terasa natural seperti ngaca —
+              tidak memengaruhi foto yang benar-benar diambil (drawImage ke canvas selalu baca
+              data mentah kamera, efek CSS di sini tidak ikut kebawa ke hasil fotonya). */}
           <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setCameraReady(true)}
-            className="w-full rounded-lg bg-slate-900 aspect-[3/4] object-cover" />
+            className="w-full rounded-lg bg-slate-900 aspect-[3/4] object-cover [transform:scaleX(-1)]" />
           <p className="text-[11px] text-slate-400 text-center">
             Layar kamera hitam/tidak muncul gambar? <button type="button" onClick={restartCamera} className="text-blue-600 hover:underline font-medium">Coba Ulang Kamera</button>
             {' '}atau{' '}
