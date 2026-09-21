@@ -43,7 +43,7 @@ export default function RencanaDetailPage() {
   const [plan, setPlan] = useState<Plan | null>(null)
   const [planStores, setPlanStores] = useState<PlanStore[]>([])
   const [allStores, setAllStores] = useState<Store[]>([])
-  const [selectedStoreId, setSelectedStoreId] = useState('')
+  const [storeSearchText, setStoreSearchText] = useState('')
   const [hasRateConfig, setHasRateConfig] = useState<boolean | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -107,16 +107,19 @@ export default function RencanaDetailPage() {
   }
 
   const availableStores = allStores.filter(s => !planStores.some(ps => ps.store_id === s.id))
+  // Ketik nama toko, cocokkan persis (case-insensitive) ke saran yang muncul dari datalist —
+  // supaya Kepala Gudang tidak perlu scroll dropdown ratusan toko satu-satu.
+  const matchedStore = availableStores.find(s => s.name.trim().toLowerCase() === storeSearchText.trim().toLowerCase())
 
   async function handleAddStore(e: React.FormEvent) {
     e.preventDefault()
-    if (!selectedStoreId) return
+    if (!matchedStore) { showMessage('error', 'Toko tidak ditemukan. Ketik nama toko lalu pilih dari saran yang muncul.'); return }
     const nextOrder = planStores.length > 0 ? Math.max(...planStores.map(ps => ps.sequence_order)) + 1 : 1
     const { error } = await supabase.from('logistics_plan_stores').insert({
-      plan_id: params.id, store_id: selectedStoreId, sequence_order: nextOrder,
+      plan_id: params.id, store_id: matchedStore.id, sequence_order: nextOrder,
     })
     if (error) showMessage('error', 'Gagal menambah toko: ' + error.message)
-    else { setSelectedStoreId(''); fetchAll() }
+    else { setStoreSearchText(''); fetchAll() }
   }
 
   async function handleRemoveStore(ps: PlanStore) {
@@ -223,12 +226,14 @@ export default function RencanaDetailPage() {
       {editable && canManage && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
           <form onSubmit={handleAddStore} className="flex gap-2">
-            <select value={selectedStoreId} onChange={e => setSelectedStoreId(e.target.value)}
-              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-              <option value="">-- Pilih Toko untuk Ditambahkan --</option>
-              {availableStores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <button type="submit" disabled={!selectedStoreId}
+            <input type="text" list="available-stores-datalist" value={storeSearchText}
+              onChange={e => setStoreSearchText(e.target.value)}
+              placeholder="Ketik nama toko untuk ditambahkan..."
+              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+            <datalist id="available-stores-datalist">
+              {availableStores.map(s => <option key={s.id} value={s.name} />)}
+            </datalist>
+            <button type="submit" disabled={!matchedStore}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">+ Tambah</button>
           </form>
           {availableStores.length === 0 && allStores.length === 0 && (
