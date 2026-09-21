@@ -936,7 +936,7 @@ export default function LaporanDetailPage() {
             {showKehilangan && (
               <div className="px-4 py-4 space-y-4">
                 {!hasLossMonthlyInput ? (
-                  <p className="text-sm text-slate-500 text-center py-4">Belum ada input Total Kehilangan Barang untuk periode/cabang ini di halaman <Link href="/penggajian/kehilangan" className="text-blue-600 hover:underline">Kehilangan Barang &amp; Kerugian Kasir</Link>.</p>
+                  <p className="text-sm text-slate-500 text-center py-4">Belum ada input Total Kehilangan Barang untuk periode/cabang ini di halaman <Link href="/penggajian/kehilangan/barang" className="text-blue-600 hover:underline">Kehilangan Barang</Link>.</p>
                 ) : (
                   <div className="bg-slate-50 rounded-lg p-3 text-sm space-y-1">
                     <div className="flex justify-between"><span className="text-slate-500">Total Kehilangan Barang (diinput di halaman Kehilangan)</span><span className="font-medium">{formatRupiah(totalKehilanganBarang)}</span></div>

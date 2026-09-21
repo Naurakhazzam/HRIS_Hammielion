@@ -180,14 +180,20 @@ const adminNavItems: NavNode[] = [
       { name: 'Gajian Bongkar Muat', href: '/penggajian/borongan' },
       { name: 'Tabungan Loyalitas', href: '/penggajian/loyalitas' },
       { name: 'Bonus Kinerja', href: '/penggajian/bonus' },
-      { name: 'Kehilangan & Kasir', href: '/penggajian/kehilangan' },
+      {
+        name: 'Kehilangan & Kasir',
+        href: '/penggajian/kehilangan/barang',
+        submenu: [
+          { name: 'Kehilangan Barang', href: '/penggajian/kehilangan/barang' },
+          { name: 'Kerugian Kasir', href: '/penggajian/kehilangan/kasir' },
+        ]
+      },
       {
         name: 'Setup Gaji & Tarif',
         href: '/penggajian/komponen',
         submenu: [
           { name: 'Komponen Gaji', href: '/penggajian/komponen' },
           { name: 'Bonus Kondisional', href: '/penggajian/bonus-kondisional' },
-          { name: 'Setup Kehilangan', href: '/penggajian/kehilangan/setup' },
           { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
           { name: 'Pekerja Lepas', href: '/penggajian/borongan/pekerja' },
           { name: 'Tarif Bongkar Muat', href: '/penggajian/borongan/tarif' },
@@ -315,6 +321,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     'Keuangan':   inKeuanganGroup,
 
     'Penggajian': pathname.startsWith('/penggajian'),
+    'Kehilangan & Kasir': pathname.startsWith('/penggajian/kehilangan'),
     'Setup Gaji & Tarif': pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup')
       || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif')
       || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
