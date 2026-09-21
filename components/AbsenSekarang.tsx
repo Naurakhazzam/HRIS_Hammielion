@@ -6,13 +6,14 @@ import { todayLocalStr, localDateStr } from '@/lib/date'
 import { resolveSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
 import { QR_LATE_TOLERANCE_MINUTES } from '@/lib/lateTolerance'
 
-type Props = { employeeId: string; employeeName: string; onDone?: () => void; mode?: 'gps' | 'qr' }
+type Props = { employeeId: string; employeeName: string; onDone?: () => void; mode?: 'gps' | 'qr'; qrBranchId?: string; qrBranchName?: string }
 
 type BranchGeo = { id: string; name: string; latitude: number | null; longitude: number | null; checkin_radius_meters: number }
 type TodayRow = { id: string; check_in: string | null; check_out: string | null; source: string } | null
 type WorkScheduleRow = WorkSchedule & { id: string }
+type BranchShiftRow = { check_in_time: string; check_out_time: string | null; detect_until: string | null; allow_overtime: boolean }
 
-type Step = 'idle' | 'confirm-action' | 'locating' | 'camera' | 'preview' | 'uploading' | 'confirm-swap' | 'pick-date'
+type Step = 'idle' | 'confirm-action' | 'confirm-perbantuan' | 'locating' | 'camera' | 'preview' | 'uploading' | 'confirm-swap' | 'pick-date'
 
 // Jarak minimum antara absen masuk & absen pulang — mencegah absen pulang yang terlalu
 // berdekatan (salah pencet atau disengaja memalsukan kehadiran). Dicek di sini (UX, supaya
@@ -25,7 +26,7 @@ const MIN_CHECKOUT_GAP_MINUTES = 15
 // foto lama/hasil edit. Radius dicek di client sebelum kamera dibuka; RLS di database cuma
 // membatasi SIAPA/TANGGAL/SUMBER (lihat migrasi attendances_mobile_checkin_*) — tidak bisa
 // memverifikasi keaslian koordinat GPS yang dikirim browser, itu batas wajar untuk absen berbasis web.
-export default function AbsenSekarang({ employeeId, employeeName, onDone, mode = 'gps' }: Props) {
+export default function AbsenSekarang({ employeeId, employeeName, onDone, mode = 'gps', qrBranchId, qrBranchName }: Props) {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [branch, setBranch] = useState<BranchGeo | null>(null)
@@ -34,6 +35,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const [customCheckIn, setCustomCheckIn] = useState<string | null>(null)
   const [customCheckOut, setCustomCheckOut] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  // "Perbantuan" — QR di-scan bukan di cabang penempatan karyawan (lihat absen-qr/[token]).
+  // isPerbantuanAction dicek per-AKSI (absen masuk & pulang independen, lihat penjelasan di
+  // handleConfirmYes), bukan sekali untuk sepanjang hari — supaya "datang di cabang sendiri,
+  // pulang perbantuan di cabang lain" (atau sebaliknya) tercatat akurat untuk masing-masing.
+  const isBranchMismatch = mode === 'qr' && !!qrBranchId && !!branch?.id && qrBranchId !== branch.id
+  const [isPerbantuanAction, setIsPerbantuanAction] = useState(false)
+  const [branchShifts, setBranchShifts] = useState<BranchShiftRow[]>([])
   // null = belum ada jadwal roster untuk hari ini (HR belum atur — biarkan absen jalan seperti biasa).
   // true/false = roster HARI INI (dibaca ulang tiap fetchContext, jadi kalau HR menggeser jadwal
   // libur ke tanggal lain, nilai ini otomatis ikut berubah tanpa perlu kode tambahan).
@@ -143,7 +152,37 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         return
       }
     }
+    // Reset dari aksi sebelumnya (absen masuk & pulang dicek independen — lihat isBranchMismatch).
+    setIsPerbantuanAction(false)
+    setBranchShifts([])
     setStep('confirm-action')
+  }
+
+  // Dipanggil dari tombol "Ya, Benar" di step confirm-action. Kalau cabang QR beda dari
+  // penempatan, tanya dulu perbantuan/salah-scan sebelum lanjut ke kamera.
+  function handleConfirmYes() {
+    if (isBranchMismatch) {
+      setStep('confirm-perbantuan')
+    } else {
+      startCheckin()
+    }
+  }
+
+  async function choosePerbantuan() {
+    setIsPerbantuanAction(true)
+    if (qrBranchId) {
+      const { data } = await supabase.from('branch_shift_schedules')
+        .select('check_in_time, check_out_time, detect_until, allow_overtime')
+        .eq('branch_id', qrBranchId).eq('is_active', true)
+      setBranchShifts((data as BranchShiftRow[]) || [])
+    }
+    startCheckin()
+  }
+
+  function chooseSalahScan() {
+    setIsPerbantuanAction(false)
+    setStep('idle')
+    showMessage('error', `Absen dibatalkan. Silakan scan QR cabang ${branch?.name ?? 'Anda'} yang benar.`)
   }
 
   function startCheckin() {
@@ -227,7 +266,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     const now = new Date()
     const label1 = employeeName
     const label2 = `${now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} ${now.toLocaleTimeString('id-ID')}`
-    const label3 = geo ? `${Math.round(geo.distance)}m dari ${branch?.name ?? 'cabang'}` : `QR Absen — ${branch?.name ?? 'cabang'}`
+    const label3 = geo ? `${Math.round(geo.distance)}m dari ${branch?.name ?? 'cabang'}` : `QR Absen — ${(mode === 'qr' ? qrBranchName : branch?.name) ?? 'cabang'}`
     const barHeight = Math.max(64, height * 0.12)
     ctx.fillStyle = 'rgba(0,0,0,0.55)'
     ctx.fillRect(0, height - barHeight, width, barHeight)
@@ -323,6 +362,8 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     setCapturedBlob(null)
     setCapturedUrl(null)
     setGeo(null)
+    setIsPerbantuanAction(false)
+    setBranchShifts([])
     setStep('idle')
   }
 
@@ -429,8 +470,18 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     const { data: pub } = supabase.storage.from('attendance-photos').getPublicUrl(filePath)
     const photoUrl = pub.publicUrl
 
+    // Cabang aktual tempat scan ini terjadi — beda dari cabang penempatan kalau perbantuan.
+    // Selalu diisi (bukan cuma saat mismatch) supaya konsisten & gampang direkap nanti.
+    const eventBranchId = mode === 'qr' ? (qrBranchId ?? branch?.id ?? null) : (branch?.id ?? null)
+    const perbantuanSuffix = isPerbantuanAction && qrBranchName ? ` (Perbantuan di ${qrBranchName})` : ''
+
     if (isCheckOut && today) {
-      const sched = resolveSchedule(nowTimeStr, schedules, customCheckIn, customCheckOut)
+      // Perbantuan: telat/lembur dievaluasi dari shift CABANG TEMPAT SCAN, bukan jadwal
+      // departemen dia — kalau cabang itu belum ada jadwal shift-nya, anggap tidak ada
+      // lembur/potongan sampai HR setup (bukan nebak/error).
+      const sched = isPerbantuanAction
+        ? matchSchedule(nowTimeStr, branchShifts)
+        : resolveSchedule(nowTimeStr, schedules, customCheckIn, customCheckOut)
       const overtimeHours = calcOvertimeHours(nowTimeStr, sched)
       const { error } = await supabase.from('attendances').update({
         check_out: nowIso,
@@ -439,11 +490,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         check_out_lat: geo?.lat ?? null,
         check_out_lng: geo?.lng ?? null,
         check_out_distance_m: geo ? Math.round(geo.distance) : null,
+        check_out_branch_id: eventBranchId,
       }).eq('id', today.id)
       if (error) { showMessage('error', 'Gagal mencatat absen pulang: ' + error.message); setStep('preview'); return }
-      showMessage('success', `Absen pulang tercatat jam ${now.toLocaleTimeString('id-ID')}.`)
+      showMessage('success', `Absen pulang tercatat jam ${now.toLocaleTimeString('id-ID')}.${perbantuanSuffix}`)
     } else {
-      const sched = resolveSchedule(nowTimeStr, schedules, customCheckIn, customCheckOut)
+      const sched = isPerbantuanAction
+        ? matchSchedule(nowTimeStr, branchShifts)
+        : resolveSchedule(nowTimeStr, schedules, customCheckIn, customCheckOut)
       const lateMinutes = calcLateMinutes(nowTimeStr, sched)
       const { error } = await supabase.from('attendances').insert({
         employee_id: employeeId,
@@ -453,20 +507,21 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         overtime_hours: 0,
         status: 'present',
         source: mode === 'qr' ? 'qr' : 'mobile',
-        notes: mode === 'qr' ? 'Absen QR' : 'Absen HP',
+        notes: (mode === 'qr' ? 'Absen QR' : 'Absen HP') + perbantuanSuffix,
         check_in_photo_url: photoUrl,
         check_in_lat: geo?.lat ?? null,
         check_in_lng: geo?.lng ?? null,
         check_in_distance_m: geo ? Math.round(geo.distance) : null,
+        check_in_branch_id: eventBranchId,
       })
       if (error) { showMessage('error', 'Gagal mencatat absen masuk: ' + error.message); setStep('preview'); return }
       const jamStr = now.toLocaleTimeString('id-ID')
       if (lateMinutes <= 0) {
-        showMessage('success', `Absen masuk tercatat jam ${jamStr}.`)
+        showMessage('success', `Absen masuk tercatat jam ${jamStr}.${perbantuanSuffix}`)
       } else if (mode === 'qr' && lateMinutes <= QR_LATE_TOLERANCE_MINUTES) {
-        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit (masih dalam toleransi ${QR_LATE_TOLERANCE_MINUTES} menit, tidak dipotong).`)
+        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit (masih dalam toleransi ${QR_LATE_TOLERANCE_MINUTES} menit, tidak dipotong).${perbantuanSuffix}`)
       } else {
-        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit, kena potongan keterlambatan.`)
+        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit, kena potongan keterlambatan.${perbantuanSuffix}`)
       }
     }
 
@@ -503,7 +558,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     <div className="bg-white rounded-xl shadow-sm border-2 border-blue-200 p-5 mb-6">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-base font-bold text-slate-800">{mode === 'qr' ? '📷 Absen QR' : '📍 Absen Sekarang'}</h2>
-        <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">{mode === 'qr' ? `Cabang ${branch?.name ?? ''}` : 'via HP'}</span>
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">{mode === 'qr' ? `Cabang ${qrBranchName || branch?.name || ''}` : 'via HP'}</span>
       </div>
       <p className="text-xs text-slate-500 mb-3">
         {mode === 'qr'
@@ -553,9 +608,26 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
           </div>
           <div className="flex gap-2">
             <button onClick={() => setStep('idle')} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-            <button onClick={startCheckin}
+            <button onClick={handleConfirmYes}
               className={`flex-1 py-2 text-white rounded-lg text-sm font-semibold transition ${nextAction === 'in' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
               Ya, Benar
+            </button>
+          </div>
+        </div>
+      )}
+      {step === 'confirm-perbantuan' && (
+        <div className="space-y-3">
+          <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+            QR ini untuk cabang <strong>{qrBranchName}</strong>, tapi Anda terdaftar di cabang lain. Apakah Anda sedang perbantuan di cabang ini?
+          </div>
+          <div className="flex flex-col gap-2">
+            <button onClick={choosePerbantuan}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition">
+              Ya, saya sedang perbantuan di {qrBranchName}
+            </button>
+            <button onClick={chooseSalahScan}
+              className="w-full py-2.5 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition">
+              Bukan, saya salah scan — harusnya di cabang saya sendiri
             </button>
           </div>
         </div>

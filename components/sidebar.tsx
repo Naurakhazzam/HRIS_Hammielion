@@ -70,6 +70,7 @@ const adminNavItems: NavNode[] = [
         submenu: [
           { name: 'Jadwal Kerja', href: '/absensi/jadwal' },
           { name: 'Penugasan Shift', href: '/absensi/shift' },
+          { name: 'Jadwal Shift Cabang', href: '/absensi/shift-cabang' },
           { name: 'Rekap Absensi', href: '/absensi/rekap' },
           { name: 'Import Absensi', href: '/absensi/import' },
           { name: 'QR Absen', href: '/absensi/qr' },

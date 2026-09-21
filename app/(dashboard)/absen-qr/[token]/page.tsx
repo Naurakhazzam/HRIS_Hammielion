@@ -16,6 +16,8 @@ export default function AbsenQrPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [employeeId, setEmployeeId] = useState('')
   const [employeeName, setEmployeeName] = useState('')
+  const [qrBranchId, setQrBranchId] = useState('')
+  const [qrBranchName, setQrBranchName] = useState('')
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -46,13 +48,11 @@ export default function AbsenQrPage() {
       return
     }
 
+    // Cabang QR boleh beda dari cabang penempatan karyawan — AbsenSekarang yang akan tanya
+    // "Perbantuan di sini?" kalau memang beda, bukan ditolak langsung seperti sebelumnya.
     const r = resolved as unknown as ResolveResult
-    if (r!.branch_id !== emp.branch_id) {
-      setErrorMsg(`QR ini untuk cabang "${r!.branch_name}", tapi Anda terdaftar di cabang lain. Absen di QR cabang tempat Anda bekerja, atau hubungi HR kalau ini keliru.`)
-      setLoading(false)
-      return
-    }
-
+    setQrBranchId(r!.branch_id)
+    setQrBranchName(r!.branch_name)
     setEmployeeId(userData.employee_id)
     setEmployeeName(emp.full_name)
     setLoading(false)
@@ -70,7 +70,7 @@ export default function AbsenQrPage() {
       {errorMsg ? (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{errorMsg}</div>
       ) : (
-        <AbsenSekarang employeeId={employeeId} employeeName={employeeName} mode="qr" />
+        <AbsenSekarang employeeId={employeeId} employeeName={employeeName} mode="qr" qrBranchId={qrBranchId} qrBranchName={qrBranchName} />
       )}
     </div>
   )
