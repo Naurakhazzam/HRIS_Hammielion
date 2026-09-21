@@ -1,0 +1,224 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
+
+type Plan = {
+  id: string
+  plan_date: string
+  vehicles: { name: string; plate_number: string | null } | null
+  delivery_routes: { name: string } | null
+  driver: { full_name: string } | null
+  helper: { full_name: string } | null
+}
+
+type PlanStore = {
+  id: string
+  plan_id: string
+  sequence_order: number
+  status: string
+  payment_method: string | null
+  payment_amount: number | null
+  payment_due_date: string | null
+  incident_type: string
+  failed_reason: string | null
+  logistics_stores: { name: string } | null
+}
+
+const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
+
+const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
+
+export default function LaporanPengirimanPage() {
+  const supabase = createClient()
+  const [loading, setLoading] = useState(true)
+  const [canView, setCanView] = useState(false)
+  const [filterMonth, setFilterMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [plans, setPlans] = useState<Plan[]>([])
+  const [storesByPlan, setStoresByPlan] = useState<Record<string, PlanStore[]>>({})
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const fetchData = useCallback(async () => {
+    setLoading(true)
+    const [year, month] = filterMonth.split('-').map(Number)
+    const startDate = `${filterMonth}-01`
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+
+    const { data: planData } = await supabase
+      .from('logistics_delivery_plans')
+      .select(`
+        id, plan_date,
+        vehicles(name, plate_number),
+        delivery_routes(name),
+        driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
+        helper:employees!logistics_delivery_plans_helper_id_fkey(full_name)
+      `)
+      .eq('status', 'completed')
+      .gte('plan_date', startDate).lte('plan_date', endDate)
+      .order('plan_date', { ascending: false })
+    const list = (planData as unknown as Plan[]) || []
+    setPlans(list)
+
+    if (list.length > 0) {
+      const { data: storeData } = await supabase.from('logistics_plan_stores')
+        .select('id, plan_id, sequence_order, status, payment_method, payment_amount, payment_due_date, incident_type, failed_reason, logistics_stores(name)')
+        .in('plan_id', list.map(p => p.id)).order('sequence_order')
+      const grouped: Record<string, PlanStore[]> = {}
+      ;(storeData as unknown as PlanStore[] || []).forEach(s => {
+        if (!grouped[s.plan_id]) grouped[s.plan_id] = []
+        grouped[s.plan_id].push(s)
+      })
+      setStoresByPlan(grouped)
+    } else {
+      setStoresByPlan({})
+    }
+    setLoading(false)
+  }, [filterMonth, supabase])
+
+  useEffect(() => {
+    async function init() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
+        if (userData) {
+          if (['owner', 'hr', 'finance'].includes(userData.role)) setCanView(true)
+          else if (userData.employee_id) {
+            const { data: emp } = await supabase.from('employees').select('positions(name)').eq('id', userData.employee_id).single()
+            setCanView((emp as any)?.positions?.name === 'Kepala Gudang')
+          }
+        }
+      }
+    }
+    init()
+  }, [supabase])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  function toggleExpand(id: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const allStores = Object.values(storesByPlan).flat()
+  const totalCash = allStores.filter(s => s.payment_method === 'cash').reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
+  const totalTransfer = allStores.filter(s => s.payment_method === 'transfer').length
+  const totalDeposit = allStores.filter(s => s.payment_method === 'deposit').reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
+  const totalTempo = allStores.filter(s => s.payment_method === 'tempo').length
+  const totalIncident = allStores.filter(s => s.incident_type !== 'tidak_ada').length
+  const totalFailed = allStores.filter(s => s.status === 'failed').length
+
+  const monthOptions = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date()
+    d.setDate(1)
+    d.setMonth(d.getMonth() - i)
+    return { value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) }
+  })
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-slate-800 mb-1">Laporan Pengiriman</h1>
+        <p className="text-sm text-slate-500">Rekap trip selesai: mobil, toko yang dikirim, dan metode bayar masing-masing.</p>
+      </div>
+
+      {!canView ? (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
+          Halaman ini khusus tim manajemen (Owner/HR/Finance/Kepala Gudang).
+        </div>
+      ) : (
+        <>
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
+            <label className="block text-xs text-slate-500 mb-1">Periode</label>
+            <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+              className="w-full sm:w-64 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
+              {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-[11px] text-slate-500 uppercase mb-1">Total Cash</p>
+              <p className="text-sm font-bold text-green-600">{fmtRp(totalCash)}</p>
+            </div>
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-[11px] text-slate-500 uppercase mb-1">Total Deposit</p>
+              <p className="text-sm font-bold text-blue-600">{fmtRp(totalDeposit)}</p>
+            </div>
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-[11px] text-slate-500 uppercase mb-1">Toko Transfer</p>
+              <p className="text-sm font-bold text-slate-700">{totalTransfer} toko</p>
+            </div>
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-[11px] text-slate-500 uppercase mb-1">Toko Tempo</p>
+              <p className="text-sm font-bold text-amber-600">{totalTempo} toko</p>
+            </div>
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-[11px] text-slate-500 uppercase mb-1">Kejadian</p>
+              <p className="text-sm font-bold text-red-500">{totalIncident} toko</p>
+            </div>
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+              <p className="text-[11px] text-slate-500 uppercase mb-1">Gagal Kirim</p>
+              <p className="text-sm font-bold text-red-500">{totalFailed} toko</p>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-12 text-slate-500 text-sm">Memuat...</div>
+          ) : plans.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada trip selesai di periode ini.</div>
+          ) : (
+            <div className="space-y-3">
+              {plans.map(p => {
+                const stores = storesByPlan[p.id] || []
+                const isOpen = expanded.has(p.id)
+                return (
+                  <div key={p.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <button onClick={() => toggleExpand(p.id)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition text-left">
+                      <div>
+                        <p className="font-bold text-slate-800 text-sm">{p.vehicles?.name} — {p.delivery_routes?.name}</p>
+                        <p className="text-xs text-slate-500">{new Date(p.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {p.driver?.full_name}{p.helper?.full_name ? ` / ${p.helper.full_name}` : ''} · {stores.length} toko</p>
+                      </div>
+                      <span className="text-xs text-blue-600 font-medium">{isOpen ? 'Tutup ▲' : 'Rincian ▼'}</span>
+                    </button>
+                    {isOpen && (
+                      <div className="border-t border-slate-100 divide-y divide-slate-50">
+                        {stores.map((s, i) => (
+                          <div key={s.id} className="px-4 py-2.5 flex items-center gap-3 text-sm">
+                            <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 shrink-0">{i + 1}</span>
+                            <span className="flex-1 text-slate-700">{s.logistics_stores?.name}</span>
+                            {s.status === 'failed' ? (
+                              <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600 font-medium">Gagal: {s.failed_reason}</span>
+                            ) : (
+                              <>
+                                {s.payment_method && (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+                                    {PAYMENT_LABEL[s.payment_method]}{s.payment_amount ? ` — ${fmtRp(Number(s.payment_amount))}` : ''}{s.payment_due_date ? ` — jatuh tempo ${new Date(s.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
+                                  </span>
+                                )}
+                                {s.incident_type !== 'tidak_ada' && (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+                                    {s.incident_type === 'salah_muat' ? 'Salah Muat' : 'Retur'}
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
