@@ -157,6 +157,14 @@ const adminNavItems: NavNode[] = [
     ]
   },
   {
+    name: 'Pengiriman Logistik',
+    href: '/logistik/toko',
+    icon: '🚚',
+    submenu: [
+      { name: 'Master Toko', href: '/logistik/toko' },
+    ]
+  },
+  {
     name: 'Penggajian',
     href: '/penggajian/bulanan',
     icon: '💰',
