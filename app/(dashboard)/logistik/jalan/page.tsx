@@ -9,9 +9,18 @@ type PlanSummary = {
   id: string
   plan_date: string
   status: string
+  vehicle_id: string
+  route_id: string
+  driver_id: string
+  helper_id: string | null
+  box_confirmed_at: string | null
   vehicles: { name: string; plate_number: string | null } | null
   delivery_routes: { name: string } | null
 }
+
+const GARAGE_GAP_MINUTES = 30
+
+const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
 type PlanStore = {
   id: string
@@ -53,6 +62,17 @@ export default function JalanPengirimanPage() {
   // Form Gagal Kirim
   const [failedReason, setFailedReason] = useState('')
 
+  // Penutupan trip (box kosong -> jeda 30 menit -> lapor garasi)
+  const [boxPhotoUrl, setBoxPhotoUrl] = useState('')
+  const [garagePhotoUrl, setGaragePhotoUrl] = useState('')
+  const [needsRefuel, setNeedsRefuel] = useState<boolean | null>(null)
+  const [nowTick, setNowTick] = useState(Date.now())
+
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 15000)
+    return () => clearInterval(t)
+  }, [])
+
   const selectedPlan = plans.find(p => p.id === selectedPlanId) || null
   const pendingStores = planStores.filter(ps => ps.status === 'pending').sort((a, b) => a.sequence_order - b.sequence_order)
   const activeStore = pendingStores[0] || null
@@ -79,7 +99,7 @@ export default function JalanPengirimanPage() {
   const fetchPlans = useCallback(async (empId: string) => {
     const { data, error } = await supabase
       .from('logistics_delivery_plans')
-      .select('id, plan_date, status, vehicles(name, plate_number), delivery_routes(name)')
+      .select('id, plan_date, status, vehicle_id, route_id, driver_id, helper_id, box_confirmed_at, vehicles(name, plate_number), delivery_routes(name)')
       .or(`driver_id.eq.${empId},helper_id.eq.${empId}`)
       .in('status', ['ready', 'departed', 'closing'])
       .order('plan_date', { ascending: false })
@@ -124,6 +144,45 @@ export default function JalanPengirimanPage() {
     if (error) { showMessage('error', 'Gagal unggah foto: ' + error.message); return null }
     const { data } = supabase.storage.from('logistics-photos').getPublicUrl(path)
     return data.publicUrl
+  }
+
+  // Foto tingkat-rencana (box kosong, amper bensin) — bukan per-toko.
+  async function uploadPlanPhoto(blob: Blob, tag: string): Promise<string | null> {
+    if (!selectedPlan) return null
+    const path = `${selectedPlan.id}/${tag}-${Date.now()}.jpg`
+    const { error } = await supabase.storage.from('logistics-photos').upload(path, blob, { contentType: 'image/jpeg' })
+    if (error) { showMessage('error', 'Gagal unggah foto: ' + error.message); return null }
+    const { data } = supabase.storage.from('logistics-photos').getPublicUrl(path)
+    return data.publicUrl
+  }
+
+  async function confirmBoxPhoto() {
+    if (!selectedPlan || !boxPhotoUrl) return
+    setSubmitting(true)
+    const { error } = await supabase.from('logistics_delivery_plans').update({
+      box_photo_url: boxPhotoUrl, box_confirmed_by: myEmployeeId, box_confirmed_at: new Date().toISOString(), status: 'closing',
+    }).eq('id', selectedPlan.id).eq('status', 'departed')
+    if (error) showMessage('error', 'Gagal: ' + error.message)
+    else showMessage('success', 'Box/bak kosong dikonfirmasi. Silakan kembali ke garasi, lapor lagi begitu sudah sampai.')
+    setBoxPhotoUrl('')
+    await refresh()
+    setSubmitting(false)
+  }
+
+  async function submitSelesaiKirim() {
+    if (!selectedPlan || !garagePhotoUrl || needsRefuel === null) return
+    setSubmitting(true)
+    const { data, error } = await supabase.rpc('complete_logistics_delivery', {
+      p_plan_id: selectedPlan.id, p_garage_photo_url: garagePhotoUrl, p_needs_refuel: needsRefuel,
+    })
+    if (error) { showMessage('error', 'Gagal menyelesaikan trip: ' + error.message); setSubmitting(false); return }
+    const row = Array.isArray(data) ? data[0] : data
+    const myShare = myEmployeeId === selectedPlan.driver_id ? row?.driver_earning : row?.helper_earning
+    showMessage('success', `Trip selesai! Upah ritase Anda sebesar ${fmtRp(Number(myShare ?? 0))} sudah tercatat.`)
+    setGaragePhotoUrl(''); setNeedsRefuel(null)
+    setSelectedPlanId(null)
+    await refresh()
+    setSubmitting(false)
   }
 
   async function handleBerangkat() {
@@ -390,17 +449,71 @@ export default function JalanPengirimanPage() {
           )}
 
           {selectedPlan?.status === 'departed' && allResolved && (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-5 text-center">
-              <p className="text-green-800 font-semibold mb-1">✓ Semua toko sudah diproses</p>
-              <p className="text-sm text-green-700">Fitur lapor kembali ke garasi & penutupan trip akan segera tersedia di update berikutnya.</p>
+            <div className="bg-white rounded-xl border-2 border-blue-200 p-5">
+              <h2 className="text-lg font-bold text-slate-800 mb-1">✓ Semua Toko Sudah Diproses</h2>
+              <p className="text-sm text-slate-500 mb-4">Sebelum kembali ke garasi, foto dulu kondisi box/bak yang sudah kosong.</p>
+              {boxPhotoUrl ? (
+                <div className="space-y-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={boxPhotoUrl} alt="Box kosong" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                  <button onClick={() => setBoxPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ambil Ulang</button>
+                  <button onClick={confirmBoxPhoto} disabled={submitting}
+                    className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition disabled:opacity-50">
+                    {submitting ? 'Memproses...' : 'Konfirmasi & Kembali ke Garasi'}
+                  </button>
+                </div>
+              ) : (
+                <LogisticsCameraCapture label="Foto Box/Bak Kosong" employeeName={myName}
+                  onCaptured={async blob => { const url = await uploadPlanPhoto(blob, 'box'); if (url) setBoxPhotoUrl(url) }} />
+              )}
             </div>
           )}
 
-          {selectedPlan?.status === 'closing' && (
-            <div className="bg-purple-50 border border-purple-200 rounded-xl p-5 text-center text-sm text-purple-700">
-              Menunggu laporan sampai garasi (fitur menyusul).
-            </div>
-          )}
+          {selectedPlan?.status === 'closing' && (() => {
+            const boxConfirmedAt = selectedPlan.box_confirmed_at ? new Date(selectedPlan.box_confirmed_at).getTime() : null
+            const msRemaining = boxConfirmedAt ? (boxConfirmedAt + GARAGE_GAP_MINUTES * 60000) - nowTick : 0
+            const canReportGarage = boxConfirmedAt !== null && msRemaining <= 0
+            return (
+              <div className="bg-white rounded-xl border-2 border-purple-200 p-5">
+                <h2 className="text-lg font-bold text-slate-800 mb-1">Lapor Sampai Garasi</h2>
+                {!canReportGarage ? (
+                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                    Tunggu {Math.max(1, Math.ceil(msRemaining / 60000))} menit lagi sebelum bisa lapor sampai garasi (anti-kecurangan).
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Foto Amper Bensin</p>
+                      {garagePhotoUrl ? (
+                        <div className="space-y-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={garagePhotoUrl} alt="Amper bensin" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                          <button onClick={() => setGaragePhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                        </div>
+                      ) : (
+                        <LogisticsCameraCapture label="Foto Amper Bensin" employeeName={myName}
+                          onCaptured={async blob => { const url = await uploadPlanPhoto(blob, 'garasi'); if (url) setGaragePhotoUrl(url) }} />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Perlu Isi Bensin Besok?</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={() => setNeedsRefuel(true)}
+                          className={`py-2 rounded-lg text-sm font-medium border transition ${needsRefuel === true ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Ya</button>
+                        <button type="button" onClick={() => setNeedsRefuel(false)}
+                          className={`py-2 rounded-lg text-sm font-medium border transition ${needsRefuel === false ? 'bg-slate-600 text-white border-slate-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Tidak</button>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-400">Upah ritase resmi tercatat begitu Anda menekan "Selesai Kirim" di bawah ini.</p>
+                    <button onClick={submitSelesaiKirim} disabled={!garagePhotoUrl || needsRefuel === null || submitting}
+                      className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-sm transition disabled:opacity-50">
+                      {submitting ? 'Memproses...' : 'Selesai Kirim'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {planStores.some(ps => ps.status !== 'pending') && (
             <div className="mt-6 bg-white rounded-xl border border-slate-200 overflow-hidden">
