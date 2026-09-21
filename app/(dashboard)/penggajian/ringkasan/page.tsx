@@ -104,13 +104,30 @@ export default function RingkasanOwnerPage() {
   const [rows, setRows] = useState<SummaryRow[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [allTimeLateTotal, setAllTimeLateTotal] = useState(0)
+  const [loadingAllTimeLate, setLoadingAllTimeLate] = useState(true)
 
   useEffect(() => { fetchBranches() }, [])
   useEffect(() => { fetchSummary() }, [filterMonth, filterYear, filterBranch])
+  useEffect(() => { fetchAllTimeLate() }, [filterBranch])
 
   async function fetchBranches() {
     const { data } = await supabase.from('branches').select('id,name').order('name')
     if (data) setBranches(data)
+  }
+
+  // Total potongan keterlambatan SEPANJANG WAKTU (semua periode gaji yang pernah dibuat) —
+  // terpisah dari ringkasan per-bulan di bawah, karena Owner butuh angka akumulasi dari awal,
+  // bukan cuma bulan yang sedang dipilih.
+  async function fetchAllTimeLate() {
+    setLoadingAllTimeLate(true)
+    const { data, error } = await supabase
+      .from('payrolls')
+      .select('late_deduction, employee:employees!payrolls_employee_id_fkey(branch_id)')
+    if (error || !data) { setAllTimeLateTotal(0); setLoadingAllTimeLate(false); return }
+    const filtered = filterBranch ? (data as any[]).filter(p => p.employee?.branch_id === filterBranch) : (data as any[])
+    setAllTimeLateTotal(filtered.reduce((s, p) => s + Number(p.late_deduction || 0), 0))
+    setLoadingAllTimeLate(false)
   }
 
   function toggleExpand(id: string) {
@@ -283,6 +300,7 @@ export default function RingkasanOwnerPage() {
   const totalGajiAwal = rows.reduce((s, r) => s + r.gajiAwal, 0)
   const totalPotongan = rows.reduce((s, r) => s + r.lateDeduction + r.kasbonDeduction + r.loyalitasDeduction + r.invLossDeduction + r.cashierLossDeduction + absenDeductionTotal(r), 0)
   const totalGajiAkhir = rows.reduce((s, r) => s + r.netTotal, 0)
+  const totalLatePeriodeIni = rows.reduce((s, r) => s + r.lateDeduction, 0)
 
   return (
     <div>
@@ -294,6 +312,16 @@ export default function RingkasanOwnerPage() {
         <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium rounded-lg transition print-hide">
           🖨️ Cetak / PDF
         </button>
+      </div>
+
+      <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-5 flex items-center justify-between gap-4 print-hide">
+        <div>
+          <p className="text-xs font-medium text-red-700 uppercase tracking-wide">Total Potongan Keterlambatan — Sepanjang Waktu</p>
+          <p className="text-[11px] text-red-500 mt-0.5">Akumulasi semua slip gaji yang pernah dibuat{filterBranch ? ' untuk cabang terpilih' : ' (semua cabang)'}.</p>
+        </div>
+        <p className="text-2xl font-bold text-red-700 whitespace-nowrap">
+          {loadingAllTimeLate ? '...' : `-${fmtRp(allTimeLateTotal)}`}
+        </p>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-5 flex flex-wrap gap-4 items-end print-hide">
@@ -478,6 +506,7 @@ export default function RingkasanOwnerPage() {
             <span>{rows.length} karyawan · periode {getPeriodLabel(filterMonth, filterYear)}</span>
             <div className="flex gap-4">
               <span>Total Gaji Awal: <strong className="text-slate-700">{fmtRp(totalGajiAwal)}</strong></span>
+              <span>Keterlambatan (periode ini): <strong className="text-red-600">-{fmtRp(totalLatePeriodeIni)}</strong></span>
               <span>Total Potongan: <strong className="text-red-600">-{fmtRp(totalPotongan)}</strong></span>
               <span>Total Gaji Akhir: <strong className="text-blue-600">{fmtRp(totalGajiAkhir)}</strong></span>
             </div>
