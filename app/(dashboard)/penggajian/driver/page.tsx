@@ -53,6 +53,9 @@ type DriverFineForm = { tempId: string; amount: string; reason: string }
 
 export default function PenggajianDriverPage() {
   const [trips, setTrips] = useState<DeliveryTrip[]>([])
+  // Trip yang lahir otomatis dari Pengiriman Logistik (bukan input manual) — dipakai buat
+  // kasih penanda visual di tabel, supaya HR tidak bingung/dobel-catat.
+  const [logisticsTripIds, setLogisticsTripIds] = useState<Set<string>>(new Set())
   const [drivers, setDrivers] = useState<DriverEmployee[]>([])
   const [helpers, setHelpers] = useState<Employee[]>([])
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
@@ -230,6 +233,13 @@ export default function PenggajianDriverPage() {
     const { data, error } = await query
     if (error) console.error('Detail error:', JSON.stringify(error, null, 2))
     else setTrips((data as unknown as DeliveryTrip[]) || [])
+
+    const { data: fromLogistik } = await supabase
+      .from('logistics_delivery_plans')
+      .select('delivery_trip_id')
+      .not('delivery_trip_id', 'is', null)
+    setLogisticsTripIds(new Set((fromLogistik || []).map((r: any) => r.delivery_trip_id as string)))
+
     setLoading(false)
   }
 
@@ -258,6 +268,29 @@ export default function PenggajianDriverPage() {
     setSubmitting(true)
     setMessage(null)
 
+    let formattedDate = ''
+    try {
+      formattedDate = new Date(formData.trip_date).toISOString().split('T')[0]
+    } catch {
+      showMessage('error', 'Format tanggal tidak valid.')
+      setSubmitting(false)
+      return
+    }
+
+    // Cek dulu apakah driver ini sudah punya trip tercatat di tanggal yang sama — bisa jadi
+    // sudah otomatis tercatat lewat Pengiriman Logistik, supaya tidak dobel-catat kalau
+    // ternyata cuma perlu diinput manual karena drivernya tidak sempat pakai aplikasi itu.
+    const { data: existingTrips } = await supabase
+      .from('delivery_trips')
+      .select('vehicles(name), delivery_routes(name), driver_earning')
+      .eq('driver_id', formData.driver_id)
+      .eq('trip_date', formattedDate)
+    if (existingTrips && existingTrips.length > 0) {
+      const list = existingTrips.map((t: any) => `${t.vehicles?.name ?? '-'} / ${t.delivery_routes?.name ?? '-'} (${formatRupiah(t.driver_earning)})`).join(', ')
+      const lanjut = confirm(`Driver ini SUDAH punya trip tercatat tanggal ${formattedDate}: ${list}.\n\nIni mungkin sudah otomatis tercatat lewat Pengiriman Logistik. Tetap catat trip baru ini juga?`)
+      if (!lanjut) { setSubmitting(false); return }
+    }
+
     const hasHelper = formData.helper_id !== ''
     const { data: config, error: cfgError } = await supabase
       .from('driver_rate_configs')
@@ -274,15 +307,6 @@ export default function PenggajianDriverPage() {
 
     const dEarning = hasHelper ? config.driver_rate_with_helper : config.driver_rate_without_helper
     const hEarning = hasHelper ? config.helper_rate : 0
-
-    let formattedDate = ''
-    try {
-      formattedDate = new Date(formData.trip_date).toISOString().split('T')[0]
-    } catch {
-      showMessage('error', 'Format tanggal tidak valid.')
-      setSubmitting(false)
-      return
-    }
 
     const weekStart = getWeekStart(formattedDate)
     const { error } = await supabase.from('delivery_trips').insert({
@@ -1139,7 +1163,12 @@ export default function PenggajianDriverPage() {
                     {detailDriver.trips.map((t) => (
                       <tr key={t.id}>
                         <td className="px-4 py-2.5 text-slate-600 text-xs">{new Date(t.trip_date).toLocaleDateString('id-ID', {day:'2-digit', month:'short'})}</td>
-                        <td className="px-4 py-2.5 text-slate-700">{t.delivery_routes?.name ?? '-'}</td>
+                        <td className="px-4 py-2.5 text-slate-700">
+                          {t.delivery_routes?.name ?? '-'}
+                          {logisticsTripIds.has(t.id) && (
+                            <span title="Otomatis tercatat dari Pengiriman Logistik" className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">🚚 Auto</span>
+                          )}
+                        </td>
                         <td className="px-4 py-2.5 text-slate-600 text-xs">{t.vehicles?.name ?? '-'}</td>
                         <td className="px-4 py-2.5 text-slate-600 text-xs">{t.helper?.full_name ?? '-'}</td>
                         <td className="px-4 py-2.5 text-center">
