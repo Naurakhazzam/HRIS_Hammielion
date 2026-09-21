@@ -161,6 +161,7 @@ const adminNavItems: NavNode[] = [
     href: '/logistik/toko',
     icon: '🚚',
     submenu: [
+      { name: 'Rencana Pengiriman', href: '/logistik/rencana' },
       { name: 'Master Toko', href: '/logistik/toko' },
     ]
   },
