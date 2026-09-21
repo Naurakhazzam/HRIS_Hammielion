@@ -46,6 +46,7 @@ const adminNavItems: NavNode[] = [
       { name: 'Jadwal Saya', href: '/portal/jadwal' },
       { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
       { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
+      { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
     ]
   },
   {
@@ -75,7 +76,6 @@ const adminNavItems: NavNode[] = [
           { name: 'Import Absensi', href: '/absensi/import' },
           { name: 'QR Absen', href: '/absensi/qr' },
           { name: 'Persetujuan Libur', href: '/absensi/persetujuan-libur' },
-          { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
         ]
       },
       { name: 'Cuti & Izin', href: '/cuti' },
@@ -218,9 +218,9 @@ const employeeNavItems: NavNode[] = [
       { name: 'Jadwal Saya', href: '/portal/jadwal' },
       { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
       { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
+      { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
     ]
   },
-  { name: 'Kalender Libur', href: '/absensi/kalender-libur', icon: '📅' },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
   { name: 'Aturan Potongan Gaji', href: '/potongan', icon: '📉' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
@@ -292,12 +292,17 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     || pathname.startsWith('/keuangan/cashflow') || pathname.startsWith('/keuangan/riwayat')
     || pathname === '/keuangan/pembelian' || pathname.startsWith('/kasbon')
 
+  // Kalender Libur secara URL ada di bawah /absensi/*, tapi menunya sengaja dipindah ke
+  // grup Portal Saya (bisa dilihat semua orang) — jadi dikecualikan dari trigger auto-expand
+  // grup SDM/HR & Absensi supaya tidak salah expand grup yang tidak punya item aktif.
+  const inKalenderLibur = pathname.startsWith('/absensi/kalender-libur')
+
   const defaultOpen: Record<string, boolean> = {
-    'SDM / HR':   pathname.startsWith('/karyawan') || pathname.startsWith('/rekrutmen') || pathname.startsWith('/absensi')
+    'SDM / HR':   pathname.startsWith('/karyawan') || pathname.startsWith('/rekrutmen') || (pathname.startsWith('/absensi') && !inKalenderLibur)
       || pathname.startsWith('/cuti') || pathname.startsWith('/kpi') || pathname.startsWith('/ranking')
       || pathname.startsWith('/cabang') || pathname.startsWith('/jabatan'),
     'Rekrutmen':  pathname.startsWith('/rekrutmen'),
-    'Absensi':    pathname.startsWith('/absensi'),
+    'Absensi':    pathname.startsWith('/absensi') && !inKalenderLibur,
     'KPI':        pathname.startsWith('/kpi'),
     'Setup Cabang & Jabatan': pathname.startsWith('/cabang') || pathname.startsWith('/jabatan'),
 
@@ -314,7 +319,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
       || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif')
       || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
 
-    'Portal Saya': pathname.startsWith('/portal'),
+    'Portal Saya': pathname.startsWith('/portal') || inKalenderLibur,
   }
 
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(defaultOpen)
