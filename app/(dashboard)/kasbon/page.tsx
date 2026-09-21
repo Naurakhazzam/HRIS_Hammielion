@@ -94,10 +94,14 @@ export default function KasbonPage() {
       <div className="flex flex-wrap gap-1 mb-6 bg-slate-100 p-1 rounded-xl w-fit">
         {([
           ['pengajuan', 'Pengajuan'],
-          ['limit', 'Limit Karyawan'],
-          ['riwayat', 'Riwayat Potongan'],
-          ['driver', '🚛 Kasbon Driver'],
-          ['kenek', '📦 Kasbon Kenek'],
+          // Tab manajemen (lihat/atur SEMUA karyawan) — proteksi utamanya sudah di RLS database,
+          // ini cuma lapisan tambahan supaya karyawan biasa tidak melihat tab yang bukan urusannya.
+          ...(['owner', 'hr', 'finance'].includes(role) ? [
+            ['limit', 'Limit Karyawan'],
+            ['riwayat', 'Riwayat Potongan'],
+            ['driver', '🚛 Kasbon Driver'],
+            ['kenek', '📦 Kasbon Kenek'],
+          ] as const : []),
         ] as const).map(([tab, label]) => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === tab ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
