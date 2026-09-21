@@ -19,6 +19,15 @@ export default function MasterTokoPage() {
   const [phone, setPhone] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const filteredStores = stores.filter(s => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return s.name.toLowerCase().includes(q)
+      || (s.address ?? '').toLowerCase().includes(q)
+      || (s.phone ?? '').toLowerCase().includes(q)
+  })
 
   useEffect(() => { init() }, [])
 
@@ -165,6 +174,32 @@ export default function MasterTokoPage() {
         </div>
       )}
 
+      <div className="relative mb-4">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Cari nama toko, alamat, atau nomor WhatsApp..."
+          className="w-full pl-9 pr-9 py-2.5 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            aria-label="Bersihkan pencarian"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {!loading && search && (
+        <p className="text-xs text-slate-500 mb-2">
+          Menampilkan {filteredStores.length} dari {stores.length} toko.
+        </p>
+      )}
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <table className="w-full text-left">
           <thead>
@@ -181,7 +216,9 @@ export default function MasterTokoPage() {
               <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">Memuat data...</td></tr>
             ) : stores.length === 0 ? (
               <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada toko.</td></tr>
-            ) : stores.map(s => (
+            ) : filteredStores.length === 0 ? (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada toko yang cocok dengan pencarian "{search}".</td></tr>
+            ) : filteredStores.map(s => (
               <tr key={s.id} className="hover:bg-slate-50 transition">
                 <td className="px-4 py-3 text-sm font-medium text-slate-800">{s.name}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{s.address || '—'}</td>
