@@ -546,7 +546,7 @@ export default function PenggajianDriverPage() {
 
   function handlePrintSlip() {
     if (!detailDriver) return
-    const totalUpah = detailDriver.trips.reduce((acc, t) => acc + t.driver_earning, 0)
+    const totalUpah = detailDriver.trips.reduce((acc, t) => acc + Number(t.driver_earning), 0)
     const paidCount = detailDriver.trips.filter(t => t.payment_status === 'paid').length
     const unpaidCount = detailDriver.trips.filter(t => t.payment_status === 'unpaid').length
     const totalKasbon = detailDriver.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
@@ -1063,7 +1063,7 @@ export default function PenggajianDriverPage() {
 
     {/* Modal Detail Driver */}
     {detailDriver && (() => {
-      const totalUpah = detailDriver.trips.reduce((acc, t) => acc + t.driver_earning, 0)
+      const totalUpah = detailDriver.trips.reduce((acc, t) => acc + Number(t.driver_earning), 0)
       const totalKasbon = detailDriver.savedKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
       const totalDenda = detailDriver.savedFines.reduce((s, f) => s + Number(f.amount), 0)
       const totalPotongan = totalKasbon + totalDenda

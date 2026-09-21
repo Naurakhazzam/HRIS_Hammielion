@@ -25,6 +25,7 @@ type Payroll = {
   late_deduction: number
   kasbon_deduction: number
   loyalitas_deduction: number
+  loyalitas_auto_release: number
   conditional_bonus: number
   inventory_loss_deduction: number
   cashier_loss_deduction: number
@@ -452,7 +453,7 @@ export default function PenggajianBulananPage() {
         id, employee_id, period_month, period_year,
         base_salary, position_allowance, meal_allowance, special_allowance,
         overtime_total, kpi_bonus, late_deduction,
-        kasbon_deduction, loyalitas_deduction, conditional_bonus,
+        kasbon_deduction, loyalitas_deduction, loyalitas_auto_release, conditional_bonus,
         inventory_loss_deduction, cashier_loss_deduction,
         absent_days, absent_deduction,
         libur_compensation_days, libur_compensation_amount,
@@ -1599,7 +1600,7 @@ export default function PenggajianBulananPage() {
 
     // Update payroll: conditional_bonus + recalc gross & net
     const p = bonusModal
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + totalBonus
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + totalBonus
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const { error: updateErr } = await supabase
@@ -1653,7 +1654,7 @@ export default function PenggajianBulananPage() {
     if (insertErr) { showMessage('error', 'Gagal menyimpan bonus: ' + insertErr.message); setExtraBonusSaving(false); return }
 
     const newExtraTotal = Number(p.extra_bonus_total ?? 0) + amt
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + newExtraTotal
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + newExtraTotal
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const wasFinalized = p.status === 'pending_approval' || p.status === 'approved'
