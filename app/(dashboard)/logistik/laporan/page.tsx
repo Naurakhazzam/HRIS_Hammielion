@@ -8,6 +8,7 @@ import RupiahInput from '@/components/RupiahInput'
 type Plan = {
   id: string
   plan_date: string
+  status: string
   box_photo_url: string | null
   garage_photo_url: string | null
   needs_refuel: boolean | null
@@ -15,6 +16,13 @@ type Plan = {
   delivery_routes: { name: string } | null
   driver: { full_name: string } | null
   helper: { full_name: string } | null
+}
+
+const PLAN_STATUS_LABEL: Record<string, { label: string; className: string }> = {
+  ready: { label: 'Siap Berangkat', className: 'bg-slate-100 text-slate-600' },
+  departed: { label: 'Sedang Berjalan', className: 'bg-blue-100 text-blue-700' },
+  closing: { label: 'Menuju Garasi', className: 'bg-purple-100 text-purple-700' },
+  completed: { label: 'Selesai', className: 'bg-green-100 text-green-700' },
 }
 
 type PlanStore = {
@@ -69,13 +77,17 @@ export default function LaporanPengirimanPage() {
     const { data: planData } = await supabase
       .from('logistics_delivery_plans')
       .select(`
-        id, plan_date, box_photo_url, garage_photo_url, needs_refuel,
+        id, plan_date, status, box_photo_url, garage_photo_url, needs_refuel,
         vehicles(name, plate_number),
         delivery_routes(name),
         driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
         helper:employees!logistics_delivery_plans_helper_id_fkey(full_name)
       `)
-      .eq('status', 'completed')
+      // Dulu cuma status 'completed' -- trip yang MASIH BERJALAN jadi sama sekali tidak
+      // terlihat di sini (cuma ada Dashboard Pengiriman yang menampilkan angka ringkas, tanpa
+      // rincian per-toko/foto/pembayaran). Sekarang ikutkan semua status kecuali draft (masih
+      // disusun, belum "Siap Kirim") dan cancelled (dibatalkan, tidak ada progres kirim nyata).
+      .in('status', ['ready', 'departed', 'closing', 'completed'])
       .gte('plan_date', startDate).lte('plan_date', endDate)
       .order('plan_date', { ascending: false })
     const list = (planData as unknown as Plan[]) || []
@@ -171,7 +183,7 @@ export default function LaporanPengirimanPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Laporan Pengiriman</h1>
-        <p className="text-sm text-slate-500">Rekap trip selesai: mobil, toko yang dikirim, dan metode bayar masing-masing.</p>
+        <p className="text-sm text-slate-500">Rincian tiap trip (yang sedang berjalan maupun yang sudah selesai): mobil, toko yang dikirim, metode bayar, dan foto buktinya.</p>
       </div>
 
       {message && (
@@ -246,10 +258,15 @@ export default function LaporanPengirimanPage() {
                   <div key={p.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                     <button onClick={() => toggleExpand(p.id)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition text-left">
                       <div>
-                        <p className="font-bold text-slate-800 text-sm">{p.vehicles?.name} — {p.delivery_routes?.name}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-bold text-slate-800 text-sm">{p.vehicles?.name} — {p.delivery_routes?.name}</p>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${(PLAN_STATUS_LABEL[p.status] ?? PLAN_STATUS_LABEL.ready).className}`}>
+                            {(PLAN_STATUS_LABEL[p.status] ?? PLAN_STATUS_LABEL.ready).label}
+                          </span>
+                        </div>
                         <p className="text-xs text-slate-500">{new Date(p.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {p.driver?.full_name}{p.helper?.full_name ? ` / ${p.helper.full_name}` : ''} · {stores.length} toko</p>
                       </div>
-                      <span className="text-xs text-blue-600 font-medium">{isOpen ? 'Tutup ▲' : 'Rincian ▼'}</span>
+                      <span className="text-xs text-blue-600 font-medium shrink-0">{isOpen ? 'Tutup ▲' : 'Rincian ▼'}</span>
                     </button>
                     {isOpen && (
                       <div className="border-t border-slate-100 divide-y divide-slate-50">
@@ -279,6 +296,8 @@ export default function LaporanPengirimanPage() {
                               <span className="flex-1 text-slate-700">{s.logistics_stores?.name}</span>
                               {s.status === 'failed' ? (
                                 <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600 font-medium">Gagal: {s.failed_reason}</span>
+                              ) : s.status === 'pending' ? (
+                                <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-medium">Belum Diproses</span>
                               ) : (
                                 <>
                                   {s.payment_method && (
