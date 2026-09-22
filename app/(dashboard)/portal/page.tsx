@@ -211,6 +211,31 @@ export default function PortalDashboardPage() {
           </Link>
         </div>
 
+        {/* Rincian Pendapatan (Gaji Pokok, Tunjangan, dst) */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <h2 className="text-sm font-bold text-slate-700 mb-1">💵 Rincian Pendapatan</h2>
+          {!payroll ? (
+            <p className="text-sm text-slate-400 italic py-4">Belum ada data.</p>
+          ) : (
+            <>
+              <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[payroll.period_month - 1]} {payroll.period_year}</p>
+              <p className="text-3xl font-bold text-emerald-600">{fmtRp(payroll.gross_total)}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Total kotor (sebelum potongan)</p>
+              <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
+                <div className="flex justify-between"><span>Gaji Pokok</span><span className="font-medium">{fmtRp(Number(payroll.base_salary))}</span></div>
+                {Number(payroll.position_allowance) > 0 && <div className="flex justify-between"><span>Tunjangan Jabatan</span><span className="font-medium">{fmtRp(Number(payroll.position_allowance))}</span></div>}
+                {Number(payroll.meal_allowance) > 0 && <div className="flex justify-between"><span>Tunjangan Tetap</span><span className="font-medium">{fmtRp(Number(payroll.meal_allowance))}</span></div>}
+                {Number(payroll.special_allowance) > 0 && <div className="flex justify-between"><span>Tunjangan Khusus</span><span className="font-medium">{fmtRp(Number(payroll.special_allowance))}</span></div>}
+                {Number(payroll.overtime_total) > 0 && <div className="flex justify-between"><span>Upah Lembur</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.overtime_total))}</span></div>}
+                {Number(payroll.kpi_bonus) > 0 && <div className="flex justify-between"><span>Bonus KPI</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.kpi_bonus))}</span></div>}
+                {Number(payroll.conditional_bonus) > 0 && <div className="flex justify-between"><span>Bonus Kondisional</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.conditional_bonus))}</span></div>}
+                {Number(payroll.extra_bonus_total) > 0 && <div className="flex justify-between"><span>Bonus Tambahan</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.extra_bonus_total))}</span></div>}
+                {Number(payroll.loyalitas_auto_release) > 0 && <div className="flex justify-between"><span>Pencairan Loyalitas</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.loyalitas_auto_release))}</span></div>}
+              </div>
+            </>
+          )}
+        </div>
+
         {/* Total Potongan Bulan Ini */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <h2 className="text-sm font-bold text-slate-700 mb-1">📉 Rincian Potongan</h2>
