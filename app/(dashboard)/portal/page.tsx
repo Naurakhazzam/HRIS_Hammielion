@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
+import { chargeableLateMinutes } from '@/lib/lateTolerance'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const DAYS_AHEAD = 30
@@ -56,6 +57,7 @@ export default function PortalDashboardPage() {
   const [upcomingOff, setUpcomingOff] = useState<string[]>([])
   const [leaveInfo, setLeaveInfo] = useState<{ joinDate: string | null; usedDays: number }>({ joinDate: null, usedDays: 0 })
   const [kasbonSaldo, setKasbonSaldo] = useState(0)
+  const [estPotongan, setEstPotongan] = useState({ keterlambatan: 0, kasbon: 0 })
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -83,6 +85,7 @@ export default function PortalDashboardPage() {
       fetchAttendanceSummary(effectiveId),
       fetchUpcomingOff(effectiveId),
       fetchKasbonSaldo(effectiveId),
+      fetchEstimasiPotongan(effectiveId),
       emp?.join_date ? fetchLeaveInfo(effectiveId, emp.join_date) : Promise.resolve(),
     ])
     setLoading(false)
@@ -148,6 +151,29 @@ export default function PortalDashboardPage() {
       .lte('start_date', toDateStr(end))
     const usedDays = (reqs || []).reduce((s, r) => s + Number(r.total_days), 0)
     setLeaveInfo({ joinDate, usedDays })
+  }
+
+  // Perkiraan potongan BULAN BERJALAN (bukan bulan lalu yang sudah final di slip gaji) --
+  // cuma komponen yang bisa dihitung akurat & sederhana tanpa duplikasi logika kompleks
+  // Penggajian Bulanan (kelompok eskalasi izin/alpha/sakit sengaja tidak ditiru di sini, biar
+  // tidak berisiko beda hasil dengan slip gaji asli): Keterlambatan (rumus sama persis dengan
+  // Slip Gaji, termasuk toleransi QR) + cicilan Kasbon yang sudah dijadwalkan Finance untuk
+  // bulan ini (dari kasbon_deductions, bukan re-hitung manual).
+  async function fetchEstimasiPotongan(employeeId: string) {
+    const y = today.getFullYear(), m = today.getMonth() + 1
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const firstDay = `${y}-${pad(m)}-01`
+    const lastDay = `${y}-${pad(m)}-${pad(new Date(y, m, 0).getDate())}`
+
+    const [{ data: lateDef }, { data: atts }, { data: kasbonDed }] = await Promise.all([
+      supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
+      supabase.from('attendances').select('late_minutes, source').eq('employee_id', employeeId).gte('date', firstDay).lte('date', lastDay).gt('late_minutes', 0),
+      supabase.from('kasbon_deductions').select('amount').eq('employee_id', employeeId).eq('deduction_month', m).eq('deduction_year', y).eq('status', 'pending'),
+    ])
+    const rate = Number(lateDef?.late_penalty_per_minute ?? 0)
+    const keterlambatan = (atts || []).reduce((s, a: any) => s + chargeableLateMinutes(Number(a.late_minutes), a.source) * rate, 0)
+    const kasbon = (kasbonDed || []).reduce((s, d: any) => s + Number(d.amount), 0)
+    setEstPotongan({ keterlambatan, kasbon })
   }
 
   // Sisa saldo kasbon aktif -- rumus sama persis dengan yang dipakai halaman Kasbon (Tab
@@ -236,26 +262,19 @@ export default function PortalDashboardPage() {
           )}
         </div>
 
-        {/* Total Potongan Bulan Ini */}
+        {/* Perkiraan Potongan Bulan Berjalan (bukan potongan bulan lalu yang sudah final) */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-          <h2 className="text-sm font-bold text-slate-700 mb-1">📉 Rincian Potongan</h2>
-          {!payroll ? (
-            <p className="text-sm text-slate-400 italic py-4">Belum ada data.</p>
-          ) : (
-            <>
-              <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[payroll.period_month - 1]} {payroll.period_year}</p>
-              <p className="text-3xl font-bold text-red-500">{fmtRp(totalPotongan)}</p>
-              <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
-                {Number(payroll.late_deduction) > 0 && <div className="flex justify-between"><span>Keterlambatan</span><span className="text-red-500">-{fmtRp(Number(payroll.late_deduction))}</span></div>}
-                {Number(payroll.absent_deduction) > 0 && <div className="flex justify-between"><span>Sakit/Izin/Alpha</span><span className="text-red-500">-{fmtRp(Number(payroll.absent_deduction))}</span></div>}
-                {Number(payroll.kasbon_deduction) > 0 && <div className="flex justify-between"><span>Kasbon</span><span className="text-red-500">-{fmtRp(Number(payroll.kasbon_deduction))}</span></div>}
-                {Number(payroll.loyalitas_deduction) > 0 && <div className="flex justify-between"><span>Tabungan Loyalitas</span><span className="text-red-500">-{fmtRp(Number(payroll.loyalitas_deduction))}</span></div>}
-                {Number(payroll.inventory_loss_deduction) > 0 && <div className="flex justify-between"><span>Kehilangan Barang</span><span className="text-red-500">-{fmtRp(Number(payroll.inventory_loss_deduction))}</span></div>}
-                {Number(payroll.cashier_loss_deduction) > 0 && <div className="flex justify-between"><span>Kerugian Kasir</span><span className="text-red-500">-{fmtRp(Number(payroll.cashier_loss_deduction))}</span></div>}
-                {totalPotongan === 0 && <p className="text-slate-300 italic">Tidak ada potongan bulan ini 🎉</p>}
-              </div>
-            </>
-          )}
+          <h2 className="text-sm font-bold text-slate-700 mb-1">📉 Perkiraan Potongan Bulan Ini</h2>
+          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[today.getMonth()]} {today.getFullYear()}, berjalan</p>
+          <p className="text-3xl font-bold text-red-500">{fmtRp(estPotongan.keterlambatan + estPotongan.kasbon)}</p>
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
+            {estPotongan.keterlambatan > 0 && <div className="flex justify-between"><span>Keterlambatan</span><span className="text-red-500">-{fmtRp(estPotongan.keterlambatan)}</span></div>}
+            {estPotongan.kasbon > 0 && <div className="flex justify-between"><span>Cicilan Kasbon</span><span className="text-red-500">-{fmtRp(estPotongan.kasbon)}</span></div>}
+            {estPotongan.keterlambatan === 0 && estPotongan.kasbon === 0 && <p className="text-slate-300 italic">Belum ada potongan tercatat bulan ini 🎉</p>}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100">
+            Perkiraan sementara, berjalan sepanjang bulan. Potongan lain (sakit/izin/alpha, kehilangan barang, dll) baru dihitung final saat slip gaji diproses Finance.
+          </p>
         </div>
 
         {/* Ringkasan Absensi Bulan Ini */}
