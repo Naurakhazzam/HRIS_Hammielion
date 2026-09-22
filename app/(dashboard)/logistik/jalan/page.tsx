@@ -19,7 +19,11 @@ type PlanSummary = {
   delivery_routes: { name: string } | null
 }
 
-const GARAGE_GAP_MINUTES = 30
+// SEMENTARA 0 untuk keperluan testing Owner — WAJIB dikembalikan ke 30 sebelum dipakai
+// driver/kenek sungguhan lagi (jeda ini mencegah kecurangan lapor sampai garasi terlalu cepat).
+// Jangan lupa: pengaman yang sama juga dimatikan sementara di RPC complete_logistics_delivery
+// (database) — keduanya harus dikembalikan bareng.
+const GARAGE_GAP_MINUTES = 0
 
 const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
