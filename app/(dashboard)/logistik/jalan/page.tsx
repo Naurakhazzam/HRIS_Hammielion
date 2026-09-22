@@ -310,11 +310,15 @@ export default function JalanPengirimanPage() {
               <p className="text-xs text-slate-500 mb-1">Toko Aktif ({planStores.findIndex(ps => ps.id === activeStore.id) + 1} dari {planStores.length})</p>
               <h2 className="text-lg font-bold text-slate-800 mb-1">{activeStore.logistics_stores?.name}</h2>
               {activeStore.logistics_stores?.address && <p className="text-sm text-slate-500 mb-2">{activeStore.logistics_stores.address}</p>}
-              {activeStore.logistics_stores?.phone && (
+              {activeStore.logistics_stores?.phone ? (
                 <a href={toWaLink(activeStore.logistics_stores.phone)} target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 text-xs font-semibold rounded-lg transition">
                   💬 Hubungi via WhatsApp — {activeStore.logistics_stores.phone}
                 </a>
+              ) : (
+                <p className="inline-flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-400 text-xs font-medium rounded-lg">
+                  Tidak ada nomor kontak
+                </p>
               )}
 
               {!actionMode && (
