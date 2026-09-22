@@ -7,6 +7,9 @@ import { localDateStr } from '@/lib/date'
 type Plan = {
   id: string
   plan_date: string
+  box_photo_url: string | null
+  garage_photo_url: string | null
+  needs_refuel: boolean | null
   vehicles: { name: string; plate_number: string | null } | null
   delivery_routes: { name: string } | null
   driver: { full_name: string } | null
@@ -18,10 +21,14 @@ type PlanStore = {
   plan_id: string
   sequence_order: number
   status: string
+  delivery_photo_url: string | null
   payment_method: string | null
   payment_amount: number | null
+  payment_photo_url: string | null
   payment_due_date: string | null
   incident_type: string
+  incident_photo_url: string | null
+  incident_description: string | null
   failed_reason: string | null
   logistics_stores: { name: string } | null
 }
@@ -51,7 +58,7 @@ export default function LaporanPengirimanPage() {
     const { data: planData } = await supabase
       .from('logistics_delivery_plans')
       .select(`
-        id, plan_date,
+        id, plan_date, box_photo_url, garage_photo_url, needs_refuel,
         vehicles(name, plate_number),
         delivery_routes(name),
         driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
@@ -65,7 +72,10 @@ export default function LaporanPengirimanPage() {
 
     if (list.length > 0) {
       const { data: storeData } = await supabase.from('logistics_plan_stores')
-        .select('id, plan_id, sequence_order, status, payment_method, payment_amount, payment_due_date, incident_type, failed_reason, logistics_stores(name)')
+        .select(`id, plan_id, sequence_order, status, delivery_photo_url,
+          payment_method, payment_amount, payment_photo_url, payment_due_date,
+          incident_type, incident_photo_url, incident_description, failed_reason,
+          logistics_stores(name)`)
         .in('plan_id', list.map(p => p.id)).order('sequence_order')
       const grouped: Record<string, PlanStore[]> = {}
       ;(storeData as unknown as PlanStore[] || []).forEach(s => {
@@ -189,25 +199,71 @@ export default function LaporanPengirimanPage() {
                     </button>
                     {isOpen && (
                       <div className="border-t border-slate-100 divide-y divide-slate-50">
+                        {(p.box_photo_url || p.garage_photo_url) && (
+                          <div className="px-4 py-2.5">
+                            <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Penutupan Trip{p.needs_refuel ? ' — ⛽ Perlu Isi Bensin' : ''}</p>
+                            <div className="flex gap-2">
+                              {p.box_photo_url && (
+                                <a href={p.box_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Box Kosong">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={p.box_photo_url} alt="Foto box kosong" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                </a>
+                              )}
+                              {p.garage_photo_url && (
+                                <a href={p.garage_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Amper Bensin">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={p.garage_photo_url} alt="Foto amper bensin" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        )}
                         {stores.map((s, i) => (
-                          <div key={s.id} className="px-4 py-2.5 flex items-center gap-3 text-sm">
-                            <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 shrink-0">{i + 1}</span>
-                            <span className="flex-1 text-slate-700">{s.logistics_stores?.name}</span>
-                            {s.status === 'failed' ? (
-                              <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600 font-medium">Gagal: {s.failed_reason}</span>
-                            ) : (
-                              <>
-                                {s.payment_method && (
-                                  <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
-                                    {PAYMENT_LABEL[s.payment_method]}{s.payment_amount ? ` — ${fmtRp(Number(s.payment_amount))}` : ''}{s.payment_due_date ? ` — jatuh tempo ${new Date(s.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
-                                  </span>
+                          <div key={s.id} className="px-4 py-2.5 text-sm">
+                            <div className="flex items-center gap-3">
+                              <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 shrink-0">{i + 1}</span>
+                              <span className="flex-1 text-slate-700">{s.logistics_stores?.name}</span>
+                              {s.status === 'failed' ? (
+                                <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600 font-medium">Gagal: {s.failed_reason}</span>
+                              ) : (
+                                <>
+                                  {s.payment_method && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+                                      {PAYMENT_LABEL[s.payment_method]}{s.payment_amount ? ` — ${fmtRp(Number(s.payment_amount))}` : ''}{s.payment_due_date ? ` — jatuh tempo ${new Date(s.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
+                                    </span>
+                                  )}
+                                  {s.incident_type !== 'tidak_ada' && (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+                                      {s.incident_type === 'salah_muat' ? 'Salah Muat' : 'Retur'}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                            {s.incident_description && (
+                              <p className="text-xs text-amber-600 mt-1 ml-8">{s.incident_description}</p>
+                            )}
+                            {(s.delivery_photo_url || s.payment_photo_url || s.incident_photo_url) && (
+                              <div className="flex gap-2 mt-2 ml-8">
+                                {s.delivery_photo_url && (
+                                  <a href={s.delivery_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Kirim">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={s.delivery_photo_url} alt="Bukti kirim" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                  </a>
                                 )}
-                                {s.incident_type !== 'tidak_ada' && (
-                                  <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-                                    {s.incident_type === 'salah_muat' ? 'Salah Muat' : 'Retur'}
-                                  </span>
+                                {s.payment_photo_url && (
+                                  <a href={s.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={s.payment_photo_url} alt="Bukti transfer" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                  </a>
                                 )}
-                              </>
+                                {s.incident_photo_url && (
+                                  <a href={s.incident_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Kejadian">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={s.incident_photo_url} alt="Foto kejadian" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                  </a>
+                                )}
+                              </div>
                             )}
                           </div>
                         ))}

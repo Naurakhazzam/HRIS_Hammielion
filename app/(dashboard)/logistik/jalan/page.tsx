@@ -32,11 +32,22 @@ type PlanStore = {
   store_id: string
   sequence_order: number
   status: string
+  delivery_photo_url: string | null
+  payment_method: PaymentMethod | null
+  payment_amount: number | null
+  payment_photo_url: string | null
+  payment_due_date: string | null
+  incident_type: 'tidak_ada' | 'salah_muat' | 'retur'
+  incident_photo_url: string | null
+  incident_description: string | null
+  failed_reason: string | null
   logistics_stores: { name: string; address: string | null; phone: string | null } | null
 }
 
 type ActionMode = null | 'kirim' | 'gagal' | 'tunda'
 type PaymentMethod = '' | 'cash' | 'transfer' | 'deposit' | 'tempo'
+
+const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
 
 const STATUS_LABEL: Record<string, string> = {
   ready: 'Siap Berangkat', departed: 'Sedang Jalan', closing: 'Menuju Garasi',
@@ -66,6 +77,14 @@ export default function JalanPengirimanPage() {
 
   // Form Gagal Kirim
   const [failedReason, setFailedReason] = useState('')
+
+  // Edit nominal/metode bayar toko yang SUDAH terkirim — untuk perbaiki salah ketik tanpa
+  // perlu ulang seluruh alur foto. Cuma boleh selama trip belum "Selesai Kirim" (completed).
+  const [editHistoryStore, setEditHistoryStore] = useState<PlanStore | null>(null)
+  const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>('')
+  const [editPaymentAmount, setEditPaymentAmount] = useState('')
+  const [editPaymentDueDate, setEditPaymentDueDate] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
 
   // Penutupan trip (box kosong -> jeda 30 menit -> lapor garasi)
   const [boxPhotoUrl, setBoxPhotoUrl] = useState('')
@@ -114,7 +133,10 @@ export default function JalanPengirimanPage() {
 
   async function fetchPlanStores(planId: string) {
     const { data } = await supabase.from('logistics_plan_stores')
-      .select('id, store_id, sequence_order, status, logistics_stores(name, address, phone)')
+      .select(`id, store_id, sequence_order, status, delivery_photo_url,
+        payment_method, payment_amount, payment_photo_url, payment_due_date,
+        incident_type, incident_photo_url, incident_description, failed_reason,
+        logistics_stores(name, address, phone)`)
       .eq('plan_id', planId).order('sequence_order')
     setPlanStores((data as unknown as PlanStore[]) || [])
   }
@@ -248,6 +270,39 @@ export default function JalanPengirimanPage() {
     setFailedReason('')
     await refresh()
     setSubmitting(false)
+  }
+
+  function openEditHistory(ps: PlanStore) {
+    setEditHistoryStore(ps)
+    setEditPaymentMethod(ps.payment_method || '')
+    setEditPaymentAmount(ps.payment_amount ? String(ps.payment_amount) : '')
+    setEditPaymentDueDate(ps.payment_due_date || '')
+  }
+
+  const canSubmitEditHistory = !!editPaymentMethod && (
+    editPaymentMethod === 'cash' || editPaymentMethod === 'deposit' ? (!!editPaymentAmount && Number(editPaymentAmount) > 0) :
+    editPaymentMethod === 'tempo' ? !!editPaymentDueDate :
+    editPaymentMethod === 'transfer' ? true : false
+  )
+
+  // Foto bukti transfer TIDAK diminta ulang di sini (fitur ini cuma untuk betulkan salah
+  // ketik nominal/metode/tanggal, bukan mengulang seluruh alur foto) — kalau metode diubah
+  // KE transfer padahal fotonya belum ada, tetap disimpan tanpa foto; kalau diubah DARI
+  // transfer, foto lama dibiarkan tersimpan di baris (tidak ditampilkan lagi karena metode
+  // sudah bukan transfer, tapi datanya tidak hilang kalau mau dikembalikan ke transfer lagi).
+  async function submitEditHistory() {
+    if (!editHistoryStore || !canSubmitEditHistory) return
+    setEditSaving(true)
+    const { error } = await supabase.from('logistics_plan_stores').update({
+      payment_method: editPaymentMethod || null,
+      payment_amount: (editPaymentMethod === 'cash' || editPaymentMethod === 'deposit') ? Number(editPaymentAmount) : null,
+      payment_due_date: editPaymentMethod === 'tempo' ? editPaymentDueDate : null,
+    }).eq('id', editHistoryStore.id).eq('status', 'delivered')
+    if (error) showMessage('error', 'Gagal menyimpan perubahan: ' + error.message)
+    else showMessage('success', 'Data pembayaran berhasil diperbarui.')
+    setEditHistoryStore(null)
+    await refresh()
+    setEditSaving(false)
   }
 
   async function submitTunda() {
@@ -535,16 +590,101 @@ export default function JalanPengirimanPage() {
               <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 text-sm font-bold text-slate-700">Riwayat Toko</div>
               <div className="divide-y divide-slate-100">
                 {planStores.filter(ps => ps.status !== 'pending').map(ps => (
-                  <div key={ps.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
-                    <span className="text-slate-700">{ps.logistics_stores?.name}</span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${ps.status === 'delivered' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                      {ps.status === 'delivered' ? 'Terkirim' : 'Gagal'}
-                    </span>
+                  <div key={ps.id} className="px-4 py-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-700 font-medium">{ps.logistics_stores?.name}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${ps.status === 'delivered' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                          {ps.status === 'delivered' ? 'Terkirim' : 'Gagal'}
+                        </span>
+                        {ps.status === 'delivered' && (
+                          <button onClick={() => openEditHistory(ps)} className="text-xs text-blue-600 hover:underline font-medium">Edit</button>
+                        )}
+                      </div>
+                    </div>
+
+                    {ps.status === 'failed' && ps.failed_reason && (
+                      <p className="text-xs text-red-600 mt-1">Alasan: {ps.failed_reason}</p>
+                    )}
+
+                    {ps.status === 'delivered' && ps.payment_method && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        {PAYMENT_LABEL[ps.payment_method]}
+                        {ps.payment_amount ? ` — ${fmtRp(Number(ps.payment_amount))}` : ''}
+                        {ps.payment_due_date ? ` — jatuh tempo ${new Date(ps.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
+                      </p>
+                    )}
+                    {ps.incident_type !== 'tidak_ada' && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        {ps.incident_type === 'salah_muat' ? 'Salah Muat' : 'Retur'}{ps.incident_description ? `: ${ps.incident_description}` : ''}
+                      </p>
+                    )}
+
+                    {(ps.delivery_photo_url || ps.payment_photo_url || ps.incident_photo_url) && (
+                      <div className="flex gap-2 mt-2">
+                        {ps.delivery_photo_url && (
+                          <a href={ps.delivery_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Kirim">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={ps.delivery_photo_url} alt="Bukti kirim" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          </a>
+                        )}
+                        {ps.payment_photo_url && (
+                          <a href={ps.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={ps.payment_photo_url} alt="Bukti transfer" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          </a>
+                        )}
+                        {ps.incident_photo_url && (
+                          <a href={ps.incident_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Kejadian">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={ps.incident_photo_url} alt="Foto kejadian" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          </a>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {editHistoryStore && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="font-semibold text-slate-800 mb-1">Edit Pembayaran</h3>
+            <p className="text-xs text-slate-500 mb-4">{editHistoryStore.logistics_stores?.name}</p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
+                  <button key={m} type="button" onClick={() => setEditPaymentMethod(m)}
+                    className={`py-2 rounded-lg text-sm font-medium border transition ${editPaymentMethod === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                    {PAYMENT_LABEL[m]}
+                  </button>
+                ))}
+              </div>
+              {(editPaymentMethod === 'cash' || editPaymentMethod === 'deposit') && (
+                <RupiahInput value={editPaymentAmount} onChange={setEditPaymentAmount}
+                  placeholder={editPaymentMethod === 'cash' ? 'Nominal cash diterima' : 'Nominal deposit'}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              )}
+              {editPaymentMethod === 'tempo' && (
+                <input type="date" value={editPaymentDueDate} onChange={e => setEditPaymentDueDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              )}
+              {editPaymentMethod === 'transfer' && (
+                <p className="text-xs text-slate-400">Foto bukti transfer yang sudah diunggah tidak berubah — cuma metode/nominal/tanggalnya yang bisa dikoreksi di sini.</p>
+              )}
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button type="button" onClick={() => setEditHistoryStore(null)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+              <button type="button" onClick={submitEditHistory} disabled={!canSubmitEditHistory || editSaving}
+                className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
+                {editSaving ? 'Menyimpan...' : 'Simpan'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
