@@ -51,6 +51,7 @@ const adminNavItems: NavNode[] = [
     href: '/portal',
     icon: '👤',
     submenu: [
+      { name: 'Dashboard Saya', href: '/portal' },
       { name: 'Profil Saya', href: '/portal/profil' },
       { name: 'Slip Gaji', href: '/portal/slip-gaji' },
       { name: 'Rekap Absensi', href: '/portal/absensi' },
@@ -223,6 +224,7 @@ const employeeNavItems: NavNode[] = [
     href: '/portal',
     icon: '👤',
     submenu: [
+      { name: 'Dashboard Saya', href: '/portal' },
       { name: 'Profil Saya', href: '/portal/profil' },
       { name: 'Slip Gaji', href: '/portal/slip-gaji' },
       { name: 'Rekap Absensi', href: '/portal/absensi' },
