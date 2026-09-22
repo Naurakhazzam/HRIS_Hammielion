@@ -284,9 +284,14 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
         if (data) {
           setUserRole(data.role)
           if (data.employee_id) {
-            supabase.from('employees').select('can_drive, can_help, positions(name)').eq('id', data.employee_id).single().then(({ data: emp }) => {
+            supabase.from('employees').select('employee_type, can_drive, can_help, positions(name)').eq('id', data.employee_id).single().then(({ data: emp }) => {
               if (emp) {
-                setIsDriverOrKenek(!!emp.can_drive || !!emp.can_help)
+                // Driver "asli" (employee_type='driver') belum tentu punya can_drive=true —
+                // kolom itu dibuat belakangan khusus untuk menandai karyawan LAIN yang bisa
+                // merangkap jadi driver, bukan buat driver aslinya sendiri. Samakan syaratnya
+                // dengan dropdown pemilihan driver di logistik/rencana (.or('employee_type.eq.
+                // driver,can_drive.eq.true')) supaya driver asli tidak kelewat di sidebar.
+                setIsDriverOrKenek(emp.employee_type === 'driver' || !!emp.can_drive || !!emp.can_help)
                 setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
               }
             })
