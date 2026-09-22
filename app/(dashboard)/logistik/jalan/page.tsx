@@ -72,6 +72,10 @@ export default function JalanPengirimanPage() {
   // selesaikan & konfirmasi 1 langkah sebelum lanjut ke langkah berikutnya:
   // 1=Foto Bukti Kirim, 2=Metode Pembayaran + konfirmasi ke toko, 3=Kejadian + kirim akhir.
   const [kirimStep, setKirimStep] = useState<1 | 2 | 3>(1)
+  // Muncul saat tombol "Lanjut ke Langkah 2" ditekan -- konfirmasi eksplisit dulu (bukan
+  // langsung pindah langkah) supaya driver benar-benar yakin semua barang toko ini sudah
+  // turun sebelum foto buktinya dianggap final.
+  const [showUnloadConfirm, setShowUnloadConfirm] = useState(false)
 
   // Form Kirim
   // Bukti Kirim boleh lebih dari 1 foto (barang yang dikirim ke 1 toko bisa banyak, 1 foto
@@ -173,7 +177,7 @@ export default function JalanPengirimanPage() {
   }
 
   function resetKirimForm() {
-    setKirimStep(1)
+    setKirimStep(1); setShowUnloadConfirm(false)
     setDeliveryPhotoUrls([]); setAddingDeliveryPhoto(false); setPaymentMethod(''); setPaymentAmount('')
     setPaymentPhotoUrl(''); setPaymentDueDate('')
     setIncidentType('tidak_ada'); setIncidentPhotoUrl(''); setIncidentDescription('')
@@ -514,13 +518,31 @@ export default function JalanPengirimanPage() {
                           + Tambah Foto Lagi
                         </button>
                       )}
-                      <div className="flex gap-2 pt-3">
-                        <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                        <button onClick={() => setKirimStep(2)} disabled={!canProceedStep1}
-                          className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
-                          Lanjut ke Langkah 2 →
-                        </button>
-                      </div>
+                      {showUnloadConfirm ? (
+                        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-xs text-blue-800 font-medium mb-2">
+                            ✋ Yakin barang di toko ini sudah turun semua?
+                          </p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => setShowUnloadConfirm(false)}
+                              className="py-2 border border-slate-300 bg-white text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50">
+                              Belum
+                            </button>
+                            <button type="button" onClick={() => { setKirimStep(2); setShowUnloadConfirm(false) }}
+                              className="py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition">
+                              Sudah, Lanjut →
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 pt-3">
+                          <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                          <button onClick={() => setShowUnloadConfirm(true)} disabled={!canProceedStep1}
+                            className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                            Lanjut ke Langkah 2 →
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
