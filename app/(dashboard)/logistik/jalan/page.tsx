@@ -68,6 +68,10 @@ export default function JalanPengirimanPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [actionMode, setActionMode] = useState<ActionMode>(null)
+  // Alur "Kirim" sekarang bertahap (wizard), bukan 1 layar isi semua sekaligus -- driver harus
+  // selesaikan & konfirmasi 1 langkah sebelum lanjut ke langkah berikutnya:
+  // 1=Foto Bukti Kirim, 2=Metode Pembayaran + konfirmasi ke toko, 3=Kejadian + kirim akhir.
+  const [kirimStep, setKirimStep] = useState<1 | 2 | 3>(1)
 
   // Form Kirim
   // Bukti Kirim boleh lebih dari 1 foto (barang yang dikirim ke 1 toko bisa banyak, 1 foto
@@ -169,6 +173,7 @@ export default function JalanPengirimanPage() {
   }
 
   function resetKirimForm() {
+    setKirimStep(1)
     setDeliveryPhotoUrls([]); setAddingDeliveryPhoto(false); setPaymentMethod(''); setPaymentAmount('')
     setPaymentPhotoUrl(''); setPaymentDueDate('')
     setIncidentType('tidak_ada'); setIncidentPhotoUrl(''); setIncidentDescription('')
@@ -240,12 +245,17 @@ export default function JalanPengirimanPage() {
     setSubmitting(false)
   }
 
-  const canSubmitKirim = deliveryPhotoUrls.length > 0 && !!paymentMethod && (
+  // Gerbang per-langkah wizard -- dipisah dari canSubmitKirim (gerbang akhir) supaya tiap
+  // langkah bisa divalidasi & dikonfirmasi sendiri sebelum lanjut ke langkah berikutnya.
+  const canProceedStep1 = deliveryPhotoUrls.length > 0
+  const canProceedStep2 = !!paymentMethod && (
     paymentMethod === 'cash' ? (!!paymentAmount && Number(paymentAmount) > 0) :
     paymentMethod === 'transfer' ? !!paymentPhotoUrl :
     paymentMethod === 'deposit' ? (!!paymentAmount && Number(paymentAmount) > 0) :
     paymentMethod === 'tempo' ? !!paymentDueDate : false
-  ) && (incidentType === 'tidak_ada' || (!!incidentPhotoUrl && incidentDescription.trim().length > 0))
+  )
+  const canSubmitKirim = canProceedStep1 && canProceedStep2 &&
+    (incidentType === 'tidak_ada' || (!!incidentPhotoUrl && incidentDescription.trim().length > 0))
 
   async function submitKirim() {
     if (!selectedStore || !canSubmitKirim) return
@@ -466,109 +476,156 @@ export default function JalanPengirimanPage() {
 
               {actionMode === 'kirim' && (
                 <div className="space-y-4 mt-2">
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase mb-2">
-                      1. Foto Bukti Kirim{deliveryPhotoUrls.length > 0 ? ` (${deliveryPhotoUrls.length} foto)` : ''}
-                    </p>
-                    {deliveryPhotoUrls.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {deliveryPhotoUrls.map((url, idx) => (
-                          <div key={idx} className="relative">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
-                            <button type="button" onClick={() => setDeliveryPhotoUrls(prev => prev.filter((_, i) => i !== idx))}
-                              className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-red-600 text-white rounded-full text-xs shadow">✕</button>
-                          </div>
+                  {/* Indikator langkah — supaya driver tahu lagi di tahap mana & masih berapa
+                      langkah lagi, bukan cuma langsung tenggelam di 1 form panjang. */}
+                  <div className="flex items-center gap-2">
+                    {[1, 2, 3].map(n => (
+                      <div key={n} className={`flex-1 h-1.5 rounded-full ${n <= kirimStep ? 'bg-blue-600' : 'bg-slate-100'}`} />
+                    ))}
+                  </div>
+
+                  {kirimStep === 1 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                        Langkah 1 — Foto Bukti Kirim{deliveryPhotoUrls.length > 0 ? ` (${deliveryPhotoUrls.length} foto)` : ''}
+                      </p>
+                      {deliveryPhotoUrls.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {deliveryPhotoUrls.map((url, idx) => (
+                            <div key={idx} className="relative">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+                              <button type="button" onClick={() => setDeliveryPhotoUrls(prev => prev.filter((_, i) => i !== idx))}
+                                className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-red-600 text-white rounded-full text-xs shadow">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {deliveryPhotoUrls.length === 0 || addingDeliveryPhoto ? (
+                        <LogisticsCameraCapture label="Foto Bukti Kirim" employeeName={myName}
+                          onCaptured={async blob => {
+                            const url = await uploadPhoto(blob, 'kirim')
+                            if (url) { setDeliveryPhotoUrls(prev => [...prev, url]); setAddingDeliveryPhoto(false) }
+                          }}
+                          onCancel={() => setAddingDeliveryPhoto(false)} />
+                      ) : (
+                        <button type="button" onClick={() => setAddingDeliveryPhoto(true)}
+                          className="w-full py-2 border border-dashed border-slate-300 text-slate-500 text-sm font-medium rounded-lg hover:bg-slate-50 transition">
+                          + Tambah Foto Lagi
+                        </button>
+                      )}
+                      <div className="flex gap-2 pt-3">
+                        <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                        <button onClick={() => setKirimStep(2)} disabled={!canProceedStep1}
+                          className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                          Lanjut ke Langkah 2 →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {kirimStep === 2 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Langkah 2 — Metode Pembayaran</p>
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
+                          <button key={m} type="button" onClick={() => setPaymentMethod(m)}
+                            className={`py-2 rounded-lg text-sm font-medium border transition ${paymentMethod === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                            {m === 'cash' ? 'Cash' : m === 'transfer' ? 'Transfer' : m === 'deposit' ? 'Deposit' : 'Tempo'}
+                          </button>
                         ))}
                       </div>
-                    )}
-                    {deliveryPhotoUrls.length === 0 || addingDeliveryPhoto ? (
-                      <LogisticsCameraCapture label="Foto Bukti Kirim" employeeName={myName}
-                        onCaptured={async blob => {
-                          const url = await uploadPhoto(blob, 'kirim')
-                          if (url) { setDeliveryPhotoUrls(prev => [...prev, url]); setAddingDeliveryPhoto(false) }
-                        }}
-                        onCancel={() => setAddingDeliveryPhoto(false)} />
-                    ) : (
-                      <button type="button" onClick={() => setAddingDeliveryPhoto(true)}
-                        className="w-full py-2 border border-dashed border-slate-300 text-slate-500 text-sm font-medium rounded-lg hover:bg-slate-50 transition">
-                        + Tambah Foto Lagi
-                      </button>
-                    )}
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase mb-2">2. Metode Pembayaran</p>
-                    <div className="grid grid-cols-2 gap-2 mb-3">
-                      {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
-                        <button key={m} type="button" onClick={() => setPaymentMethod(m)}
-                          className={`py-2 rounded-lg text-sm font-medium border transition ${paymentMethod === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
-                          {m === 'cash' ? 'Cash' : m === 'transfer' ? 'Transfer' : m === 'deposit' ? 'Deposit' : 'Tempo'}
-                        </button>
-                      ))}
-                    </div>
-                    {paymentMethod === 'cash' && (
-                      <RupiahInput value={paymentAmount} onChange={setPaymentAmount} placeholder="Nominal cash diterima"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                    )}
-                    {paymentMethod === 'deposit' && (
-                      <RupiahInput value={paymentAmount} onChange={setPaymentAmount} placeholder="Nominal deposit"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                    )}
-                    {paymentMethod === 'tempo' && (
-                      <input type="date" value={paymentDueDate} onChange={e => setPaymentDueDate(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                    )}
-                    {paymentMethod === 'transfer' && (
-                      paymentPhotoUrl ? (
-                        <div className="space-y-2">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={paymentPhotoUrl} alt="Bukti transfer" className="w-full rounded-lg aspect-[4/3] object-cover" />
-                          <button onClick={() => setPaymentPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
-                        </div>
-                      ) : (
-                        <LogisticsCameraCapture label="Foto Bukti Transfer" employeeName={myName}
-                          onCaptured={async blob => { const url = await uploadPhoto(blob, 'transfer'); if (url) setPaymentPhotoUrl(url) }} />
-                      )
-                    )}
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase mb-2">3. Kejadian</p>
-                    <div className="grid grid-cols-3 gap-2 mb-3">
-                      {(['tidak_ada', 'salah_muat', 'retur'] as const).map(k => (
-                        <button key={k} type="button" onClick={() => setIncidentType(k)}
-                          className={`py-2 rounded-lg text-xs font-medium border transition ${incidentType === k ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
-                          {k === 'tidak_ada' ? 'Tidak Ada' : k === 'salah_muat' ? 'Salah Muat' : 'Retur'}
-                        </button>
-                      ))}
-                    </div>
-                    {incidentType !== 'tidak_ada' && (
-                      <div className="space-y-2">
-                        {incidentPhotoUrl ? (
+                      {paymentMethod === 'cash' && (
+                        <RupiahInput value={paymentAmount} onChange={setPaymentAmount} placeholder="Nominal cash diterima"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      )}
+                      {paymentMethod === 'deposit' && (
+                        <RupiahInput value={paymentAmount} onChange={setPaymentAmount} placeholder="Nominal deposit"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      )}
+                      {paymentMethod === 'tempo' && (
+                        <input type="date" value={paymentDueDate} onChange={e => setPaymentDueDate(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      )}
+                      {paymentMethod === 'transfer' && (
+                        paymentPhotoUrl ? (
                           <div className="space-y-2">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={incidentPhotoUrl} alt="Foto kejadian" className="w-full rounded-lg aspect-[4/3] object-cover" />
-                            <button onClick={() => setIncidentPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                            <img src={paymentPhotoUrl} alt="Bukti transfer" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                            <button onClick={() => setPaymentPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
                           </div>
                         ) : (
-                          <LogisticsCameraCapture label="Foto Kejadian" employeeName={myName}
-                            onCaptured={async blob => { const url = await uploadPhoto(blob, 'kejadian'); if (url) setIncidentPhotoUrl(url) }} />
-                        )}
-                        <textarea value={incidentDescription} onChange={e => setIncidentDescription(e.target.value)}
-                          placeholder="Keterangan kejadian..." rows={3}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
-                      </div>
-                    )}
-                  </div>
+                          <LogisticsCameraCapture label="Foto Bukti Transfer" employeeName={myName}
+                            onCaptured={async blob => { const url = await uploadPhoto(blob, 'transfer'); if (url) setPaymentPhotoUrl(url) }} />
+                        )
+                      )}
 
-                  <div className="flex gap-2 pt-2">
-                    <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                    <button onClick={submitKirim} disabled={!canSubmitKirim || submitting}
-                      className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
-                      {submitting ? 'Menyimpan...' : 'Toko Selesai'}
-                    </button>
-                  </div>
+                      {canProceedStep2 && (
+                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-xs text-blue-800 font-medium mb-2">
+                            ✋ Sebelum lanjut — sudah dikonfirmasi ke toko, barang yang diterima sudah benar & lengkap?
+                          </p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => showMessage('error', 'Konfirmasi dulu ke toko sebelum lanjut ke Langkah 3.')}
+                              className="py-2 border border-slate-300 bg-white text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50">
+                              Belum
+                            </button>
+                            <button type="button" onClick={() => setKirimStep(3)}
+                              className="py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition">
+                              Ya, Lanjut →
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex gap-2 pt-3">
+                        <button onClick={() => setKirimStep(1)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">← Kembali</button>
+                        <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {kirimStep === 3 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Langkah 3 — Kejadian</p>
+                      <p className="text-xs text-slate-400 mb-2">Ada barang retur atau salah muat di toko ini?</p>
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {(['tidak_ada', 'salah_muat', 'retur'] as const).map(k => (
+                          <button key={k} type="button" onClick={() => setIncidentType(k)}
+                            className={`py-2 rounded-lg text-xs font-medium border transition ${incidentType === k ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                            {k === 'tidak_ada' ? 'Tidak Ada' : k === 'salah_muat' ? 'Salah Muat' : 'Retur'}
+                          </button>
+                        ))}
+                      </div>
+                      {incidentType !== 'tidak_ada' && (
+                        <div className="space-y-2">
+                          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                            Wajib foto dan tulis keterangan sebelum bisa lanjut.
+                          </p>
+                          {incidentPhotoUrl ? (
+                            <div className="space-y-2">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={incidentPhotoUrl} alt="Foto kejadian" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                              <button onClick={() => setIncidentPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                            </div>
+                          ) : (
+                            <LogisticsCameraCapture label="Foto Kejadian" employeeName={myName}
+                              onCaptured={async blob => { const url = await uploadPhoto(blob, 'kejadian'); if (url) setIncidentPhotoUrl(url) }} />
+                          )}
+                          <textarea value={incidentDescription} onChange={e => setIncidentDescription(e.target.value)}
+                            placeholder="Keterangan kejadian..." rows={3}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 pt-3">
+                        <button onClick={() => setKirimStep(2)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">← Kembali</button>
+                        <button onClick={submitKirim} disabled={!canSubmitKirim || submitting}
+                          className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                          {submitting ? 'Menyimpan...' : incidentType === 'tidak_ada' ? 'Pengiriman Selesai' : 'Kirim & Selesaikan'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
