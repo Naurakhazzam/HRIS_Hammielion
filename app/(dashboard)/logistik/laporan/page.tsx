@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr } from '@/lib/date'
 
 type Plan = {
   id: string
@@ -45,7 +46,7 @@ export default function LaporanPengirimanPage() {
     setLoading(true)
     const [year, month] = filterMonth.split('-').map(Number)
     const startDate = `${filterMonth}-01`
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+    const endDate = localDateStr(new Date(year, month, 0))
 
     const { data: planData } = await supabase
       .from('logistics_delivery_plans')
