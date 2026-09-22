@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import { usePhotoLightbox, isImageUrl } from '@/components/PhotoLightbox'
 
 type LeaveRequest = {
   id: string
@@ -31,6 +32,7 @@ function isLateNotice(req: Pick<LeaveRequest, 'leave_type' | 'start_date' | 'cre
 }
 
 export default function CutiIzinPage() {
+  const { openLightbox } = usePhotoLightbox()
   const [requests, setRequests] = useState<LeaveRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState('')
@@ -246,7 +248,11 @@ export default function CutiIzinPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-sm font-medium text-blue-700">{translateLeaveType(req.leave_type)}</div>
-                      {req.document_url && (
+                      {req.document_url && isImageUrl(req.document_url) ? (
+                        <button type="button" onClick={() => openLightbox(req.document_url!, 'Surat cuti/izin')} className="text-xs text-blue-500 hover:underline inline-flex items-center gap-1 mt-1">
+                          📎 Lihat Surat
+                        </button>
+                      ) : req.document_url && (
                         <a href={req.document_url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline inline-flex items-center gap-1 mt-1">
                           📎 Lihat Surat
                         </a>

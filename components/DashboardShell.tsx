@@ -7,6 +7,7 @@ import Sidebar from './sidebar'
 import ThemeToggle from './ThemeToggle'
 import NotifikasiBell from './NotifikasiBell'
 import { isPreviewModeClient, setPreviewMode } from '@/lib/previewMode'
+import { PhotoLightboxProvider } from './PhotoLightbox'
 
 export default function DashboardShell({ children, userEmail }: { children: React.ReactNode; userEmail: string }) {
   // null = belum disentuh user, ikuti perilaku bawaan (tampil di layar >=768px, sembunyi di bawahnya).
@@ -39,6 +40,7 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
   }
 
   return (
+    <PhotoLightboxProvider>
     <div className="min-h-screen bg-slate-50 flex flex-col print:block print:h-auto print:min-h-0">
       {/* Navbar */}
       <nav className="bg-white border-b border-slate-200 px-4 sm:px-6 z-30 sticky top-0 print:hidden">
@@ -129,5 +131,6 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
         </main>
       </div>
     </div>
+    </PhotoLightboxProvider>
   )
 }

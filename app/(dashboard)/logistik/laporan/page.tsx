@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr } from '@/lib/date'
 import RupiahInput from '@/components/RupiahInput'
+import { usePhotoLightbox } from '@/components/PhotoLightbox'
 
 type Plan = {
   id: string
@@ -51,6 +52,7 @@ const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency',
 
 export default function LaporanPengirimanPage() {
   const supabase = createClient()
+  const { openLightbox } = usePhotoLightbox()
   const [loading, setLoading] = useState(true)
   const [canView, setCanView] = useState(false)
   // Verifikasi kas fisik cuma untuk tim kantor (Owner/HR/Finance) -- beda dari canView, karena
@@ -275,18 +277,18 @@ export default function LaporanPengirimanPage() {
                             <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Penutupan Trip{p.needs_refuel ? ' — ⛽ Perlu Isi Bensin' : ''}</p>
                             <div className="flex gap-3">
                               {p.box_photo_url && (
-                                <a href={p.box_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Box Kosong" className="flex flex-col items-center gap-1">
+                                <button type="button" onClick={() => openLightbox(p.box_photo_url!, 'Foto box kosong')} title="Foto Box Kosong" className="flex flex-col items-center gap-1">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={p.box_photo_url} alt="Foto box kosong" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                                   <span className="text-[10px] text-slate-500 font-medium">Box Kosong</span>
-                                </a>
+                                </button>
                               )}
                               {p.garage_photo_url && (
-                                <a href={p.garage_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Amper Bensin" className="flex flex-col items-center gap-1">
+                                <button type="button" onClick={() => openLightbox(p.garage_photo_url!, 'Foto amper bensin')} title="Foto Amper Bensin" className="flex flex-col items-center gap-1">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={p.garage_photo_url} alt="Foto amper bensin" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                                   <span className="text-[10px] text-slate-500 font-medium">Amper Bensin</span>
-                                </a>
+                                </button>
                               )}
                             </div>
                           </div>
@@ -321,25 +323,25 @@ export default function LaporanPengirimanPage() {
                             {((s.delivery_photo_urls && s.delivery_photo_urls.length > 0) || s.payment_photo_url || s.incident_photo_url) && (
                               <div className="flex gap-3 mt-2 ml-8 flex-wrap">
                                 {s.delivery_photo_urls?.map((url, idx) => (
-                                  <a key={idx} href={url} target="_blank" rel="noopener noreferrer" title={`Bukti Kirim ${idx + 1}`} className="flex flex-col items-center gap-1">
+                                  <button key={idx} type="button" onClick={() => openLightbox(url, `Bukti kirim ${idx + 1}`)} title={`Bukti Kirim ${idx + 1}`} className="flex flex-col items-center gap-1">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                                     <span className="text-[10px] text-slate-500 font-medium">Bukti Kirim{s.delivery_photo_urls!.length > 1 ? ` ${idx + 1}` : ''}</span>
-                                  </a>
+                                  </button>
                                 ))}
                                 {s.payment_photo_url && (
-                                  <a href={s.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer" className="flex flex-col items-center gap-1">
+                                  <button type="button" onClick={() => openLightbox(s.payment_photo_url!, 'Bukti transfer')} title="Bukti Transfer" className="flex flex-col items-center gap-1">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img src={s.payment_photo_url} alt="Bukti transfer" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                                     <span className="text-[10px] text-slate-500 font-medium">Bukti Transfer</span>
-                                  </a>
+                                  </button>
                                 )}
                                 {s.incident_photo_url && (
-                                  <a href={s.incident_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Kejadian" className="flex flex-col items-center gap-1">
+                                  <button type="button" onClick={() => openLightbox(s.incident_photo_url!, 'Foto kejadian')} title="Foto Kejadian" className="flex flex-col items-center gap-1">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img src={s.incident_photo_url} alt="Foto kejadian" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                                     <span className="text-[10px] text-slate-500 font-medium">Foto Kejadian</span>
-                                  </a>
+                                  </button>
                                 )}
                               </div>
                             )}

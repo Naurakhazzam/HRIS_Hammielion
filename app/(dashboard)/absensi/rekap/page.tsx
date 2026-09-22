@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { triggerDailyPhotoCleanup } from '@/lib/photoCleanup'
+import { usePhotoLightbox } from '@/components/PhotoLightbox'
 
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
@@ -44,6 +45,7 @@ type EditLog = {
 
 export default function RekapAbsensiPage() {
   const supabase = createClient()
+  const { openLightbox } = usePhotoLightbox()
   const [attendances, setAttendances] = useState<Attendance[]>([])
   // Penanda permintaan terbaru — supaya kalau beberapa filter diganti cepat berturut-turut,
   // hasil dari permintaan LAMA yang kebetulan selesai belakangan tidak menimpa hasil yang baru.
@@ -762,11 +764,11 @@ export default function RekapAbsensiPage() {
                         </td>
                         <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">
                           {fmtTs(att.check_in)}
-                          {att.check_in_photo_url && <a href={att.check_in_photo_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</a>}
+                          {att.check_in_photo_url && <button type="button" onClick={() => openLightbox(att.check_in_photo_url!, 'Foto absen masuk')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</button>}
                         </td>
                         <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">
                           {fmtTs(att.check_out)}
-                          {att.check_out_photo_url && <a href={att.check_out_photo_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</a>}
+                          {att.check_out_photo_url && <button type="button" onClick={() => openLightbox(att.check_out_photo_url!, 'Foto absen pulang')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</button>}
                         </td>
                         <td className="px-4 py-3 text-center">
                           {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}
@@ -820,11 +822,11 @@ export default function RekapAbsensiPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">
                         {fmtTs(att.check_in)}
-                        {att.check_in_photo_url && <a href={att.check_in_photo_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</a>}
+                        {att.check_in_photo_url && <button type="button" onClick={() => openLightbox(att.check_in_photo_url!, 'Foto absen masuk')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</button>}
                       </td>
                       <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">
                         {fmtTs(att.check_out)}
-                        {att.check_out_photo_url && <a href={att.check_out_photo_url} target="_blank" rel="noopener noreferrer" className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</a>}
+                        {att.check_out_photo_url && <button type="button" onClick={() => openLightbox(att.check_out_photo_url!, 'Foto absen pulang')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</button>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import LogisticsCameraCapture from '@/components/LogisticsCameraCapture'
+import { usePhotoLightbox } from '@/components/PhotoLightbox'
 import { toWaLink } from '@/lib/whatsapp'
 
 type PlanSummary = {
@@ -55,6 +56,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function JalanPengirimanPage() {
   const supabase = createClient()
+  const { openLightbox } = usePhotoLightbox()
   const [loading, setLoading] = useState(true)
   const [myEmployeeId, setMyEmployeeId] = useState('')
   const [myName, setMyName] = useState('')
@@ -781,25 +783,25 @@ export default function JalanPengirimanPage() {
                     {((ps.delivery_photo_urls && ps.delivery_photo_urls.length > 0) || ps.payment_photo_url || ps.incident_photo_url) && (
                       <div className="flex gap-3 mt-2 flex-wrap">
                         {ps.delivery_photo_urls?.map((url, idx) => (
-                          <a key={idx} href={url} target="_blank" rel="noopener noreferrer" title={`Bukti Kirim ${idx + 1}`} className="flex flex-col items-center gap-1">
+                          <button key={idx} type="button" onClick={() => openLightbox(url, `Bukti kirim ${idx + 1}`)} title={`Bukti Kirim ${idx + 1}`} className="flex flex-col items-center gap-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                             <span className="text-[10px] text-slate-500 font-medium">Bukti Kirim{ps.delivery_photo_urls!.length > 1 ? ` ${idx + 1}` : ''}</span>
-                          </a>
+                          </button>
                         ))}
                         {ps.payment_photo_url && (
-                          <a href={ps.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer" className="flex flex-col items-center gap-1">
+                          <button type="button" onClick={() => openLightbox(ps.payment_photo_url!, 'Bukti transfer')} title="Bukti Transfer" className="flex flex-col items-center gap-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={ps.payment_photo_url} alt="Bukti transfer" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                             <span className="text-[10px] text-slate-500 font-medium">Bukti Transfer</span>
-                          </a>
+                          </button>
                         )}
                         {ps.incident_photo_url && (
-                          <a href={ps.incident_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Kejadian" className="flex flex-col items-center gap-1">
+                          <button type="button" onClick={() => openLightbox(ps.incident_photo_url!, 'Foto kejadian')} title="Foto Kejadian" className="flex flex-col items-center gap-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={ps.incident_photo_url} alt="Foto kejadian" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                             <span className="text-[10px] text-slate-500 font-medium">Foto Kejadian</span>
-                          </a>
+                          </button>
                         )}
                       </div>
                     )}
