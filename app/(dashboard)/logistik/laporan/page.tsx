@@ -273,17 +273,19 @@ export default function LaporanPengirimanPage() {
                         {(p.box_photo_url || p.garage_photo_url) && (
                           <div className="px-4 py-2.5">
                             <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Penutupan Trip{p.needs_refuel ? ' — ⛽ Perlu Isi Bensin' : ''}</p>
-                            <div className="flex gap-2">
+                            <div className="flex gap-3">
                               {p.box_photo_url && (
-                                <a href={p.box_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Box Kosong">
+                                <a href={p.box_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Box Kosong" className="flex flex-col items-center gap-1">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={p.box_photo_url} alt="Foto box kosong" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                  <span className="text-[10px] text-slate-500 font-medium">Box Kosong</span>
                                 </a>
                               )}
                               {p.garage_photo_url && (
-                                <a href={p.garage_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Amper Bensin">
+                                <a href={p.garage_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Amper Bensin" className="flex flex-col items-center gap-1">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={p.garage_photo_url} alt="Foto amper bensin" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                  <span className="text-[10px] text-slate-500 font-medium">Amper Bensin</span>
                                 </a>
                               )}
                             </div>
@@ -317,23 +319,26 @@ export default function LaporanPengirimanPage() {
                               <p className="text-xs text-amber-600 mt-1 ml-8">{s.incident_description}</p>
                             )}
                             {(s.delivery_photo_url || s.payment_photo_url || s.incident_photo_url) && (
-                              <div className="flex gap-2 mt-2 ml-8">
+                              <div className="flex gap-3 mt-2 ml-8">
                                 {s.delivery_photo_url && (
-                                  <a href={s.delivery_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Kirim">
+                                  <a href={s.delivery_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Kirim" className="flex flex-col items-center gap-1">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img src={s.delivery_photo_url} alt="Bukti kirim" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                    <span className="text-[10px] text-slate-500 font-medium">Bukti Kirim</span>
                                   </a>
                                 )}
                                 {s.payment_photo_url && (
-                                  <a href={s.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer">
+                                  <a href={s.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer" className="flex flex-col items-center gap-1">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img src={s.payment_photo_url} alt="Bukti transfer" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                    <span className="text-[10px] text-slate-500 font-medium">Bukti Transfer</span>
                                   </a>
                                 )}
                                 {s.incident_photo_url && (
-                                  <a href={s.incident_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Kejadian">
+                                  <a href={s.incident_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Kejadian" className="flex flex-col items-center gap-1">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img src={s.incident_photo_url} alt="Foto kejadian" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                    <span className="text-[10px] text-slate-500 font-medium">Foto Kejadian</span>
                                   </a>
                                 )}
                               </div>

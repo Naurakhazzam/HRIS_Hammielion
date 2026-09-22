@@ -679,23 +679,26 @@ export default function JalanPengirimanPage() {
                     )}
 
                     {(ps.delivery_photo_url || ps.payment_photo_url || ps.incident_photo_url) && (
-                      <div className="flex gap-2 mt-2">
+                      <div className="flex gap-3 mt-2">
                         {ps.delivery_photo_url && (
-                          <a href={ps.delivery_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Kirim">
+                          <a href={ps.delivery_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Kirim" className="flex flex-col items-center gap-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={ps.delivery_photo_url} alt="Bukti kirim" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                            <span className="text-[10px] text-slate-500 font-medium">Bukti Kirim</span>
                           </a>
                         )}
                         {ps.payment_photo_url && (
-                          <a href={ps.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer">
+                          <a href={ps.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer" className="flex flex-col items-center gap-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={ps.payment_photo_url} alt="Bukti transfer" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                            <span className="text-[10px] text-slate-500 font-medium">Bukti Transfer</span>
                           </a>
                         )}
                         {ps.incident_photo_url && (
-                          <a href={ps.incident_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Kejadian">
+                          <a href={ps.incident_photo_url} target="_blank" rel="noopener noreferrer" title="Foto Kejadian" className="flex flex-col items-center gap-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={ps.incident_photo_url} alt="Foto kejadian" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                            <span className="text-[10px] text-slate-500 font-medium">Foto Kejadian</span>
                           </a>
                         )}
                       </div>
