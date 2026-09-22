@@ -167,9 +167,13 @@ export default function PortalDashboardPage() {
     ? Number(payroll.late_deduction || 0) + Number(payroll.kasbon_deduction || 0) + Number(payroll.loyalitas_deduction || 0)
       + Number(payroll.inventory_loss_deduction || 0) + Number(payroll.cashier_loss_deduction || 0) + Number(payroll.absent_deduction || 0)
     : 0
-  const totalTambahan = payroll
-    ? Number(payroll.overtime_total || 0) + Number(payroll.kpi_bonus || 0) + Number(payroll.conditional_bonus || 0)
-      + Number(payroll.extra_bonus_total || 0) + Number(payroll.loyalitas_auto_release || 0)
+  // Sengaja tidak menghitung bonus (kpi_bonus, conditional_bonus, extra_bonus_total,
+  // loyalitas_auto_release) di sini -- Owner minta dashboard tidak menampilkan komponen bonus
+  // sama sekali, walau nominalnya sudah benar-benar dibayarkan di slip aslinya.
+  const totalLembur = payroll ? Number(payroll.overtime_total || 0) : 0
+  const totalGajiTetap = payroll
+    ? Number(payroll.base_salary || 0) + Number(payroll.position_allowance || 0) + Number(payroll.meal_allowance || 0)
+      + Number(payroll.special_allowance || 0) + totalLembur
     : 0
 
   const eligible = leaveInfo.joinDate ? isEligibleForAnnualLeave(leaveInfo.joinDate) : false
@@ -201,7 +205,7 @@ export default function PortalDashboardPage() {
               <p className="text-3xl font-bold text-blue-600">{fmtRp(payroll.net_total)}</p>
               <p className="text-xs text-slate-400 mt-0.5">Gaji bersih diterima</p>
               <div className="flex justify-between mt-3 pt-3 border-t border-slate-100 text-xs">
-                <span className="text-emerald-600">+ {fmtRp(totalTambahan)} tambahan</span>
+                <span className="text-emerald-600">+ {fmtRp(totalLembur)} lembur</span>
                 <span className="text-red-500">- {fmtRp(totalPotongan)} potongan</span>
               </div>
             </>
@@ -219,18 +223,14 @@ export default function PortalDashboardPage() {
           ) : (
             <>
               <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[payroll.period_month - 1]} {payroll.period_year}</p>
-              <p className="text-3xl font-bold text-emerald-600">{fmtRp(payroll.gross_total)}</p>
-              <p className="text-xs text-slate-400 mt-0.5">Total kotor (sebelum potongan)</p>
+              <p className="text-3xl font-bold text-emerald-600">{fmtRp(totalGajiTetap)}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Gaji pokok, tunjangan &amp; lembur (di luar bonus)</p>
               <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
                 <div className="flex justify-between"><span>Gaji Pokok</span><span className="font-medium">{fmtRp(Number(payroll.base_salary))}</span></div>
                 {Number(payroll.position_allowance) > 0 && <div className="flex justify-between"><span>Tunjangan Jabatan</span><span className="font-medium">{fmtRp(Number(payroll.position_allowance))}</span></div>}
                 {Number(payroll.meal_allowance) > 0 && <div className="flex justify-between"><span>Tunjangan Tetap</span><span className="font-medium">{fmtRp(Number(payroll.meal_allowance))}</span></div>}
                 {Number(payroll.special_allowance) > 0 && <div className="flex justify-between"><span>Tunjangan Khusus</span><span className="font-medium">{fmtRp(Number(payroll.special_allowance))}</span></div>}
                 {Number(payroll.overtime_total) > 0 && <div className="flex justify-between"><span>Upah Lembur</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.overtime_total))}</span></div>}
-                {Number(payroll.kpi_bonus) > 0 && <div className="flex justify-between"><span>Bonus KPI</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.kpi_bonus))}</span></div>}
-                {Number(payroll.conditional_bonus) > 0 && <div className="flex justify-between"><span>Bonus Kondisional</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.conditional_bonus))}</span></div>}
-                {Number(payroll.extra_bonus_total) > 0 && <div className="flex justify-between"><span>Bonus Tambahan</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.extra_bonus_total))}</span></div>}
-                {Number(payroll.loyalitas_auto_release) > 0 && <div className="flex justify-between"><span>Pencairan Loyalitas</span><span className="font-medium text-emerald-600">+{fmtRp(Number(payroll.loyalitas_auto_release))}</span></div>}
               </div>
             </>
           )}
