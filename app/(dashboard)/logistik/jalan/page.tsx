@@ -44,7 +44,7 @@ type PlanStore = {
   logistics_stores: { name: string; address: string | null; phone: string | null } | null
 }
 
-type ActionMode = null | 'kirim' | 'gagal' | 'tunda'
+type ActionMode = null | 'kirim' | 'gagal'
 type PaymentMethod = '' | 'cash' | 'transfer' | 'deposit' | 'tempo'
 
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
@@ -61,6 +61,10 @@ export default function JalanPengirimanPage() {
   const [plans, setPlans] = useState<PlanSummary[]>([])
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
   const [planStores, setPlanStores] = useState<PlanStore[]>([])
+  // Toko TIDAK wajib dikerjakan berurutan — driver bebas pilih toko mana saja dari daftar
+  // yang tersisa (sequence_order cuma dipakai sebagai nomor referensi urutan rencana awal,
+  // bukan aturan yang mengunci). null = belum pilih, tampilkan daftar toko yang bisa dipilih.
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [actionMode, setActionMode] = useState<ActionMode>(null)
@@ -99,7 +103,7 @@ export default function JalanPengirimanPage() {
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId) || null
   const pendingStores = planStores.filter(ps => ps.status === 'pending').sort((a, b) => a.sequence_order - b.sequence_order)
-  const activeStore = pendingStores[0] || null
+  const selectedStore = pendingStores.find(ps => ps.id === selectedStoreId) || null
   const allResolved = planStores.length > 0 && pendingStores.length === 0
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -165,8 +169,8 @@ export default function JalanPengirimanPage() {
   }
 
   async function uploadPhoto(blob: Blob, tag: string): Promise<string | null> {
-    if (!selectedPlan || !activeStore) return null
-    const path = `${selectedPlan.id}/${activeStore.id}-${tag}-${Date.now()}.jpg`
+    if (!selectedPlan || !selectedStore) return null
+    const path = `${selectedPlan.id}/${selectedStore.id}-${tag}-${Date.now()}.jpg`
     const { error } = await supabase.storage.from('logistics-photos').upload(path, blob, { contentType: 'image/jpeg' })
     if (error) { showMessage('error', 'Gagal unggah foto: ' + error.message); return null }
     const { data } = supabase.storage.from('logistics-photos').getPublicUrl(path)
@@ -232,7 +236,7 @@ export default function JalanPengirimanPage() {
   ) && (incidentType === 'tidak_ada' || (!!incidentPhotoUrl && incidentDescription.trim().length > 0))
 
   async function submitKirim() {
-    if (!activeStore || !canSubmitKirim) return
+    if (!selectedStore || !canSubmitKirim) return
     setSubmitting(true)
     const { data, error } = await supabase.from('logistics_plan_stores').update({
       status: 'delivered',
@@ -246,27 +250,29 @@ export default function JalanPengirimanPage() {
       incident_description: incidentType !== 'tidak_ada' ? incidentDescription.trim() : null,
       resolved_by: myEmployeeId,
       resolved_at: new Date().toISOString(),
-    }).eq('id', activeStore.id).eq('status', 'pending').select('id')
+    }).eq('id', selectedStore.id).eq('status', 'pending').select('id')
 
     if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); return }
     if (!data || data.length === 0) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
-    else showMessage('success', `Toko "${activeStore.logistics_stores?.name}" selesai dikirim.`)
+    else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" selesai dikirim.`)
     setActionMode(null)
+    setSelectedStoreId(null)
     resetKirimForm()
     await refresh()
     setSubmitting(false)
   }
 
   async function submitGagal() {
-    if (!activeStore || !failedReason.trim()) return
+    if (!selectedStore || !failedReason.trim()) return
     setSubmitting(true)
     const { data, error } = await supabase.from('logistics_plan_stores').update({
       status: 'failed', failed_reason: failedReason.trim(), resolved_by: myEmployeeId, resolved_at: new Date().toISOString(),
-    }).eq('id', activeStore.id).eq('status', 'pending').select('id')
+    }).eq('id', selectedStore.id).eq('status', 'pending').select('id')
     if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); return }
     if (!data || data.length === 0) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
-    else showMessage('success', `Toko "${activeStore.logistics_stores?.name}" ditandai gagal kirim.`)
+    else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" ditandai gagal kirim.`)
     setActionMode(null)
+    setSelectedStoreId(null)
     setFailedReason('')
     await refresh()
     setSubmitting(false)
@@ -303,17 +309,6 @@ export default function JalanPengirimanPage() {
     setEditHistoryStore(null)
     await refresh()
     setEditSaving(false)
-  }
-
-  async function submitTunda() {
-    if (!activeStore) return
-    setSubmitting(true)
-    const { error } = await supabase.rpc('tunda_toko', { p_plan_store_id: activeStore.id })
-    if (error) showMessage('error', 'Gagal menunda: ' + error.message)
-    else showMessage('success', `Toko "${activeStore.logistics_stores?.name}" ditunda, akan muncul lagi setelah toko berikutnya.`)
-    setActionMode(null)
-    await refresh()
-    setSubmitting(false)
   }
 
   return (
@@ -364,15 +359,38 @@ export default function JalanPengirimanPage() {
             </button>
           )}
 
-          {selectedPlan?.status === 'departed' && !allResolved && activeStore && (
+          {selectedPlan?.status === 'departed' && !allResolved && !selectedStore && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+                <p className="text-sm font-bold text-slate-700">Pilih Toko ({pendingStores.length} tersisa)</p>
+                <p className="text-xs text-slate-400 mt-0.5">Bebas pilih toko mana saja, tidak harus berurutan. Nomor cuma referensi urutan rencana awal.</p>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {pendingStores.map(ps => (
+                  <button key={ps.id} onClick={() => setSelectedStoreId(ps.id)}
+                    className="w-full text-left px-4 py-3 hover:bg-blue-50/50 transition flex items-center gap-3">
+                    <span className="w-6 h-6 flex items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 shrink-0">{ps.sequence_order}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{ps.logistics_stores?.name}</p>
+                      {ps.logistics_stores?.address && <p className="text-xs text-slate-400 truncate">{ps.logistics_stores.address}</p>}
+                    </div>
+                    <span className="text-slate-300">›</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedPlan?.status === 'departed' && !allResolved && selectedStore && (
             <div className="bg-white rounded-xl border-2 border-blue-200 p-5">
-              <p className="text-xs text-slate-500 mb-1">Toko Aktif ({planStores.findIndex(ps => ps.id === activeStore.id) + 1} dari {planStores.length})</p>
-              <h2 className="text-lg font-bold text-slate-800 mb-1">{activeStore.logistics_stores?.name}</h2>
-              {activeStore.logistics_stores?.address && <p className="text-sm text-slate-500 mb-2">{activeStore.logistics_stores.address}</p>}
-              {activeStore.logistics_stores?.phone ? (
-                <a href={toWaLink(activeStore.logistics_stores.phone)} target="_blank" rel="noopener noreferrer"
+              <button onClick={() => { setSelectedStoreId(null); setActionMode(null) }} className="text-xs text-blue-600 hover:underline mb-2">← Pilih Toko Lain</button>
+              <p className="text-xs text-slate-500 mb-1">Toko #{selectedStore.sequence_order} · {pendingStores.length} toko tersisa</p>
+              <h2 className="text-lg font-bold text-slate-800 mb-1">{selectedStore.logistics_stores?.name}</h2>
+              {selectedStore.logistics_stores?.address && <p className="text-sm text-slate-500 mb-2">{selectedStore.logistics_stores.address}</p>}
+              {selectedStore.logistics_stores?.phone ? (
+                <a href={toWaLink(selectedStore.logistics_stores.phone)} target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 text-xs font-semibold rounded-lg transition">
-                  💬 Hubungi via WhatsApp — {activeStore.logistics_stores.phone}
+                  💬 Hubungi via WhatsApp — {selectedStore.logistics_stores.phone}
                 </a>
               ) : (
                 <p className="inline-flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-400 text-xs font-medium rounded-lg">
@@ -381,10 +399,9 @@ export default function JalanPengirimanPage() {
               )}
 
               {!actionMode && (
-                <div className="grid grid-cols-3 gap-2 mt-4">
+                <div className="grid grid-cols-2 gap-2 mt-4">
                   <button onClick={() => openAction('kirim')} className="py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition">Kirim</button>
                   <button onClick={() => openAction('gagal')} className="py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition">Gagal Kirim</button>
-                  <button onClick={() => openAction('tunda')} className="py-2.5 border border-amber-300 text-amber-700 hover:bg-amber-50 text-sm font-semibold rounded-lg transition">Tunda</button>
                 </div>
               )}
 
@@ -501,20 +518,6 @@ export default function JalanPengirimanPage() {
                 </div>
               )}
 
-              {actionMode === 'tunda' && (
-                <div className="space-y-3 mt-2">
-                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
-                    Toko ini akan ditunda — muncul lagi setelah toko berikutnya selesai diproses.
-                  </p>
-                  <div className="flex gap-2">
-                    <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                    <button onClick={submitTunda} disabled={submitting}
-                      className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
-                      {submitting ? 'Memproses...' : 'Ya, Tunda'}
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
