@@ -26,6 +26,17 @@ function hasActiveDescendant(item: NavNode, pathname: string): boolean {
   return pathname === item.href
 }
 
+// Dipakai bareng oleh adminNavItems DAN getEmployeeNavItems (untuk Kepala Gudang, yang
+// role sistemnya tetap 'employee' biasa) — supaya menunya selalu identik, tidak ada risiko
+// salah satu ketinggalan diupdate kalau ada perubahan di lain waktu.
+const LOGISTIK_SUBMENU: NavNode[] = [
+  { name: 'Dashboard Pengiriman', href: '/logistik/dashboard' },
+  { name: 'Rencana Pengiriman', href: '/logistik/rencana' },
+  { name: 'Jalankan Pengiriman', href: '/logistik/jalan' },
+  { name: 'Laporan Pengiriman', href: '/logistik/laporan' },
+  { name: 'Master Toko', href: '/logistik/toko' },
+]
+
 // Menu untuk HR, Owner, Finance, Supervisor — dikelompokkan jadi 4 kelompok besar (SDM/HR,
 // Operasional, Keuangan, Penggajian) atas permintaan Owner, supaya menu yang tadinya flat
 // (13+ item sejajar) lebih gampang ditelusuri. Item lintas-kelompok (Dashboard, Laporan,
@@ -161,13 +172,7 @@ const adminNavItems: NavNode[] = [
     name: 'Pengiriman Logistik',
     href: '/logistik/toko',
     icon: '🚚',
-    submenu: [
-      { name: 'Dashboard Pengiriman', href: '/logistik/dashboard' },
-      { name: 'Rencana Pengiriman', href: '/logistik/rencana' },
-      { name: 'Jalankan Pengiriman', href: '/logistik/jalan' },
-      { name: 'Laporan Pengiriman', href: '/logistik/laporan' },
-      { name: 'Master Toko', href: '/logistik/toko' },
-    ]
+    submenu: LOGISTIK_SUBMENU
   },
   {
     name: 'Penggajian',
@@ -232,7 +237,18 @@ const employeeNavItems: NavNode[] = [
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
 ]
 
-function getEmployeeNavItems(isDriverOrKenek: boolean): NavNode[] {
+function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean): NavNode[] {
+  // Kepala Gudang dapat submenu LENGKAP (sama seperti admin) karena dia yang bikin Rencana
+  // Pengiriman & kelola Master Toko — bukan cuma jalankan trip seperti driver/kenek. Dicek
+  // duluan sebelum isDriverOrKenek supaya kalau kebetulan Kepala Gudang juga ditandai
+  // can_drive/can_help, dia tetap dapat menu lengkap, bukan cuma link tunggal.
+  if (isKepalaGudang) {
+    return [
+      ...employeeNavItems.slice(0, 2),
+      { name: 'Pengiriman Logistik', href: '/logistik/toko', icon: '🚚', submenu: LOGISTIK_SUBMENU },
+      ...employeeNavItems.slice(2),
+    ]
+  }
   if (!isDriverOrKenek) return employeeNavItems
   // Disisip setelah Portal Saya, cuma link ke aplikasi lapangan (bukan submenu admin
   // lengkap seperti Dashboard/Rencana/Laporan/Master Toko) — RLS di halaman itu sendiri
@@ -259,6 +275,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [loadingRole, setLoadingRole] = useState(true)
   const [previewMode, setPreviewModeState] = useState(false)
   const [isDriverOrKenek, setIsDriverOrKenek] = useState(false)
+  const [isKepalaGudang, setIsKepalaGudang] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -267,8 +284,11 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
         if (data) {
           setUserRole(data.role)
           if (data.employee_id) {
-            supabase.from('employees').select('can_drive, can_help').eq('id', data.employee_id).single().then(({ data: emp }) => {
-              if (emp) setIsDriverOrKenek(!!emp.can_drive || !!emp.can_help)
+            supabase.from('employees').select('can_drive, can_help, positions(name)').eq('id', data.employee_id).single().then(({ data: emp }) => {
+              if (emp) {
+                setIsDriverOrKenek(!!emp.can_drive || !!emp.can_help)
+                setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
+              }
             })
           }
         }
@@ -282,7 +302,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // tombol toggle preview itu sendiri, supaya karyawan asli tidak bisa iseng balik ke menu admin.
   const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
   const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
-  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek) : adminNavItems
+  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang) : adminNavItems
 
   function togglePreview() {
     const next = !previewMode
