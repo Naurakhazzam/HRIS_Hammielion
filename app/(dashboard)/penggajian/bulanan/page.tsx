@@ -892,7 +892,9 @@ export default function PenggajianBulananPage() {
     if (!silent) {
       // Sync state UI agar tampilan checklist ikut update
       setCreateBonusCriteria(latestCriteria)
-      latestCriteria.forEach(c => { latestChecked[c.id] = createBonusChecked[c.id] ?? true })
+      // Default TIDAK tercapai (bukan ?? true) -- kriteria belum pernah dinilai untuk periode
+      // baru tidak boleh diasumsikan terpenuhi, harus dicentang manual oleh Finance.
+      latestCriteria.forEach(c => { latestChecked[c.id] = createBonusChecked[c.id] ?? false })
       setCreateBonusChecked(latestChecked)
     } else {
       // Preview massal: bonus kondisional TIDAK diasumsikan terpenuhi — dikosongkan,
