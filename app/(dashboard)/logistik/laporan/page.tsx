@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr } from '@/lib/date'
+import RupiahInput from '@/components/RupiahInput'
 
 type Plan = {
   id: string
@@ -30,6 +31,9 @@ type PlanStore = {
   incident_photo_url: string | null
   incident_description: string | null
   failed_reason: string | null
+  office_verified_amount: number | null
+  office_verified_by: string | null
+  office_verified_at: string | null
   logistics_stores: { name: string } | null
 }
 
@@ -41,6 +45,9 @@ export default function LaporanPengirimanPage() {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [canView, setCanView] = useState(false)
+  // Verifikasi kas fisik cuma untuk tim kantor (Owner/HR/Finance) -- beda dari canView, karena
+  // Kepala Gudang boleh LIHAT laporan tapi bukan yang pegang/hitung uang setoran driver.
+  const [canVerify, setCanVerify] = useState(false)
   const [filterMonth, setFilterMonth] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -48,6 +55,10 @@ export default function LaporanPengirimanPage() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [storesByPlan, setStoresByPlan] = useState<Record<string, PlanStore[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [verifyingId, setVerifyingId] = useState<string | null>(null)
+  const [verifyAmount, setVerifyAmount] = useState('')
+  const [verifySaving, setVerifySaving] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -75,6 +86,7 @@ export default function LaporanPengirimanPage() {
         .select(`id, plan_id, sequence_order, status, delivery_photo_url,
           payment_method, payment_amount, payment_photo_url, payment_due_date,
           incident_type, incident_photo_url, incident_description, failed_reason,
+          office_verified_amount, office_verified_by, office_verified_at,
           logistics_stores(name)`)
         .in('plan_id', list.map(p => p.id)).order('sequence_order')
       const grouped: Record<string, PlanStore[]> = {}
@@ -95,7 +107,7 @@ export default function LaporanPengirimanPage() {
       if (user) {
         const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
         if (userData) {
-          if (['owner', 'hr', 'finance'].includes(userData.role)) setCanView(true)
+          if (['owner', 'hr', 'finance'].includes(userData.role)) { setCanView(true); setCanVerify(true) }
           else if (userData.employee_id) {
             const { data: emp } = await supabase.from('employees').select('positions(name)').eq('id', userData.employee_id).single()
             setCanView((emp as any)?.positions?.name === 'Kepala Gudang')
@@ -116,13 +128,37 @@ export default function LaporanPengirimanPage() {
     })
   }
 
+  function showMessage(type: 'success' | 'error', text: string) {
+    setMessage({ type, text })
+    setTimeout(() => setMessage(null), 5000)
+  }
+
+  function openVerify(s: PlanStore) {
+    setVerifyingId(s.id)
+    setVerifyAmount(s.office_verified_amount != null ? String(s.office_verified_amount) : (s.payment_amount != null ? String(s.payment_amount) : ''))
+  }
+
+  async function submitVerify(storeId: string) {
+    const amt = parseFloat(verifyAmount)
+    if (isNaN(amt) || amt < 0) { showMessage('error', 'Nominal tidak valid.'); return }
+    setVerifySaving(true)
+    const { error } = await supabase.rpc('verify_cash_payment', { p_plan_store_id: storeId, p_verified_amount: amt })
+    if (error) showMessage('error', 'Gagal verifikasi: ' + error.message)
+    else { showMessage('success', 'Verifikasi kas berhasil disimpan.'); setVerifyingId(null); await fetchData() }
+    setVerifySaving(false)
+  }
+
   const allStores = Object.values(storesByPlan).flat()
-  const totalCash = allStores.filter(s => s.payment_method === 'cash').reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
+  const cashStores = allStores.filter(s => s.payment_method === 'cash')
+  const totalCash = cashStores.reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
   const totalTransfer = allStores.filter(s => s.payment_method === 'transfer').length
   const totalDeposit = allStores.filter(s => s.payment_method === 'deposit').reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
   const totalTempo = allStores.filter(s => s.payment_method === 'tempo').length
   const totalIncident = allStores.filter(s => s.incident_type !== 'tidak_ada').length
   const totalFailed = allStores.filter(s => s.status === 'failed').length
+  const verifiedCashStores = cashStores.filter(s => s.office_verified_amount != null)
+  const unverifiedCashCount = cashStores.length - verifiedCashStores.length
+  const totalSelisihKas = verifiedCashStores.reduce((sum, s) => sum + (Number(s.office_verified_amount) - Number(s.payment_amount || 0)), 0)
 
   const monthOptions = Array.from({ length: 12 }, (_, i) => {
     const d = new Date()
@@ -137,6 +173,12 @@ export default function LaporanPengirimanPage() {
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Laporan Pengiriman</h1>
         <p className="text-sm text-slate-500">Rekap trip selesai: mobil, toko yang dikirim, dan metode bayar masing-masing.</p>
       </div>
+
+      {message && (
+        <div className={`p-4 mb-4 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+          {message.text}
+        </div>
+      )}
 
       {!canView ? (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
@@ -177,6 +219,18 @@ export default function LaporanPengirimanPage() {
               <p className="text-[11px] text-slate-500 uppercase mb-1">Gagal Kirim</p>
               <p className="text-sm font-bold text-red-500">{totalFailed} toko</p>
             </div>
+            {canVerify && (
+              <>
+                <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+                  <p className="text-[11px] text-slate-500 uppercase mb-1">Cash Belum Diverifikasi</p>
+                  <p className={`text-sm font-bold ${unverifiedCashCount > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{unverifiedCashCount} toko</p>
+                </div>
+                <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+                  <p className="text-[11px] text-slate-500 uppercase mb-1">Selisih Kas (Terverifikasi)</p>
+                  <p className={`text-sm font-bold ${totalSelisihKas === 0 ? 'text-slate-400' : totalSelisihKas < 0 ? 'text-red-600' : 'text-blue-600'}`}>{fmtRp(totalSelisihKas)}</p>
+                </div>
+              </>
+            )}
           </div>
 
           {loading ? (
@@ -262,6 +316,46 @@ export default function LaporanPengirimanPage() {
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img src={s.incident_photo_url} alt="Foto kejadian" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                                   </a>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Validasi kas fisik — nominal yang ditulis driver belum tentu sama
+                                dengan yang benar-benar diserahkan ke kantor. Cuma untuk pembayaran
+                                cash, cuma bisa diisi Owner/HR/Finance (canVerify). */}
+                            {s.payment_method === 'cash' && canVerify && (
+                              <div className="mt-2 ml-8">
+                                {verifyingId === s.id ? (
+                                  <div className="flex items-center gap-2">
+                                    <RupiahInput value={verifyAmount} onChange={setVerifyAmount}
+                                      placeholder="Nominal diterima kantor"
+                                      className="w-40 px-2 py-1 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" />
+                                    <button onClick={() => submitVerify(s.id)} disabled={verifySaving}
+                                      className="px-2 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded transition disabled:opacity-50">
+                                      {verifySaving ? 'Menyimpan...' : 'Simpan'}
+                                    </button>
+                                    <button onClick={() => setVerifyingId(null)} className="text-xs text-slate-500 hover:underline">Batal</button>
+                                  </div>
+                                ) : s.office_verified_amount != null ? (
+                                  (() => {
+                                    const selisih = Number(s.office_verified_amount) - Number(s.payment_amount || 0)
+                                    return (
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
+                                          Diterima kantor: {fmtRp(Number(s.office_verified_amount))}
+                                        </span>
+                                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${selisih === 0 ? 'bg-green-100 text-green-700' : selisih < 0 ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'}`}>
+                                          {selisih === 0 ? '✓ Cocok' : selisih < 0 ? `Kurang ${fmtRp(Math.abs(selisih))}` : `Lebih ${fmtRp(selisih)}`}
+                                        </span>
+                                        <button onClick={() => openVerify(s)} className="text-xs text-blue-600 hover:underline">Ubah</button>
+                                      </div>
+                                    )
+                                  })()
+                                ) : (
+                                  <button onClick={() => openVerify(s)}
+                                    className="text-xs px-2.5 py-1 border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg font-medium transition">
+                                    ⚠ Verifikasi Kas Diterima
+                                  </button>
                                 )}
                               </div>
                             )}
