@@ -68,6 +68,8 @@ type PendingKasbon = {
   id: string
   employee_id: string
   amount_requested: number
+  original_amount_requested: number | null
+  status: 'pending' | 'finance_reviewed'
   reason: string | null
   created_at: string
   employees: { full_name: string; employee_code: string; departments: { name: string } | null }
@@ -120,12 +122,17 @@ export default function ApprovalKasKeluarPage() {
   const [rejectModal, setRejectModal] = useState<{ ids: string[] } | null>(null)
   const [rejectReasonText, setRejectReasonText] = useState('')
 
-  // Kasbon: beda dari tab lain, approve butuh input tambahan (cicilan per bulan) jadi pakai
-  // modal sendiri, bukan bulk approve satu-klik — dan persetujuan dibatasi ke role owner saja
-  // (ditegakkan juga lewat RLS kasbon_req_update), sesuai keputusan pemisahan tugas: admin/HR
-  // yang mengajukan (di halaman Kasbon Karyawan), owner yang menyetujui di sini.
+  // Kasbon sekarang 2 tahap: (1) Finance cek & boleh sesuaikan nominal yang diizinkan
+  // (status pending -> finance_reviewed, ditegakkan RLS kasbon_req_finance_review), (2) Owner
+  // ("atasan lebih tinggi") verifikasi akhir & tentukan cicilan (finance_reviewed -> approved,
+  // ditegakkan RLS kasbon_req_update) — begitu Owner meng-OK-kan, kasbon otomatis langsung
+  // cair (trigger fin_autopost_kasbon_request menandai disbursed_at sendiri), tidak perlu
+  // langkah pencairan manual terpisah lagi.
+  const canReviewKasbon = role === 'finance' || role === 'owner'
   const canApproveKasbon = role === 'owner'
   const today = new Date()
+  const [kasbonReviewModal, setKasbonReviewModal] = useState<PendingKasbon | null>(null)
+  const [kasbonReviewAmount, setKasbonReviewAmount] = useState('')
   const [kasbonApproveModal, setKasbonApproveModal] = useState<PendingKasbon | null>(null)
   const [kasbonApproveForm, setKasbonApproveForm] = useState({
     deduction_per_month: '',
@@ -162,8 +169,8 @@ export default function ApprovalKasKeluarPage() {
         .select('id, contract_type, rent_amount, notes, fin_assets(name, branch_id, branches(name)), input_user:users!fin_asset_contracts_input_by_fkey(email)')
         .eq('approval_status', 'pending').order('created_at', { ascending: false }),
       supabase.from('kasbon_requests')
-        .select('id, employee_id, amount_requested, reason, created_at, employees(full_name, employee_code, departments(name))')
-        .eq('status', 'pending').order('created_at', { ascending: false }),
+        .select('id, employee_id, amount_requested, original_amount_requested, status, reason, created_at, employees(full_name, employee_code, departments(name))')
+        .in('status', ['pending', 'finance_reviewed']).order('created_at', { ascending: false }),
       supabase.from('driver_kasbon')
         .select('id, total_amount, notes, created_at, employees!driver_kasbon_driver_id_fkey(full_name, employee_code)')
         .eq('status', 'pending_approval').order('created_at', { ascending: false }),
@@ -320,6 +327,38 @@ export default function ApprovalKasKeluarPage() {
     setProcessing(false)
   }
 
+  async function handleKasbonReview(e: React.FormEvent) {
+    e.preventDefault()
+    if (!kasbonReviewModal || !myUserId) return
+    const amt = Number(kasbonReviewAmount)
+    if (!amt || amt <= 0) { showMessage('error', 'Masukkan nominal yang diizinkan (harus lebih dari 0).'); return }
+    setProcessing(true)
+
+    // .eq('status', 'pending') mencegah dua Finance memproses pengajuan yang sama bersamaan.
+    const { data: updatedRows, error } = await supabase.from('kasbon_requests').update({
+      amount_requested: amt,
+      original_amount_requested: kasbonReviewModal.amount_requested,
+      status: 'finance_reviewed',
+      finance_reviewed_by: myUserId,
+      finance_reviewed_at: new Date().toISOString(),
+    }).eq('id', kasbonReviewModal.id).eq('status', 'pending').select('id')
+
+    if (error) { showMessage('error', 'Gagal memproses: ' + error.message); setProcessing(false); return }
+    if (!updatedRows || updatedRows.length === 0) {
+      showMessage('error', 'Pengajuan ini sudah diproses orang lain. Silakan refresh.')
+      setKasbonReviewModal(null)
+      fetchAll()
+      setProcessing(false)
+      return
+    }
+
+    showMessage('success', 'Nominal kasbon dikonfirmasi, dilempar ke Owner untuk verifikasi akhir.')
+    setKasbonReviewModal(null)
+    setKasbonReviewAmount('')
+    fetchAll()
+    setProcessing(false)
+  }
+
   async function handleKasbonApprove(e: React.FormEvent) {
     e.preventDefault()
     if (!kasbonApproveModal || !myUserId) return
@@ -327,9 +366,11 @@ export default function ApprovalKasKeluarPage() {
     if (!dpm || dpm <= 0) { showMessage('error', 'Masukkan cicilan yang valid.'); return }
     setProcessing(true)
 
-    // .eq('status', 'pending') + cek jumlah baris yang benar-benar ter-update mencegah dua
-    // admin yang menyetujui pengajuan yang sama nyaris bersamaan sama-sama lolos dan
-    // sama-sama insert cicilan kasbon_deductions (dobel-catat cicilan untuk 1 pengajuan).
+    // .eq('status', 'finance_reviewed') + cek jumlah baris yang benar-benar ter-update mencegah
+    // dua Owner yang menyetujui pengajuan yang sama nyaris bersamaan sama-sama lolos dan
+    // sama-sama insert cicilan kasbon_deductions (dobel-catat cicilan untuk 1 pengajuan). Begitu
+    // status jadi 'approved', trigger fin_autopost_kasbon_request otomatis mencatat pengeluaran
+    // kas & menandai kasbon ini cair (disbursed_at) -- tidak perlu langkah manual lagi.
     const { data: updatedRows, error } = await supabase.from('kasbon_requests').update({
       status: 'approved',
       approved_by: myUserId,
@@ -337,11 +378,11 @@ export default function ApprovalKasKeluarPage() {
       deduction_per_month: dpm,
       deduction_start_month: kasbonApproveForm.deduction_start_month,
       deduction_start_year: kasbonApproveForm.deduction_start_year,
-    }).eq('id', kasbonApproveModal.id).eq('status', 'pending').select('id')
+    }).eq('id', kasbonApproveModal.id).eq('status', 'finance_reviewed').select('id')
 
     if (error) { showMessage('error', 'Gagal menyetujui: ' + error.message); setProcessing(false); return }
     if (!updatedRows || updatedRows.length === 0) {
-      showMessage('error', 'Pengajuan ini sudah diproses (bukan pending lagi) — kemungkinan sudah disetujui/ditolak orang lain. Silakan refresh.')
+      showMessage('error', 'Pengajuan ini sudah diproses (bukan menunggu verifikasi lagi) — kemungkinan sudah disetujui/ditolak orang lain, atau belum dicek Finance. Silakan refresh.')
       setKasbonApproveModal(null)
       fetchAll()
       setProcessing(false)
@@ -510,7 +551,8 @@ export default function ApprovalKasKeluarPage() {
         {tab === 'kasbon' ? (
           <div className="p-4 border-b border-slate-200 bg-slate-50">
             <span className="text-sm text-slate-500">
-              {canApproveKasbon ? 'Setujui/Tolak per pengajuan — butuh rencana cicilan, jadi tidak bisa diproses massal.' : 'Persetujuan kasbon dibatasi untuk role Owner.'}
+              Alur 2 tahap: Finance cek &amp; sesuaikan nominal dulu, baru Owner verifikasi akhir (langsung cair begitu di-OK-kan). Diproses per pengajuan, tidak bisa massal.
+              {!canReviewKasbon && ' Anda tidak punya akses memproses tahap manapun.'}
             </span>
           </div>
         ) : tab === 'kasbon_driver_kenek' ? (
@@ -705,20 +747,37 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-sm">
                     <p className="font-medium text-slate-800">{en.employees?.full_name}</p>
                     <p className="text-xs text-slate-500">{en.employees?.employee_code} · diajukan {new Date(en.created_at).toLocaleDateString('id-ID')}</p>
+                    <span className={`inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${en.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {en.status === 'pending' ? '① Menunggu Cek Finance' : '② Menunggu Verifikasi Owner'}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{en.employees?.departments?.name || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatRupiah(en.amount_requested)}</td>
+                  <td className="px-4 py-3 text-sm text-right">
+                    <p className="font-semibold text-slate-800">{formatRupiah(en.amount_requested)}</p>
+                    {en.original_amount_requested != null && Number(en.original_amount_requested) !== Number(en.amount_requested) && (
+                      <p className="text-[10px] text-slate-400">diajukan {formatRupiah(en.original_amount_requested)}</p>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm text-slate-500">{en.reason || '—'}</td>
                   <td className="px-4 py-3 text-center">
-                    {canApproveKasbon ? (
+                    {en.status === 'pending' && canReviewKasbon ? (
+                      <div className="flex gap-1 justify-center">
+                        <button onClick={() => { setKasbonReviewModal(en); setKasbonReviewAmount(String(en.amount_requested)) }}
+                          disabled={processing} className="px-2 py-1 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded text-xs font-medium transition">Cek Nominal</button>
+                        <button onClick={() => { setKasbonRejectModal(en); setKasbonRejectReason('') }}
+                          disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
+                      </div>
+                    ) : en.status === 'finance_reviewed' && canApproveKasbon ? (
                       <div className="flex gap-1 justify-center">
                         <button onClick={() => { setKasbonApproveModal(en); setKasbonApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() }) }}
-                          disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
+                          disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Verifikasi &amp; Setujui</button>
                         <button onClick={() => { setKasbonRejectModal(en); setKasbonRejectReason('') }}
                           disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                       </div>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">⏳ Menunggu Owner</span>
+                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">
+                        {en.status === 'pending' ? '⏳ Menunggu Finance' : '⏳ Menunggu Owner'}
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -782,12 +841,55 @@ export default function ApprovalKasKeluarPage() {
         </div>
       )}
 
-      {/* Modal Setujui Kasbon — butuh rencana cicilan, jadi tidak ikut alur bulk approve generik */}
+      {/* Modal Tahap 1: Cek Nominal (Finance) — boleh sesuaikan nominal yang diizinkan sebelum
+          dilempar ke Owner untuk verifikasi akhir. */}
+      {kasbonReviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Cek Nominal Kasbon</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              {kasbonReviewModal.employees?.full_name} mengajukan {formatRupiah(kasbonReviewModal.amount_requested)}
+              {kasbonReviewModal.reason && <> — <span className="italic">&quot;{kasbonReviewModal.reason}&quot;</span></>}
+            </p>
+            <form onSubmit={handleKasbonReview} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Nominal yang Diizinkan (Rp) *</label>
+                <RupiahInput required value={kasbonReviewAmount}
+                  onChange={setKasbonReviewAmount}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="Contoh: 200000" />
+                {Number(kasbonReviewAmount) > 0 && Number(kasbonReviewAmount) !== Number(kasbonReviewModal.amount_requested) && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Beda dari yang diajukan ({formatRupiah(kasbonReviewModal.amount_requested)}) — karyawan akan menerima nominal ini, bukan nominal pengajuan awal.
+                  </p>
+                )}
+              </div>
+              <p className="text-xs text-slate-400">Setelah ini, pengajuan akan menunggu verifikasi akhir dari Owner. Uang baru cair setelah Owner meng-OK-kan.</p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setKasbonReviewModal(null)}
+                  className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                <button type="submit" disabled={processing}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                  {processing ? 'Menyimpan...' : 'Lempar ke Owner'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Tahap 2: Verifikasi & Setujui (Owner) — butuh rencana cicilan, jadi tidak ikut alur bulk approve generik */}
       {kasbonApproveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold text-slate-800 mb-1">Setujui Pengajuan Kasbon</h2>
-            <p className="text-sm text-slate-500 mb-4">{kasbonApproveModal.employees?.full_name} — {formatRupiah(kasbonApproveModal.amount_requested)}</p>
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Verifikasi &amp; Setujui Kasbon</h2>
+            <p className="text-sm text-slate-500 mb-1">{kasbonApproveModal.employees?.full_name} — {formatRupiah(kasbonApproveModal.amount_requested)}</p>
+            {kasbonApproveModal.original_amount_requested != null && Number(kasbonApproveModal.original_amount_requested) !== Number(kasbonApproveModal.amount_requested) && (
+              <p className="text-xs text-slate-400 mb-3">Diajukan awal {formatRupiah(kasbonApproveModal.original_amount_requested)}, sudah disesuaikan Finance.</p>
+            )}
+            <p className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-4">
+              Begitu disetujui, kasbon langsung tercatat cair — tidak perlu langkah pencairan manual lagi.
+            </p>
             <form onSubmit={handleKasbonApprove} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Potongan Gaji per Bulan (Rp) *</label>

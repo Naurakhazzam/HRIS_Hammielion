@@ -9,8 +9,9 @@ type KasbonRequest = {
   id: string
   employee_id: string
   amount_requested: number
+  original_amount_requested: number | null
   reason: string | null
-  status: 'pending' | 'approved' | 'rejected' | 'lunas'
+  status: 'pending' | 'finance_reviewed' | 'approved' | 'rejected' | 'lunas'
   approved_by: string | null
   approved_at: string | null
   rejection_reason: string | null
@@ -121,10 +122,11 @@ export default function KasbonPage() {
 
 // ─── STATUS CONFIG ────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  pending:  { label: 'Pending',   className: 'bg-yellow-100 text-yellow-700' },
-  approved: { label: 'Disetujui', className: 'bg-blue-100 text-blue-700' },
-  rejected: { label: 'Ditolak',   className: 'bg-red-100 text-red-600' },
-  lunas:    { label: 'Lunas',     className: 'bg-green-100 text-green-700' },
+  pending:          { label: 'Menunggu Cek Finance',  className: 'bg-yellow-100 text-yellow-700' },
+  finance_reviewed: { label: 'Menunggu Verifikasi Owner', className: 'bg-indigo-100 text-indigo-700' },
+  approved:         { label: 'Disetujui & Cair',      className: 'bg-blue-100 text-blue-700' },
+  rejected:         { label: 'Ditolak',               className: 'bg-red-100 text-red-600' },
+  lunas:            { label: 'Lunas',                 className: 'bg-green-100 text-green-700' },
 }
 
 // ─── TAB 1: PENGAJUAN ────────────────────────────────────────────────────────
@@ -244,7 +246,7 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
       {/* Filter pills */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
         <div className="flex flex-wrap gap-2">
-          {[['all','Semua'],['pending','Pending'],['approved','Disetujui'],['rejected','Ditolak'],['lunas','Lunas']].map(([val, label]) => (
+          {[['all','Semua'],['pending','Pending'],['finance_reviewed','Cek Finance'],['approved','Disetujui'],['rejected','Ditolak'],['lunas','Lunas']].map(([val, label]) => (
             <button key={val} onClick={() => setFilterStatus(val)}
               className={`px-4 py-1.5 rounded-full text-sm font-medium transition border ${filterStatus === val ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
               {label} {val === 'all' ? `(${requests.length})` : `(${requests.filter(r => r.status === val).length})`}
@@ -278,7 +280,12 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
                         <p className="text-xs text-slate-500">{r.employees?.employee_code}</p>
                       </td>
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{r.employees?.departments?.name || '—'}</td>
-                      <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">{fmtRp(r.amount_requested)}</td>
+                      <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                        {fmtRp(r.amount_requested)}
+                        {r.original_amount_requested != null && Number(r.original_amount_requested) !== Number(r.amount_requested) && (
+                          <p className="text-[10px] font-normal text-slate-400">diajukan {fmtRp(r.original_amount_requested)}</p>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-slate-600 max-w-[200px]">
                         <p className="truncate">{r.reason || '—'}</p>
                       </td>
@@ -290,7 +297,7 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex gap-2">
-                          {r.status === 'pending' && (
+                          {(r.status === 'pending' || r.status === 'finance_reviewed') && (
                             <Link href="/keuangan/approval"
                               className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap hover:bg-amber-100 transition">
                               ⏳ Proses di Verifikasi Keuangan
