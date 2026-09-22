@@ -11,11 +11,15 @@ type Plan = {
   status: string
   vehicle_id: string
   route_id: string
+  driver_id: string
+  helper_id: string | null
   vehicles: { name: string; plate_number: string | null } | null
   delivery_routes: { name: string } | null
   driver: { full_name: string } | null
   helper: { full_name: string } | null
 }
+
+type Employee = { id: string; full_name: string }
 
 type PlanStore = {
   id: string
@@ -48,13 +52,29 @@ export default function RencanaDetailPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  // Ganti Driver/Kenek kalau salah pilih -- database (RLS) sudah mengizinkan Kepala Gudang/
+  // Owner update plan kapan saja, tidak dibatasi status, jadi ini murni tampilan. Sengaja
+  // TIDAK diizinkan lagi setelah trip benar-benar selesai/dibatalkan (completed/cancelled) --
+  // di titik itu upah sudah dihitung berdasarkan driver_id/helper_id saat itu, mengubahnya lagi
+  // cuma akan bikin data tercatat tidak sinkron dengan yang sudah dibayar.
+  const [drivers, setDrivers] = useState<Employee[]>([])
+  const [helpers, setHelpers] = useState<Employee[]>([])
+  const [editingAssignment, setEditingAssignment] = useState(false)
+  const [editDriverId, setEditDriverId] = useState('')
+  const [editHelperId, setEditHelperId] = useState('')
+  const [assignmentSaving, setAssignmentSaving] = useState(false)
+
   const editable = !!plan && ['draft', 'ready'].includes(plan.status)
+  // Trip yang sudah berjalan (Berjalan/Menuju Garasi) masih boleh dikoreksi Kepala Gudang/Owner
+  // kalau ada salah pilih -- beda dari `editable` di atas yang membuka SEMUA kontrol (termasuk
+  // urutan toko, Batalkan Rencana, dst) yang memang cuma masuk akal sebelum berangkat.
+  const canEditActive = !!plan && canManage && ['departed', 'closing'].includes(plan.status)
 
   const fetchAll = useCallback(async () => {
     const { data: planData, error } = await supabase
       .from('logistics_delivery_plans')
       .select(`
-        id, plan_date, status, vehicle_id, route_id,
+        id, plan_date, status, vehicle_id, route_id, driver_id, helper_id,
         vehicles(name, plate_number),
         delivery_routes(name),
         driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
@@ -77,6 +97,26 @@ export default function RencanaDetailPage() {
 
     const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).order('name')
     setAllStores(storeData || [])
+
+    // Sama persis kondisinya dengan dropdown Driver/Kenek di /logistik/rencana (halaman daftar)
+    // -- driver "asli" (employee_type='driver') belum tentu can_drive=true, begitu juga
+    // sebaliknya untuk karyawan yang cuma merangkap.
+    const { data: drvData } = await supabase.from('employees').select('id, full_name')
+      .or('employee_type.eq.driver,can_drive.eq.true').eq('is_active', true).order('full_name')
+    setDrivers(drvData || [])
+    const { data: allPerm } = await supabase.from('employees').select('id, full_name, departments(name)')
+      .eq('employee_type', 'permanent').eq('is_active', true)
+    const { data: helperDrivers } = await supabase.from('employees').select('id, full_name')
+      .eq('employee_type', 'driver').eq('can_help', true).eq('is_active', true)
+    if (allPerm) {
+      const gudangWorkers = (allPerm as any[]).filter(pw => {
+        const dept = Array.isArray(pw.departments) ? pw.departments[0] : pw.departments
+        return dept?.name === 'Team Gudang'
+      })
+      const toEmployee = (arr: any[]) => arr.map(pw => ({ id: pw.id, full_name: pw.full_name }))
+      const base = gudangWorkers.length > 0 ? toEmployee(gudangWorkers) : toEmployee(allPerm)
+      setHelpers([...base, ...(helperDrivers || [])])
+    }
 
     setLoading(false)
   }, [params.id, supabase])
@@ -104,6 +144,25 @@ export default function RencanaDetailPage() {
     setMessage({ type, text })
     window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMessage(null), 5000)
+  }
+
+  function openEditAssignment() {
+    if (!plan) return
+    setEditDriverId(plan.driver_id)
+    setEditHelperId(plan.helper_id || '')
+    setEditingAssignment(true)
+  }
+
+  async function submitEditAssignment() {
+    if (!plan || !editDriverId) return
+    if (editHelperId && editHelperId === editDriverId) { showMessage('error', 'Driver dan Kenek tidak boleh orang yang sama.'); return }
+    setAssignmentSaving(true)
+    const { error } = await supabase.from('logistics_delivery_plans').update({
+      driver_id: editDriverId, helper_id: editHelperId || null,
+    }).eq('id', plan.id)
+    if (error) showMessage('error', 'Gagal mengubah Driver/Kenek: ' + error.message)
+    else { showMessage('success', 'Driver/Kenek berhasil diperbarui.'); setEditingAssignment(false); fetchAll() }
+    setAssignmentSaving(false)
   }
 
   const availableStores = allStores.filter(s => !planStores.some(ps => ps.store_id === s.id))
@@ -186,8 +245,45 @@ export default function RencanaDetailPage() {
           <div><p className="text-slate-400 text-xs uppercase mb-0.5">Tanggal</p><p className="font-medium text-slate-800">{new Date(plan.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</p></div>
           <div><p className="text-slate-400 text-xs uppercase mb-0.5">Mobil</p><p className="font-medium text-slate-800">{plan.vehicles?.name} {plan.vehicles?.plate_number ? `(${plan.vehicles.plate_number})` : ''}</p></div>
           <div><p className="text-slate-400 text-xs uppercase mb-0.5">Ritase</p><p className="font-medium text-slate-800">{plan.delivery_routes?.name}</p></div>
-          <div><p className="text-slate-400 text-xs uppercase mb-0.5">Driver / Kenek</p><p className="font-medium text-slate-800">{plan.driver?.full_name} {plan.helper?.full_name ? `/ ${plan.helper.full_name}` : ''}</p></div>
+          <div>
+            <p className="text-slate-400 text-xs uppercase mb-0.5">Driver / Kenek</p>
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-slate-800">{plan.driver?.full_name} {plan.helper?.full_name ? `/ ${plan.helper.full_name}` : ''}</p>
+              {canManage && !['completed', 'cancelled'].includes(plan.status) && !editingAssignment && (
+                <button onClick={openEditAssignment} className="text-xs text-blue-600 hover:underline shrink-0">Ubah</button>
+              )}
+            </div>
+          </div>
         </div>
+
+        {editingAssignment && (
+          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-600">Driver</label>
+              <select value={editDriverId} onChange={e => setEditDriverId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">-- Pilih Driver --</option>
+                {drivers.map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-600">Kenek (Opsional)</label>
+              <select value={editHelperId} onChange={e => setEditHelperId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">-- Tanpa Kenek --</option>
+                {helpers.map(h => <option key={h.id} value={h.id}>{h.full_name}</option>)}
+              </select>
+            </div>
+            <div className="sm:col-span-2 flex justify-end gap-2 pt-1">
+              <button onClick={() => setEditingAssignment(false)} className="px-4 py-1.5 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+              <button onClick={submitEditAssignment} disabled={!editDriverId || assignmentSaving}
+                className="px-4 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
+                {assignmentSaving ? 'Menyimpan...' : 'Simpan'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {hasRateConfig === false && (
           <p className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
             ⚠ Tarif untuk kombinasi Mobil + Ritase ini belum disetup — rencana tidak bisa ditandai "Siap Kirim" sampai tarifnya diatur di Penggajian Driver → Tarif &amp; Mobil Driver.
@@ -210,6 +306,11 @@ export default function RencanaDetailPage() {
                   <p className="text-sm font-medium text-slate-800 truncate">{ps.logistics_stores?.name}</p>
                   {ps.logistics_stores?.address && <p className="text-xs text-slate-400 truncate">{ps.logistics_stores.address}</p>}
                 </div>
+                {ps.status !== 'pending' && (
+                  <span className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${ps.status === 'delivered' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                    {ps.status === 'delivered' ? 'Terkirim' : 'Gagal'}
+                  </span>
+                )}
                 {editable && canManage && (
                   <div className="flex gap-1 shrink-0">
                     <button onClick={() => handleMove(i, -1)} disabled={i === 0} className="w-7 h-7 flex items-center justify-center text-slate-500 hover:bg-slate-100 rounded disabled:opacity-30">↑</button>
@@ -217,14 +318,21 @@ export default function RencanaDetailPage() {
                     <button onClick={() => handleRemoveStore(ps)} className="w-7 h-7 flex items-center justify-center text-red-400 hover:bg-red-50 rounded">✕</button>
                   </div>
                 )}
+                {/* Trip sudah berjalan — cuma toko yang BELUM diproses (pending) yang boleh
+                    dihapus (salah masuk daftar). Toko yang sudah Terkirim/Gagal dikunci,
+                    supaya histori pengiriman & foto buktinya tidak bisa dihapus begitu saja. */}
+                {!editable && canEditActive && ps.status === 'pending' && (
+                  <button onClick={() => handleRemoveStore(ps)} className="w-7 h-7 flex items-center justify-center text-red-400 hover:bg-red-50 rounded shrink-0">✕</button>
+                )}
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {editable && canManage && (
+      {(editable || canEditActive) && canManage && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
+          {canEditActive && <p className="text-xs text-amber-600 mb-2">⚠ Trip sudah berjalan — toko baru langsung ikut jadi bagian trip ini, driver/kenek bisa langsung memprosesnya.</p>}
           <form onSubmit={handleAddStore} className="flex gap-2">
             <input type="text" list="available-stores-datalist" value={storeSearchText}
               onChange={e => setStoreSearchText(e.target.value)}
