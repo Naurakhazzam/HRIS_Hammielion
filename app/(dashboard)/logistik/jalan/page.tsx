@@ -90,6 +90,14 @@ export default function JalanPengirimanPage() {
   const [editPaymentDueDate, setEditPaymentDueDate] = useState('')
   const [editSaving, setEditSaving] = useState(false)
 
+  // Selesai Tugas lebih awal — kalau masih ada toko pending pas driver mau akhiri trip (mis.
+  // kehabisan waktu), sisa toko yang belum diproses WAJIB dikonfirmasi dulu baru ditandai Gagal
+  // Kirim sekaligus (bukan diam-diam hilang) -- supaya tetap ada jejaknya (kemungkinan salah
+  // pencet/lupa tetap harus lewat konfirmasi eksplisit dulu).
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false)
+  const [finishReason, setFinishReason] = useState('')
+  const [finishSaving, setFinishSaving] = useState(false)
+
   // Penutupan trip (box kosong -> jeda 30 menit -> lapor garasi)
   const [boxPhotoUrl, setBoxPhotoUrl] = useState('')
   const [garagePhotoUrl, setGaragePhotoUrl] = useState('')
@@ -278,6 +286,20 @@ export default function JalanPengirimanPage() {
     setSubmitting(false)
   }
 
+  async function submitFinishEarly() {
+    if (!selectedPlan || !finishReason.trim() || pendingStores.length === 0) return
+    setFinishSaving(true)
+    const { error } = await supabase.from('logistics_plan_stores').update({
+      status: 'failed', failed_reason: finishReason.trim(), resolved_by: myEmployeeId, resolved_at: new Date().toISOString(),
+    }).eq('plan_id', selectedPlan.id).eq('status', 'pending')
+    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setFinishSaving(false); return }
+    showMessage('success', `${pendingStores.length} toko yang belum terkirim ditandai Gagal Kirim.`)
+    setShowFinishConfirm(false)
+    setFinishReason('')
+    await refresh()
+    setFinishSaving(false)
+  }
+
   function openEditHistory(ps: PlanStore) {
     setEditHistoryStore(ps)
     setEditPaymentMethod(ps.payment_method || '')
@@ -377,6 +399,39 @@ export default function JalanPengirimanPage() {
                     <span className="text-slate-300">›</span>
                   </button>
                 ))}
+              </div>
+              <div className="px-4 py-3 border-t border-slate-100">
+                <button onClick={() => { setFinishReason(''); setShowFinishConfirm(true) }}
+                  className="w-full py-2 text-sm font-medium text-slate-500 border border-dashed border-slate-300 rounded-lg hover:bg-slate-50 hover:text-slate-700 transition">
+                  🏁 Selesai Tugas (masih ada {pendingStores.length} toko belum terkirim)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showFinishConfirm && (
+            <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+                <h3 className="font-semibold text-slate-800 mb-2">Akhiri Trip Lebih Awal?</h3>
+                <p className="text-sm text-slate-600 mb-3">
+                  Ada <strong>{pendingStores.length} toko</strong> yang belum terkirim:
+                </p>
+                <ul className="text-sm text-slate-600 list-disc list-inside mb-3 max-h-32 overflow-y-auto">
+                  {pendingStores.map(ps => <li key={ps.id}>{ps.logistics_stores?.name}</li>)}
+                </ul>
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  Toko-toko di atas akan otomatis ditandai <strong>Gagal Kirim</strong> dengan alasan yang Anda isi di bawah. Pastikan ini benar sebelum lanjut.
+                </p>
+                <input type="text" value={finishReason} onChange={e => setFinishReason(e.target.value)}
+                  placeholder="Alasan (contoh: trip diakhiri, kehabisan waktu)"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none mb-3" />
+                <div className="flex gap-3">
+                  <button onClick={() => setShowFinishConfirm(false)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+                  <button onClick={submitFinishEarly} disabled={!finishReason.trim() || finishSaving}
+                    className="flex-1 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50">
+                    {finishSaving ? 'Menyimpan...' : 'Ya, Lanjutkan'}
+                  </button>
+                </div>
               </div>
             </div>
           )}
