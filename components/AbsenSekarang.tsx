@@ -71,6 +71,10 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Canvas tersembunyi yang nyimpen frame MENTAH (belum ada watermark, belum di-flip) —
+  // dipakai untuk render ulang tiap kali toggleFlip() dipencet, tanpa perlu ambil foto lagi.
+  const rawCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [isFlipped, setIsFlipped] = useState(false)
 
   useEffect(() => { fetchContext() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => stopCamera(), [])
@@ -279,10 +283,58 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     ctx.fillText(label3, 12, height - barHeight + fontSize * 3 + 8)
   }
 
+  // Simpan frame/gambar MENTAH (sebelum watermark, sebelum kemungkinan di-flip) ke canvas
+  // tersembunyi — ini "sumber kebenaran" yang dipakai ulang oleh renderFinal() tiap kali
+  // status flip berubah, supaya tidak perlu buka kamera/pilih file lagi cuma untuk membalik foto.
+  function captureRawFrom(source: CanvasImageSource, width: number, height: number) {
+    if (!rawCanvasRef.current) rawCanvasRef.current = document.createElement('canvas')
+    const raw = rawCanvasRef.current
+    raw.width = width
+    raw.height = height
+    const rctx = raw.getContext('2d')
+    if (!rctx) return
+    rctx.drawImage(source, 0, 0, width, height)
+  }
+
+  // Render hasil akhir dari frame mentah: flip dulu kalau diminta, BARU watermark digambar di
+  // atasnya — urutan ini penting supaya teks watermark (nama/waktu/jarak) selalu kebaca normal,
+  // tidak ikut kebalik walau fotonya di-flip.
+  function renderFinal(flip: boolean) {
+    const raw = rawCanvasRef.current
+    const canvas = canvasRef.current
+    if (!raw || !canvas) return
+    canvas.width = raw.width
+    canvas.height = raw.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.save()
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    if (flip) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1) }
+    ctx.drawImage(raw, 0, 0)
+    ctx.restore()
+    drawWatermark(ctx, canvas.width, canvas.height)
+
+    canvas.toBlob(blob => {
+      if (!blob) return
+      setCapturedUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob) })
+      setCapturedBlob(blob)
+    }, 'image/jpeg', 0.85)
+  }
+
+  // Beberapa HP (kebanyakan laporan dari Android) menyimpan foto kamera depan dalam kondisi
+  // ter-mirror — entah dari aplikasi kamera bawaan HP-nya sendiri (jalur cadangan di bawah)
+  // atau dari stream kamera browser itu sendiri. Tidak ada cara yang bisa diandalkan dari kode
+  // web untuk mendeteksi ini otomatis di semua HP, jadi solusinya kasih tombol balik manual di
+  // preview — karyawan yang lihat fotonya kebalik tinggal pencet sekali.
+  function toggleFlip() {
+    const next = !isFlipped
+    setIsFlipped(next)
+    renderFinal(next)
+  }
+
   function takePhoto() {
     const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas) return
+    if (!video) return
     if (mode === 'gps' && !geo) return
     // Jaring pengaman: kalau video belum benar-benar siap (metadata belum termuat), videoWidth/
     // videoHeight masih 0 dan drawImage akan gagal diam-diam — kasih pesan jelas alih-alih diam.
@@ -290,25 +342,16 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       showMessage('error', 'Kamera belum siap sepenuhnya, tunggu 1-2 detik lalu coba lagi.')
       return
     }
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
     try {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      captureRawFrom(video, video.videoWidth, video.videoHeight)
     } catch {
       showMessage('error', 'Gagal mengambil gambar dari kamera. Coba lagi.')
       return
     }
-    drawWatermark(ctx, canvas.width, canvas.height)
-
-    canvas.toBlob(blob => {
-      if (!blob) return
-      setCapturedBlob(blob)
-      setCapturedUrl(URL.createObjectURL(blob))
-      stopCamera()
-      setStep('preview')
-    }, 'image/jpeg', 0.85)
+    setIsFlipped(false)
+    renderFinal(false)
+    stopCamera()
+    setStep('preview')
   }
 
   // Jalur cadangan kalau live-preview kamera (getUserMedia) tidak jalan di HP tertentu (kelihatan
@@ -329,21 +372,17 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     const objUrl = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => {
-      const canvas = canvasRef.current
-      if (!canvas) { URL.revokeObjectURL(objUrl); return }
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
-      const ctx = canvas.getContext('2d')
-      if (!ctx) { URL.revokeObjectURL(objUrl); return }
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      drawWatermark(ctx, canvas.width, canvas.height)
-      canvas.toBlob(blob => {
+      try {
+        captureRawFrom(img, img.naturalWidth, img.naturalHeight)
+      } catch {
         URL.revokeObjectURL(objUrl)
-        if (!blob) return
-        setCapturedBlob(blob)
-        setCapturedUrl(URL.createObjectURL(blob))
-        setStep('preview')
-      }, 'image/jpeg', 0.85)
+        showMessage('error', 'Gagal memuat foto dari kamera.')
+        return
+      }
+      URL.revokeObjectURL(objUrl)
+      setIsFlipped(false)
+      renderFinal(false)
+      setStep('preview')
     }
     img.onerror = () => { URL.revokeObjectURL(objUrl); showMessage('error', 'Gagal memuat foto dari kamera.') }
     img.src = objUrl
@@ -353,6 +392,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     setCapturedBlob(null)
     if (capturedUrl) URL.revokeObjectURL(capturedUrl)
     setCapturedUrl(null)
+    setIsFlipped(false)
     proceedToGeoCheckin()
   }
 
@@ -364,6 +404,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     setGeo(null)
     setIsPerbantuanAction(false)
     setBranchShifts([])
+    setIsFlipped(false)
     setStep('idle')
   }
 
@@ -730,6 +771,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         <div className="space-y-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={capturedUrl} alt="Pratinjau foto absen" className="w-full rounded-lg aspect-[3/4] object-cover" />
+          <p className="text-xs text-center text-slate-500">
+            Fotonya kebalik/mirror (misal tulisan di baju terbaca terbalik)?{' '}
+            <button type="button" onClick={toggleFlip} disabled={step === 'uploading'} className="text-blue-600 hover:underline font-medium disabled:opacity-50">
+              🔄 {isFlipped ? 'Kembalikan Seperti Semula' : 'Balik Foto Ini'}
+            </button>
+          </p>
           <div className="flex gap-2">
             <button onClick={retakePhoto} disabled={step === 'uploading'} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50">Ambil Ulang</button>
             <button onClick={submitCheckin} disabled={step === 'uploading'} className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
