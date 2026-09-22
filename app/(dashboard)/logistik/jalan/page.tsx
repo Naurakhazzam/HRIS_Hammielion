@@ -32,7 +32,7 @@ type PlanStore = {
   store_id: string
   sequence_order: number
   status: string
-  delivery_photo_url: string | null
+  delivery_photo_urls: string[] | null
   payment_method: PaymentMethod | null
   payment_amount: number | null
   payment_photo_url: string | null
@@ -70,7 +70,11 @@ export default function JalanPengirimanPage() {
   const [actionMode, setActionMode] = useState<ActionMode>(null)
 
   // Form Kirim
-  const [deliveryPhotoUrl, setDeliveryPhotoUrl] = useState('')
+  // Bukti Kirim boleh lebih dari 1 foto (barang yang dikirim ke 1 toko bisa banyak, 1 foto
+  // sering tidak cukup) -- addingDeliveryPhoto mengontrol kapan kamera ditampilkan lagi untuk
+  // foto tambahan (vs. galeri foto yang sudah diambil + tombol "+ Tambah Foto Lagi").
+  const [deliveryPhotoUrls, setDeliveryPhotoUrls] = useState<string[]>([])
+  const [addingDeliveryPhoto, setAddingDeliveryPhoto] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentPhotoUrl, setPaymentPhotoUrl] = useState('')
@@ -145,7 +149,7 @@ export default function JalanPengirimanPage() {
 
   async function fetchPlanStores(planId: string) {
     const { data } = await supabase.from('logistics_plan_stores')
-      .select(`id, store_id, sequence_order, status, delivery_photo_url,
+      .select(`id, store_id, sequence_order, status, delivery_photo_urls,
         payment_method, payment_amount, payment_photo_url, payment_due_date,
         incident_type, incident_photo_url, incident_description, failed_reason,
         logistics_stores(name, address, phone)`)
@@ -165,7 +169,7 @@ export default function JalanPengirimanPage() {
   }
 
   function resetKirimForm() {
-    setDeliveryPhotoUrl(''); setPaymentMethod(''); setPaymentAmount('')
+    setDeliveryPhotoUrls([]); setAddingDeliveryPhoto(false); setPaymentMethod(''); setPaymentAmount('')
     setPaymentPhotoUrl(''); setPaymentDueDate('')
     setIncidentType('tidak_ada'); setIncidentPhotoUrl(''); setIncidentDescription('')
   }
@@ -236,7 +240,7 @@ export default function JalanPengirimanPage() {
     setSubmitting(false)
   }
 
-  const canSubmitKirim = !!deliveryPhotoUrl && !!paymentMethod && (
+  const canSubmitKirim = deliveryPhotoUrls.length > 0 && !!paymentMethod && (
     paymentMethod === 'cash' ? (!!paymentAmount && Number(paymentAmount) > 0) :
     paymentMethod === 'transfer' ? !!paymentPhotoUrl :
     paymentMethod === 'deposit' ? (!!paymentAmount && Number(paymentAmount) > 0) :
@@ -248,7 +252,7 @@ export default function JalanPengirimanPage() {
     setSubmitting(true)
     const { data, error } = await supabase.from('logistics_plan_stores').update({
       status: 'delivered',
-      delivery_photo_url: deliveryPhotoUrl,
+      delivery_photo_urls: deliveryPhotoUrls,
       payment_method: paymentMethod || null,
       payment_amount: (paymentMethod === 'cash' || paymentMethod === 'deposit') ? Number(paymentAmount) : null,
       payment_photo_url: paymentMethod === 'transfer' ? paymentPhotoUrl : null,
@@ -463,16 +467,33 @@ export default function JalanPengirimanPage() {
               {actionMode === 'kirim' && (
                 <div className="space-y-4 mt-2">
                   <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase mb-2">1. Foto Bukti Kirim</p>
-                    {deliveryPhotoUrl ? (
-                      <div className="space-y-2">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={deliveryPhotoUrl} alt="Bukti kirim" className="w-full rounded-lg aspect-[4/3] object-cover" />
-                        <button onClick={() => setDeliveryPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                    <p className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                      1. Foto Bukti Kirim{deliveryPhotoUrls.length > 0 ? ` (${deliveryPhotoUrls.length} foto)` : ''}
+                    </p>
+                    {deliveryPhotoUrls.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {deliveryPhotoUrls.map((url, idx) => (
+                          <div key={idx} className="relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+                            <button type="button" onClick={() => setDeliveryPhotoUrls(prev => prev.filter((_, i) => i !== idx))}
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-red-600 text-white rounded-full text-xs shadow">✕</button>
+                          </div>
+                        ))}
                       </div>
-                    ) : (
+                    )}
+                    {deliveryPhotoUrls.length === 0 || addingDeliveryPhoto ? (
                       <LogisticsCameraCapture label="Foto Bukti Kirim" employeeName={myName}
-                        onCaptured={async blob => { const url = await uploadPhoto(blob, 'kirim'); if (url) setDeliveryPhotoUrl(url) }} />
+                        onCaptured={async blob => {
+                          const url = await uploadPhoto(blob, 'kirim')
+                          if (url) { setDeliveryPhotoUrls(prev => [...prev, url]); setAddingDeliveryPhoto(false) }
+                        }}
+                        onCancel={() => setAddingDeliveryPhoto(false)} />
+                    ) : (
+                      <button type="button" onClick={() => setAddingDeliveryPhoto(true)}
+                        className="w-full py-2 border border-dashed border-slate-300 text-slate-500 text-sm font-medium rounded-lg hover:bg-slate-50 transition">
+                        + Tambah Foto Lagi
+                      </button>
                     )}
                   </div>
 
@@ -678,15 +699,15 @@ export default function JalanPengirimanPage() {
                       </p>
                     )}
 
-                    {(ps.delivery_photo_url || ps.payment_photo_url || ps.incident_photo_url) && (
-                      <div className="flex gap-3 mt-2">
-                        {ps.delivery_photo_url && (
-                          <a href={ps.delivery_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Kirim" className="flex flex-col items-center gap-1">
+                    {((ps.delivery_photo_urls && ps.delivery_photo_urls.length > 0) || ps.payment_photo_url || ps.incident_photo_url) && (
+                      <div className="flex gap-3 mt-2 flex-wrap">
+                        {ps.delivery_photo_urls?.map((url, idx) => (
+                          <a key={idx} href={url} target="_blank" rel="noopener noreferrer" title={`Bukti Kirim ${idx + 1}`} className="flex flex-col items-center gap-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={ps.delivery_photo_url} alt="Bukti kirim" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                            <span className="text-[10px] text-slate-500 font-medium">Bukti Kirim</span>
+                            <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                            <span className="text-[10px] text-slate-500 font-medium">Bukti Kirim{ps.delivery_photo_urls!.length > 1 ? ` ${idx + 1}` : ''}</span>
                           </a>
-                        )}
+                        ))}
                         {ps.payment_photo_url && (
                           <a href={ps.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer" className="flex flex-col items-center gap-1">
                             {/* eslint-disable-next-line @next/next/no-img-element */}

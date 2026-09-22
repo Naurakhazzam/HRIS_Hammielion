@@ -30,7 +30,7 @@ type PlanStore = {
   plan_id: string
   sequence_order: number
   status: string
-  delivery_photo_url: string | null
+  delivery_photo_urls: string[] | null
   payment_method: string | null
   payment_amount: number | null
   payment_photo_url: string | null
@@ -95,7 +95,7 @@ export default function LaporanPengirimanPage() {
 
     if (list.length > 0) {
       const { data: storeData } = await supabase.from('logistics_plan_stores')
-        .select(`id, plan_id, sequence_order, status, delivery_photo_url,
+        .select(`id, plan_id, sequence_order, status, delivery_photo_urls,
           payment_method, payment_amount, payment_photo_url, payment_due_date,
           incident_type, incident_photo_url, incident_description, failed_reason,
           office_verified_amount, office_verified_by, office_verified_at,
@@ -318,15 +318,15 @@ export default function LaporanPengirimanPage() {
                             {s.incident_description && (
                               <p className="text-xs text-amber-600 mt-1 ml-8">{s.incident_description}</p>
                             )}
-                            {(s.delivery_photo_url || s.payment_photo_url || s.incident_photo_url) && (
-                              <div className="flex gap-3 mt-2 ml-8">
-                                {s.delivery_photo_url && (
-                                  <a href={s.delivery_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Kirim" className="flex flex-col items-center gap-1">
+                            {((s.delivery_photo_urls && s.delivery_photo_urls.length > 0) || s.payment_photo_url || s.incident_photo_url) && (
+                              <div className="flex gap-3 mt-2 ml-8 flex-wrap">
+                                {s.delivery_photo_urls?.map((url, idx) => (
+                                  <a key={idx} href={url} target="_blank" rel="noopener noreferrer" title={`Bukti Kirim ${idx + 1}`} className="flex flex-col items-center gap-1">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src={s.delivery_photo_url} alt="Bukti kirim" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                                    <span className="text-[10px] text-slate-500 font-medium">Bukti Kirim</span>
+                                    <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                    <span className="text-[10px] text-slate-500 font-medium">Bukti Kirim{s.delivery_photo_urls!.length > 1 ? ` ${idx + 1}` : ''}</span>
                                   </a>
-                                )}
+                                ))}
                                 {s.payment_photo_url && (
                                   <a href={s.payment_photo_url} target="_blank" rel="noopener noreferrer" title="Bukti Transfer" className="flex flex-col items-center gap-1">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
