@@ -302,7 +302,9 @@ export default function LaporanPengirimanPage() {
                               <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 shrink-0">{i + 1}</span>
                               <span className="flex-1 text-slate-700">{s.logistics_stores?.name}</span>
                               {s.resolved_at && (
-                                <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">🕐 {fmtJam(s.resolved_at)}</span>
+                                <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">
+                                  🕐 {s.status === 'delivered' ? 'Terkirim jam ' : 'jam '}{fmtJam(s.resolved_at)}
+                                </span>
                               )}
                               {s.status === 'failed' ? (
                                 <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600 font-medium">Gagal: {s.failed_reason}</span>
