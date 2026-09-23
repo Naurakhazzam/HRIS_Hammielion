@@ -196,17 +196,43 @@ export default function JalanPengirimanPage() {
     setTimeout(() => setMessage(null), 6000)
   }
 
-  function resetKirimForm() {
+  // Hidrasi dari data yang SUDAH tersimpan di database (kalau ada) -- bukan selalu mulai
+  // kosong. Ini yang membuat foto tidak hilang kalau driver tidak sengaja pencet tombol
+  // kembali di tengah proses: foto sudah diunggah & disimpan ke baris toko ini seketika
+  // (lihat persistDeliveryPhotos & sejenisnya), jadi begitu dibuka lagi, tetap ada.
+  function resetKirimForm(store?: PlanStore | null) {
     setKirimStep(1); setShowUnloadConfirm(false)
-    setDeliveryPhotoUrls([]); setAddingDeliveryPhoto(false); setPaymentMethod(''); setPaymentAmount('')
-    setPaymentPhotoUrl(''); setPaymentDueDate('')
-    setIncidentType('tidak_ada'); setIncidentPhotoUrl(''); setIncidentDescription('')
+    setDeliveryPhotoUrls(store?.delivery_photo_urls || []); setAddingDeliveryPhoto(false)
+    setPaymentMethod(store?.payment_method || '')
+    setPaymentAmount(store?.payment_amount != null ? String(store.payment_amount) : '')
+    setPaymentPhotoUrl(store?.payment_photo_url || ''); setPaymentDueDate(store?.payment_due_date || '')
+    setIncidentType(store?.incident_type || 'tidak_ada')
+    setIncidentPhotoUrl(store?.incident_photo_url || ''); setIncidentDescription(store?.incident_description || '')
   }
 
   function openAction(mode: ActionMode) {
-    resetKirimForm()
+    resetKirimForm(mode === 'kirim' ? selectedStore : null)
     setFailedReason('')
     setActionMode(mode)
+  }
+
+  // Simpan patch ke state lokal planStores juga (bukan cuma database) -- supaya selectedStore
+  // langsung ikut ter-update tanpa perlu refetch, dipakai saat resetKirimForm() hidrasi ulang.
+  function patchSelectedStoreLocal(patch: Partial<PlanStore>) {
+    if (!selectedStore) return
+    setPlanStores(prev => prev.map(ps => ps.id === selectedStore.id ? { ...ps, ...patch } : ps))
+  }
+
+  // Simpan foto ke database SETIAP KALI berhasil diambil (bukan nunggu submit akhir) --
+  // laporan driver: foto ikut hilang kalau tidak sengaja pencet tombol kembali sebelum sempat
+  // menekan "Kirim". File-nya sendiri sebenarnya sudah aman di storage sejak diunggah, yang
+  // hilang cuma REFERENSI-nya di state lokal HP -- jadi begitu path-nya juga langsung ditulis
+  // ke baris toko ini, referensinya tidak hilang lagi walau state lokal reset.
+  async function persistStorePhotoField(field: 'delivery_photo_urls' | 'payment_photo_url' | 'incident_photo_url', value: string[] | string | null) {
+    if (!selectedStore) return
+    const { error } = await supabase.from('logistics_plan_stores').update({ [field]: value }).eq('id', selectedStore.id)
+    if (error) { showMessage('error', 'Foto sudah diunggah tapi gagal disimpan ke rencana: ' + error.message); return }
+    patchSelectedStoreLocal({ [field]: value } as Partial<PlanStore>)
   }
 
   async function uploadPhoto(blob: Blob, tag: string): Promise<string | null> {
@@ -517,7 +543,11 @@ export default function JalanPengirimanPage() {
                             <div key={idx} className="relative">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
-                              <button type="button" onClick={() => setDeliveryPhotoUrls(prev => prev.filter((_, i) => i !== idx))}
+                              <button type="button" onClick={async () => {
+                                  const updated = deliveryPhotoUrls.filter((_, i) => i !== idx)
+                                  setDeliveryPhotoUrls(updated)
+                                  await persistStorePhotoField('delivery_photo_urls', updated)
+                                }}
                                 className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-red-600 text-white rounded-full text-xs shadow">✕</button>
                             </div>
                           ))}
@@ -527,7 +557,12 @@ export default function JalanPengirimanPage() {
                         <LogisticsCameraCapture label="Foto Bukti Kirim" employeeName={myName}
                           onCaptured={async blob => {
                             const url = await uploadPhoto(blob, 'kirim')
-                            if (url) { setDeliveryPhotoUrls(prev => [...prev, url]); setAddingDeliveryPhoto(false) }
+                            if (url) {
+                              const updated = [...deliveryPhotoUrls, url]
+                              setDeliveryPhotoUrls(updated)
+                              setAddingDeliveryPhoto(false)
+                              await persistStorePhotoField('delivery_photo_urls', updated)
+                            }
                           }}
                           onCancel={() => setAddingDeliveryPhoto(false)} />
                       ) : (
@@ -592,11 +627,14 @@ export default function JalanPengirimanPage() {
                           <div className="space-y-2">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={paymentPhotoUrl} alt="Bukti transfer" className="w-full rounded-lg aspect-[4/3] object-cover" />
-                            <button onClick={() => setPaymentPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                            <button onClick={async () => { setPaymentPhotoUrl(''); await persistStorePhotoField('payment_photo_url', null) }} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
                           </div>
                         ) : (
                           <LogisticsCameraCapture label="Foto Bukti Transfer" employeeName={myName}
-                            onCaptured={async blob => { const url = await uploadPhoto(blob, 'transfer'); if (url) setPaymentPhotoUrl(url) }} />
+                            onCaptured={async blob => {
+                              const url = await uploadPhoto(blob, 'transfer')
+                              if (url) { setPaymentPhotoUrl(url); await persistStorePhotoField('payment_photo_url', url) }
+                            }} />
                         )
                       )}
 
@@ -645,11 +683,14 @@ export default function JalanPengirimanPage() {
                             <div className="space-y-2">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img src={incidentPhotoUrl} alt="Foto kejadian" className="w-full rounded-lg aspect-[4/3] object-cover" />
-                              <button onClick={() => setIncidentPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                              <button onClick={async () => { setIncidentPhotoUrl(''); await persistStorePhotoField('incident_photo_url', null) }} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
                             </div>
                           ) : (
                             <LogisticsCameraCapture label="Foto Kejadian" employeeName={myName}
-                              onCaptured={async blob => { const url = await uploadPhoto(blob, 'kejadian'); if (url) setIncidentPhotoUrl(url) }} />
+                              onCaptured={async blob => {
+                                const url = await uploadPhoto(blob, 'kejadian')
+                                if (url) { setIncidentPhotoUrl(url); await persistStorePhotoField('incident_photo_url', url) }
+                              }} />
                           )}
                           <textarea value={incidentDescription} onChange={e => setIncidentDescription(e.target.value)}
                             placeholder="Keterangan kejadian..." rows={3}
