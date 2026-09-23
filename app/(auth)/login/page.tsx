@@ -1,12 +1,22 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  // Kalau datang dari link yang butuh login dulu (mis. Absen QR, lihat middleware.ts), kembali
+  // ke situ setelah berhasil login -- bukan selalu /dashboard. Cuma terima path relatif internal
+  // (harus diawali "/" tapi bukan "//") supaya tidak bisa dipakai untuk open-redirect ke situs lain.
+  function resolveNextPath(): string {
+    const next = searchParams.get('next')
+    if (next && next.startsWith('/') && !next.startsWith('//')) return next
+    return '/dashboard'
+  }
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -51,7 +61,7 @@ export default function LoginPage() {
       return
     }
 
-    router.push('/dashboard')
+    router.push(resolveNextPath())
     router.refresh()
   }
 
@@ -203,5 +213,13 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <LoginForm />
+    </Suspense>
   )
 }

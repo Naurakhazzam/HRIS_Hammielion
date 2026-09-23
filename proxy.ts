@@ -62,9 +62,17 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Jika user belum login dan mengakses route yang dilindungi → redirect ke /login
+  // Bug lama: tujuan asal (mis. link Absen QR) tidak pernah dibawa ke /login, dan setelah
+  // login selalu dilempar ke /dashboard begitu saja — karyawan yang scan QR tapi belum login
+  // di device itu (device bersama, atau sesi HP sendiri sudah habis; sering terjadi pas
+  // perbantuan di cabang lain karena bukan device yang biasa dipakai) jadi harus scan ulang dari
+  // nol tanpa tahu itu perlu, sering disangka "QR-nya tidak bisa dipakai". Sekarang tujuan asal
+  // dibawa lewat ?next=, dan halaman login mengarahkan balik ke situ setelah berhasil.
   if (!user && !PUBLIC_ROUTES.some((route) => pathname.startsWith(route))) {
     const loginUrl = request.nextUrl.clone()
     loginUrl.pathname = '/login'
+    loginUrl.search = ''
+    loginUrl.searchParams.set('next', pathname + request.nextUrl.search)
     return NextResponse.redirect(loginUrl)
   }
 
