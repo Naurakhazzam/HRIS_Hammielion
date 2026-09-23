@@ -13,6 +13,7 @@ type Plan = {
   box_photo_url: string | null
   garage_photo_url: string | null
   needs_refuel: boolean | null
+  current_target_store_id: string | null
   vehicles: { name: string; plate_number: string | null } | null
   delivery_routes: { name: string } | null
   driver: { full_name: string } | null
@@ -82,7 +83,7 @@ export default function LaporanPengirimanPage() {
     const { data: planData } = await supabase
       .from('logistics_delivery_plans')
       .select(`
-        id, plan_date, status, box_photo_url, garage_photo_url, needs_refuel,
+        id, plan_date, status, box_photo_url, garage_photo_url, needs_refuel, current_target_store_id,
         vehicles(name, plate_number),
         delivery_routes(name),
         driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
@@ -173,8 +174,11 @@ export default function LaporanPengirimanPage() {
   const totalTempo = allStores.filter(s => s.payment_method === 'tempo').length
   const totalIncident = allStores.filter(s => s.incident_type !== 'tidak_ada').length
   const totalFailed = allStores.filter(s => s.status === 'failed').length
-  const verifiedCashStores = cashStores.filter(s => s.office_verified_amount != null)
-  const unverifiedCashCount = cashStores.length - verifiedCashStores.length
+  // Deposit juga uang tunai fisik yang diterima driver (beda dari transfer yang cuma bukti foto),
+  // jadi sama-sama butuh verifikasi kantor -- bukan cuma cash.
+  const verifiableStores = allStores.filter(s => s.payment_method === 'cash' || s.payment_method === 'deposit')
+  const verifiedCashStores = verifiableStores.filter(s => s.office_verified_amount != null)
+  const unverifiedCashCount = verifiableStores.length - verifiedCashStores.length
   const totalSelisihKas = verifiedCashStores.reduce((sum, s) => sum + (Number(s.office_verified_amount) - Number(s.payment_amount || 0)), 0)
 
   const monthOptions = Array.from({ length: 12 }, (_, i) => {
@@ -239,7 +243,7 @@ export default function LaporanPengirimanPage() {
             {canVerify && (
               <>
                 <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
-                  <p className="text-[11px] text-slate-500 uppercase mb-1">Cash Belum Diverifikasi</p>
+                  <p className="text-[11px] text-slate-500 uppercase mb-1">Cash/Deposit Belum Diverifikasi</p>
                   <p className={`text-sm font-bold ${unverifiedCashCount > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{unverifiedCashCount} toko</p>
                 </div>
                 <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
@@ -309,7 +313,11 @@ export default function LaporanPengirimanPage() {
                               {s.status === 'failed' ? (
                                 <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600 font-medium">Gagal: {s.failed_reason}</span>
                               ) : s.status === 'pending' ? (
-                                <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-medium">Belum Diproses</span>
+                                s.id === p.current_target_store_id ? (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-medium animate-pulse">🚗 Sedang dalam perjalanan menuju toko ini</span>
+                                ) : (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-medium">Belum Diproses</span>
+                                )
                               ) : (
                                 <>
                                   {s.payment_method && (
@@ -355,9 +363,10 @@ export default function LaporanPengirimanPage() {
                             )}
 
                             {/* Validasi kas fisik — nominal yang ditulis driver belum tentu sama
-                                dengan yang benar-benar diserahkan ke kantor. Cuma untuk pembayaran
-                                cash, cuma bisa diisi Owner/HR/Finance (canVerify). */}
-                            {s.payment_method === 'cash' && canVerify && (
+                                dengan yang benar-benar diserahkan ke kantor. Berlaku untuk cash
+                                DAN deposit (sama-sama uang tunai fisik, beda dari transfer yang
+                                cuma bukti foto), cuma bisa diisi Owner/HR/Finance (canVerify). */}
+                            {(s.payment_method === 'cash' || s.payment_method === 'deposit') && canVerify && (
                               <div className="mt-2 ml-8">
                                 {verifyingId === s.id ? (
                                   <div className="flex items-center gap-2">

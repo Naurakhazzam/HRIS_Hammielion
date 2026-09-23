@@ -172,6 +172,24 @@ export default function JalanPengirimanPage() {
     if (selectedPlanId) await fetchPlanStores(selectedPlanId)
   }
 
+  // Simpan toko yang sedang DITUJU ke rencana (bukan cuma state lokal) -- supaya kantor bisa
+  // lihat progres real-time di Laporan Pengiriman ("Sedang dalam perjalanan menuju..."), bukan
+  // cuma status akhir toko itu sendiri.
+  async function selectTargetStore(storeId: string) {
+    setSelectedStoreId(storeId)
+    if (selectedPlanId) {
+      await supabase.from('logistics_delivery_plans').update({ current_target_store_id: storeId }).eq('id', selectedPlanId)
+    }
+  }
+
+  async function clearTargetStore() {
+    setSelectedStoreId(null)
+    setActionMode(null)
+    if (selectedPlanId) {
+      await supabase.from('logistics_delivery_plans').update({ current_target_store_id: null }).eq('id', selectedPlanId)
+    }
+  }
+
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -283,8 +301,7 @@ export default function JalanPengirimanPage() {
     if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); return }
     if (!data || data.length === 0) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
     else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" selesai dikirim.`)
-    setActionMode(null)
-    setSelectedStoreId(null)
+    await clearTargetStore()
     resetKirimForm()
     await refresh()
     setSubmitting(false)
@@ -299,8 +316,7 @@ export default function JalanPengirimanPage() {
     if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); return }
     if (!data || data.length === 0) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
     else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" ditandai gagal kirim.`)
-    setActionMode(null)
-    setSelectedStoreId(null)
+    await clearTargetStore()
     setFailedReason('')
     await refresh()
     setSubmitting(false)
@@ -409,7 +425,7 @@ export default function JalanPengirimanPage() {
               </div>
               <div className="divide-y divide-slate-100">
                 {pendingStores.map(ps => (
-                  <button key={ps.id} onClick={() => setSelectedStoreId(ps.id)}
+                  <button key={ps.id} onClick={() => selectTargetStore(ps.id)}
                     className="w-full text-left px-4 py-3 hover:bg-blue-50/50 transition flex items-center gap-3">
                     <span className="w-6 h-6 flex items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 shrink-0">{ps.sequence_order}</span>
                     <div className="flex-1 min-w-0">
@@ -458,7 +474,7 @@ export default function JalanPengirimanPage() {
 
           {selectedPlan?.status === 'departed' && !allResolved && selectedStore && (
             <div className="bg-white rounded-xl border-2 border-blue-200 p-5">
-              <button onClick={() => { setSelectedStoreId(null); setActionMode(null) }} className="text-xs text-blue-600 hover:underline mb-2">← Pilih Toko Lain</button>
+              <button onClick={clearTargetStore} className="text-xs text-blue-600 hover:underline mb-2">← Pilih Toko Lain</button>
               <p className="text-xs text-slate-500 mb-1">Toko #{selectedStore.sequence_order} · {pendingStores.length} toko tersisa</p>
               <h2 className="text-lg font-bold text-slate-800 mb-1">{selectedStore.logistics_stores?.name}</h2>
               {selectedStore.logistics_stores?.address && <p className="text-sm text-slate-500 mb-2">{selectedStore.logistics_stores.address}</p>}
