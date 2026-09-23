@@ -117,6 +117,7 @@ export default function JalanPengirimanPage() {
   const [boxPhotoUrl, setBoxPhotoUrl] = useState('')
   const [garagePhotoUrl, setGaragePhotoUrl] = useState('')
   const [needsRefuel, setNeedsRefuel] = useState<boolean | null>(null)
+  const [refuelAmount, setRefuelAmount] = useState('')
   const [nowTick, setNowTick] = useState(Date.now())
   const [garageGapMinutes, setGarageGapMinutes] = useState(GARAGE_GAP_MINUTES_DEFAULT)
 
@@ -271,17 +272,20 @@ export default function JalanPengirimanPage() {
     setSubmitting(false)
   }
 
+  const canSubmitSelesaiKirim = !!garagePhotoUrl && needsRefuel !== null && (!needsRefuel || (!!refuelAmount && Number(refuelAmount) > 0))
+
   async function submitSelesaiKirim() {
-    if (!selectedPlan || !garagePhotoUrl || needsRefuel === null) return
+    if (!selectedPlan || !canSubmitSelesaiKirim) return
     setSubmitting(true)
     const { data, error } = await supabase.rpc('complete_logistics_delivery', {
       p_plan_id: selectedPlan.id, p_garage_photo_url: garagePhotoUrl, p_needs_refuel: needsRefuel,
+      p_refuel_amount: needsRefuel ? Number(refuelAmount) : null,
     })
     if (error) { showMessage('error', 'Gagal menyelesaikan trip: ' + error.message); setSubmitting(false); return }
     const row = Array.isArray(data) ? data[0] : data
     const myShare = myEmployeeId === selectedPlan.driver_id ? row?.driver_earning : row?.helper_earning
     showMessage('success', `Trip selesai! Upah ritase Anda sebesar ${fmtRp(Number(myShare ?? 0))} sudah tercatat.`)
-    setGaragePhotoUrl(''); setNeedsRefuel(null)
+    setGaragePhotoUrl(''); setNeedsRefuel(null); setRefuelAmount('')
     setSelectedPlanId(null)
     await refresh()
     setSubmitting(false)
@@ -791,12 +795,21 @@ export default function JalanPengirimanPage() {
                       <div className="grid grid-cols-2 gap-2">
                         <button type="button" onClick={() => setNeedsRefuel(true)}
                           className={`py-2 rounded-lg text-sm font-medium border transition ${needsRefuel === true ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Ya</button>
-                        <button type="button" onClick={() => setNeedsRefuel(false)}
+                        <button type="button" onClick={() => { setNeedsRefuel(false); setRefuelAmount('') }}
                           className={`py-2 rounded-lg text-sm font-medium border transition ${needsRefuel === false ? 'bg-slate-600 text-white border-slate-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Tidak</button>
                       </div>
+                      {needsRefuel === true && (
+                        <div className="mt-2">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Kira-kira Butuh Berapa? (Rp)</label>
+                          <RupiahInput value={refuelAmount} onChange={setRefuelAmount}
+                            placeholder="Contoh: 150000"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none" />
+                          <p className="text-[11px] text-slate-400 mt-1">Supaya admin bisa siapkan uangnya dari pagi.</p>
+                        </div>
+                      )}
                     </div>
                     <p className="text-[11px] text-slate-400">Upah ritase resmi tercatat begitu Anda menekan "Selesai Kirim" di bawah ini.</p>
-                    <button onClick={submitSelesaiKirim} disabled={!garagePhotoUrl || needsRefuel === null || submitting}
+                    <button onClick={submitSelesaiKirim} disabled={!canSubmitSelesaiKirim || submitting}
                       className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-sm transition disabled:opacity-50">
                       {submitting ? 'Memproses...' : 'Selesai Kirim'}
                     </button>

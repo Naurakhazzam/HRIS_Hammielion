@@ -13,6 +13,7 @@ type Plan = {
   box_photo_url: string | null
   garage_photo_url: string | null
   needs_refuel: boolean | null
+  refuel_amount: number | null
   current_target_store_id: string | null
   vehicles: { name: string; plate_number: string | null } | null
   delivery_routes: { name: string } | null
@@ -83,7 +84,7 @@ export default function LaporanPengirimanPage() {
     const { data: planData } = await supabase
       .from('logistics_delivery_plans')
       .select(`
-        id, plan_date, status, box_photo_url, garage_photo_url, needs_refuel, current_target_store_id,
+        id, plan_date, status, box_photo_url, garage_photo_url, needs_refuel, refuel_amount, current_target_store_id,
         vehicles(name, plate_number),
         delivery_routes(name),
         driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
@@ -281,7 +282,9 @@ export default function LaporanPengirimanPage() {
                       <div className="border-t border-slate-100 divide-y divide-slate-50">
                         {(p.box_photo_url || p.garage_photo_url) && (
                           <div className="px-4 py-2.5">
-                            <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Penutupan Trip{p.needs_refuel ? ' — ⛽ Perlu Isi Bensin' : ''}</p>
+                            <p className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                              Penutupan Trip{p.needs_refuel ? ` — ⛽ Perlu Isi Bensin${p.refuel_amount != null ? ` (${fmtRp(Number(p.refuel_amount))})` : ''}` : ''}
+                            </p>
                             <div className="flex gap-3">
                               {p.box_photo_url && (
                                 <button type="button" onClick={() => openLightbox(p.box_photo_url!, 'Foto box kosong')} title="Foto Box Kosong" className="flex flex-col items-center gap-1">

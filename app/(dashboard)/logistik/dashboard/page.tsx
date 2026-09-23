@@ -19,8 +19,11 @@ type StoreCount = { total: number; delivered: number; failed: number; pending: n
 type RefuelPlan = {
   id: string
   plan_date: string
+  refuel_amount: number | null
   vehicles: { name: string; plate_number: string | null } | null
 }
+
+const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
 const STATUS_LABEL: Record<string, { label: string; className: string }> = {
   ready: { label: 'Siap Berangkat', className: 'bg-slate-100 text-slate-600' },
@@ -74,7 +77,7 @@ export default function LogistikDashboardPage() {
     }
 
     const { data: refuelData } = await supabase.from('logistics_delivery_plans')
-      .select('id, plan_date, vehicles(name, plate_number)')
+      .select('id, plan_date, refuel_amount, vehicles(name, plate_number)')
       .eq('needs_refuel', true)
       .order('plan_date', { ascending: false })
       .limit(20)
@@ -183,7 +186,10 @@ export default function LogistikDashboardPage() {
           <div className="space-y-1.5">
             {refuelPlans.map(p => (
               <div key={p.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 text-sm">
-                <span className="text-slate-700">{p.vehicles?.name} {p.vehicles?.plate_number ? `(${p.vehicles.plate_number})` : ''} — {new Date(p.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}</span>
+                <span className="text-slate-700">
+                  {p.vehicles?.name} {p.vehicles?.plate_number ? `(${p.vehicles.plate_number})` : ''} — {new Date(p.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}
+                  {p.refuel_amount != null && <span className="font-semibold text-amber-700"> · {fmtRp(Number(p.refuel_amount))}</span>}
+                </span>
                 {canManage && (
                   <button onClick={() => dismissRefuel(p.id)} className="text-xs text-blue-600 hover:underline font-medium">Sudah Diisi</button>
                 )}
