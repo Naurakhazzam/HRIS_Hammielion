@@ -40,6 +40,7 @@ type PlanStore = {
   incident_photo_url: string | null
   incident_description: string | null
   failed_reason: string | null
+  resolved_at: string | null
   office_verified_amount: number | null
   office_verified_by: string | null
   office_verified_at: string | null
@@ -47,6 +48,8 @@ type PlanStore = {
 }
 
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
+
+const fmtJam = (ts: string) => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
 
 const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
@@ -99,7 +102,7 @@ export default function LaporanPengirimanPage() {
       const { data: storeData } = await supabase.from('logistics_plan_stores')
         .select(`id, plan_id, sequence_order, status, delivery_photo_urls,
           payment_method, payment_amount, payment_photo_url, payment_due_date,
-          incident_type, incident_photo_url, incident_description, failed_reason,
+          incident_type, incident_photo_url, incident_description, failed_reason, resolved_at,
           office_verified_amount, office_verified_by, office_verified_at,
           logistics_stores(name)`)
         .in('plan_id', list.map(p => p.id)).order('sequence_order')
@@ -298,6 +301,9 @@ export default function LaporanPengirimanPage() {
                             <div className="flex items-center gap-3">
                               <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 shrink-0">{i + 1}</span>
                               <span className="flex-1 text-slate-700">{s.logistics_stores?.name}</span>
+                              {s.resolved_at && (
+                                <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">🕐 {fmtJam(s.resolved_at)}</span>
+                              )}
                               {s.status === 'failed' ? (
                                 <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600 font-medium">Gagal: {s.failed_reason}</span>
                               ) : s.status === 'pending' ? (
