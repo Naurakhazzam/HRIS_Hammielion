@@ -33,6 +33,11 @@ export default function AjukanCutiPage() {
   // dipakai untuk memperingatkan pengali eskalasi yang akan berlaku kalau mereka ajukan lagi.
   const [izinOccurrenceCount, setIzinOccurrenceCount] = useState(0)
 
+  // Rekan (cabang mana pun) yang juga libur/cuti/mengajukan di tanggal yang tumpang tindih
+  // dengan pengajuan ini -- supaya karyawan sadar akan bentrok SEBELUM dikirim ke HR, sama
+  // seperti peringatan yang sudah ada di Ajukan Libur (roster mingguan).
+  const [dayoffCalendar, setDayoffCalendar] = useState<Record<string, string>>({})
+
   const [formData, setFormData] = useState({
     employee_id: '',
     leave_type: 'annual',
@@ -63,6 +68,19 @@ export default function AjukanCutiPage() {
   useEffect(() => {
     fetchMyUserAndEmployees()
   }, [])
+
+  useEffect(() => {
+    if (!formData.start_date || !formData.end_date || formData.end_date < formData.start_date) {
+      setDayoffCalendar({})
+      return
+    }
+    supabase.rpc('get_company_dayoff_calendar', { p_from: formData.start_date, p_to: formData.end_date })
+      .then(({ data }) => {
+        const map: Record<string, string> = {}
+        ;(data as { off_date: string; employee_names: string }[] | null)?.forEach(r => { map[r.off_date] = r.employee_names })
+        setDayoffCalendar(map)
+      })
+  }, [formData.start_date, formData.end_date]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Muat masa kerja & pemakaian Cuti Tahunan karyawan yang dipilih, tiap kali employee_id berubah.
   useEffect(() => {
@@ -342,6 +360,23 @@ export default function AjukanCutiPage() {
             <span className="text-sm font-medium text-slate-700">Total Hari Diajukan:</span>
             <span className="text-lg font-bold text-blue-600">{totalDays} Hari</span>
           </div>
+
+          {Object.keys(dayoffCalendar).length > 0 && (
+            <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-amber-200">
+              <span>⚠️</span>
+              <div>
+                <p className="font-medium mb-1">Ada rekan lain (cabang mana pun) yang juga libur/cuti di tanggal ini:</p>
+                <ul className="space-y-0.5">
+                  {Object.entries(dayoffCalendar).map(([date, names]) => (
+                    <li key={date}>
+                      {new Date(date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short' })}: {names}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1">Koordinasi dulu, atau tetap lanjut kalau tidak masalah.</p>
+              </div>
+            </div>
+          )}
 
           {(formData.leave_type === 'sick' || formData.leave_type === 'permission' || formData.leave_type === 'bereaved') && izinOccurrenceCount > 0 && (
             <div className="bg-orange-50 text-orange-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-orange-200">
