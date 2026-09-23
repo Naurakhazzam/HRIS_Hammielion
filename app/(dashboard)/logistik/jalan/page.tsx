@@ -22,9 +22,10 @@ type PlanSummary = {
 
 // SEMENTARA 0 untuk keperluan testing Owner — WAJIB dikembalikan ke 30 sebelum dipakai
 // driver/kenek sungguhan lagi (jeda ini mencegah kecurangan lapor sampai garasi terlalu cepat).
-// Jangan lupa: pengaman yang sama juga dimatikan sementara di RPC complete_logistics_delivery
-// (database) — keduanya harus dikembalikan bareng.
-const GARAGE_GAP_MINUTES = 0
+// Nilainya sekarang dibaca dari tabel logistics_settings (bisa dinyalakan/dimatikan Owner dari
+// Dashboard Pengiriman untuk keperluan testing) -- lihat fetchGarageGapMinutes(), RPC
+// complete_logistics_delivery membaca setting yang sama di database jadi keduanya selalu sinkron.
+const GARAGE_GAP_MINUTES_DEFAULT = 30
 
 const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
@@ -117,6 +118,7 @@ export default function JalanPengirimanPage() {
   const [garagePhotoUrl, setGaragePhotoUrl] = useState('')
   const [needsRefuel, setNeedsRefuel] = useState<boolean | null>(null)
   const [nowTick, setNowTick] = useState(Date.now())
+  const [garageGapMinutes, setGarageGapMinutes] = useState(GARAGE_GAP_MINUTES_DEFAULT)
 
   useEffect(() => {
     const t = setInterval(() => setNowTick(Date.now()), 15000)
@@ -143,6 +145,8 @@ export default function JalanPengirimanPage() {
     setMyEmployeeId(empId)
     setMyName((userData as any)?.employees?.full_name || '')
     if (empId) await fetchPlans(empId)
+    const { data: settings } = await supabase.from('logistics_settings').select('garage_gap_active').eq('id', true).maybeSingle()
+    setGarageGapMinutes(settings?.garage_gap_active === false ? 0 : GARAGE_GAP_MINUTES_DEFAULT)
     setLoading(false)
   }
 
@@ -758,7 +762,7 @@ export default function JalanPengirimanPage() {
 
           {selectedPlan?.status === 'closing' && (() => {
             const boxConfirmedAt = selectedPlan.box_confirmed_at ? new Date(selectedPlan.box_confirmed_at).getTime() : null
-            const msRemaining = boxConfirmedAt ? (boxConfirmedAt + GARAGE_GAP_MINUTES * 60000) - nowTick : 0
+            const msRemaining = boxConfirmedAt ? (boxConfirmedAt + garageGapMinutes * 60000) - nowTick : 0
             const canReportGarage = boxConfirmedAt !== null && msRemaining <= 0
             return (
               <div className="bg-white rounded-xl border-2 border-purple-200 p-5">

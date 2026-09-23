@@ -34,6 +34,9 @@ export default function LogistikDashboardPage() {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [canManage, setCanManage] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
+  const [garageGapActive, setGarageGapActive] = useState<boolean | null>(null)
+  const [garageGapSaving, setGarageGapSaving] = useState(false)
   const [plans, setPlans] = useState<ActivePlan[]>([])
   const [counts, setCounts] = useState<Record<string, StoreCount>>({})
   const [refuelPlans, setRefuelPlans] = useState<RefuelPlan[]>([])
@@ -90,8 +93,11 @@ export default function LogistikDashboardPage() {
             const { data: emp } = await supabase.from('employees').select('positions(name)').eq('id', userData.employee_id).single()
             setCanManage((emp as any)?.positions?.name === 'Kepala Gudang')
           }
+          setIsOwner(userData.role === 'owner')
         }
       }
+      const { data: settings } = await supabase.from('logistics_settings').select('garage_gap_active').eq('id', true).maybeSingle()
+      setGarageGapActive(settings?.garage_gap_active ?? true)
       await fetchAll()
       setLoading(false)
     }
@@ -111,6 +117,24 @@ export default function LogistikDashboardPage() {
     else fetchAll()
   }
 
+  async function toggleGarageGap() {
+    if (garageGapActive === null) return
+    const next = !garageGapActive
+    setGarageGapSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('logistics_settings')
+      .update({ garage_gap_active: next, updated_by: user?.id, updated_at: new Date().toISOString() })
+      .eq('id', true)
+    if (error) showMessage('error', 'Gagal mengubah pengaturan: ' + error.message)
+    else {
+      setGarageGapActive(next)
+      showMessage('success', next
+        ? 'Pengaman 30 menit AKTIF — driver harus menunggu 30 menit sejak foto box kosong sebelum bisa lapor sampai garasi.'
+        : 'Pengaman 30 menit DIMATIKAN — driver bisa langsung lapor sampai garasi tanpa jeda. Ingat nyalakan lagi setelah selesai testing.')
+    }
+    setGarageGapSaving(false)
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -126,6 +150,24 @@ export default function LogistikDashboardPage() {
       {message && (
         <div className={`p-4 mb-6 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
           {message.text}
+        </div>
+      )}
+
+      {isOwner && garageGapActive !== null && (
+        <div className={`mb-6 rounded-xl border p-4 flex items-center justify-between gap-4 ${garageGapActive ? 'bg-white border-slate-200' : 'bg-amber-50 border-amber-300'}`}>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">⏱️ Pengaman 30 Menit Lapor Garasi</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {garageGapActive
+                ? 'Aktif — driver wajib menunggu 30 menit sejak foto box kosong sebelum bisa lapor sampai garasi (anti-kecurangan).'
+                : '⚠ Nonaktif — driver bisa langsung lapor sampai garasi tanpa jeda. Cuma untuk keperluan testing, jangan lupa nyalakan lagi.'}
+            </p>
+          </div>
+          <button onClick={toggleGarageGap} disabled={garageGapSaving}
+            className={`shrink-0 relative w-14 h-8 rounded-full transition disabled:opacity-50 ${garageGapActive ? 'bg-green-600' : 'bg-slate-300'}`}
+            aria-label="Toggle pengaman 30 menit">
+            <span className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow transition-transform ${garageGapActive ? 'translate-x-7' : 'translate-x-1'}`} />
+          </button>
         </div>
       )}
 
