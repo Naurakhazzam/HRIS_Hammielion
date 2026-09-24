@@ -46,6 +46,15 @@ type PlanStore = {
   logistics_stores: { name: string; address: string | null; phone: string | null } | null
 }
 
+type PlanSupplierTask = {
+  id: string
+  supplier_id: string
+  status: string
+  notes: string | null
+  proof_photo_url: string | null
+  suppliers: { name: string; phone: string | null } | null
+}
+
 type ActionMode = null | 'kirim' | 'gagal'
 type PaymentMethod = '' | 'cash' | 'transfer' | 'deposit' | 'tempo'
 
@@ -68,6 +77,9 @@ export default function JalanPengirimanPage() {
   // yang tersisa (sequence_order cuma dipakai sebagai nomor referensi urutan rencana awal,
   // bukan aturan yang mengunci). null = belum pilih, tampilkan daftar toko yang bisa dipilih.
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null)
+  const [supplierTasks, setSupplierTasks] = useState<PlanSupplierTask[]>([])
+  const [selectedSupplierTaskId, setSelectedSupplierTaskId] = useState<string | null>(null)
+  const [supplierTaskSubmitting, setSupplierTaskSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [actionMode, setActionMode] = useState<ActionMode>(null)
@@ -129,12 +141,14 @@ export default function JalanPengirimanPage() {
   const selectedPlan = plans.find(p => p.id === selectedPlanId) || null
   const pendingStores = planStores.filter(ps => ps.status === 'pending').sort((a, b) => a.sequence_order - b.sequence_order)
   const selectedStore = pendingStores.find(ps => ps.id === selectedStoreId) || null
-  const allResolved = planStores.length > 0 && pendingStores.length === 0
+  const pendingSupplierTasks = supplierTasks.filter(t => t.status === 'pending')
+  const selectedSupplierTask = pendingSupplierTasks.find(t => t.id === selectedSupplierTaskId) || null
+  const allResolved = (planStores.length > 0 || supplierTasks.length > 0) && pendingStores.length === 0 && pendingSupplierTasks.length === 0
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (selectedPlanId) fetchPlanStores(selectedPlanId)
+    if (selectedPlanId) { fetchPlanStores(selectedPlanId); fetchSupplierTasks(selectedPlanId) }
   }, [selectedPlanId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
@@ -172,9 +186,16 @@ export default function JalanPengirimanPage() {
     setPlanStores((data as unknown as PlanStore[]) || [])
   }
 
+  async function fetchSupplierTasks(planId: string) {
+    const { data } = await supabase.from('logistics_plan_supplier_tasks')
+      .select('id, supplier_id, status, notes, proof_photo_url, suppliers(name, phone)')
+      .eq('plan_id', planId).order('created_at')
+    setSupplierTasks((data as unknown as PlanSupplierTask[]) || [])
+  }
+
   async function refresh() {
     if (myEmployeeId) await fetchPlans(myEmployeeId)
-    if (selectedPlanId) await fetchPlanStores(selectedPlanId)
+    if (selectedPlanId) { await fetchPlanStores(selectedPlanId); await fetchSupplierTasks(selectedPlanId) }
   }
 
   // Simpan toko yang sedang DITUJU ke rencana (bukan cuma state lokal) -- supaya kantor bisa
@@ -257,6 +278,23 @@ export default function JalanPengirimanPage() {
     if (error) { showMessage('error', 'Gagal unggah foto: ' + error.message); return null }
     const { data } = supabase.storage.from('logistics-photos').getPublicUrl(path)
     return data.publicUrl
+  }
+
+  // Tugas Belanja Supplier langsung ditandai selesai begitu foto surat jalan/nota berhasil
+  // diunggah -- tidak ada langkah "konfirmasi" terpisah, supaya tidak ada state belum-tersimpan
+  // yang bisa hilang kalau tidak sengaja pencet tombol kembali (sama seperti alasan foto Bukti
+  // Kirim langsung tersimpan begitu diambil).
+  async function submitSupplierTaskDone(task: PlanSupplierTask, photoUrl: string) {
+    setSupplierTaskSubmitting(true)
+    const { data, error } = await supabase.from('logistics_plan_supplier_tasks').update({
+      status: 'done', proof_photo_url: photoUrl, resolved_by: myEmployeeId, resolved_at: new Date().toISOString(),
+    }).eq('id', task.id).eq('status', 'pending').select('id')
+    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSupplierTaskSubmitting(false); return }
+    if (!data || data.length === 0) showMessage('error', 'Tugas ini sudah lebih dulu diproses oleh rekan Anda.')
+    else showMessage('success', `Belanja ke "${task.suppliers?.name}" selesai dicatat.`)
+    setSelectedSupplierTaskId(null)
+    await refresh()
+    setSupplierTaskSubmitting(false)
   }
 
   async function confirmBoxPhoto() {
@@ -451,31 +489,83 @@ export default function JalanPengirimanPage() {
             </button>
           )}
 
-          {selectedPlan?.status === 'departed' && !allResolved && !selectedStore && (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-                <p className="text-sm font-bold text-slate-700">Pilih Toko ({pendingStores.length} tersisa)</p>
-                <p className="text-xs text-slate-400 mt-0.5">Bebas pilih toko mana saja, tidak harus berurutan. Nomor cuma referensi urutan rencana awal.</p>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {pendingStores.map(ps => (
-                  <button key={ps.id} onClick={() => selectTargetStore(ps.id)}
-                    className="w-full text-left px-4 py-3 hover:bg-blue-50/50 transition flex items-center gap-3">
-                    <span className="w-6 h-6 flex items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 shrink-0">{ps.sequence_order}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-800 truncate">{ps.logistics_stores?.name}</p>
-                      {ps.logistics_stores?.address && <p className="text-xs text-slate-400 truncate">{ps.logistics_stores.address}</p>}
-                    </div>
-                    <span className="text-slate-300">›</span>
-                  </button>
-                ))}
-              </div>
-              <div className="px-4 py-3 border-t border-slate-100">
+          {selectedPlan?.status === 'departed' && !allResolved && !selectedStore && !selectedSupplierTask && (
+            <div className="space-y-4">
+              {pendingStores.length > 0 && (
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+                    <p className="text-sm font-bold text-slate-700">Pilih Toko ({pendingStores.length} tersisa)</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Bebas pilih toko mana saja, tidak harus berurutan. Nomor cuma referensi urutan rencana awal.</p>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {pendingStores.map(ps => (
+                      <button key={ps.id} onClick={() => selectTargetStore(ps.id)}
+                        className="w-full text-left px-4 py-3 hover:bg-blue-50/50 transition flex items-center gap-3">
+                        <span className="w-6 h-6 flex items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600 shrink-0">{ps.sequence_order}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-800 truncate">{ps.logistics_stores?.name}</p>
+                          {ps.logistics_stores?.address && <p className="text-xs text-slate-400 truncate">{ps.logistics_stores.address}</p>}
+                        </div>
+                        <span className="text-slate-300">›</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {pendingSupplierTasks.length > 0 && (
+                <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-amber-50 border-b border-amber-100">
+                    <p className="text-sm font-bold text-amber-800">🛒 Belanja Supplier ({pendingSupplierTasks.length} tersisa)</p>
+                    <p className="text-xs text-amber-600 mt-0.5">Bebas pilih kapan saja, boleh sebelum atau sesudah kirim ke toko.</p>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {pendingSupplierTasks.map(t => (
+                      <button key={t.id} onClick={() => setSelectedSupplierTaskId(t.id)}
+                        className="w-full text-left px-4 py-3 hover:bg-amber-50/50 transition flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-800 truncate">{t.suppliers?.name}</p>
+                          {t.notes && <p className="text-xs text-slate-400 truncate">{t.notes}</p>}
+                        </div>
+                        <span className="text-slate-300">›</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {pendingStores.length > 0 && (
                 <button onClick={() => { setFinishReason(''); setShowFinishConfirm(true) }}
-                  className="w-full py-2 text-sm font-medium text-slate-500 border border-dashed border-slate-300 rounded-lg hover:bg-slate-50 hover:text-slate-700 transition">
+                  className="w-full py-2 text-sm font-medium text-slate-500 border border-dashed border-slate-300 rounded-lg bg-white hover:bg-slate-50 hover:text-slate-700 transition">
                   🏁 Selesai Tugas (masih ada {pendingStores.length} toko belum terkirim)
                 </button>
-              </div>
+              )}
+            </div>
+          )}
+
+          {selectedPlan?.status === 'departed' && !allResolved && selectedSupplierTask && (
+            <div className="bg-white rounded-xl border-2 border-amber-300 p-5">
+              <button onClick={() => setSelectedSupplierTaskId(null)} className="text-xs text-blue-600 hover:underline mb-2">← Pilih Tugas Lain</button>
+              <h2 className="text-lg font-bold text-slate-800 mb-1">🛒 Belanja ke {selectedSupplierTask.suppliers?.name}</h2>
+              {selectedSupplierTask.notes && <p className="text-sm text-slate-500 mb-2">{selectedSupplierTask.notes}</p>}
+              {selectedSupplierTask.suppliers?.phone ? (
+                <a href={toWaLink(selectedSupplierTask.suppliers.phone)} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 mb-3 px-3 py-1.5 bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 text-xs font-semibold rounded-lg transition">
+                  💬 Hubungi via WhatsApp — {selectedSupplierTask.suppliers.phone}
+                </a>
+              ) : (
+                <p className="inline-flex items-center gap-1.5 mb-3 px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-400 text-xs font-medium rounded-lg">
+                  Tidak ada nomor kontak
+                </p>
+              )}
+              <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Wajib Foto Surat Jalan / Nota</p>
+              <p className="text-xs text-slate-400 mb-2">Begitu foto berhasil diambil, tugas ini langsung tercatat selesai.</p>
+              <LogisticsCameraCapture label="Foto Surat Jalan / Nota" employeeName={myName}
+                onCaptured={async blob => {
+                  const url = await uploadPlanPhoto(blob, `supplier-${selectedSupplierTask.id}`)
+                  if (url) await submitSupplierTaskDone(selectedSupplierTask, url)
+                }} />
+              {supplierTaskSubmitting && <p className="text-xs text-slate-400 mt-2">Menyimpan...</p>}
             </div>
           )}
 

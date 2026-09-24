@@ -31,6 +31,16 @@ type PlanStore = {
 
 type Store = { id: string; name: string }
 
+type PlanSupplierTask = {
+  id: string
+  supplier_id: string
+  status: string
+  notes: string | null
+  suppliers: { name: string } | null
+}
+
+type Supplier = { id: string; name: string }
+
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Draft', ready: 'Siap Kirim', departed: 'Berjalan',
   closing: 'Menuju Garasi', completed: 'Selesai', cancelled: 'Dibatalkan',
@@ -48,6 +58,10 @@ export default function RencanaDetailPage() {
   const [planStores, setPlanStores] = useState<PlanStore[]>([])
   const [allStores, setAllStores] = useState<Store[]>([])
   const [storeSearchText, setStoreSearchText] = useState('')
+  const [supplierTasks, setSupplierTasks] = useState<PlanSupplierTask[]>([])
+  const [allSuppliers, setAllSuppliers] = useState<Supplier[]>([])
+  const [supplierSearchText, setSupplierSearchText] = useState('')
+  const [supplierTaskNotes, setSupplierTaskNotes] = useState('')
   const [hasRateConfig, setHasRateConfig] = useState<boolean | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -97,6 +111,14 @@ export default function RencanaDetailPage() {
 
     const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).order('name')
     setAllStores(storeData || [])
+
+    const { data: taskData } = await supabase.from('logistics_plan_supplier_tasks')
+      .select('id, supplier_id, status, notes, suppliers(name)')
+      .eq('plan_id', params.id).order('created_at')
+    setSupplierTasks((taskData as unknown as PlanSupplierTask[]) || [])
+
+    const { data: supplierData } = await supabase.from('suppliers').select('id, name').eq('is_active', true).order('name')
+    setAllSuppliers(supplierData || [])
 
     // Sama persis kondisinya dengan dropdown Driver/Kenek di /logistik/rencana (halaman daftar)
     // -- driver "asli" (employee_type='driver') belum tentu can_drive=true, begitu juga
@@ -166,6 +188,7 @@ export default function RencanaDetailPage() {
   }
 
   const availableStores = allStores.filter(s => !planStores.some(ps => ps.store_id === s.id))
+  const availableSuppliers = allSuppliers.filter(s => !supplierTasks.some(t => t.supplier_id === s.id && t.status === 'pending'))
   // Ketik nama toko, cocokkan persis (case-insensitive) ke saran yang muncul dari datalist —
   // supaya Kepala Gudang tidak perlu scroll dropdown ratusan toko satu-satu.
   const matchedStore = availableStores.find(s => s.name.trim().toLowerCase() === storeSearchText.trim().toLowerCase())
@@ -185,6 +208,25 @@ export default function RencanaDetailPage() {
     if (!confirm(`Hapus "${ps.logistics_stores?.name}" dari rencana ini?`)) return
     const { error } = await supabase.from('logistics_plan_stores').delete().eq('id', ps.id)
     if (error) showMessage('error', 'Gagal menghapus toko: ' + error.message)
+    else fetchAll()
+  }
+
+  const matchedSupplier = availableSuppliers.find(s => s.name.trim().toLowerCase() === supplierSearchText.trim().toLowerCase())
+
+  async function handleAddSupplierTask(e: React.FormEvent) {
+    e.preventDefault()
+    if (!matchedSupplier) { showMessage('error', 'Supplier tidak ditemukan. Ketik nama supplier lalu pilih dari saran yang muncul.'); return }
+    const { error } = await supabase.from('logistics_plan_supplier_tasks').insert({
+      plan_id: params.id, supplier_id: matchedSupplier.id, notes: supplierTaskNotes.trim() || null, created_by: myEmployeeId,
+    })
+    if (error) showMessage('error', 'Gagal menambah tugas belanja: ' + error.message)
+    else { setSupplierSearchText(''); setSupplierTaskNotes(''); fetchAll() }
+  }
+
+  async function handleRemoveSupplierTask(t: PlanSupplierTask) {
+    if (!confirm(`Hapus tugas belanja ke "${t.suppliers?.name}" dari rencana ini?`)) return
+    const { error } = await supabase.from('logistics_plan_supplier_tasks').delete().eq('id', t.id)
+    if (error) showMessage('error', 'Gagal menghapus tugas: ' + error.message)
     else fetchAll()
   }
 
@@ -346,6 +388,60 @@ export default function RencanaDetailPage() {
           </form>
           {availableStores.length === 0 && allStores.length === 0 && (
             <p className="text-xs text-slate-400 mt-2">Belum ada toko di Master Toko. <Link href="/logistik/toko" className="text-blue-600 hover:underline">Tambah dulu di sini</Link>.</p>
+          )}
+        </div>
+      )}
+
+      {/* Tugas Belanja Supplier — bebas dikombinasikan dengan toko, tidak dipaksa urutan
+          (sebelum atau sesudah kirim ke toko, terserah driver di lapangan). Bisa ditambahkan
+          juga ke trip yang sudah berjalan, sama seperti toko. */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-200">
+          <span className="text-sm font-bold text-slate-700">🛒 Tugas Belanja Supplier ({supplierTasks.length})</span>
+        </div>
+        {supplierTasks.length === 0 ? (
+          <div className="p-6 text-center text-sm text-slate-500">Belum ada tugas belanja supplier.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {supplierTasks.map(t => (
+              <div key={t.id} className="flex items-center gap-3 px-5 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-800 truncate">{t.suppliers?.name}</p>
+                  {t.notes && <p className="text-xs text-slate-400 truncate">{t.notes}</p>}
+                </div>
+                {t.status === 'done' ? (
+                  <span className="text-xs px-2 py-0.5 rounded font-medium shrink-0 bg-green-100 text-green-700">Selesai</span>
+                ) : (
+                  <span className="text-xs px-2 py-0.5 rounded font-medium shrink-0 bg-slate-100 text-slate-500">Belum Diproses</span>
+                )}
+                {(editable || canEditActive) && canManage && t.status === 'pending' && (
+                  <button onClick={() => handleRemoveSupplierTask(t)} className="w-7 h-7 flex items-center justify-center text-red-400 hover:bg-red-50 rounded shrink-0">✕</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {(editable || canEditActive) && canManage && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
+          {canEditActive && <p className="text-xs text-amber-600 mb-2">⚠ Trip sudah berjalan — tugas belanja baru langsung ikut jadi bagian trip ini, driver/kenek bisa langsung memprosesnya.</p>}
+          <form onSubmit={handleAddSupplierTask} className="flex flex-col sm:flex-row gap-2">
+            <input type="text" list="available-suppliers-datalist" value={supplierSearchText}
+              onChange={e => setSupplierSearchText(e.target.value)}
+              placeholder="Ketik nama supplier untuk ditambahkan..."
+              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+            <datalist id="available-suppliers-datalist">
+              {availableSuppliers.map(s => <option key={s.id} value={s.name} />)}
+            </datalist>
+            <input type="text" value={supplierTaskNotes} onChange={e => setSupplierTaskNotes(e.target.value)}
+              placeholder="Catatan (opsional)"
+              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+            <button type="submit" disabled={!matchedSupplier}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 whitespace-nowrap">+ Tambah Tugas</button>
+          </form>
+          {availableSuppliers.length === 0 && allSuppliers.length === 0 && (
+            <p className="text-xs text-slate-400 mt-2">Belum ada data Supplier. <Link href="/keuangan/pembelian/supplier" className="text-blue-600 hover:underline">Tambah dulu di sini</Link>.</p>
           )}
         </div>
       )}

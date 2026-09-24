@@ -49,6 +49,16 @@ type PlanStore = {
   logistics_stores: { name: string } | null
 }
 
+type PlanSupplierTask = {
+  id: string
+  plan_id: string
+  status: string
+  notes: string | null
+  proof_photo_url: string | null
+  resolved_at: string | null
+  suppliers: { name: string } | null
+}
+
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
 
 const fmtJam = (ts: string) => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
@@ -69,6 +79,7 @@ export default function LaporanPengirimanPage() {
   })
   const [plans, setPlans] = useState<Plan[]>([])
   const [storesByPlan, setStoresByPlan] = useState<Record<string, PlanStore[]>>({})
+  const [supplierTasksByPlan, setSupplierTasksByPlan] = useState<Record<string, PlanSupplierTask[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [verifyingId, setVerifyingId] = useState<string | null>(null)
   const [verifyAmount, setVerifyAmount] = useState('')
@@ -114,8 +125,19 @@ export default function LaporanPengirimanPage() {
         grouped[s.plan_id].push(s)
       })
       setStoresByPlan(grouped)
+
+      const { data: taskData } = await supabase.from('logistics_plan_supplier_tasks')
+        .select('id, plan_id, status, notes, proof_photo_url, resolved_at, suppliers(name)')
+        .in('plan_id', list.map(p => p.id)).order('created_at')
+      const groupedTasks: Record<string, PlanSupplierTask[]> = {}
+      ;(taskData as unknown as PlanSupplierTask[] || []).forEach(t => {
+        if (!groupedTasks[t.plan_id]) groupedTasks[t.plan_id] = []
+        groupedTasks[t.plan_id].push(t)
+      })
+      setSupplierTasksByPlan(groupedTasks)
     } else {
       setStoresByPlan({})
+      setSupplierTasksByPlan({})
     }
     setLoading(false)
   }, [filterMonth, supabase])
@@ -263,6 +285,7 @@ export default function LaporanPengirimanPage() {
             <div className="space-y-3">
               {plans.map(p => {
                 const stores = storesByPlan[p.id] || []
+                const tasks = supplierTasksByPlan[p.id] || []
                 const isOpen = expanded.has(p.id)
                 return (
                   <div key={p.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -300,6 +323,34 @@ export default function LaporanPengirimanPage() {
                                   <span className="text-[10px] text-slate-500 font-medium">Amper Bensin</span>
                                 </button>
                               )}
+                            </div>
+                          </div>
+                        )}
+                        {tasks.length > 0 && (
+                          <div className="px-4 py-2.5">
+                            <p className="text-xs font-semibold text-amber-600 uppercase mb-2">🛒 Belanja Supplier</p>
+                            <div className="space-y-2">
+                              {tasks.map(t => (
+                                <div key={t.id} className="flex items-center gap-3 text-sm">
+                                  <span className="flex-1 text-slate-700">
+                                    {t.suppliers?.name}
+                                    {t.notes && <span className="text-slate-400"> — {t.notes}</span>}
+                                  </span>
+                                  {t.resolved_at && (
+                                    <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">🕐 {fmtJam(t.resolved_at)}</span>
+                                  )}
+                                  {t.status === 'done' ? (
+                                    t.proof_photo_url && (
+                                      <button type="button" onClick={() => openLightbox(t.proof_photo_url!, `Surat jalan/nota - ${t.suppliers?.name}`)} title="Foto Surat Jalan/Nota" className="flex flex-col items-center gap-0.5 shrink-0">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img src={t.proof_photo_url} alt="Surat jalan/nota" className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
+                                      </button>
+                                    )
+                                  ) : (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-medium shrink-0">Belum Diproses</span>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                           </div>
                         )}
