@@ -7,6 +7,8 @@ import { createClient } from '@/lib/supabase/client'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
 import { chargeableLateMinutes } from '@/lib/lateTolerance'
+import { getUpcomingRosterPeriod, rosterPeriodLabel } from '@/lib/rosterPeriod'
+import { localDateStr } from '@/lib/date'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const DAYS_AHEAD = 30
@@ -58,6 +60,7 @@ export default function PortalDashboardPage() {
   const [leaveInfo, setLeaveInfo] = useState<{ joinDate: string | null; usedDays: number }>({ joinDate: null, usedDays: 0 })
   const [kasbonSaldo, setKasbonSaldo] = useState(0)
   const [estPotongan, setEstPotongan] = useState({ keterlambatan: 0, kasbon: 0 })
+  const [quotaLibur, setQuotaLibur] = useState<{ submitted: number; draft: number; label: string; daysUntil: number } | null>(null)
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -86,6 +89,7 @@ export default function PortalDashboardPage() {
       fetchUpcomingOff(effectiveId),
       fetchKasbonSaldo(effectiveId),
       fetchEstimasiPotongan(effectiveId),
+      fetchQuotaLibur(effectiveId),
       emp?.join_date ? fetchLeaveInfo(effectiveId, emp.join_date) : Promise.resolve(),
     ])
     setLoading(false)
@@ -176,6 +180,21 @@ export default function PortalDashboardPage() {
     setEstPotongan({ keterlambatan, kasbon })
   }
 
+  // Jatah libur 4 tanggal untuk periode roster BERIKUTNYA -- selalu diperingatkan sampai
+  // terpenuhi. RPC mengembalikan semua karyawan kalau yang login Owner (preview), jadi difilter.
+  async function fetchQuotaLibur(employeeId: string) {
+    const period = getUpcomingRosterPeriod()
+    const { data } = await supabase.rpc('get_dayoff_quota_status', { p_period_start: localDateStr(period.start) })
+    const mine = ((data || []) as { employee_id: string; approved_count: number; pending_count: number; draft_count: number }[])
+      .find(r => r.employee_id === employeeId)
+    if (!mine) { setQuotaLibur(null); return }
+    setQuotaLibur({
+      submitted: mine.approved_count + mine.pending_count, draft: mine.draft_count,
+      label: rosterPeriodLabel(period.start, period.end),
+      daysUntil: Math.ceil((period.start.getTime() - new Date(new Date().toDateString()).getTime()) / 86400000),
+    })
+  }
+
   // Sisa saldo kasbon aktif -- rumus sama persis dengan yang dipakai halaman Kasbon (Tab
   // Limit): jumlah (amount_requested - total_deducted) dari kasbon_requests yang sudah
   // disetujui & dicairkan, bukan dari kasbon_limits yang sudah tidak sinkron.
@@ -211,6 +230,18 @@ export default function PortalDashboardPage() {
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Halo, {myName}! 👋</h1>
         <p className="text-sm text-slate-500">{today.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} — ringkasan singkat untuk Anda.</p>
       </div>
+
+      {quotaLibur && quotaLibur.submitted < 4 && (
+        <Link href="/portal/ajukan-libur" className="block bg-amber-50 border-2 border-amber-400 rounded-xl p-4 hover:bg-amber-100 transition">
+          <p className="text-base font-bold text-amber-800">⚠️ Jatah libur Anda belum diambil!</p>
+          <p className="text-sm text-amber-700 mt-1">
+            Baru <strong>{quotaLibur.submitted} dari 4</strong> tanggal libur terkirim untuk periode {quotaLibur.label}
+            {quotaLibur.draft > 0 ? ` (${quotaLibur.draft} masih draf, belum dikirim ke HR)` : ''}.
+            {quotaLibur.daysUntil > 0 ? ` Periode mulai ${quotaLibur.daysUntil} hari lagi.` : ''}
+          </p>
+          <p className="text-sm font-semibold text-amber-800 mt-2">Ketuk di sini untuk memilih tanggal libur →</p>
+        </Link>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Ringkasan Gaji */}

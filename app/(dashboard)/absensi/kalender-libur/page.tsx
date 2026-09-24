@@ -2,6 +2,11 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getUpcomingRosterPeriod, rosterPeriodLabel } from '@/lib/rosterPeriod'
+import { localDateStr } from '@/lib/date'
+
+const DAYOFF_QUOTA = 4
+type QuotaRow = { employee_id: string; full_name: string; branch_name: string | null; approved_count: number; pending_count: number; draft_count: number }
 
 type DayOffEntry = { employee_id: string; full_name: string; branch_name: string | null; source_type: string }
 type Holiday = { id: string; holiday_date: string; name: string }
@@ -38,6 +43,18 @@ export default function KalenderLiburPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [expandedDate, setExpandedDate] = useState<string | null>(null)
 
+  // Peringatan level Owner: karyawan yang belum mengajukan jatah libur (4 tanggal) untuk
+  // periode roster BERIKUTNYA -- sama dengan periode yang dipilih di halaman Ajukan Libur.
+  const [isOwner, setIsOwner] = useState(false)
+  const [quotaRows, setQuotaRows] = useState<QuotaRow[]>([])
+  const upcomingPeriod = getUpcomingRosterPeriod()
+  const periodStartStr = localDateStr(upcomingPeriod.start)
+  const daysUntilPeriod = Math.ceil((upcomingPeriod.start.getTime() - new Date(new Date().toDateString()).getTime()) / 86400000)
+  const notCompliant = quotaRows
+    .map(r => ({ ...r, submitted: r.approved_count + r.pending_count }))
+    .filter(r => r.submitted < DAYOFF_QUOTA)
+    .sort((a, b) => a.submitted - b.submitted || a.full_name.localeCompare(b.full_name))
+
   const [showHolidayForm, setShowHolidayForm] = useState(false)
   const [holidayDate, setHolidayDate] = useState('')
   const [holidayName, setHolidayName] = useState('')
@@ -50,7 +67,14 @@ export default function KalenderLiburPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
       const { data } = await supabase.from('users').select('role').eq('id', user.id).single()
-      if (data) setCanManage(['owner', 'hr'].includes(data.role))
+      if (data) {
+        setCanManage(['owner', 'hr'].includes(data.role))
+        if (data.role === 'owner') {
+          setIsOwner(true)
+          const { data: rows } = await supabase.rpc('get_dayoff_quota_status', { p_period_start: periodStartStr })
+          setQuotaRows((rows as QuotaRow[]) || [])
+        }
+      }
     }
   }
 
@@ -157,6 +181,33 @@ export default function KalenderLiburPage() {
         <div className={`p-4 mb-6 rounded-lg border ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
           {message.text}
         </div>
+      )}
+
+      {isOwner && quotaRows.length > 0 && (
+        notCompliant.length > 0 ? (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mb-6">
+            <p className="text-sm font-bold text-amber-800">
+              ⚠️ {notCompliant.length} dari {quotaRows.length} karyawan belum mengambil jatah libur ({DAYOFF_QUOTA} tanggal) untuk periode {rosterPeriodLabel(upcomingPeriod.start, upcomingPeriod.end)}
+            </p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              {daysUntilPeriod > 0 ? `Periode mulai ${daysUntilPeriod} hari lagi.` : 'Periode sudah dimulai.'} Yang masih draf (belum dikirim ke HR) dihitung belum mengambil.
+            </p>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {notCompliant.map(r => (
+                <div key={r.employee_id} className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 text-sm border border-amber-100">
+                  <span className="text-slate-700 truncate">{r.full_name}{r.branch_name ? <span className="text-slate-400"> · {r.branch_name}</span> : null}</span>
+                  <span className={`text-xs font-semibold shrink-0 ml-2 ${r.submitted === 0 ? 'text-red-600' : 'text-amber-600'}`}>
+                    {r.submitted}/{DAYOFF_QUOTA}{r.draft_count > 0 ? ` (+${r.draft_count} draf)` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-3 mb-6">
+            ✅ Semua karyawan sudah mengambil jatah libur ({DAYOFF_QUOTA} tanggal) untuk periode {rosterPeriodLabel(upcomingPeriod.start, upcomingPeriod.end)}.
+          </div>
+        )
       )}
 
       {showHolidayForm && canManage && (

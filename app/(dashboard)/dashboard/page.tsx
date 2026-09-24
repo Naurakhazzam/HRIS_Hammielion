@@ -4,6 +4,8 @@ import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { ANNUAL_LEAVE_QUOTA_DAYS, isEligibleForAnnualLeave, tenureDays, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
 import { PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
+import { getUpcomingRosterPeriod, rosterPeriodLabel } from '@/lib/rosterPeriod'
+import { localDateStr } from '@/lib/date'
 
 export const metadata: Metadata = {
   title: 'Dashboard — Hammielion HRIS',
@@ -62,6 +64,17 @@ export default async function DashboardPage() {
         .gte('date', monthStart).lte('date', monthEnd),
     ])
 
+    // Peringatan jatah libur: 4 tanggal libur untuk periode roster BERIKUTNYA (sama dengan
+    // halaman Ajukan Libur). Selalu tampil sampai terpenuhi. RPC mengembalikan SEMUA karyawan
+    // kalau yang login Owner (mis. saat preview), jadi difilter ke karyawan yang ditampilkan.
+    const upcomingPeriod = getUpcomingRosterPeriod()
+    const { data: quotaRows } = await supabase.rpc('get_dayoff_quota_status', { p_period_start: localDateStr(upcomingPeriod.start) })
+    const myQuota = ((quotaRows || []) as { employee_id: string; approved_count: number; pending_count: number; draft_count: number }[])
+      .find(r => r.employee_id === effectiveEmployeeId)
+    const quotaSubmitted = myQuota ? myQuota.approved_count + myQuota.pending_count : 4
+    const quotaMissing = myQuota && quotaSubmitted < 4
+    const daysUntilPeriod = Math.ceil((upcomingPeriod.start.getTime() - new Date(new Date().toDateString()).getTime()) / 86400000)
+
     const usedDays = (leaveReqs || []).reduce((s, r) => s + Number(r.total_days), 0)
     const remaining = Math.max(0, ANNUAL_LEAVE_QUOTA_DAYS - usedDays)
     const eligible = emp?.join_date ? isEligibleForAnnualLeave(emp.join_date) : false
@@ -73,6 +86,18 @@ export default async function DashboardPage() {
           <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
           <p className="text-slate-500 text-sm mt-1">Halo, <strong>{emp?.full_name || user?.email}</strong>.</p>
         </div>
+
+        {quotaMissing && (
+          <Link href="/portal/ajukan-libur" className="block mb-6 bg-amber-50 border-2 border-amber-400 rounded-2xl p-4 hover:bg-amber-100 transition">
+            <p className="text-base font-bold text-amber-800">⚠️ Jatah libur Anda belum diambil!</p>
+            <p className="text-sm text-amber-700 mt-1">
+              Baru <strong>{quotaSubmitted} dari 4</strong> tanggal libur yang terkirim untuk periode {rosterPeriodLabel(upcomingPeriod.start, upcomingPeriod.end)}
+              {(myQuota?.draft_count ?? 0) > 0 ? ` (${myQuota!.draft_count} masih draf, belum dikirim ke HR)` : ''}.
+              {daysUntilPeriod > 0 ? ` Periode mulai ${daysUntilPeriod} hari lagi.` : ''}
+            </p>
+            <p className="text-sm font-semibold text-amber-800 mt-2">Ketuk di sini untuk memilih tanggal libur →</p>
+          </Link>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
