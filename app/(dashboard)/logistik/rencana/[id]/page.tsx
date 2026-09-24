@@ -33,13 +33,13 @@ type Store = { id: string; name: string }
 
 type PlanSupplierTask = {
   id: string
-  supplier_id: string
+  route_id: string
   status: string
   notes: string | null
-  suppliers: { name: string } | null
+  delivery_routes: { name: string } | null
 }
 
-type Supplier = { id: string; name: string }
+type SupplierRoute = { id: string; name: string }
 
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Draft', ready: 'Siap Kirim', departed: 'Berjalan',
@@ -59,8 +59,8 @@ export default function RencanaDetailPage() {
   const [allStores, setAllStores] = useState<Store[]>([])
   const [storeSearchText, setStoreSearchText] = useState('')
   const [supplierTasks, setSupplierTasks] = useState<PlanSupplierTask[]>([])
-  const [allSuppliers, setAllSuppliers] = useState<Supplier[]>([])
-  const [supplierSearchText, setSupplierSearchText] = useState('')
+  const [supplierRoutes, setSupplierRoutes] = useState<SupplierRoute[]>([])
+  const [supplierRouteSearchText, setSupplierRouteSearchText] = useState('')
   const [supplierTaskNotes, setSupplierTaskNotes] = useState('')
   const [hasRateConfig, setHasRateConfig] = useState<boolean | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
@@ -113,12 +113,15 @@ export default function RencanaDetailPage() {
     setAllStores(storeData || [])
 
     const { data: taskData } = await supabase.from('logistics_plan_supplier_tasks')
-      .select('id, supplier_id, status, notes, suppliers(name)')
+      .select('id, route_id, status, notes, delivery_routes(name)')
       .eq('plan_id', params.id).order('created_at')
     setSupplierTasks((taskData as unknown as PlanSupplierTask[]) || [])
 
-    const { data: supplierData } = await supabase.from('suppliers').select('id, name').eq('is_active', true).order('name')
-    setAllSuppliers(supplierData || [])
+    // Rute "Belanja X" -- ritase khusus supplier, sudah punya tarif sendiri di
+    // driver_rate_configs (dulu diinput manual lewat Catat Trip Harian), dibedakan dari rute
+    // pengiriman toko biasa lewat konvensi nama diawali "Belanja".
+    const { data: routeData } = await supabase.from('delivery_routes').select('id, name').ilike('name', 'Belanja%').order('name')
+    setSupplierRoutes(routeData || [])
 
     // Sama persis kondisinya dengan dropdown Driver/Kenek di /logistik/rencana (halaman daftar)
     // -- driver "asli" (employee_type='driver') belum tentu can_drive=true, begitu juga
@@ -188,7 +191,7 @@ export default function RencanaDetailPage() {
   }
 
   const availableStores = allStores.filter(s => !planStores.some(ps => ps.store_id === s.id))
-  const availableSuppliers = allSuppliers.filter(s => !supplierTasks.some(t => t.supplier_id === s.id && t.status === 'pending'))
+  const availableSupplierRoutes = supplierRoutes.filter(r => !supplierTasks.some(t => t.route_id === r.id && t.status === 'pending'))
   // Ketik nama toko, cocokkan persis (case-insensitive) ke saran yang muncul dari datalist —
   // supaya Kepala Gudang tidak perlu scroll dropdown ratusan toko satu-satu.
   const matchedStore = availableStores.find(s => s.name.trim().toLowerCase() === storeSearchText.trim().toLowerCase())
@@ -211,20 +214,20 @@ export default function RencanaDetailPage() {
     else fetchAll()
   }
 
-  const matchedSupplier = availableSuppliers.find(s => s.name.trim().toLowerCase() === supplierSearchText.trim().toLowerCase())
+  const matchedSupplierRoute = availableSupplierRoutes.find(r => r.name.trim().toLowerCase() === supplierRouteSearchText.trim().toLowerCase())
 
   async function handleAddSupplierTask(e: React.FormEvent) {
     e.preventDefault()
-    if (!matchedSupplier) { showMessage('error', 'Supplier tidak ditemukan. Ketik nama supplier lalu pilih dari saran yang muncul.'); return }
+    if (!matchedSupplierRoute) { showMessage('error', 'Rute belanja tidak ditemukan. Ketik nama rute lalu pilih dari saran yang muncul.'); return }
     const { error } = await supabase.from('logistics_plan_supplier_tasks').insert({
-      plan_id: params.id, supplier_id: matchedSupplier.id, notes: supplierTaskNotes.trim() || null, created_by: myEmployeeId,
+      plan_id: params.id, route_id: matchedSupplierRoute.id, notes: supplierTaskNotes.trim() || null, created_by: myEmployeeId,
     })
     if (error) showMessage('error', 'Gagal menambah tugas belanja: ' + error.message)
-    else { setSupplierSearchText(''); setSupplierTaskNotes(''); fetchAll() }
+    else { setSupplierRouteSearchText(''); setSupplierTaskNotes(''); fetchAll() }
   }
 
   async function handleRemoveSupplierTask(t: PlanSupplierTask) {
-    if (!confirm(`Hapus tugas belanja ke "${t.suppliers?.name}" dari rencana ini?`)) return
+    if (!confirm(`Hapus tugas belanja "${t.delivery_routes?.name}" dari rencana ini?`)) return
     const { error } = await supabase.from('logistics_plan_supplier_tasks').delete().eq('id', t.id)
     if (error) showMessage('error', 'Gagal menghapus tugas: ' + error.message)
     else fetchAll()
@@ -392,9 +395,10 @@ export default function RencanaDetailPage() {
         </div>
       )}
 
-      {/* Tugas Belanja Supplier — bebas dikombinasikan dengan toko, tidak dipaksa urutan
-          (sebelum atau sesudah kirim ke toko, terserah driver di lapangan). Bisa ditambahkan
-          juga ke trip yang sudah berjalan, sama seperti toko. */}
+      {/* Tugas Belanja Supplier — pakai rute "Belanja X" yang sudah ada tarifnya sendiri di
+          Tarif & Mobil Driver (dulu diinput manual lewat Catat Trip Harian), sekarang upahnya
+          otomatis tercatat begitu driver selesai. Bebas dikombinasikan dengan toko, tidak
+          dipaksa urutan. Bisa ditambahkan juga ke trip yang sudah berjalan, sama seperti toko. */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
         <div className="px-5 py-3 bg-slate-50 border-b border-slate-200">
           <span className="text-sm font-bold text-slate-700">🛒 Tugas Belanja Supplier ({supplierTasks.length})</span>
@@ -406,7 +410,7 @@ export default function RencanaDetailPage() {
             {supplierTasks.map(t => (
               <div key={t.id} className="flex items-center gap-3 px-5 py-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-800 truncate">{t.suppliers?.name}</p>
+                  <p className="text-sm font-medium text-slate-800 truncate">{t.delivery_routes?.name}</p>
                   {t.notes && <p className="text-xs text-slate-400 truncate">{t.notes}</p>}
                 </div>
                 {t.status === 'done' ? (
@@ -427,21 +431,21 @@ export default function RencanaDetailPage() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
           {canEditActive && <p className="text-xs text-amber-600 mb-2">⚠ Trip sudah berjalan — tugas belanja baru langsung ikut jadi bagian trip ini, driver/kenek bisa langsung memprosesnya.</p>}
           <form onSubmit={handleAddSupplierTask} className="flex flex-col sm:flex-row gap-2">
-            <input type="text" list="available-suppliers-datalist" value={supplierSearchText}
-              onChange={e => setSupplierSearchText(e.target.value)}
-              placeholder="Ketik nama supplier untuk ditambahkan..."
+            <input type="text" list="available-supplier-routes-datalist" value={supplierRouteSearchText}
+              onChange={e => setSupplierRouteSearchText(e.target.value)}
+              placeholder="Ketik nama rute belanja (mis. Belanja Aina)..."
               className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-            <datalist id="available-suppliers-datalist">
-              {availableSuppliers.map(s => <option key={s.id} value={s.name} />)}
+            <datalist id="available-supplier-routes-datalist">
+              {availableSupplierRoutes.map(r => <option key={r.id} value={r.name} />)}
             </datalist>
             <input type="text" value={supplierTaskNotes} onChange={e => setSupplierTaskNotes(e.target.value)}
               placeholder="Catatan (opsional)"
               className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-            <button type="submit" disabled={!matchedSupplier}
+            <button type="submit" disabled={!matchedSupplierRoute}
               className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 whitespace-nowrap">+ Tambah Tugas</button>
           </form>
-          {availableSuppliers.length === 0 && allSuppliers.length === 0 && (
-            <p className="text-xs text-slate-400 mt-2">Belum ada data Supplier. <Link href="/keuangan/pembelian/supplier" className="text-blue-600 hover:underline">Tambah dulu di sini</Link>.</p>
+          {availableSupplierRoutes.length === 0 && supplierRoutes.length === 0 && (
+            <p className="text-xs text-slate-400 mt-2">Belum ada rute "Belanja" di Master Rute. <Link href="/penggajian/driver/setup" className="text-blue-600 hover:underline">Tambah dulu di sini</Link>.</p>
           )}
         </div>
       )}

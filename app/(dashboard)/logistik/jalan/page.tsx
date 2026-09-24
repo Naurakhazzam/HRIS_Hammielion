@@ -48,11 +48,11 @@ type PlanStore = {
 
 type PlanSupplierTask = {
   id: string
-  supplier_id: string
+  route_id: string
   status: string
   notes: string | null
   proof_photo_url: string | null
-  suppliers: { name: string; phone: string | null } | null
+  delivery_routes: { name: string } | null
 }
 
 type ActionMode = null | 'kirim' | 'gagal'
@@ -188,7 +188,7 @@ export default function JalanPengirimanPage() {
 
   async function fetchSupplierTasks(planId: string) {
     const { data } = await supabase.from('logistics_plan_supplier_tasks')
-      .select('id, supplier_id, status, notes, proof_photo_url, suppliers(name, phone)')
+      .select('id, route_id, status, notes, proof_photo_url, delivery_routes(name)')
       .eq('plan_id', planId).order('created_at')
     setSupplierTasks((data as unknown as PlanSupplierTask[]) || [])
   }
@@ -283,15 +283,16 @@ export default function JalanPengirimanPage() {
   // Tugas Belanja Supplier langsung ditandai selesai begitu foto surat jalan/nota berhasil
   // diunggah -- tidak ada langkah "konfirmasi" terpisah, supaya tidak ada state belum-tersimpan
   // yang bisa hilang kalau tidak sengaja pencet tombol kembali (sama seperti alasan foto Bukti
-  // Kirim langsung tersimpan begitu diambil).
+  // Kirim langsung tersimpan begitu diambil). Upah ritase-nya juga otomatis tercatat lewat RPC
+  // ini (rate lookup by kendaraan + rute Belanja, sama persis polanya dengan penyelesaian trip
+  // pengiriman biasa) -- bukan diinput manual lagi lewat Catat Trip Harian.
   async function submitSupplierTaskDone(task: PlanSupplierTask, photoUrl: string) {
     setSupplierTaskSubmitting(true)
-    const { data, error } = await supabase.from('logistics_plan_supplier_tasks').update({
-      status: 'done', proof_photo_url: photoUrl, resolved_by: myEmployeeId, resolved_at: new Date().toISOString(),
-    }).eq('id', task.id).eq('status', 'pending').select('id')
+    const { data, error } = await supabase.rpc('complete_supplier_task', { p_task_id: task.id, p_proof_photo_url: photoUrl })
     if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSupplierTaskSubmitting(false); return }
-    if (!data || data.length === 0) showMessage('error', 'Tugas ini sudah lebih dulu diproses oleh rekan Anda.')
-    else showMessage('success', `Belanja ke "${task.suppliers?.name}" selesai dicatat.`)
+    const row = Array.isArray(data) ? data[0] : data
+    const myShare = myEmployeeId === selectedPlan?.driver_id ? row?.driver_earning : row?.helper_earning
+    showMessage('success', `Belanja "${task.delivery_routes?.name}" selesai dicatat. Upah ritase Anda sebesar ${fmtRp(Number(myShare ?? 0))} sudah tercatat.`)
     setSelectedSupplierTaskId(null)
     await refresh()
     setSupplierTaskSubmitting(false)
@@ -524,7 +525,7 @@ export default function JalanPengirimanPage() {
                       <button key={t.id} onClick={() => setSelectedSupplierTaskId(t.id)}
                         className="w-full text-left px-4 py-3 hover:bg-amber-50/50 transition flex items-center gap-3">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-800 truncate">{t.suppliers?.name}</p>
+                          <p className="text-sm font-medium text-slate-800 truncate">{t.delivery_routes?.name}</p>
                           {t.notes && <p className="text-xs text-slate-400 truncate">{t.notes}</p>}
                         </div>
                         <span className="text-slate-300">›</span>
@@ -546,18 +547,8 @@ export default function JalanPengirimanPage() {
           {selectedPlan?.status === 'departed' && !allResolved && selectedSupplierTask && (
             <div className="bg-white rounded-xl border-2 border-amber-300 p-5">
               <button onClick={() => setSelectedSupplierTaskId(null)} className="text-xs text-blue-600 hover:underline mb-2">← Pilih Tugas Lain</button>
-              <h2 className="text-lg font-bold text-slate-800 mb-1">🛒 Belanja ke {selectedSupplierTask.suppliers?.name}</h2>
-              {selectedSupplierTask.notes && <p className="text-sm text-slate-500 mb-2">{selectedSupplierTask.notes}</p>}
-              {selectedSupplierTask.suppliers?.phone ? (
-                <a href={toWaLink(selectedSupplierTask.suppliers.phone)} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 mb-3 px-3 py-1.5 bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 text-xs font-semibold rounded-lg transition">
-                  💬 Hubungi via WhatsApp — {selectedSupplierTask.suppliers.phone}
-                </a>
-              ) : (
-                <p className="inline-flex items-center gap-1.5 mb-3 px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-400 text-xs font-medium rounded-lg">
-                  Tidak ada nomor kontak
-                </p>
-              )}
+              <h2 className="text-lg font-bold text-slate-800 mb-1">🛒 {selectedSupplierTask.delivery_routes?.name}</h2>
+              {selectedSupplierTask.notes && <p className="text-sm text-slate-500 mb-3">{selectedSupplierTask.notes}</p>}
               <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Wajib Foto Surat Jalan / Nota</p>
               <p className="text-xs text-slate-400 mb-2">Begitu foto berhasil diambil, tugas ini langsung tercatat selesai.</p>
               <LogisticsCameraCapture label="Foto Surat Jalan / Nota" employeeName={myName}

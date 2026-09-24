@@ -56,7 +56,7 @@ type PlanSupplierTask = {
   notes: string | null
   proof_photo_url: string | null
   resolved_at: string | null
-  suppliers: { name: string } | null
+  delivery_routes: { name: string } | null
 }
 
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
@@ -127,7 +127,7 @@ export default function LaporanPengirimanPage() {
       setStoresByPlan(grouped)
 
       const { data: taskData } = await supabase.from('logistics_plan_supplier_tasks')
-        .select('id, plan_id, status, notes, proof_photo_url, resolved_at, suppliers(name)')
+        .select('id, plan_id, status, notes, proof_photo_url, resolved_at, delivery_routes(name)')
         .in('plan_id', list.map(p => p.id)).order('created_at')
       const groupedTasks: Record<string, PlanSupplierTask[]> = {}
       ;(taskData as unknown as PlanSupplierTask[] || []).forEach(t => {
@@ -333,7 +333,7 @@ export default function LaporanPengirimanPage() {
                               {tasks.map(t => (
                                 <div key={t.id} className="flex items-center gap-3 text-sm">
                                   <span className="flex-1 text-slate-700">
-                                    {t.suppliers?.name}
+                                    {t.delivery_routes?.name}
                                     {t.notes && <span className="text-slate-400"> — {t.notes}</span>}
                                   </span>
                                   {t.resolved_at && (
@@ -341,7 +341,7 @@ export default function LaporanPengirimanPage() {
                                   )}
                                   {t.status === 'done' ? (
                                     t.proof_photo_url && (
-                                      <button type="button" onClick={() => openLightbox(t.proof_photo_url!, `Surat jalan/nota - ${t.suppliers?.name}`)} title="Foto Surat Jalan/Nota" className="flex flex-col items-center gap-0.5 shrink-0">
+                                      <button type="button" onClick={() => openLightbox(t.proof_photo_url!, `Surat jalan/nota - ${t.delivery_routes?.name}`)} title="Foto Surat Jalan/Nota" className="flex flex-col items-center gap-0.5 shrink-0">
                                         {/* eslint-disable-next-line @next/next/no-img-element */}
                                         <img src={t.proof_photo_url} alt="Surat jalan/nota" className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
                                       </button>
