@@ -286,14 +286,20 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
         if (data) {
           setUserRole(data.role)
           if (data.employee_id) {
-            supabase.from('employees').select('employee_type, can_drive, can_help, positions(name)').eq('id', data.employee_id).single().then(({ data: emp }) => {
+            supabase.from('employees').select('employee_type, can_drive, can_help, departments(name), positions(name)').eq('id', data.employee_id).single().then(({ data: emp }) => {
               if (emp) {
                 // Driver "asli" (employee_type='driver') belum tentu punya can_drive=true —
                 // kolom itu dibuat belakangan khusus untuk menandai karyawan LAIN yang bisa
                 // merangkap jadi driver, bukan buat driver aslinya sendiri. Samakan syaratnya
                 // dengan dropdown pemilihan driver di logistik/rencana (.or('employee_type.eq.
                 // driver,can_drive.eq.true')) supaya driver asli tidak kelewat di sidebar.
-                setIsDriverOrKenek(emp.employee_type === 'driver' || !!emp.can_drive || !!emp.can_help)
+                // Kenek/helper permanen di Team Gudang JUGA otomatis dianggap kenek di halaman
+                // lain (dropdown Kenek di Rencana Pengiriman, Kasbon Kenek) tanpa perlu
+                // can_help=true — sebelumnya sidebar ini TIDAK ikut mengecek departemen sama
+                // sekali, jadi Helper Gudang biasa (can_help masih false) tidak lolos di sini
+                // walau sudah lolos di halaman lain (kasus nyata: Riki Yusdinar Pahas).
+                const dept = Array.isArray((emp as any).departments) ? (emp as any).departments[0] : (emp as any).departments
+                setIsDriverOrKenek(emp.employee_type === 'driver' || !!emp.can_drive || !!emp.can_help || dept?.name === 'Team Gudang')
                 setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
               }
             })
