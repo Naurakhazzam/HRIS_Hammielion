@@ -20,6 +20,7 @@ export default function AjukanLiburPage() {
   const [previewReadOnly, setPreviewReadOnly] = useState(false)
   const [ownRequests, setOwnRequests] = useState<OwnRequest[]>([])
   const [colleagueNames, setColleagueNames] = useState<Record<string, string>>({})
+  const [rejectedByDate, setRejectedByDate] = useState<Record<string, string>>({})
   const [branchEmployeeCount, setBranchEmployeeCount] = useState<number | null>(null)
   const [busyDate, setBusyDate] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -73,6 +74,14 @@ export default function AjukanLiburPage() {
       supabase.rpc('get_company_dayoff_calendar', { p_from: periodStartStr, p_to: periodEndStr }),
     ])
     setOwnRequests((reqs as OwnRequest[]) || [])
+    // Pilihan yang DITOLAK disembunyikan dari daftar aktif (tanggalnya boleh dipilih lagi), tapi
+    // alasannya tetap ditampilkan supaya karyawan tahu kenapa ditolak.
+    const { data: rej } = await supabase.from('roster_pick_requests')
+      .select('requested_date, rejection_reason')
+      .eq('employee_id', empId).eq('period_start', periodStartStr).eq('status', 'rejected')
+      .order('decided_at', { ascending: true })
+    setRejectedByDate(Object.fromEntries(((rej || []) as { requested_date: string; rejection_reason: string | null }[])
+      .map(r => [r.requested_date, r.rejection_reason || 'tanpa alasan'])))
     const map: Record<string, string> = {}
     ;(calRows as { off_date: string; employee_names: string }[] | null)?.forEach(r => { map[r.off_date] = r.employee_names })
     setColleagueNames(map)
@@ -216,6 +225,9 @@ export default function AjukanLiburPage() {
                   </p>
                   {names && (
                     <p className="text-xs text-amber-600 mt-0.5">⚠️ Rekan juga libur: {names} — koordinasi dulu, atau tetap lanjut kalau tidak masalah.</p>
+                  )}
+                  {rejectedByDate[dateStr] && !own && (
+                    <p className="text-xs text-red-600 mt-0.5">❌ Sebelumnya ditolak: {rejectedByDate[dateStr]} — tanggal ini boleh dipilih lagi.</p>
                   )}
                   {weekendCapBlocks && (
                     <p className="text-xs text-slate-400 mt-0.5">Jatah weekend periode ini sudah terpakai.</p>
