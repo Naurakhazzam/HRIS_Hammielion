@@ -35,6 +35,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const [customCheckIn, setCustomCheckIn] = useState<string | null>(null)
   const [customCheckOut, setCustomCheckOut] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  // Dept/posisi karyawan — dipakai buat replikasi PERSIS aturan pengecualian lembur/telat yang
+  // sudah berlaku di trigger DB calc_attendance_times() (dipakai absen masuk & import fingerprint):
+  // Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang tidak pernah dapat lembur/telat.
+  // Absen PULANG lewat HP/QR cuma meng-update baris (check_in tidak berubah), jadi trigger itu
+  // SKIP menghitung ulang dan percaya begitu saja nilai dari HP — makanya pengecualian ini harus
+  // dicek juga di sini, kalau tidak Team Gudang/Helper Gudang bisa lolos dapat lembur dari HP.
+  const [deptName, setDeptName] = useState<string | null>(null)
+  const [posName, setPosName] = useState<string | null>(null)
 
   // "Perbantuan" — QR di-scan bukan di cabang penempatan karyawan (lihat absen-qr/[token]).
   // isPerbantuanAction dicek per-AKSI (absen masuk & pulang independen, lihat penjelasan di
@@ -106,12 +114,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     setLoading(true)
     const { data: emp } = await supabase
       .from('employees')
-      .select('department_id, custom_check_in_time, custom_check_out_time, branches(id, name, latitude, longitude, checkin_radius_meters)')
+      .select('department_id, custom_check_in_time, custom_check_out_time, branches(id, name, latitude, longitude, checkin_radius_meters), departments(name), positions(name)')
       .eq('id', employeeId).single()
     const b = (emp as unknown as { branches: BranchGeo | null } | null)?.branches ?? null
     setBranch(b)
     setCustomCheckIn((emp as { custom_check_in_time: string | null } | null)?.custom_check_in_time ?? null)
     setCustomCheckOut((emp as { custom_check_out_time: string | null } | null)?.custom_check_out_time ?? null)
+    setDeptName((emp as unknown as { departments: { name: string } | null } | null)?.departments?.name ?? null)
+    setPosName((emp as unknown as { positions: { name: string } | null } | null)?.positions?.name ?? null)
 
     if (emp?.department_id) {
       const { data: sched } = await supabase.from('work_schedules')
@@ -523,7 +533,10 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       const sched = isPerbantuanAction
         ? matchSchedule(nowTimeStr, branchShifts)
         : resolveSchedule(nowTimeStr, schedules, customCheckIn, customCheckOut)
-      const overtimeHours = calcOvertimeHours(nowTimeStr, sched)
+      // Sama seperti trigger DB: Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang
+      // juga tidak (dicek dari cabang PENEMPATAN karyawan, bukan cabang tempat scan/perbantuan).
+      const otExcluded = deptName === 'Team Gudang' || (posName === 'Helper' && branch?.name === 'Gudang')
+      const overtimeHours = otExcluded ? 0 : calcOvertimeHours(nowTimeStr, sched)
       const { error } = await supabase.from('attendances').update({
         check_out: nowIso,
         overtime_hours: overtimeHours,
