@@ -8,6 +8,22 @@ import { usePhotoLightbox } from '@/components/PhotoLightbox'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 
+// filterMonth ("YYYY-MM") di halaman ini artinya "periode yang BERAKHIR di bulan itu" (26 bulan
+// sebelumnya s/d 25 bulan itu) -- lihat getPeriodLabel. Jadi default-nya TIDAK BOLEH cuma bulan
+// kalender sekarang: kalau hari ini sudah tanggal 26 ke atas, periode yang sedang berjalan itu
+// berakhir bulan DEPAN, bukan bulan ini -- salah default bikin HR pertama buka langsung lihat
+// periode yang sudah lewat/selesai, bukan yang sedang berjalan.
+function getDefaultPeriodFilter(): string {
+  const now = new Date()
+  let endMonth = now.getMonth() + 1
+  let endYear = now.getFullYear()
+  if (now.getDate() >= 26) {
+    endMonth += 1
+    if (endMonth > 12) { endMonth = 1; endYear += 1 }
+  }
+  return `${endYear}-${String(endMonth).padStart(2, '0')}`
+}
+
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
 type Employee = { id: string; full_name: string; branch_id: string; department_id: string; join_date: string | null; custom_check_in_time: string | null; custom_check_out_time: string | null }
@@ -58,7 +74,7 @@ export default function RekapAbsensiPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [schedules, setSchedules] = useState<WorkSchedule[]>([])
   const [loading, setLoading] = useState(true)
-  const [filterMonth, setFilterMonth] = useState(new Date().toISOString().substring(0, 7))
+  const [filterMonth, setFilterMonth] = useState(getDefaultPeriodFilter())
   const [filterBranch, setFilterBranch] = useState('')
   const [filterDept, setFilterDept] = useState('')
   const [filterEmployee, setFilterEmployee] = useState('')

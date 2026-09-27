@@ -44,8 +44,15 @@ export default function PortalAbsensiPage() {
 
   const [myEmployeeId, setMyEmployeeId] = useState('')
   const [myName, setMyName] = useState('')
-  const [filterMonth, setFilterMonth] = useState(today.getMonth() + 1)
-  const [filterYear, setFilterYear] = useState(today.getFullYear())
+  // Default filter = periode 26-25 yang SEDANG BERJALAN hari ini, bukan cuma bulan kalender
+  // sekarang -- kalau hari ini sudah tanggal 26 ke atas, periode berjalan berakhir bulan DEPAN.
+  const defaultPeriod = (() => {
+    let m = today.getMonth() + 1, y = today.getFullYear()
+    if (today.getDate() >= 26) { m += 1; if (m > 12) { m = 1; y += 1 } }
+    return { m, y }
+  })()
+  const [filterMonth, setFilterMonth] = useState(defaultPeriod.m)
+  const [filterYear, setFilterYear] = useState(defaultPeriod.y)
   const [attendances, setAttendances] = useState<Attendance[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -115,7 +122,10 @@ export default function PortalAbsensiPage() {
   const totalAbsen     = attendances.filter(a => a.status === 'absent').length
   const totalCutiIzin  = attendances.filter(a => ['leave', 'sick', 'sick_doc', 'permission'].includes(a.status)).length
 
-  const yearOptions = [today.getFullYear() - 1, today.getFullYear()]
+  // Sertakan tahun depan juga kalau periode default (lihat defaultPeriod di atas) sudah
+  // menyeberang ke tahun depan (kasus akhir Desember) -- supaya dropdown Tahun tidak kehilangan
+  // pilihan yang justru sedang aktif dipilih.
+  const yearOptions = Array.from(new Set([today.getFullYear() - 1, today.getFullYear(), defaultPeriod.y]))
 
   return (
     <div>
