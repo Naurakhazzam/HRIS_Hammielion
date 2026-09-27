@@ -71,10 +71,29 @@ export default function PortalAbsensiPage() {
     setMyName((userData as any).employees?.full_name || '')
   }
 
+  // Periode gajian 26–25 (sama seperti Penggajian & Rekap Absensi HR) — BUKAN tanggal 1-akhir
+  // bulan kalender. "September" di filter ini artinya periode 26 Agustus s/d 25 September, biar
+  // rekap yang dilihat karyawan selalu sama persis dengan yang dipakai buat hitung slip gajinya
+  // (dulu pernah beda: filter ini pakai kalender 1-30, jadi angkanya tidak pernah cocok dengan slip).
+  function getPeriodRange(m: number, y: number) {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const pm = m === 1 ? 12 : m - 1
+    const py = m === 1 ? y - 1 : y
+    return { firstDay: `${py}-${pad(pm)}-26`, lastDay: `${y}-${pad(m)}-25` }
+  }
+
+  function getPeriodLabel(m: number, y: number) {
+    const { firstDay, lastDay } = getPeriodRange(m, y)
+    const fmt = (s: string) => {
+      const [yy, mm, dd] = s.split('-').map(Number)
+      return `${dd} ${MONTHS[mm - 1]} ${yy}`
+    }
+    return `${fmt(firstDay)} – ${fmt(lastDay)}`
+  }
+
   async function fetchAttendances() {
     setLoading(true)
-    const firstDay = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`
-    const lastDay = new Date(filterYear, filterMonth, 0).toISOString().split('T')[0]
+    const { firstDay, lastDay } = getPeriodRange(filterMonth, filterYear)
 
     const { data } = await supabase
       .from('attendances')
@@ -131,6 +150,9 @@ export default function PortalAbsensiPage() {
             {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
+        <p className="text-xs text-slate-400 w-full sm:w-auto">
+          📅 Periode gaji: <strong className="text-slate-600">{getPeriodLabel(filterMonth, filterYear)}</strong> (26 s/d 25, sama seperti slip gaji)
+        </p>
       </div>
 
       {/* Summary Cards */}
@@ -154,7 +176,7 @@ export default function PortalAbsensiPage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-200 bg-slate-50">
           <span className="text-sm font-semibold text-slate-700">
-            Detail Absensi — {MONTHS[filterMonth-1]} {filterYear}
+            Detail Absensi — Periode {getPeriodLabel(filterMonth, filterYear)}
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -170,7 +192,7 @@ export default function PortalAbsensiPage() {
               {loading ? (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">Memuat data...</td></tr>
               ) : attendances.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">Belum ada data absensi bulan ini.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">Belum ada data absensi periode ini.</td></tr>
               ) : (
                 attendances.map(a => {
                   const cfg = STATUS_CONFIG[a.status] ?? { label: a.status, color: 'bg-slate-100 text-slate-600' }
