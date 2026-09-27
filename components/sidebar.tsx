@@ -43,6 +43,7 @@ const LOGISTIK_SUBMENU: NavNode[] = [
 // Catatan Meeting, Manajemen User) sengaja TIDAK dipaksa masuk salah satu kelompok.
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
+  { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
   // Owner/HR/Finance juga karyawan (punya employee_id sendiri) — bukan cuma pengelola sistem.
   // Grup ini kasih mereka akses ke data pribadi sendiri (profil, slip gaji, absensi, jadwal),
   // sama seperti yang dilihat karyawan biasa di menu "Portal Saya".
@@ -219,6 +220,7 @@ const adminNavItems: NavNode[] = [
 // berdasarkan role, karena Driver/Kenek di tabel users tetap ber-role 'employee' biasa.
 const employeeNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
+  { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
   {
     name: 'Portal Saya',
     href: '/portal',
@@ -246,9 +248,9 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean):
   // can_drive/can_help, dia tetap dapat menu lengkap, bukan cuma link tunggal.
   if (isKepalaGudang) {
     return [
-      ...employeeNavItems.slice(0, 2),
+      ...employeeNavItems.slice(0, 3),
       { name: 'Pengiriman Logistik', href: '/logistik/toko', icon: '🚚', submenu: LOGISTIK_SUBMENU },
-      ...employeeNavItems.slice(2),
+      ...employeeNavItems.slice(3),
     ]
   }
   if (!isDriverOrKenek) return employeeNavItems
@@ -256,9 +258,9 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean):
   // lengkap seperti Dashboard/Rencana/Laporan/Master Toko) — RLS di halaman itu sendiri
   // sudah membatasi datanya ke rencana milik driver/kenek yang bersangkutan.
   return [
-    ...employeeNavItems.slice(0, 2),
+    ...employeeNavItems.slice(0, 3),
     { name: 'Pengiriman Logistik', href: '/logistik/jalan', icon: '🚚' },
-    ...employeeNavItems.slice(2),
+    ...employeeNavItems.slice(3),
   ]
 }
 
