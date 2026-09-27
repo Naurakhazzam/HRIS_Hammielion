@@ -21,6 +21,10 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null)
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Sebagian HP (terutama yang murah/lawas) sesekali menghasilkan file foto yang rusak dari
+  // kamera web (glitch driver kamera/GPU) -- kalau tidak dicek, foto rusak itu tetap bisa
+  // ditekan "Gunakan Foto Ini" dan terkirim sebagai bukti, padahal isinya tidak bisa dibuka.
+  const [previewFailed, setPreviewFailed] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -93,6 +97,7 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
       if (!blob) return
       setCapturedBlob(blob)
       setCapturedUrl(URL.createObjectURL(blob))
+      setPreviewFailed(false)
       stopCamera()
       setStep('preview')
     }, 'image/jpeg', 0.85)
@@ -123,6 +128,7 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
         if (!blob) return
         setCapturedBlob(blob)
         setCapturedUrl(URL.createObjectURL(blob))
+        setPreviewFailed(false)
         setStep('preview')
       }, 'image/jpeg', 0.85)
     }
@@ -134,6 +140,7 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
     if (capturedUrl) URL.revokeObjectURL(capturedUrl)
     setCapturedBlob(null)
     setCapturedUrl(null)
+    setPreviewFailed(false)
     openCamera()
   }
 
@@ -178,11 +185,22 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
       )}
       {step === 'preview' && capturedUrl && (
         <div className="space-y-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={capturedUrl} alt={label} className="w-full rounded-lg aspect-[4/3] object-cover" />
+          {previewFailed ? (
+            <div className="w-full rounded-lg aspect-[4/3] bg-red-50 border-2 border-red-200 flex flex-col items-center justify-center text-center px-4">
+              <span className="text-3xl mb-2">⚠️</span>
+              <p className="text-sm font-semibold text-red-700">Foto gagal / rusak</p>
+              <p className="text-xs text-red-500 mt-1">HP sempat gagal menyimpan fotonya. Coba ambil ulang.</p>
+            </div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={capturedUrl} alt={label} className="w-full rounded-lg aspect-[4/3] object-cover" onError={() => setPreviewFailed(true)} />
+          )}
           <div className="flex gap-2">
             <button type="button" onClick={retake} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Ambil Ulang</button>
-            <button type="button" onClick={confirmPhoto} className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold">Gunakan Foto Ini</button>
+            <button type="button" onClick={confirmPhoto} disabled={previewFailed}
+              className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+              Gunakan Foto Ini
+            </button>
           </div>
         </div>
       )}
