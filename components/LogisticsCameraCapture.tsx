@@ -21,10 +21,14 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null)
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // Sebagian HP (terutama yang murah/lawas) sesekali menghasilkan file foto yang rusak dari
-  // kamera web (glitch driver kamera/GPU) -- kalau tidak dicek, foto rusak itu tetap bisa
-  // ditekan "Gunakan Foto Ini" dan terkirim sebagai bukti, padahal isinya tidak bisa dibuka.
+  // Sebagian HP (terutama yang murah/lawas) sesekali gagal MENAMPILKAN pratinjau foto sesaat
+  // setelah difoto (glitch render WebView/memori) -- terbukti dari laporan lapangan, file
+  // foto aslinya sebenarnya baik-baik saja begitu dicek, cuma tampilannya yang sempat gagal.
+  // Jadi dicoba muat ulang otomatis dulu beberapa kali (biasanya langsung berhasil) sebelum
+  // benar-benar dianggap rusak dan mengunci tombol "Gunakan Foto Ini".
+  const [previewRetry, setPreviewRetry] = useState(0)
   const [previewFailed, setPreviewFailed] = useState(false)
+  const MAX_PREVIEW_RETRY = 3
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -97,6 +101,7 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
       if (!blob) return
       setCapturedBlob(blob)
       setCapturedUrl(URL.createObjectURL(blob))
+      setPreviewRetry(0)
       setPreviewFailed(false)
       stopCamera()
       setStep('preview')
@@ -128,6 +133,7 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
         if (!blob) return
         setCapturedBlob(blob)
         setCapturedUrl(URL.createObjectURL(blob))
+        setPreviewRetry(0)
         setPreviewFailed(false)
         setStep('preview')
       }, 'image/jpeg', 0.85)
@@ -140,8 +146,19 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
     if (capturedUrl) URL.revokeObjectURL(capturedUrl)
     setCapturedBlob(null)
     setCapturedUrl(null)
+    setPreviewRetry(0)
     setPreviewFailed(false)
     openCamera()
+  }
+
+  // Coba render ulang pratinjaunya dulu (biasanya cukup 1x) sebelum benar-benar dianggap
+  // rusak -- file blob-nya sendiri tidak berubah, cuma elemen <img>-nya dipaksa mencoba lagi
+  // lewat key yang berganti.
+  function handlePreviewError() {
+    setPreviewRetry(n => {
+      if (n + 1 >= MAX_PREVIEW_RETRY) { setPreviewFailed(true); return n }
+      return n + 1
+    })
   }
 
   function confirmPhoto() {
@@ -188,17 +205,19 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
           {previewFailed ? (
             <div className="w-full rounded-lg aspect-[4/3] bg-red-50 border-2 border-red-200 flex flex-col items-center justify-center text-center px-4">
               <span className="text-3xl mb-2">⚠️</span>
-              <p className="text-sm font-semibold text-red-700">Foto gagal / rusak</p>
-              <p className="text-xs text-red-500 mt-1">HP sempat gagal menyimpan fotonya. Coba ambil ulang.</p>
+              <p className="text-sm font-semibold text-red-700">Pratinjau gagal ditampilkan</p>
+              <p className="text-xs text-red-500 mt-1">Kalau foto sebelumnya memang jelas, boleh tetap dikirim -- kalau ragu, ambil ulang saja.</p>
             </div>
           ) : (
+            // key berganti tiap retry supaya <img> benar-benar dipaksa mencoba muat ulang dari
+            // awal (bukan cuma re-render React biasa yang tidak mengulang proses decode gambar).
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={capturedUrl} alt={label} className="w-full rounded-lg aspect-[4/3] object-cover" onError={() => setPreviewFailed(true)} />
+            <img key={previewRetry} src={capturedUrl} alt={label} className="w-full rounded-lg aspect-[4/3] object-cover" onError={handlePreviewError} />
           )}
           <div className="flex gap-2">
             <button type="button" onClick={retake} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Ambil Ulang</button>
-            <button type="button" onClick={confirmPhoto} disabled={previewFailed}
-              className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+            <button type="button" onClick={confirmPhoto}
+              className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold">
               Gunakan Foto Ini
             </button>
           </div>
