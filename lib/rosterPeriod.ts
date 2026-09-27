@@ -24,6 +24,21 @@ export function getUpcomingRosterPeriod(refDate: Date = new Date()): { start: Da
   return { start, end }
 }
 
+// Periode 26-25 yang MENAUNGI refDate saat ini, sebagai Date (bukan string) -- dipakai fitur
+// yang butuh cek apakah periode BERJALAN masih kurang dari jatah 4 tanggal (Ajukan Libur),
+// beda dari getUpcomingRosterPeriod() yang selalu periode BERIKUTNYA.
+export function getCurrentRosterPeriod(refDate: Date = new Date()): { start: Date; end: Date } {
+  let startMonth = refDate.getDate() >= 26 ? refDate.getMonth() : refDate.getMonth() - 1
+  let startYear = refDate.getFullYear()
+  if (startMonth < 0) { startMonth = 11; startYear -= 1 }
+  const start = new Date(startYear, startMonth, 26)
+  let endMonth = startMonth + 1
+  let endYear = startYear
+  if (endMonth > 11) { endMonth = 0; endYear += 1 }
+  const end = new Date(endYear, endMonth, 25)
+  return { start, end }
+}
+
 // Periode 26-25 yang MENAUNGI refDate saat ini — beda dari getUpcomingRosterPeriod() yang
 // selalu mengambil periode BERIKUTNYA. Dipakai fitur yang butuh status "periode berjalan sekarang"
 // (mis. Ajukan Cuti/Izin, Aturan Potongan Gaji), bukan periode mendatang untuk roster.

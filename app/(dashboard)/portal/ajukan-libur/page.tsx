@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { getUpcomingRosterPeriod, rosterPeriodLabel, datesInRange } from '@/lib/rosterPeriod'
+import { getUpcomingRosterPeriod, getCurrentRosterPeriod, rosterPeriodLabel, datesInRange } from '@/lib/rosterPeriod'
 import { todayLocalStr, localDateStr } from '@/lib/date'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
@@ -26,7 +26,13 @@ export default function AjukanLiburPage() {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const period = getUpcomingRosterPeriod()
+  // Periode yang ditampilkan BUKAN selalu "periode berikutnya" -- kalau periode yang SEDANG
+  // BERJALAN masih kurang dari 4 tanggal (misal ada yang ditolak dan belum diganti, atau belum
+  // sempat lengkapi 4/4 sebelum periode itu mulai), periode itu yang diprioritaskan supaya masih
+  // bisa dilengkapi selama tanggal penggantinya belum lewat. Ditentukan di init() lewat cek
+  // jumlah dulu, baru fetchData() penuh untuk periode yang benar-benar dipakai.
+  const [period, setPeriod] = useState(() => getUpcomingRosterPeriod())
+  const [isCurrentPeriod, setIsCurrentPeriod] = useState(false)
   const periodStartStr = localDateStr(period.start)
   const periodEndStr = localDateStr(period.end)
   const allDates = datesInRange(period.start, period.end)
@@ -47,8 +53,18 @@ export default function AjukanLiburPage() {
     const effectiveId = previewing ? PREVIEW_EMPLOYEE_ID : userData.employee_id
     setEmployeeId(effectiveId)
 
+    const currentPeriod = getCurrentRosterPeriod()
+    const currentStartStr = localDateStr(currentPeriod.start)
+    const { count: currentActiveCount } = await supabase.from('roster_pick_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('employee_id', effectiveId).eq('period_start', currentStartStr).neq('status', 'rejected')
+    const useCurrentPeriod = (currentActiveCount ?? 0) < MAX_PICKS
+    const activePeriod = useCurrentPeriod ? currentPeriod : getUpcomingRosterPeriod()
+    setPeriod(activePeriod)
+    setIsCurrentPeriod(useCurrentPeriod)
+
     const [, count] = await Promise.all([
-      fetchData(effectiveId),
+      fetchData(effectiveId, localDateStr(activePeriod.start), localDateStr(activePeriod.end)),
       previewing
         ? (async () => {
             const { data: emp } = await supabase.from('employees').select('branch_id').eq('id', effectiveId).single()
@@ -63,22 +79,22 @@ export default function AjukanLiburPage() {
     setLoading(false)
   }
 
-  async function fetchData(empId: string) {
+  async function fetchData(empId: string, startStr: string = periodStartStr, endStr: string = periodEndStr) {
     const [{ data: reqs }, { data: calRows }] = await Promise.all([
       supabase.from('roster_pick_requests')
         .select('id, requested_date, status, rejection_reason')
         .eq('employee_id', empId)
-        .eq('period_start', periodStartStr)
+        .eq('period_start', startStr)
         .neq('status', 'rejected')
         .order('requested_date'),
-      supabase.rpc('get_company_dayoff_calendar', { p_from: periodStartStr, p_to: periodEndStr }),
+      supabase.rpc('get_company_dayoff_calendar', { p_from: startStr, p_to: endStr }),
     ])
     setOwnRequests((reqs as OwnRequest[]) || [])
     // Pilihan yang DITOLAK disembunyikan dari daftar aktif (tanggalnya boleh dipilih lagi), tapi
     // alasannya tetap ditampilkan supaya karyawan tahu kenapa ditolak.
     const { data: rej } = await supabase.from('roster_pick_requests')
       .select('requested_date, rejection_reason')
-      .eq('employee_id', empId).eq('period_start', periodStartStr).eq('status', 'rejected')
+      .eq('employee_id', empId).eq('period_start', startStr).eq('status', 'rejected')
       .order('decided_at', { ascending: true })
     setRejectedByDate(Object.fromEntries(((rej || []) as { requested_date: string; rejection_reason: string | null }[])
       .map(r => [r.requested_date, r.rejection_reason || 'tanpa alasan'])))
@@ -164,6 +180,15 @@ export default function AjukanLiburPage() {
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Ajukan Jadwal Libur</h1>
         <p className="text-sm text-slate-500">Wajib pilih tepat {MAX_PICKS} tanggal libur untuk periode <strong>{rosterPeriodLabel(period.start, period.end)}</strong> sebelum bisa diajukan ke HR/Owner — belum bisa diproses kalau belum genap {MAX_PICKS}/{MAX_PICKS}.</p>
       </div>
+
+      {isCurrentPeriod && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+          <p className="text-sm font-semibold text-blue-800">📌 Periode ini sedang berjalan sekarang</p>
+          <p className="text-sm text-blue-700 mt-0.5">
+            Jatah libur Anda untuk periode ini masih kurang dari {MAX_PICKS} (mungkin ada yang ditolak, atau belum sempat dilengkapi) — lengkapi dulu di sini sebelum bisa lanjut ke periode berikutnya. Tanggal yang sudah lewat otomatis terkunci.
+          </p>
+        </div>
+      )}
 
       {previewReadOnly && (
         <div className="bg-slate-100 border border-slate-200 text-slate-600 text-sm rounded-lg px-4 py-2.5 mb-6">
