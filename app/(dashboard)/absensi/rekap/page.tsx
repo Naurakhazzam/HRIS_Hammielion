@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { triggerDailyPhotoCleanup } from '@/lib/photoCleanup'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
 
+const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
+
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
 type Employee = { id: string; full_name: string; branch_id: string; department_id: string; join_date: string | null; custom_check_in_time: string | null; custom_check_out_time: string | null }
@@ -454,12 +456,16 @@ export default function RekapAbsensiPage() {
   const totalLiburDB = validAtts.filter(a=>a.status==='leave').length
   const formEmps = formBranchId ? employees.filter(e=>e.branch_id===formBranchId) : employees
 
+  // Format jelas "26 Agustus – 25 September 2026" (bukan ISO mentah) supaya HR tidak salah
+  // paham periode mana yang sedang dilihat — terutama saat lintas tahun (Januari = 26 Des tahun
+  // lalu s/d 25 Jan tahun ini, dua tahun berbeda dalam satu label).
   const getPeriodLabel = () => {
     if (!filterMonth) return ''
     const p=filterMonth.split('-'); const y=parseInt(p[0]); const m=parseInt(p[1])
-    const pad = (n: number) => String(n).padStart(2,'0')
     const pm=m===1?12:m-1; const py=m===1?y-1:y
-    return py+'-'+pad(pm)+'-26 s/d '+y+'-'+pad(m)+'-25'
+    const startLabel = `26 ${MONTHS[pm-1]}${py!==y ? ' '+py : ''}`
+    const endLabel = `25 ${MONTHS[m-1]} ${y}`
+    return `${startLabel} – ${endLabel}`
   }
 
   // Generate semua tanggal dalam periode (26 bulan lalu s/d 25 bulan ini)
@@ -608,7 +614,7 @@ export default function RekapAbsensiPage() {
           <div>
             <label className="text-xs font-medium text-slate-500 block mb-1">Periode</label>
             <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="bg-white border border-slate-300 text-sm rounded-lg outline-none block w-full p-2" />
-            {filterMonth && <p className="text-xs text-slate-400 mt-1">{getPeriodLabel()}</p>}
+            {filterMonth && <p className="text-xs text-slate-500 mt-1">📅 {getPeriodLabel()} <span className="text-slate-400">(sama seperti periode gaji)</span></p>}
           </div>
           <div>
             <label className="text-xs font-medium text-slate-500 block mb-1">Karyawan</label>
