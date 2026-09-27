@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr, localDateStr } from '@/lib/date'
 import { resolveSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
 import { QR_LATE_TOLERANCE_MINUTES } from '@/lib/lateTolerance'
+import { fetchAlphaAlerts } from '@/lib/alphaDetection'
+import Link from 'next/link'
 
 type Props = { employeeId: string; employeeName: string; onDone?: () => void; mode?: 'gps' | 'qr'; qrBranchId?: string; qrBranchName?: string }
 
@@ -35,6 +37,11 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const [customCheckIn, setCustomCheckIn] = useState<string | null>(null)
   const [customCheckOut, setCustomCheckOut] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  // Peringatan "cek Portal Anda" -- muncul begitu absen (masuk/pulang) berhasil, KALAU karyawan
+  // ini punya hari Alpha otomatis yang masih bisa/perlu diklarifikasi (belum lewat batas 2 hari).
+  // Ini titik pertemuan paling pasti karyawan lihat, karena absen wajib dilakukan tiap hari --
+  // beda dari Portal Saya yang mungkin tidak rutin dibuka sendiri.
+  const [showAlphaReminder, setShowAlphaReminder] = useState(false)
   // Dept/posisi karyawan — dipakai buat replikasi PERSIS aturan pengecualian lembur/telat yang
   // sudah berlaku di trigger DB calc_attendance_times() (dipakai absen masuk & import fingerprint):
   // Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang tidak pernah dapat lembur/telat.
@@ -585,6 +592,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     setGeo(null)
     setStep('idle')
     await fetchContext()
+    try {
+      const alerts = await fetchAlphaAlerts(supabase, employeeId)
+      setShowAlphaReminder(alerts.some(a => a.actionable))
+    } catch {
+      // Gagal diam-diam -- jangan sampai ganggu alur absen utama gara-gara pengecekan tambahan ini.
+    }
     onDone?.()
   }
 
@@ -624,6 +637,13 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         <div className={`p-3 mb-3 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
           {message.text}
         </div>
+      )}
+
+      {showAlphaReminder && (
+        <Link href="/portal" className="block p-3 mb-3 rounded-lg border-2 border-red-400 bg-red-50 text-sm hover:bg-red-100 transition">
+          <p className="font-bold text-red-800">🔴 Ada catatan ALPHA yang belum diklarifikasi!</p>
+          <p className="text-red-700 mt-0.5">Ketuk di sini untuk buka Portal Saya dan klarifikasi sekarang — batas waktunya cuma 2 hari.</p>
+        </Link>
       )}
 
       {alreadyDoneToday && (

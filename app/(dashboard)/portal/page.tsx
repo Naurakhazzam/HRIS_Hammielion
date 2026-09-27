@@ -9,6 +9,7 @@ import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, 
 import { chargeableLateMinutes } from '@/lib/lateTolerance'
 import { getUpcomingRosterPeriod, rosterPeriodLabel } from '@/lib/rosterPeriod'
 import { localDateStr } from '@/lib/date'
+import { fetchAlphaAlerts as fetchAlphaAlertsShared, type AlphaAlertItem } from '@/lib/alphaDetection'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const DAYS_AHEAD = 30
@@ -62,6 +63,18 @@ export default function PortalDashboardPage() {
   const [estPotongan, setEstPotongan] = useState({ keterlambatan: 0, kasbon: 0 })
   const [quotaLibur, setQuotaLibur] = useState<{ submitted: number; draft: number; label: string; daysUntil: number } | null>(null)
 
+  // Hari yang otomatis ditandai Alpha karena tidak ada absen sama sekali (lihat
+  // lib/alphaDetection.ts) -- karyawan bisa klarifikasi di sini kalau sebenarnya sakit/izin,
+  // karena potongan Alpha jauh lebih besar dari sakit/izin biasa. Batas waktu klarifikasi H+2
+  // dari tanggal Alpha (ditegakkan di database, lihat computed "actionable"/"deadline").
+  const [alphaAlerts, setAlphaAlerts] = useState<AlphaAlertItem[]>([])
+  const [clarifyModal, setClarifyModal] = useState<AlphaAlertItem | null>(null)
+  const [clarifyType, setClarifyType] = useState<'sick' | 'sick_doc' | 'permission'>('sick')
+  const [clarifyReason, setClarifyReason] = useState('')
+  const [clarifyFile, setClarifyFile] = useState<File | null>(null)
+  const [clarifyError, setClarifyError] = useState('')
+  const [clarifySubmitting, setClarifySubmitting] = useState(false)
+
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
@@ -90,6 +103,7 @@ export default function PortalDashboardPage() {
       fetchKasbonSaldo(effectiveId),
       fetchEstimasiPotongan(effectiveId),
       fetchQuotaLibur(effectiveId),
+      fetchAlphaAlerts(effectiveId),
       emp?.join_date ? fetchLeaveInfo(effectiveId, emp.join_date) : Promise.resolve(),
     ])
     setLoading(false)
@@ -195,6 +209,53 @@ export default function PortalDashboardPage() {
     })
   }
 
+  // Hari-hari yang otomatis ditandai Alpha (tidak ada absen sama sekali) yang masih berstatus
+  // absent -- kalau sudah pernah diklarifikasi & di-ACC HR, statusnya sudah berubah jadi
+  // sakit/izin dan otomatis tidak muncul lagi di sini.
+  async function fetchAlphaAlerts(employeeId: string) {
+    setAlphaAlerts(await fetchAlphaAlertsShared(supabase, employeeId))
+  }
+
+  function openClarifyModal(alert: AlphaAlertItem) {
+    setClarifyModal(alert)
+    setClarifyType('sick')
+    setClarifyReason('')
+    setClarifyFile(null)
+    setClarifyError('')
+  }
+
+  async function submitClarification() {
+    if (!clarifyModal) return
+    if (!clarifyReason.trim()) { setClarifyError('Keterangan wajib diisi -- jelaskan alasannya.'); return }
+    if (clarifyType === 'sick_doc' && !clarifyFile) { setClarifyError('Sakit dengan surat dokter wajib lampirkan foto/scan surat.'); return }
+    setClarifySubmitting(true)
+    setClarifyError('')
+
+    let documentUrl: string | null = null
+    if (clarifyFile) {
+      const fileExt = clarifyFile.name.split('.').pop()
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
+      const filePath = `alpha_klarifikasi/${fileName}`
+      const { error: upErr } = await supabase.storage.from('documents').upload(filePath, clarifyFile)
+      if (upErr) { setClarifyError('Gagal unggah bukti: ' + upErr.message); setClarifySubmitting(false); return }
+      documentUrl = supabase.storage.from('documents').getPublicUrl(filePath).data.publicUrl
+    }
+
+    const { error } = await supabase.rpc('submit_alpha_clarification', {
+      p_attendance_id: clarifyModal.attendanceId,
+      p_requested_type: clarifyType,
+      p_reason: clarifyReason.trim(),
+      p_document_url: documentUrl,
+    })
+    if (error) {
+      setClarifyError(error.message)
+    } else {
+      setClarifyModal(null)
+      await fetchAlphaAlerts(myEmployeeId)
+    }
+    setClarifySubmitting(false)
+  }
+
   // Sisa saldo kasbon aktif -- rumus sama persis dengan yang dipakai halaman Kasbon (Tab
   // Limit): jumlah (amount_requested - total_deducted) dari kasbon_requests yang sudah
   // disetujui & dicairkan, bukan dari kasbon_limits yang sudah tidak sinkron.
@@ -225,11 +286,52 @@ export default function PortalDashboardPage() {
   const remainingLeave = Math.max(0, ANNUAL_LEAVE_QUOTA_DAYS - leaveInfo.usedDays)
 
   return (
+    <>
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Halo, {myName}! 👋</h1>
         <p className="text-sm text-slate-500">{today.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} — ringkasan singkat untuk Anda.</p>
       </div>
+
+      {alphaAlerts.length > 0 && (
+        <div className="bg-red-50 border-2 border-red-400 rounded-xl p-4">
+          <p className="text-base font-bold text-red-800">🔴 Ada {alphaAlerts.length} hari tidak absen — tercatat ALPHA (potongan gaji BESAR)</p>
+          <p className="text-sm text-red-700 mt-1">Kalau ini karena sakit atau izin, segera klarifikasi di bawah ini supaya tidak salah potong gaji Anda.</p>
+          <div className="mt-3 space-y-2">
+            {alphaAlerts.map(a => {
+              const deadlineLabel = new Date(a.deadline + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long' })
+              const isPending = a.clarification?.status === 'pending'
+              return (
+                <div key={a.attendanceId} className="bg-white border border-red-200 rounded-lg p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-800">
+                      {new Date(a.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                    </p>
+                    {isPending ? (
+                      <span className="text-xs px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg font-medium">⏳ Menunggu review HR</span>
+                    ) : a.actionable ? (
+                      <button onClick={() => openClarifyModal(a)} className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold">
+                        {a.clarification ? 'Klarifikasi Lagi' : 'Klarifikasi Sekarang'}
+                      </button>
+                    ) : (
+                      <span className="text-xs px-3 py-1.5 bg-slate-200 text-slate-600 rounded-lg font-medium">🔒 Batas waktu lewat</span>
+                    )}
+                  </div>
+                  {!isPending && a.clarification?.status === 'rejected' && (
+                    <p className="text-xs text-slate-500 mt-1.5">Klarifikasi sebelumnya ditolak{a.clarification.rejection_note ? `: ${a.clarification.rejection_note}` : ''}.</p>
+                  )}
+                  {a.actionable && !isPending && (
+                    <p className="text-xs text-red-600 font-medium mt-1.5">⏰ Batas waktu klarifikasi: paling lambat {deadlineLabel} (2 hari setelah tanggal Alpha)</p>
+                  )}
+                  {!a.actionable && !isPending && (
+                    <p className="text-xs text-slate-400 mt-1.5">Sudah lewat dari batas waktu {deadlineLabel} — status Alpha tidak bisa diubah lagi.</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {quotaLibur && quotaLibur.submitted < 4 && (
         <Link href="/portal/ajukan-libur" className="block bg-amber-50 border-2 border-amber-400 rounded-xl p-4 hover:bg-amber-100 transition">
@@ -388,5 +490,49 @@ export default function PortalDashboardPage() {
         )}
       </div>
     </div>
+
+    {clarifyModal && (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-5">
+          <h3 className="text-lg font-bold text-slate-800 mb-1">Klarifikasi Alpha</h3>
+          <p className="text-sm text-slate-500 mb-4">
+            {new Date(clarifyModal.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+            {' — batas waktu klarifikasi '}
+            {new Date(clarifyModal.deadline + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long' })}
+          </p>
+          {clarifyError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{clarifyError}</p>}
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">Sebenarnya kenapa?</label>
+              <select value={clarifyType} onChange={e => setClarifyType(e.target.value as 'sick' | 'sick_doc' | 'permission')}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none bg-white">
+                <option value="sick">Sakit (tanpa surat dokter)</option>
+                <option value="sick_doc">Sakit (dengan surat dokter)</option>
+                <option value="permission">Izin</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">Keterangan *</label>
+              <textarea value={clarifyReason} onChange={e => setClarifyReason(e.target.value)} rows={3}
+                placeholder="Jelaskan alasannya..." className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+            </div>
+            {clarifyType === 'sick_doc' && (
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">Foto/Scan Surat Dokter *</label>
+                <input type="file" accept="image/*,.pdf" onChange={e => setClarifyFile(e.target.files?.[0] ?? null)} className="w-full text-sm" />
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2 mt-5">
+            <button onClick={() => setClarifyModal(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+            <button onClick={submitClarification} disabled={clarifySubmitting}
+              className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
+              {clarifySubmitting ? 'Mengirim...' : 'Kirim Klarifikasi'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }

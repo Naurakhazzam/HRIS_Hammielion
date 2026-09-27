@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { triggerDailyPhotoCleanup } from '@/lib/photoCleanup'
+import { triggerDailyAlphaDetection } from '@/lib/alphaDetection'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
@@ -68,6 +69,7 @@ export default function RekapAbsensiPage() {
   // ── Role user ──
   const [myRole, setMyRole] = useState('')
   const [myUserId, setMyUserId] = useState('')
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null)
 
   // ── Modal Edit universal (menggantikan editModal lama) ──
   const [editModal, setEditModal] = useState<Attendance | null>(null)
@@ -104,7 +106,19 @@ export default function RekapAbsensiPage() {
   type IncompleteRow = { id: string; date: string; check_in: string; employee_id: string; employees: { full_name: string } }
   const [incompleteCheckouts, setIncompleteCheckouts] = useState<IncompleteRow[]>([])
 
-  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); triggerDailyPhotoCleanup() }, [])
+  // Klarifikasi Alpha yang menunggu review HR -- muncul dari deteksi otomatis "tidak absen
+  // sama sekali" (lihat lib/alphaDetection.ts + RPC detect_unexplained_absences).
+  type AlphaClarificationRow = {
+    id: string; attendance_id: string; employee_id: string; date: string
+    requested_type: string; reason: string; document_url: string | null; created_at: string
+    employees: { full_name: string } | null
+  }
+  const [alphaClarifications, setAlphaClarifications] = useState<AlphaClarificationRow[]>([])
+  const [alphaReviewingId, setAlphaReviewingId] = useState<string | null>(null)
+  const [alphaRejectId, setAlphaRejectId] = useState<string | null>(null)
+  const [alphaRejectNote, setAlphaRejectNote] = useState('')
+
+  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection() }, [])
   useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
   // Kalau karyawan yang sedang dipilih jadi tidak termasuk lagi setelah Cabang/Departemen
   // diganti, kosongkan lagi pilihannya — supaya tidak nyangkut ke karyawan di luar cakupan filter.
@@ -120,8 +134,8 @@ export default function RekapAbsensiPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
       setMyUserId(user.id)
-      const { data } = await supabase.from('users').select('role').eq('id', user.id).single()
-      if (data) setMyRole(data.role)
+      const { data } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
+      if (data) { setMyRole(data.role); setMyEmployeeId(data.employee_id ?? null) }
     }
   }
 
@@ -150,6 +164,30 @@ export default function RekapAbsensiPage() {
       .order('date', { ascending: false })
       .limit(30)
     setIncompleteCheckouts((data as unknown as IncompleteRow[]) || [])
+  }
+
+  async function fetchAlphaClarifications() {
+    const { data } = await supabase.from('alpha_clarifications')
+      .select('id,attendance_id,employee_id,date,requested_type,reason,document_url,created_at,employees(full_name)')
+      .eq('status', 'pending')
+      .order('created_at')
+    setAlphaClarifications((data as unknown as AlphaClarificationRow[]) || [])
+  }
+
+  async function reviewAlpha(id: string, approve: boolean, rejectionNote?: string) {
+    setAlphaReviewingId(id)
+    const { error } = await supabase.rpc('review_alpha_clarification', {
+      p_id: id, p_reviewed_by: myEmployeeId, p_approve: approve, p_rejection_note: rejectionNote || null,
+    })
+    if (error) {
+      showMsg('error', 'Gagal memproses klarifikasi: ' + error.message)
+    } else {
+      showMsg('success', approve ? 'Klarifikasi disetujui, status absensi diperbarui.' : 'Klarifikasi ditolak, tetap tercatat Alpha.')
+      setAlphaRejectId(null); setAlphaRejectNote('')
+      fetchAlphaClarifications()
+      fetchAttendances()
+    }
+    setAlphaReviewingId(null)
   }
 
   // Periode filter di halaman ini pakai siklus tanggal 26–25 (lihat getPeriodLabel), jadi
@@ -530,6 +568,46 @@ export default function RekapAbsensiPage() {
                 {row.employees?.full_name} — {new Date(row.date + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })} ({fmtTs(row.check_in)})
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {alphaClarifications.length > 0 && (
+        <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm font-semibold text-red-800 mb-3">🔴 {alphaClarifications.length} klarifikasi Alpha menunggu review — potongan besar, mohon segera diputuskan</p>
+          <div className="space-y-3">
+            {alphaClarifications.map(c => {
+              const typeLabel = c.requested_type === 'sick' ? 'Sakit (tanpa surat)' : c.requested_type === 'sick_doc' ? 'Sakit (dengan surat dokter)' : 'Izin'
+              return (
+                <div key={c.id} className="bg-white border border-red-200 rounded-lg p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2 mb-1.5">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{c.employees?.full_name} — {new Date(c.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">Minta diubah jadi: <strong className="text-blue-700">{typeLabel}</strong></p>
+                    </div>
+                    {c.document_url && (
+                      <button type="button" onClick={() => openLightbox(c.document_url!, 'Bukti/surat dokter')} className="text-xs text-blue-600 hover:underline whitespace-nowrap">📎 Lihat bukti</button>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-600 bg-slate-50 rounded px-2.5 py-1.5 mb-2">"{c.reason}"</p>
+                  {alphaRejectId === c.id ? (
+                    <div className="space-y-2">
+                      <textarea value={alphaRejectNote} onChange={e => setAlphaRejectNote(e.target.value)} placeholder="Alasan penolakan (opsional, untuk arsip)..." rows={2}
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none" />
+                      <div className="flex gap-2">
+                        <button disabled={alphaReviewingId === c.id} onClick={() => reviewAlpha(c.id, false, alphaRejectNote)} className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium disabled:opacity-50">Konfirmasi Tolak</button>
+                        <button onClick={() => { setAlphaRejectId(null); setAlphaRejectNote('') }} className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">Batal</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button disabled={alphaReviewingId === c.id} onClick={() => reviewAlpha(c.id, true)} className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium disabled:opacity-50">✓ Setujui</button>
+                      <button disabled={alphaReviewingId === c.id} onClick={() => setAlphaRejectId(c.id)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium disabled:opacity-50">✕ Tolak (Tetap Alpha)</button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
