@@ -26,6 +26,13 @@ function getDefaultPeriodFilter(): string {
 
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
+// Baris "Libur" sintetis dari employee_roster (bukan attendances sungguhan) -- dipakai di mode
+// "semua karyawan" (tanpa filter Karyawan) supaya yang sedang libur roster ikut tampil jelas,
+// bukan cuma diam-diam hilang dari daftar seolah tidak ada datanya sama sekali.
+type DayOffRow = {
+  employee_id: string; date: string
+  employees: { full_name: string; branch_id: string; department_id: string; branches: { name: string } | null; departments: { name: string } | null } | null
+}
 type Employee = { id: string; full_name: string; branch_id: string; department_id: string; join_date: string | null; custom_check_in_time: string | null; custom_check_out_time: string | null }
 type WorkSchedule = { id: string; name: string; check_in_time: string; check_out_time: string; detect_until: string | null; applies_to_dept: string }
 type Attendance = {
@@ -66,6 +73,7 @@ export default function RekapAbsensiPage() {
   const supabase = createClient()
   const { openLightbox } = usePhotoLightbox()
   const [attendances, setAttendances] = useState<Attendance[]>([])
+  const [dayOffRows, setDayOffRows] = useState<DayOffRow[]>([])
   // Penanda permintaan terbaru — supaya kalau beberapa filter diganti cepat berturut-turut,
   // hasil dari permintaan LAMA yang kebetulan selesai belakangan tidak menimpa hasil yang baru.
   const fetchSeq = useRef(0)
@@ -220,24 +228,41 @@ export default function RekapAbsensiPage() {
   async function fetchAttendances() {
     const mySeq = ++fetchSeq.current
     setLoading(true)
-    let q = supabase.from('attendances')
-      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,source,check_in_photo_url,check_out_photo_url,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,branches(name),departments(name))')
-      .order('date', { ascending: true })
+
+    let periodFrom = '', periodTo = ''
     if (filterMonth) {
       const p = filterMonth.split('-'); const y=parseInt(p[0]); const m=parseInt(p[1])
       const pad = (n: number) => String(n).padStart(2,'0')
       const pm=m===1?12:m-1; const py=m===1?y-1:y
-      q = q.gte('date', py+'-'+pad(pm)+'-26').lte('date', y+'-'+pad(m)+'-25')
+      periodFrom = py+'-'+pad(pm)+'-26'; periodTo = y+'-'+pad(m)+'-25'
     }
+
+    let q = supabase.from('attendances')
+      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,source,check_in_photo_url,check_out_photo_url,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,branches(name),departments(name))')
+      .order('date', { ascending: true })
+    if (periodFrom) q = q.gte('date', periodFrom).lte('date', periodTo)
     if (filterBranch) q = q.eq('employees.branch_id', filterBranch)
     if (filterDept) q = q.eq('employees.department_id', filterDept)
     if (filterEmployee) q = q.eq('employee_id', filterEmployee)
-    const { data, error } = await q
+
+    // Mode "semua karyawan" (tanpa filter satu orang): ambil juga baris libur roster, supaya
+    // yang sedang libur ikut tampil jelas -- bukan cuma diam-diam hilang dari daftar. Mode per
+    // karyawan tidak butuh ini karena sudah punya fallback "Libur" sendiri per tanggal kosong.
+    let dq = filterEmployee ? null : supabase.from('employee_roster')
+      .select('employee_id,date,employees!inner(full_name,branch_id,department_id,branches(name),departments(name))')
+      .eq('is_day_off', true)
+      .order('date', { ascending: true })
+    if (dq && periodFrom) dq = dq.gte('date', periodFrom).lte('date', periodTo)
+    if (dq && filterBranch) dq = dq.eq('employees.branch_id', filterBranch)
+    if (dq && filterDept) dq = dq.eq('employees.department_id', filterDept)
+
+    const [{ data, error }, dayOffRes] = await Promise.all([q, dq ?? Promise.resolve({ data: [], error: null })])
     // Kalau ada filter lain yang berubah (dan fetch baru sudah jalan) sebelum request ini
     // selesai, jangan timpa state dengan hasil yang sudah basi ini.
     if (mySeq !== fetchSeq.current) return
     if (error) showMsg('error','Gagal memuat: '+error.message)
     else setAttendances((data as unknown as Attendance[])||[])
+    setDayOffRows((dayOffRes.data as unknown as DayOffRow[]) || [])
     setLoading(false)
   }
 
@@ -889,63 +914,99 @@ export default function RekapAbsensiPage() {
                     )
                   })
                 })
-              ) : attendances.length === 0 ? (
+              ) : attendances.length === 0 && dayOffRows.length === 0 ? (
                 <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data absensi.</td></tr>
               ) : (
-                // Mode semua karyawan: tampilkan hanya yang ada data
-                attendances.map(att => {
-                  const deptId = (att.employees as any)?.department_id
-                  const sched = getScheduleForAtt(att.check_in, deptId, att.employees)
-                  const allKey = `${(att as any).employee_id}|${att.date}`
-                  return (
-                    <tr key={att.id} className={`hover:bg-slate-50 transition ${selectedRows.has(allKey) ? 'bg-blue-50/50' : ''}`}>
-                      <td className="px-3 py-3 text-center">
-                        {['hr','owner','finance'].includes(myRole) && (
-                          <input type="checkbox" checked={selectedRows.has(allKey)}
-                            onChange={() => toggleRow(allKey, { employeeId: (att as any).employee_id, date: att.date })}
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
-                          />
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">{new Date(att.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'short',day:'2-digit',month:'short'})}</td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-slate-800">{att.employees?.full_name}</div>
-                        <div className="text-xs text-slate-500">{att.employees?.branches?.name} · {att.employees?.departments?.name}</div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {sched ? (
-                          <div>
-                            <div className="text-xs font-semibold text-blue-700">{sched.name}</div>
-                            <div className="text-xs text-slate-400">{fmtTime(sched.check_in_time)} – {fmtTime(sched.check_out_time)}</div>
-                          </div>
-                        ) : <span className="text-slate-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">
-                        {fmtTs(att.check_in)}
-                        {att.check_in_photo_url && <button type="button" onClick={() => openLightbox(att.check_in_photo_url!, 'Foto absen masuk')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</button>}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">
-                        {fmtTs(att.check_out)}
-                        {att.check_out_photo_url && <button type="button" onClick={() => openLightbox(att.check_out_photo_url!, 'Foto absen pulang')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</button>}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {att.overtime_hours > 0 ? <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-xs font-semibold">{att.overtime_hours} jam</span> : <span className="text-slate-300 text-xs">-</span>}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLOR[att.status]??'bg-purple-100 text-purple-800'}`}>{STATUS_LABEL[att.status]??att.status}</span>
-                        {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {['hr','owner','finance'].includes(myRole) && (
-                          <button onClick={() => openEditModal(att)} className="px-2.5 py-1 text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 transition">Edit</button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })
+                // Mode semua karyawan: gabung data absensi asli + baris Libur roster (supaya
+                // yang sedang libur ikut tampil jelas, tidak diam-diam hilang dari daftar),
+                // diurut tanggal. Baris Libur dikecualikan kalau ternyata untuk (karyawan,
+                // tanggal) yang sama sudah ada baris attendances asli (mis. HR sudah input manual).
+                (() => {
+                  const attKeys = new Set(attendances.map(a => `${(a as any).employee_id}|${a.date}`))
+                  type MergedRow = { kind: 'att'; date: string; att: Attendance } | { kind: 'dayoff'; date: string; d: DayOffRow }
+                  const merged: MergedRow[] = [
+                    ...attendances.map(att => ({ kind: 'att' as const, date: att.date, att })),
+                    ...dayOffRows.filter(d => !attKeys.has(`${d.employee_id}|${d.date}`)).map(d => ({ kind: 'dayoff' as const, date: d.date, d })),
+                  ].sort((a, b) => a.date.localeCompare(b.date))
+
+                  return merged.map(row => {
+                    if (row.kind === 'dayoff') {
+                      const d = row.d
+                      return (
+                        <tr key={`off-${d.employee_id}-${d.date}`} className="bg-slate-50/40">
+                          <td className="px-3 py-3 text-center"></td>
+                          <td className="px-4 py-3 text-sm font-semibold text-slate-500 whitespace-nowrap">{new Date(d.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'short',day:'2-digit',month:'short'})}</td>
+                          <td className="px-4 py-3">
+                            <div className="text-sm font-medium text-slate-500">{d.employees?.full_name}</div>
+                            <div className="text-xs text-slate-400">{d.employees?.branches?.name} · {d.employees?.departments?.name}</div>
+                          </td>
+                          <td colSpan={5} className="px-4 py-3 text-center"><span className="text-slate-300 text-xs">—</span></td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="bg-slate-100 text-slate-500 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium">Libur</span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {['hr','owner','finance'].includes(myRole) && (
+                              <button onClick={() => { setAbsenModal(true); setAbsenForm({ employee_id: d.employee_id, date: d.date, status: 'leave', notes: '' }) }}
+                                className="px-2.5 py-1 text-xs font-medium bg-slate-100 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-200 transition">Edit</button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    }
+                    const att = row.att
+                    const deptId = (att.employees as any)?.department_id
+                    const sched = getScheduleForAtt(att.check_in, deptId, att.employees)
+                    const allKey = `${(att as any).employee_id}|${att.date}`
+                    return (
+                      <tr key={att.id} className={`hover:bg-slate-50 transition ${selectedRows.has(allKey) ? 'bg-blue-50/50' : ''}`}>
+                        <td className="px-3 py-3 text-center">
+                          {['hr','owner','finance'].includes(myRole) && (
+                            <input type="checkbox" checked={selectedRows.has(allKey)}
+                              onChange={() => toggleRow(allKey, { employeeId: (att as any).employee_id, date: att.date })}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                            />
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">{new Date(att.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'short',day:'2-digit',month:'short'})}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm font-medium text-slate-800">{att.employees?.full_name}</div>
+                          <div className="text-xs text-slate-500">{att.employees?.branches?.name} · {att.employees?.departments?.name}</div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {sched ? (
+                            <div>
+                              <div className="text-xs font-semibold text-blue-700">{sched.name}</div>
+                              <div className="text-xs text-slate-400">{fmtTime(sched.check_in_time)} – {fmtTime(sched.check_out_time)}</div>
+                            </div>
+                          ) : <span className="text-slate-300 text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">
+                          {fmtTs(att.check_in)}
+                          {att.check_in_photo_url && <button type="button" onClick={() => openLightbox(att.check_in_photo_url!, 'Foto absen masuk')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</button>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">
+                          {fmtTs(att.check_out)}
+                          {att.check_out_photo_url && <button type="button" onClick={() => openLightbox(att.check_out_photo_url!, 'Foto absen pulang')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</button>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {att.overtime_hours > 0 ? <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-xs font-semibold">{att.overtime_hours} jam</span> : <span className="text-slate-300 text-xs">-</span>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLOR[att.status]??'bg-purple-100 text-purple-800'}`}>{STATUS_LABEL[att.status]??att.status}</span>
+                          {att.notes && <div className="text-xs text-slate-400 mt-0.5 italic">{att.notes}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {['hr','owner','finance'].includes(myRole) && (
+                            <button onClick={() => openEditModal(att)} className="px-2.5 py-1 text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 transition">Edit</button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })
+                })()
               )}
             </tbody>
           </table>

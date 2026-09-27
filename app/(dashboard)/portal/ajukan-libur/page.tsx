@@ -21,7 +21,6 @@ export default function AjukanLiburPage() {
   const [ownRequests, setOwnRequests] = useState<OwnRequest[]>([])
   const [colleagueNames, setColleagueNames] = useState<Record<string, string>>({})
   const [rejectedByDate, setRejectedByDate] = useState<Record<string, string>>({})
-  const [branchEmployeeCount, setBranchEmployeeCount] = useState<number | null>(null)
   const [busyDate, setBusyDate] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -63,19 +62,7 @@ export default function AjukanLiburPage() {
     setPeriod(activePeriod)
     setIsCurrentPeriod(useCurrentPeriod)
 
-    const [, count] = await Promise.all([
-      fetchData(effectiveId, localDateStr(activePeriod.start), localDateStr(activePeriod.end)),
-      previewing
-        ? (async () => {
-            const { data: emp } = await supabase.from('employees').select('branch_id').eq('id', effectiveId).single()
-            if (!emp?.branch_id) return null
-            const { count: c } = await supabase.from('employees').select('id', { count: 'exact', head: true })
-              .eq('branch_id', emp.branch_id).eq('is_active', true)
-            return c
-          })()
-        : supabase.rpc('get_my_branch_employee_count').then(r => r.data),
-    ])
-    setBranchEmployeeCount(typeof count === 'number' ? count : null)
+    await fetchData(effectiveId, localDateStr(activePeriod.start), localDateStr(activePeriod.end))
     setLoading(false)
   }
 
@@ -109,11 +96,11 @@ export default function AjukanLiburPage() {
   }
 
   const activeCount = ownRequests.filter(r => r.status !== 'rejected').length
-  // Weekend (Sabtu/Minggu) jadi primadona karena toko buka tiap hari — cabang dengan LEBIH DARI
-  // 2 karyawan aktif dibatasi cuma boleh 1 pilihan weekend per periode, supaya tidak ada yang
-  // "menguasai" weekend terus-menerus tiap bulan. Cabang kecil (<=2 orang) dikecualikan.
+  // Weekend (Sabtu/Minggu) jadi primadona karena toko buka tiap hari — SEMUA karyawan di SEMUA
+  // cabang dibatasi cuma boleh 1 pilihan weekend per periode (aturan global, bukan cuma cabang
+  // ramai), supaya tidak ada yang "menguasai" weekend terus-menerus tiap bulan.
   const isWeekend = (dateStr: string) => [0, 6].includes(new Date(dateStr + 'T00:00:00').getDay())
-  const weekendCapActive = (branchEmployeeCount ?? 0) > 2
+  const weekendCapActive = true
   const weekendPicksUsed = ownRequests.filter(r => r.status !== 'rejected' && isWeekend(r.requested_date)).length
 
   async function toggleDate(dateStr: string, own: OwnRequest | undefined) {
@@ -196,15 +183,13 @@ export default function AjukanLiburPage() {
         </div>
       )}
 
-      {weekendCapActive && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex gap-3">
-          <span className="text-xl leading-none">📅</span>
-          <div>
-            <p className="text-sm font-semibold text-amber-800">Aturan Libur Weekend</p>
-            <p className="text-sm text-amber-700 mt-0.5">Cabang Anda ramai (lebih dari 2 karyawan), jadi setiap orang cuma boleh pilih <strong>1 tanggal Sabtu/Minggu</strong> dari {MAX_PICKS} pengajuan libur per periode. Ini supaya weekend bisa bergantian dengan rekan sekantor, tidak dikuasai orang yang sama terus setiap bulan. Sisanya bebas pilih hari kerja biasa.</p>
-          </div>
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex gap-3">
+        <span className="text-xl leading-none">📅</span>
+        <div>
+          <p className="text-sm font-semibold text-amber-800">Aturan Libur Weekend</p>
+          <p className="text-sm text-amber-700 mt-0.5">Setiap orang di semua cabang cuma boleh pilih <strong>1 tanggal Sabtu/Minggu</strong> dari {MAX_PICKS} pengajuan libur per periode. Ini supaya weekend bisa bergantian dengan rekan sekantor, tidak dikuasai orang yang sama terus setiap bulan. Sisanya bebas pilih hari kerja biasa.</p>
         </div>
-      )}
+      </div>
 
       {message && (
         <div className={`p-3 mb-4 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
