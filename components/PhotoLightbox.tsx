@@ -1,12 +1,30 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 // Dipakai di halaman yang punya link dokumen campur (foto ATAU pdf, mis. Surat Cuti) --
 // PDF tetap dibuka di tab baru (tidak masuk akal di-zoom sebagai gambar), cuma foto yang
 // dicegat untuk ditampilkan membesar di tempat.
 export function isImageUrl(url: string): boolean {
   return /\.(jpe?g|png|gif|webp|bmp|heic|avif)(\?|#|$)/i.test(url)
+}
+
+// Bucket 'documents' bersifat privat, jadi alamat /object/public/documents/... yang tersimpan di
+// database (bukti Alpha, foto lembur, surat cuti) selalu balas HTTP 400 kalau dibuka langsung.
+// Ditukar dulu dengan alamat bertanda tangan sementara sebelum ditampilkan.
+const DOCS_PUBLIC_PREFIX = '/storage/v1/object/public/documents/'
+
+export async function resolveStorageUrl(url: string): Promise<string> {
+  const i = url.indexOf(DOCS_PUBLIC_PREFIX)
+  if (i === -1) return url
+  const path = decodeURIComponent(url.slice(i + DOCS_PUBLIC_PREFIX.length).split('?')[0])
+  const { data } = await createClient().storage.from('documents').createSignedUrl(path, 3600)
+  return data?.signedUrl ?? url
+}
+
+export async function openStoredUrl(url: string) {
+  window.open(await resolveStorageUrl(url), '_blank', 'noopener,noreferrer')
 }
 
 const MIN_SCALE = 1
@@ -24,7 +42,7 @@ export function usePhotoLightbox() {
 
 export function PhotoLightboxProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<LightboxState>(null)
-  const openLightbox = useCallback((url: string, alt?: string) => setState({ url, alt }), [])
+  const openLightbox = useCallback(async (url: string, alt?: string) => setState({ url: await resolveStorageUrl(url), alt }), [])
   const close = useCallback(() => setState(null), [])
 
   return (

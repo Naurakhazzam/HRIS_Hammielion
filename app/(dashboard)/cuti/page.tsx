@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
-import { usePhotoLightbox, isImageUrl } from '@/components/PhotoLightbox'
+import { usePhotoLightbox, isImageUrl, openStoredUrl } from '@/components/PhotoLightbox'
 
 type LeaveRequest = {
   id: string
@@ -253,9 +253,9 @@ export default function CutiIzinPage() {
                           📎 Lihat Surat
                         </button>
                       ) : req.document_url && (
-                        <a href={req.document_url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline inline-flex items-center gap-1 mt-1">
+                        <button type="button" onClick={() => openStoredUrl(req.document_url!)} className="text-xs text-blue-500 hover:underline inline-flex items-center gap-1 mt-1">
                           📎 Lihat Surat
-                        </a>
+                        </button>
                       )}
                       {req.status === 'pending' && isLateNotice(req) && (
                         <p className="text-[11px] text-amber-600 font-medium mt-1">⚠️ Kurang dari H-2 — akan jadi Alpha (1.5x) kalau disetujui</p>
