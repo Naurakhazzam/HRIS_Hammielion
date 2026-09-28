@@ -691,7 +691,12 @@ export default function RekapAbsensiPage() {
           <p className="text-sm font-semibold text-red-800 mb-3">🔴 {alphaClarifications.length} klarifikasi Alpha menunggu review — potongan besar, mohon segera diputuskan</p>
           <div className="space-y-3">
             {alphaClarifications.map(c => {
-              const typeLabel = c.requested_type === 'sick' ? 'Sakit (tanpa surat)' : c.requested_type === 'sick_doc' ? 'Sakit (dengan surat dokter)' : c.requested_type === 'lupa_absen' ? 'Lupa Absen Masuk (hadir, denda Rp15.000)' : 'Izin'
+              const typeLabel = c.requested_type === 'sick' ? 'Sakit (tanpa surat)'
+                : c.requested_type === 'sick_doc' ? 'Sakit (dengan surat dokter)'
+                : c.requested_type === 'lupa_absen' ? 'Lupa Absen Masuk (hadir, denda Rp15.000)'
+                : c.requested_type === 'leave' ? 'Libur (pakai jatah 4 hari/periode, gratis)'
+                : c.requested_type === 'hadir' ? '🔍 Saya Hadir (periode transisi, GRATIS -- cek bukti di bawah!)'
+                : 'Izin'
               return (
                 <div key={c.id} className="bg-white border border-red-200 rounded-lg p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2 mb-1.5">

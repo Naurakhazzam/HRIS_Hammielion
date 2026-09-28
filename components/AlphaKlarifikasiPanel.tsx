@@ -8,6 +8,9 @@ import { getCurrentPeriodRangeStr } from '@/lib/rosterPeriod'
 type ClarifyType = 'sick' | 'sick_doc' | 'permission' | 'lupa_absen' | 'leave' | 'hadir'
 
 const LEAVE_QUOTA_PER_PERIOD = 4
+// "Saya Hadir" cuma untuk tanggal yang masih ditutupi import fingerprint lama -- HARUS selalu
+// sama persis dengan batas di RPC submit_alpha_clarification (v_hadir_allowed).
+const HADIR_ALLOWED_END = '2026-09-17'
 
 // Panel klarifikasi Alpha -- dipakai di DUA tempat: kartu ringkas di Dashboard Portal Saya
 // (portal/page.tsx) dan halaman khusus Klarifikasi Alpha (portal/alpha/page.tsx) yang selalu
@@ -60,6 +63,7 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty }: { e
   async function submitClarification() {
     if (!clarifyModal) return
     if (!clarifyReason.trim()) { setClarifyError('Keterangan wajib diisi -- jelaskan alasannya.'); return }
+    if (clarifyType === 'hadir' && clarifyReason.trim().length < 15) { setClarifyError('Tuliskan bukti kehadiran yang lebih jelas (minimal 15 karakter) -- HR perlu menilai apakah buktinya masuk akal.'); return }
     if (clarifyType === 'sick_doc' && !clarifyFile) { setClarifyError('Sakit dengan surat dokter wajib lampirkan foto/scan surat.'); return }
     setClarifySubmitting(true)
     setClarifyError('')
@@ -160,13 +164,13 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty }: { e
                   <option value="permission">Izin</option>
                   <option value="leave">Libur (pakai jatah 4 hari/periode)</option>
                   <option value="lupa_absen">Lupa Absen (sebenarnya masuk kerja)</option>
-                  {clarifyModal.noDeadline && <option value="hadir">Saya Hadir (periode transisi, gratis)</option>}
+                  {clarifyModal.date <= HADIR_ALLOWED_END && <option value="hadir">Saya Hadir (periode transisi, gratis)</option>}
                 </select>
                 {clarifyType === 'lupa_absen' && (
                   <p className="text-xs text-amber-600 mt-1">Kalau disetujui HR, dianggap hadir (bukan Alpha/Izin) tapi tetap kena denda administratif Rp15.000. Maksimal 4x per periode gajian.</p>
                 )}
                 {clarifyType === 'hadir' && (
-                  <p className="text-xs text-emerald-600 mt-1">Khusus periode transisi 26 Agustus - 25 September 2026 (banyak Alpha bukan karena kesalahan karyawan). Dianggap hadir penuh, GRATIS tanpa denda, tidak dibatasi berapa kali.</p>
+                  <p className="text-xs text-emerald-600 mt-1">Khusus tanggal 26 Agustus - 17 September 2026 (periode masih ditutupi import fingerprint lama). Dianggap hadir penuh, GRATIS tanpa denda, tidak dibatasi berapa kali.</p>
                 )}
                 {clarifyType === 'leave' && (
                   <p className="text-xs text-emerald-600 mt-1">
@@ -175,11 +179,21 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty }: { e
                   </p>
                 )}
               </div>
-              <div>
-                <label className="text-xs font-medium text-slate-600 block mb-1">Keterangan *</label>
-                <textarea value={clarifyReason} onChange={e => setClarifyReason(e.target.value)} rows={3}
-                  placeholder="Jelaskan alasannya..." className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
-              </div>
+              {clarifyType === 'hadir' ? (
+                <div>
+                  <label className="text-xs font-medium text-amber-700 block mb-1">❓ Apakah Anda bisa membuktikan bahwa Anda hadir? Tuliskan buktinya *</label>
+                  <textarea value={clarifyReason} onChange={e => setClarifyReason(e.target.value)} rows={3}
+                    placeholder='Wajib tuliskan bukti konkret, misal: "Lihat laporan penjualan/CCTV tanggal ini", "Bisa dikonfirmasi rekan kerja [nama]", dll. Jangan cuma tulis "saya hadir" tanpa bukti.'
+                    className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm outline-none" />
+                  <p className="text-[11px] text-slate-400 mt-1">Minimal 15 karakter — HR akan menilai apakah buktinya masuk akal sebelum menyetujui.</p>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs font-medium text-slate-600 block mb-1">Keterangan *</label>
+                  <textarea value={clarifyReason} onChange={e => setClarifyReason(e.target.value)} rows={3}
+                    placeholder="Jelaskan alasannya..." className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+                </div>
+              )}
               {clarifyType === 'sick_doc' && (
                 <div>
                   <label className="text-xs font-medium text-slate-600 block mb-1">Foto/Scan Surat Dokter *</label>
