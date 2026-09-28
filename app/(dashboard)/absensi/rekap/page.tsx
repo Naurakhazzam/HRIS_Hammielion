@@ -154,7 +154,19 @@ export default function RekapAbsensiPage() {
   const [checkoutRejectId, setCheckoutRejectId] = useState<string | null>(null)
   const [checkoutRejectNote, setCheckoutRejectNote] = useState('')
 
-  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); fetchCheckoutClarifications(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection() }, [])
+  // Klaim Lembur (foto kertas lembur) yang menunggu review -- approve/reject HANYA boleh Owner
+  // (ditegakkan juga di RPC review_overtime_claim), HR cuma bisa lihat untuk awareness.
+  type OvertimeClaimRow = {
+    id: string; attendance_id: string; employee_id: string; date: string
+    overtime_hours_detected: number; photo_url: string; created_at: string
+    employees: { full_name: string } | null
+  }
+  const [overtimeClaims, setOvertimeClaims] = useState<OvertimeClaimRow[]>([])
+  const [overtimeReviewingId, setOvertimeReviewingId] = useState<string | null>(null)
+  const [overtimeRejectId, setOvertimeRejectId] = useState<string | null>(null)
+  const [overtimeRejectNote, setOvertimeRejectNote] = useState('')
+
+  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); fetchCheckoutClarifications(); fetchOvertimeClaims(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection() }, [])
   useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
   // Kalau karyawan yang sedang dipilih jadi tidak termasuk lagi setelah Cabang/Departemen
   // diganti, kosongkan lagi pilihannya — supaya tidak nyangkut ke karyawan di luar cakupan filter.
@@ -249,6 +261,30 @@ export default function RekapAbsensiPage() {
       fetchAttendances()
     }
     setCheckoutReviewingId(null)
+  }
+
+  async function fetchOvertimeClaims() {
+    const { data } = await supabase.from('overtime_claims')
+      .select('id,attendance_id,employee_id,date,overtime_hours_detected,photo_url,created_at,employees(full_name)')
+      .eq('status', 'pending')
+      .order('created_at')
+    setOvertimeClaims((data as unknown as OvertimeClaimRow[]) || [])
+  }
+
+  async function reviewOvertime(id: string, approve: boolean, rejectionNote?: string) {
+    setOvertimeReviewingId(id)
+    const { error } = await supabase.rpc('review_overtime_claim', {
+      p_id: id, p_reviewed_by: myEmployeeId, p_approve: approve, p_rejection_note: rejectionNote || null,
+    })
+    if (error) {
+      showMsg('error', 'Gagal memproses klaim: ' + error.message)
+    } else {
+      showMsg('success', approve ? 'Klaim lembur disetujui, sudah bisa dihitung di slip gaji.' : 'Klaim lembur ditolak.')
+      setOvertimeRejectId(null); setOvertimeRejectNote('')
+      fetchOvertimeClaims()
+      fetchAttendances()
+    }
+    setOvertimeReviewingId(null)
   }
 
   // Periode filter di halaman ini pakai siklus tanggal 26–25 (lihat getPeriodLabel), jadi
@@ -712,6 +748,39 @@ export default function RekapAbsensiPage() {
                     <button disabled={checkoutReviewingId === c.id} onClick={() => reviewCheckout(c.id, true)} className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium disabled:opacity-50">✓ Setujui (denda Rp5.000)</button>
                     <button disabled={checkoutReviewingId === c.id} onClick={() => setCheckoutRejectId(c.id)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium disabled:opacity-50">✕ Tolak</button>
                   </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {overtimeClaims.length > 0 && (
+        <div className="mb-6 bg-purple-50 border border-purple-200 rounded-xl p-4">
+          <p className="text-sm font-semibold text-purple-800 mb-3">🕗 {overtimeClaims.length} klaim lembur menunggu review {myRole !== 'owner' && '(hanya Owner yang bisa menyetujui/menolak)'}</p>
+          <div className="space-y-3">
+            {overtimeClaims.map(c => (
+              <div key={c.id} className="bg-white border border-purple-200 rounded-lg p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2 mb-1.5">
+                  <p className="text-sm font-semibold text-slate-800">{c.employees?.full_name} — {new Date(c.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' })} — {c.overtime_hours_detected} jam</p>
+                  <button type="button" onClick={() => openLightbox(c.photo_url, 'Foto kertas lembur')} className="text-xs text-blue-600 hover:underline whitespace-nowrap">📎 Lihat foto</button>
+                </div>
+                {myRole === 'owner' && (
+                  overtimeRejectId === c.id ? (
+                    <div className="space-y-2">
+                      <textarea value={overtimeRejectNote} onChange={e => setOvertimeRejectNote(e.target.value)} placeholder="Alasan penolakan (opsional, untuk arsip)..." rows={2}
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none" />
+                      <div className="flex gap-2">
+                        <button disabled={overtimeReviewingId === c.id} onClick={() => reviewOvertime(c.id, false, overtimeRejectNote)} className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium disabled:opacity-50">Konfirmasi Tolak</button>
+                        <button onClick={() => { setOvertimeRejectId(null); setOvertimeRejectNote('') }} className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">Batal</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button disabled={overtimeReviewingId === c.id} onClick={() => reviewOvertime(c.id, true)} className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium disabled:opacity-50">✓ Setujui</button>
+                      <button disabled={overtimeReviewingId === c.id} onClick={() => setOvertimeRejectId(c.id)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium disabled:opacity-50">✕ Tolak</button>
+                    </div>
+                  )
                 )}
               </div>
             ))}

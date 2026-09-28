@@ -6,6 +6,7 @@ import { todayLocalStr, localDateStr } from '@/lib/date'
 import { resolveHomeSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
 import { fetchAlphaAlerts } from '@/lib/alphaDetection'
 import { fetchIncompleteCheckouts } from '@/lib/checkoutClarification'
+import { fetchOvertimeClaimAlerts } from '@/lib/overtimeClaim'
 import Link from 'next/link'
 
 type Props = { employeeId: string; employeeName: string; onDone?: () => void; mode?: 'gps' | 'qr'; qrBranchId?: string; qrBranchName?: string }
@@ -45,6 +46,9 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   // Sama seperti showAlphaReminder di atas, tapi untuk "Lupa Absen Pulang" (sudah absen masuk
   // hari sebelumnya, belum absen pulang) -- lihat lib/checkoutClarification.ts.
   const [showCheckoutReminder, setShowCheckoutReminder] = useState(false)
+  // Sama pola-nya lagi, untuk lembur yang terdeteksi tapi belum diklaim (foto kertas lembur) --
+  // lihat lib/overtimeClaim.ts. Batas klaim 3 hari, jadi pengingat ini penting supaya tidak hangus.
+  const [showOvertimeReminder, setShowOvertimeReminder] = useState(false)
   // Dept/posisi karyawan — dipakai buat replikasi PERSIS aturan pengecualian lembur/telat yang
   // sudah berlaku di trigger DB calc_attendance_times() (dipakai absen masuk & import fingerprint):
   // Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang tidak pernah dapat lembur/telat.
@@ -620,6 +624,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     } catch {
       // Gagal diam-diam, sama seperti pengecekan Alpha di atas.
     }
+    try {
+      const otAlerts = await fetchOvertimeClaimAlerts(supabase, employeeId)
+      setShowOvertimeReminder(otAlerts.some(a => a.actionable))
+    } catch {
+      // Gagal diam-diam, sama seperti pengecekan Alpha di atas.
+    }
     onDone?.()
   }
 
@@ -672,6 +682,13 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         <Link href="/portal" className="block p-3 mb-3 rounded-lg border-2 border-amber-400 bg-amber-50 text-sm hover:bg-amber-100 transition">
           <p className="font-bold text-amber-800">🟡 Ada absen pulang yang belum lengkap!</p>
           <p className="text-amber-700 mt-0.5">Ketuk di sini untuk buka Portal Saya dan ajukan klarifikasi lupa absen pulang.</p>
+        </Link>
+      )}
+
+      {showOvertimeReminder && (
+        <Link href="/portal" className="block p-3 mb-3 rounded-lg border-2 border-purple-400 bg-purple-50 text-sm hover:bg-purple-100 transition">
+          <p className="font-bold text-purple-800">🕗 Ada lembur belum diklaim!</p>
+          <p className="text-purple-700 mt-0.5">Upload foto kertas lembur di Portal Saya paling lama 3 hari sejak tanggal lembur, atau hangus tidak dibayar.</p>
         </Link>
       )}
 

@@ -365,7 +365,11 @@ export default function PenggajianBulananPage() {
       })
   }, [selectedEmpId, createModal])
 
-  // Fetch hari-hari lembur yang tercatat mesin, untuk divalidasi manual terhadap surat lembur fisik
+  // Fetch hari-hari lembur yang SUDAH disetujui Owner (foto kertas lembur diklaim & di-ACC lewat
+  // Portal Saya / Rekap Absensi, lihat overtime_claims + review_overtime_claim) -- lembur yang
+  // cuma terdeteksi mesin tapi belum diklaim/disetujui TIDAK muncul di sini sama sekali, supaya
+  // tidak bisa lolos ke slip gaji tanpa persetujuan Owner. Checklist di bawah tetap ada sebagai
+  // review terakhir HR sebelum slip dibuat (bisa di-uncheck kalau ada kasus khusus).
   useEffect(() => {
     if (!selectedEmpId || !createModal) { setOtCandidates([]); setOtChecked({}); setOtAdjusted({}); return }
     setLoadingOtCandidates(true)
@@ -374,6 +378,7 @@ export default function PenggajianBulananPage() {
       .from('attendances')
       .select('date, overtime_hours, overtime_validated, overtime_hours_adjusted')
       .eq('employee_id', selectedEmpId)
+      .eq('overtime_validated', true)
       .gte('date', firstDay)
       .lte('date', lastDay)
       .gt('overtime_hours', 0)
@@ -381,11 +386,12 @@ export default function PenggajianBulananPage() {
       .then(({ data }) => {
         const list = (data || []).map((a: any) => ({ date: a.date, hours: roundOvertimeHours(Number(a.overtime_hours)) }))
         setOtCandidates(list)
-        // Default ikut status overtime_validated tersimpan (baris baru = false, belum tervalidasi)
+        // Sudah difilter overtime_validated=true di query -- default semua tercentang, HR
+        // tinggal uncheck kalau ada kasus khusus yang ingin dikecualikan dari slip ini.
         const init: Record<string, boolean> = {}
         const initAdjusted: Record<string, number> = {}
         ;(data || []).forEach((a: any) => {
-          init[a.date] = a.overtime_validated === true
+          init[a.date] = true
           initAdjusted[a.date] = a.overtime_hours_adjusted != null ? Number(a.overtime_hours_adjusted) : roundOvertimeHours(Number(a.overtime_hours))
         })
         setOtChecked(init)

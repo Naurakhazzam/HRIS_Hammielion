@@ -192,19 +192,30 @@ export default function PanduanKaryawanPage() {
           <h2 className="text-lg font-bold text-slate-800 mb-3">4. 🌙 Aturan Lembur</h2>
           <div className="space-y-3 text-sm text-slate-600">
             <ul className="list-disc pl-5 space-y-1">
-              <li>Lembur baru dihitung kalau Anda pulang <strong>minimal 60 menit penuh</strong> setelah jam pulang shift Anda.</li>
-              <li>Perhitungannya <strong>dibulatkan ke bawah</strong> per jam penuh — 59 menit lebih = belum dihitung, 61 menit lebih = dihitung 1 jam (bukan 1,5 jam).</li>
+              <li>Lembur baru <strong>terdeteksi</strong> kalau Anda pulang <strong>minimal 60 menit penuh</strong> setelah jam pulang shift Anda.</li>
+              <li>Perhitungan jamnya <strong>dibulatkan ke bawah</strong> per jam penuh — 59 menit lebih = belum terdeteksi, 61 menit lebih = terdeteksi 1 jam (bukan 1,5 jam).</li>
               <li><strong>Team Gudang tidak pernah mendapat lembur</strong> apapun alasannya. <strong>Helper yang bertugas di cabang Gudang</strong> juga tidak mendapat lembur maupun potongan telat.</li>
             </ul>
+            <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-3">
+              <p className="font-bold text-purple-800">⚠️ Lembur terdeteksi ≠ otomatis dibayar!</p>
+              <p className="text-purple-700 mt-0.5">Lembur yang terdeteksi dari jam pulang <strong>tidak otomatis masuk gaji</strong>. Wajib diklaim dengan langkah berikut supaya dibayar (jalur klaimnya ada di Portal Saya, muncul otomatis kalau ada lembur terdeteksi):</p>
+              <ol className="list-decimal pl-5 mt-1.5 space-y-0.5 text-purple-700">
+                <li>Isi kertas lembur fisik & minta tanda tangan sesuai prosedur cabang Anda.</li>
+                <li>Foto kertas itu dan upload di Portal Saya — <strong>paling lambat 3 hari</strong> setelah tanggal lembur.</li>
+                <li><strong>Owner</strong> yang meninjau & menyetujui foto tersebut (bukan HR/Supervisor).</li>
+                <li>Baru setelah disetujui, jam lembur itu ikut dihitung ke gaji.</li>
+              </ol>
+              <p className="text-purple-700 font-semibold mt-1.5">Lewat 3 hari tidak diklaim = HANGUS, tidak bisa dibayar lagi walau sudah terdeteksi sistem.</p>
+            </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
-              <p className="text-blue-700 mt-0.5">Seperti parkir motor per jam — kurang dari 1 jam penuh belum ditagih, begitu genap 1 jam baru dihitung. Numpang lewat 5-10 menit saja belum kena tarif jam berikutnya.</p>
+              <p className="text-blue-700 mt-0.5">Seperti reimburse struk belanja kantor — biar kelihatan di struk kasir (terdeteksi), tetap harus difoto & diajukan supaya benar-benar diganti uangnya. Kelamaan disimpan tanpa diklaim, ya tidak bisa diganti lagi.</p>
             </div>
-            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi jam yang dihitung (tarif Rupiah per jam beda-beda tiap orang, lihat di bawah):</p>
+            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi jam yang terdeteksi (tarif Rupiah per jam beda-beda tiap orang, lihat di bawah):</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Pulang 45 menit lewat jam shift → belum genap 60 menit → lembur <strong>0 jam</strong></li>
-              <li>Pulang 95 menit lewat jam shift → dibulatkan ke bawah → lembur <strong>1 jam</strong></li>
-              <li>Pulang 130 menit lewat jam shift → dibulatkan ke bawah → lembur <strong>2 jam</strong></li>
+              <li>Pulang 45 menit lewat jam shift → belum genap 60 menit → lembur <strong>0 jam</strong>, tidak ada yang perlu diklaim</li>
+              <li>Pulang 95 menit lewat jam shift → dibulatkan ke bawah → terdeteksi <strong>1 jam</strong> → wajib klaim+foto dalam 3 hari</li>
+              <li>Pulang 130 menit lewat jam shift → dibulatkan ke bawah → terdeteksi <strong>2 jam</strong> → wajib klaim+foto dalam 3 hari</li>
             </ul>
             <p className="text-sm text-slate-500">Tarif lembur per jam Anda sendiri tergantung gaji pokok masing-masing, jadi tidak sama untuk semua orang. Untuk lihat tarif asli & simulasi lembur dalam Rupiah berdasarkan gaji Anda, klik <DiSiniLink />.</p>
           </div>
