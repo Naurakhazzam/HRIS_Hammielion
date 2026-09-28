@@ -404,7 +404,10 @@ export default function PortalDashboardPage() {
                   {!isPending && a.clarification?.status === 'rejected' && (
                     <p className="text-xs text-slate-500 mt-1.5">Klarifikasi sebelumnya ditolak{a.clarification.rejection_note ? `: ${a.clarification.rejection_note}` : ''}.</p>
                   )}
-                  {a.actionable && !isPending && (
+                  {a.actionable && !isPending && a.noDeadline && (
+                    <p className="text-xs text-amber-600 font-medium mt-1.5">⏳ Periode ini boleh diklarifikasi kapan saja, tanpa batas waktu.</p>
+                  )}
+                  {a.actionable && !isPending && !a.noDeadline && (
                     <p className="text-xs text-red-600 font-medium mt-1.5">⏰ Batas waktu klarifikasi: paling lambat {deadlineLabel} (2 hari setelah tanggal Alpha)</p>
                   )}
                   {!a.actionable && !isPending && (

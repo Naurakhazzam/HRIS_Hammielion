@@ -555,9 +555,15 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       // Perbantuan: telat/lembur dievaluasi dari shift CABANG TEMPAT SCAN, bukan jadwal
       // departemen dia — kalau cabang itu belum ada jadwal shift-nya, anggap tidak ada
       // lembur/potongan sampai HR setup (bukan nebak/error).
+      // PENTING: shift untuk cabang SENDIRI harus dideteksi dari jam ABSEN MASUK tadi
+      // (today.check_in), BUKAN dari jam sekarang/pulang -- detect_until itu konsepnya "jam
+      // masuk paling lambat untuk shift ini", tidak ada artinya dicocokkan ke jam pulang (yang
+      // hampir selalu sudah lewat detect_until shift manapun). Kalau dicocokkan ke jam pulang,
+      // hasilnya selalu jatuh ke shift TERAKHIR yang detect_until-nya null, salah shift.
+      const checkInTimeStr = new Date(today.check_in!).toTimeString().substring(0, 5)
       const sched = isPerbantuanAction
         ? matchSchedule(nowTimeStr, branchShifts)
-        : resolveHomeSchedule(nowTimeStr, schedules, homeBranchShifts, customCheckIn, customCheckOut)
+        : resolveHomeSchedule(checkInTimeStr, schedules, homeBranchShifts, customCheckIn, customCheckOut)
       // Sama seperti trigger DB: Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang
       // juga tidak (dicek dari cabang PENEMPATAN karyawan, bukan cabang tempat scan/perbantuan).
       const otExcluded = deptName === 'Team Gudang' || (posName === 'Helper' && branch?.name === 'Gudang')

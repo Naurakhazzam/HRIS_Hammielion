@@ -22,14 +22,25 @@ export type AlphaAlertItem = {
   attendanceId: string
   date: string
   // Batas terakhir tanggal boleh klarifikasi (H+2 dari tanggal Alpha) -- sama persis dengan
-  // aturan yang ditegakkan RPC submit_alpha_clarification di database.
+  // aturan yang ditegakkan RPC submit_alpha_clarification di database. Diabaikan kalau
+  // noDeadline true.
   deadline: string
+  // true = tanggal Alpha ini masuk periode pengecualian (26 Agu - 25 Sep 2026) yang boleh
+  // diklarifikasi kapan saja, tanpa batas H+2 -- sama persis dengan pengecualian di RPC
+  // submit_alpha_clarification. Dikonfirmasi user karena Alpha periode ini ditandai belakangan
+  // dari import data lama, bukan dari absen real-time.
+  noDeadline: boolean
   // true = masih bisa/perlu diklarifikasi (belum ada klarifikasi, atau klarifikasi lama ditolak,
-  // DAN belum lewat batas waktu). false = sudah lewat batas waktu (Alpha permanen) ATAU sedang
-  // menunggu review HR (clarification.status === 'pending').
+  // DAN belum lewat batas waktu, kecuali noDeadline). false = sudah lewat batas waktu (Alpha
+  // permanen) ATAU sedang menunggu review HR (clarification.status === 'pending').
   actionable: boolean
   clarification: { status: string; requested_type: string; rejection_note: string | null } | null
 }
+
+// Periode pengecualian batas waktu klarifikasi -- lihat migrasi
+// alpha_clarification_no_deadline_aug_sep_2026, HARUS selalu sama persis dengan RPC.
+const NO_DEADLINE_PERIOD_START = '2026-08-26'
+const NO_DEADLINE_PERIOD_END = '2026-09-25'
 
 function addDaysStr(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00')
@@ -58,9 +69,10 @@ export async function fetchAlphaAlerts(supabase: ReturnType<typeof createClient>
   const todayStr = new Date().toISOString().split('T')[0]
   return (flagged as any[]).map(f => {
     const deadline = addDaysStr(f.date, 2)
+    const noDeadline = f.date >= NO_DEADLINE_PERIOD_START && f.date <= NO_DEADLINE_PERIOD_END
     const clarification = latestByAtt.get(f.id) ?? null
-    const withinWindow = todayStr <= deadline
+    const withinWindow = noDeadline || todayStr <= deadline
     const actionable = withinWindow && (!clarification || clarification.status === 'rejected')
-    return { attendanceId: f.id, date: f.date, deadline, actionable, clarification }
+    return { attendanceId: f.id, date: f.date, deadline, noDeadline, actionable, clarification }
   })
 }
