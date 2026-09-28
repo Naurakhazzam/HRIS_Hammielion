@@ -238,6 +238,7 @@ const employeeNavItems: NavNode[] = [
       { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
     ]
   },
+  { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
   { name: 'Aturan Potongan Gaji', href: '/potongan', icon: '📉' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
@@ -282,6 +283,21 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [previewMode, setPreviewModeState] = useState(false)
   const [isDriverOrKenek, setIsDriverOrKenek] = useState(false)
   const [isKepalaGudang, setIsKepalaGudang] = useState(false)
+  const [meetingBadge, setMeetingBadge] = useState(0)
+
+  // Angka merah di menu Catatan Meeting: catatan belum dibaca + tugas yang belum dilaporkan
+  // (karyawan), atau laporan yang menunggu review (Owner/HR). Dihitung di server.
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      const { data } = await supabase.rpc('get_meeting_badge_count')
+      if (!cancelled && data) setMeetingBadge(Number((data as { total: number }).total) || 0)
+    }
+    load()
+    const timer = setInterval(load, 60000)
+    window.addEventListener('meeting-badge-refresh', load)
+    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('meeting-badge-refresh', load) }
+  }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -501,6 +517,11 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                   >
                     <span className="text-lg">{item.icon}</span>
                     {item.name}
+                    {item.href === '/catatan-meeting' && meetingBadge > 0 && (
+                      <span className="ml-auto inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
+                        {meetingBadge > 99 ? '99+' : meetingBadge}
+                      </span>
+                    )}
                   </Link>
                 )}
               </li>
