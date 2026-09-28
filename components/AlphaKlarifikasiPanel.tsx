@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAlphaAlerts as fetchAlphaAlertsShared, type AlphaAlertItem } from '@/lib/alphaDetection'
 import { getCurrentPeriodRangeStr } from '@/lib/rosterPeriod'
 
-type ClarifyType = 'sick' | 'sick_doc' | 'permission' | 'lupa_absen' | 'leave'
+type ClarifyType = 'sick' | 'sick_doc' | 'permission' | 'lupa_absen' | 'leave' | 'hadir'
 
 const LEAVE_QUOTA_PER_PERIOD = 4
 
@@ -160,9 +160,13 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty }: { e
                   <option value="permission">Izin</option>
                   <option value="leave">Libur (pakai jatah 4 hari/periode)</option>
                   <option value="lupa_absen">Lupa Absen (sebenarnya masuk kerja)</option>
+                  {clarifyModal.noDeadline && <option value="hadir">Saya Hadir (periode transisi, gratis)</option>}
                 </select>
                 {clarifyType === 'lupa_absen' && (
                   <p className="text-xs text-amber-600 mt-1">Kalau disetujui HR, dianggap hadir (bukan Alpha/Izin) tapi tetap kena denda administratif Rp15.000. Maksimal 4x per periode gajian.</p>
+                )}
+                {clarifyType === 'hadir' && (
+                  <p className="text-xs text-emerald-600 mt-1">Khusus periode transisi 26 Agustus - 25 September 2026 (banyak Alpha bukan karena kesalahan karyawan). Dianggap hadir penuh, GRATIS tanpa denda, tidak dibatasi berapa kali.</p>
                 )}
                 {clarifyType === 'leave' && (
                   <p className="text-xs text-emerald-600 mt-1">

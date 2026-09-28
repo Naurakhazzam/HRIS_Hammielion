@@ -291,6 +291,10 @@ export default function PanduanKaryawanPage() {
               <p className="font-medium text-blue-800">🏖️ Opsi "Libur" — pakai jatah 4 hari/periode</p>
               <p className="text-blue-700 mt-0.5">Kalau hari Alpha itu sebenarnya memang mau Anda jadikan libur (belum sempat diajukan di muka), pilih opsi <em>Libur</em> saat klarifikasi — <strong>gratis, tidak ada potongan sama sekali</strong>, selama jatah 4 hari libur periode ini belum habis (lihat bagian 5). Kalau jatahnya sudah habis, ajukan sebagai Izin biasa.</p>
             </div>
+            <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3">
+              <p className="font-bold text-emerald-800">✅ Opsi "Saya Hadir" — khusus periode 26 Agustus - 25 September 2026</p>
+              <p className="text-emerald-700 mt-0.5">Kalau Alpha Anda jatuh di periode ini, akan muncul opsi tambahan <em>Saya Hadir</em> — khusus untuk periode transisi ini karena banyak Alpha yang terjadi bukan karena kesalahan karyawan (sistem absen sedang berpindah dari mesin fingerprint ke QR). Pilih ini kalau Anda sebenarnya masuk kerja normal — <strong>gratis, tanpa denda, tidak dibatasi berapa kali</strong>. Opsi ini tidak muncul untuk periode lain.</p>
+            </div>
             <ul className="list-disc pl-5 space-y-1">
               <li>Klarifikasi tepat waktu → HR akan meninjau, dan statusnya berubah sesuai yang Anda pilih (bukan Alpha lagi kalau disetujui).</li>
               <li>Lewat 2 hari tanpa klarifikasi → Alpha jadi <strong>permanen</strong>, tidak bisa diubah lagi.</li>
