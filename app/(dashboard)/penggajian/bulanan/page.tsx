@@ -878,13 +878,14 @@ export default function PenggajianBulananPage() {
     const alphaGroup = calcEscalatingDeduction(alphaGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
     // Sakit DENGAN surat dokter: hari ke-1 gratis, ke-2&3 = 0.5×, ke-4+ = 1× (dihitung kumulatif
-    // per hari dalam periode, bukan per kejadian) -- KECUALI periode sebelum aturan baru, flat 1x
-    // dari hari pertama (tidak ada hari gratis).
+    // per hari dalam periode, bukan per kejadian). Aturan ini SUDAH lama berlaku (bukan bagian
+    // dari eskalasi Izin/Alpha yang baru), jadi TETAP sama untuk periode lama maupun baru --
+    // dikonfirmasi user, hari pertama sakit dengan surat selalu gratis, tidak ikut aturan flat.
     const sickCount   = sickDocRecs.length
-    const sick1Free   = isPreNewRulesPeriod ? 0 : Math.min(sickCount, 1)
-    const sick23Half  = isPreNewRulesPeriod ? 0 : Math.max(0, Math.min(sickCount - 1, 2))
-    const sick4Full   = isPreNewRulesPeriod ? 0 : Math.max(0, sickCount - 3)
-    const sickDed     = isPreNewRulesPeriod ? Math.round(sickCount * dailyRate) : Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
+    const sick1Free   = Math.min(sickCount, 1)
+    const sick23Half  = Math.max(0, Math.min(sickCount - 1, 2))
+    const sick4Full   = Math.max(0, sickCount - 3)
+    const sickDed     = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
 
     // Denda administratif Lupa Absen Masuk/Pulang -- nominal flat per kejadian (Rp15.000/Rp5.000,
     // lihat migrasi checkout_clarifications & submit_alpha_clarification), BUKAN bagian dari
@@ -1568,11 +1569,13 @@ export default function PenggajianBulananPage() {
     const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
     const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
+    // Sakit dengan surat dokter: hari-1 gratis, dst -- aturan lama, TETAP sama untuk semua
+    // periode (tidak ikut disederhanakan jadi flat), dikonfirmasi user.
     const sickDays   = atts.filter((a: any) => a.status === 'sick_doc').length
-    const sick1Free  = isPreNewRulesPeriod ? 0 : Math.min(sickDays, 1)
-    const sick23Half = isPreNewRulesPeriod ? 0 : Math.max(0, Math.min(sickDays - 1, 2))
-    const sick4Full  = isPreNewRulesPeriod ? 0 : Math.max(0, sickDays - 3)
-    const sickDed    = isPreNewRulesPeriod ? Math.round(sickDays * dailyRate) : Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
+    const sick1Free  = Math.min(sickDays, 1)
+    const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
+    const sick4Full  = Math.max(0, sickDays - 3)
+    const sickDed    = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
     const adminFeeTotal = isPreNewRulesPeriod ? 0 : atts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
 
     setAbsentBreakdownDetail({ dailyRate, izinGroup, alphaGroup, sickDays, sick1Free, sick23Half, sick4Full, sickDed, adminFeeTotal, isPreNewRulesPeriod })
