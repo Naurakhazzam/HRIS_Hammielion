@@ -237,7 +237,7 @@ export default function RekapAbsensiPage() {
 
   async function fetchAlphaClarifications() {
     const { data } = await supabase.from('alpha_clarifications')
-      .select('id,attendance_id,employee_id,date,requested_type,reason,document_url,created_at,employees(full_name)')
+      .select('id,attendance_id,employee_id,date,requested_type,reason,document_url,created_at,employees!alpha_clarifications_employee_id_fkey(full_name)')
       .eq('status', 'pending')
       .order('created_at')
     setAlphaClarifications((data as unknown as AlphaClarificationRow[]) || [])
@@ -261,7 +261,7 @@ export default function RekapAbsensiPage() {
 
   async function fetchCheckoutClarifications() {
     const { data } = await supabase.from('checkout_clarifications')
-      .select('id,attendance_id,employee_id,date,reason,created_at,employees(full_name)')
+      .select('id,attendance_id,employee_id,date,reason,created_at,employees!checkout_clarifications_employee_id_fkey(full_name)')
       .eq('status', 'pending')
       .order('created_at')
     setCheckoutClarifications((data as unknown as CheckoutClarificationRow[]) || [])
@@ -286,7 +286,7 @@ export default function RekapAbsensiPage() {
 
   async function fetchOvertimeClaims() {
     const { data } = await supabase.from('overtime_claims')
-      .select('id,attendance_id,employee_id,date,overtime_hours_detected,photo_url,created_at,employees(full_name)')
+      .select('id,attendance_id,employee_id,date,overtime_hours_detected,photo_url,created_at,employees!overtime_claims_employee_id_fkey(full_name)')
       .eq('status', 'pending')
       .order('created_at')
     setOvertimeClaims((data as unknown as OvertimeClaimRow[]) || [])
@@ -310,7 +310,7 @@ export default function RekapAbsensiPage() {
 
   async function fetchLateClarifications() {
     const { data } = await supabase.from('late_clarifications')
-      .select('id,attendance_id,employee_id,date,late_minutes,reason,created_at,employees(full_name)')
+      .select('id,attendance_id,employee_id,date,late_minutes,reason,created_at,employees!late_clarifications_employee_id_fkey(full_name)')
       .eq('status', 'pending')
       .order('created_at')
     setLateClarifications((data as unknown as LateClarificationRow[]) || [])
