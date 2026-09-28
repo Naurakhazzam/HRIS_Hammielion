@@ -1,18 +1,19 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getCurrentPeriodRangeStr, rosterPeriodLabel } from '@/lib/rosterPeriod'
-import { QR_LATE_TOLERANCE_MINUTES } from '@/lib/lateTolerance'
 import { IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS } from '@/lib/escalatingDeduction'
 
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
 const fmtJam = (t: string) => t.substring(0, 5).replace(':', '.')
 
-// Contoh ilustrasi supaya simulasi gampang dihitung sendiri oleh karyawan -- BUKAN gaji
-// sungguhan siapa pun. Gaji harian Anda yang sebenarnya ada di menu "Aturan Potongan Gaji".
-const CONTOH_GAJI_HARIAN = 150000
-const CONTOH_TARIF_LEMBUR = 15000
+// Link biru ke halaman pribadi karyawan (Aturan Potongan Gaji) -- dipakai berkali-kali di bawah
+// supaya kata "DI SINI" selalu konsisten gaya & tujuannya.
+function DiSiniLink() {
+  return <Link href="/potongan" className="text-blue-600 hover:underline font-semibold">DI SINI</Link>
+}
 
 type SchedRow = { label: string; check_in_time: string; check_out_time: string | null; detect_until: string | null; allow_overtime: boolean }
 
@@ -69,8 +70,13 @@ export default function PanduanKaryawanPage() {
   const [deptSchedules, setDeptSchedules] = useState<SchedRow[]>([])
   const [branchSchedules, setBranchSchedules] = useState<SchedRow[]>([])
   const [lateRate, setLateRate] = useState(1000)
+  // Gaji standar acuan sistem (salary_defaults) -- dipakai HR sebagai isian awal saat menambah
+  // karyawan baru. Dipakai di sini sebagai dasar simulasi supaya angkanya REAL (bukan karangan),
+  // walau tetap bukan gaji pribadi siapa pun -- gaji asli tiap orang beda-beda.
+  const [contohGajiBulanan, setContohGajiBulanan] = useState(0)
 
   const period = getCurrentPeriodRangeStr()
+  const contohGajiHarian = Math.round(contohGajiBulanan / 26)
 
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -82,7 +88,7 @@ export default function PanduanKaryawanPage() {
       supabase.from('branch_shift_schedules')
         .select('check_in_time, check_out_time, detect_until, allow_overtime, branches(name)')
         .eq('is_active', true).order('check_in_time'),
-      supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
+      supabase.from('salary_defaults').select('base_salary, position_allowance, meal_allowance, late_penalty_per_minute').limit(1).maybeSingle(),
     ])
     setDeptSchedules((dept || []).map((d: any) => ({
       label: d.departments?.name ?? 'Departemen', check_in_time: d.check_in_time,
@@ -93,6 +99,7 @@ export default function PanduanKaryawanPage() {
       check_out_time: b.check_out_time, detect_until: b.detect_until, allow_overtime: b.allow_overtime,
     })))
     setLateRate(Number(def?.late_penalty_per_minute ?? 1000))
+    setContohGajiBulanan(Number(def?.base_salary ?? 0) + Number(def?.position_allowance ?? 0) + Number(def?.meal_allowance ?? 0))
     setLoading(false)
   }
 
@@ -164,21 +171,18 @@ export default function PanduanKaryawanPage() {
         <section id="telat" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
           <h2 className="text-lg font-bold text-slate-800 mb-3">3. ⏱️ Aturan Terlambat</h2>
           <div className="space-y-3 text-sm text-slate-600">
-            <p>Telat dihitung dari <strong>selisih menit</strong> antara jam Anda absen masuk dengan jam masuk shift Anda. Kalau datang lebih awal atau tepat waktu, telatnya dianggap 0 menit (tidak pernah minus).</p>
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <p className="font-medium text-amber-800">Toleransi khusus Absen QR: {QR_LATE_TOLERANCE_MINUTES} menit</p>
-              <p className="text-amber-700 mt-0.5">Kalau Anda absen pakai <strong>QR</strong> dan telatnya cuma sampai {QR_LATE_TOLERANCE_MINUTES} menit, keterlambatan tetap tercatat apa adanya, tapi <strong>tidak dipotong gaji</strong>. Lewat {QR_LATE_TOLERANCE_MINUTES} menit, seluruh menit telatnya dihitung dari menit pertama (bukan cuma kelebihannya). Toleransi ini <strong>tidak berlaku</strong> untuk absen fingerprint, HP, atau input manual.</p>
-            </div>
+            <p>Telat dihitung dari <strong>selisih menit</strong> antara jam Anda absen masuk dengan jam masuk shift Anda. Kalau datang lebih awal atau tepat waktu, telatnya dianggap 0 menit (tidak pernah minus). Setiap menit telat berpotensi kena potongan — jadi usahakan selalu datang tepat waktu.</p>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
-              <p className="text-blue-700 mt-0.5">Bayangkan naik angkot langganan yang berangkat jam 7 pagi tepat. Datang jam 7 lewat 12 menit? Angkotnya sudah jalan duluan — Anda yang menanggung 12 menit itu. Tapi kalau Anda absen QR dan cuma telat 3 menit, dianggap masih "keburu naik", jadi dimaafkan.</p>
+              <p className="text-blue-700 mt-0.5">Bayangkan naik angkot langganan yang berangkat jam 7 pagi tepat. Datang jam 7 lewat 12 menit? Angkotnya sudah jalan duluan — Anda yang menanggung 12 menit itu.</p>
             </div>
-            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi (tarif standar Anda: {fmtRp(lateRate)}/menit — tarif pribadi Anda bisa dicek di menu <em>Aturan Potongan Gaji</em>):</p>
+            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi (tarif standar sistem: {fmtRp(lateRate)}/menit):</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Absen fingerprint, telat 12 menit → potongan = 12 × {fmtRp(lateRate)} = <strong>{fmtRp(12 * lateRate)}</strong></li>
-              <li>Absen QR, telat 3 menit → masih dalam toleransi {QR_LATE_TOLERANCE_MINUTES} menit → potongan <strong>Rp 0</strong></li>
-              <li>Absen QR, telat 9 menit → lewat toleransi, dihitung penuh dari menit pertama → potongan = 9 × {fmtRp(lateRate)} = <strong>{fmtRp(9 * lateRate)}</strong></li>
+              <li>Telat 5 menit → potongan = 5 × {fmtRp(lateRate)} = <strong>{fmtRp(5 * lateRate)}</strong></li>
+              <li>Telat 12 menit → potongan = 12 × {fmtRp(lateRate)} = <strong>{fmtRp(12 * lateRate)}</strong></li>
+              <li>Telat 30 menit → potongan = 30 × {fmtRp(lateRate)} = <strong>{fmtRp(30 * lateRate)}</strong></li>
             </ul>
+            <p className="text-sm text-slate-500">Tarif pribadi Anda bisa beda dari contoh di atas — untuk lihat tarif & rincian telat Anda sendiri, klik <DiSiniLink />.</p>
           </div>
         </section>
 
@@ -195,12 +199,13 @@ export default function PanduanKaryawanPage() {
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
               <p className="text-blue-700 mt-0.5">Seperti parkir motor per jam — kurang dari 1 jam penuh belum ditagih, begitu genap 1 jam baru dihitung. Numpang lewat 5-10 menit saja belum kena tarif jam berikutnya.</p>
             </div>
-            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi (contoh tarif lembur Anda: {fmtRp(CONTOH_TARIF_LEMBUR)}/jam — tarif asli lihat di slip gaji):</p>
+            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi jam yang dihitung (tarif Rupiah per jam beda-beda tiap orang, lihat di bawah):</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Pulang 45 menit lewat jam shift → belum genap 60 menit → lembur <strong>Rp 0</strong></li>
-              <li>Pulang 95 menit lewat jam shift → dibulatkan ke bawah jadi 1 jam → lembur = <strong>{fmtRp(CONTOH_TARIF_LEMBUR)}</strong></li>
-              <li>Pulang 130 menit lewat jam shift → dibulatkan ke bawah jadi 2 jam → lembur = <strong>{fmtRp(CONTOH_TARIF_LEMBUR * 2)}</strong></li>
+              <li>Pulang 45 menit lewat jam shift → belum genap 60 menit → lembur <strong>0 jam</strong></li>
+              <li>Pulang 95 menit lewat jam shift → dibulatkan ke bawah → lembur <strong>1 jam</strong></li>
+              <li>Pulang 130 menit lewat jam shift → dibulatkan ke bawah → lembur <strong>2 jam</strong></li>
             </ul>
+            <p className="text-sm text-slate-500">Tarif lembur per jam Anda sendiri tergantung gaji pokok masing-masing, jadi tidak sama untuk semua orang. Untuk lihat tarif asli & simulasi lembur dalam Rupiah berdasarkan gaji Anda, klik <DiSiniLink />.</p>
           </div>
         </section>
 
@@ -250,21 +255,22 @@ export default function PanduanKaryawanPage() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
-                <thead><tr className="bg-orange-50 text-orange-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari (contoh gaji harian {fmtRp(CONTOH_GAJI_HARIAN)})</th></tr></thead>
+                <thead><tr className="bg-orange-50 text-orange-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari</th></tr></thead>
                 <tbody className="divide-y divide-orange-100">
                   {IZIN_GROUP_MULTIPLIERS.map((m, i) => (
-                    <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === IZIN_GROUP_MULTIPLIERS.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(CONTOH_GAJI_HARIAN * m))}</td></tr>
+                    <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === IZIN_GROUP_MULTIPLIERS.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(contohGajiHarian * m))}</td></tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi lengkap (gaji harian contoh {fmtRp(CONTOH_GAJI_HARIAN)}):</p>
+            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi lengkap (pakai gaji standar sistem {fmtRp(contohGajiBulanan)}/bulan → gaji harian {fmtRp(contohGajiHarian)}):</p>
             <p>Dalam satu periode: Izin 1 hari (tgl 3) — lalu masuk kerja normal — lalu Sakit tanpa surat 2 hari berturut (tgl 15-16).</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Kejadian ke-1 (tgl 3, 1 hari) × 1× = <strong>{fmtRp(CONTOH_GAJI_HARIAN)}</strong></li>
-              <li>Kejadian ke-2 (tgl 15-16, 2 hari, tetap 1 kejadian karena berturut) × 1.25× = 2 × {fmtRp(Math.round(CONTOH_GAJI_HARIAN * 1.25))} = <strong>{fmtRp(2 * Math.round(CONTOH_GAJI_HARIAN * 1.25))}</strong></li>
-              <li>Total potongan periode ini: <strong>{fmtRp(CONTOH_GAJI_HARIAN + 2 * Math.round(CONTOH_GAJI_HARIAN * 1.25))}</strong></li>
+              <li>Kejadian ke-1 (tgl 3, 1 hari) × 1× = <strong>{fmtRp(contohGajiHarian)}</strong></li>
+              <li>Kejadian ke-2 (tgl 15-16, 2 hari, tetap 1 kejadian karena berturut) × 1.25× = 2 × {fmtRp(Math.round(contohGajiHarian * 1.25))} = <strong>{fmtRp(2 * Math.round(contohGajiHarian * 1.25))}</strong></li>
+              <li>Total potongan periode ini: <strong>{fmtRp(contohGajiHarian + 2 * Math.round(contohGajiHarian * 1.25))}</strong></li>
             </ul>
+            <p className="text-sm text-slate-500">Ini pakai gaji standar sistem sebagai contoh — gaji Anda sendiri kemungkinan beda. Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>
         </section>
 
@@ -275,17 +281,19 @@ export default function PanduanKaryawanPage() {
             <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (per kejadian, blok tanggal berturut dihitung 1 kejadian, reset tiap periode) — bedanya tarifnya jauh lebih berat karena ini absen tanpa keterangan sama sekali. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama.</p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
-                <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari (contoh gaji harian {fmtRp(CONTOH_GAJI_HARIAN)})</th></tr></thead>
+                <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari</th></tr></thead>
                 <tbody className="divide-y divide-red-100">
                   {ALPHA_GROUP_MULTIPLIERS.map((m, i) => (
-                    <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === ALPHA_GROUP_MULTIPLIERS.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(CONTOH_GAJI_HARIAN * m))}</td></tr>
+                    <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === ALPHA_GROUP_MULTIPLIERS.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(contohGajiHarian * m))}</td></tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <p className="text-xs text-slate-400">(Pakai gaji harian standar sistem {fmtRp(contohGajiHarian)} sebagai contoh — lihat angka Anda sendiri di link bawah.)</p>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
               <p className="text-red-700">Ini kenapa klarifikasi Alpha (bagian 6) penting dilakukan cepat — kalau berhasil diubah jadi Izin/Sakit, potongannya jauh lebih ringan (kelompok 1×–2× di bagian 7), dibanding dibiarkan jadi Alpha permanen (kelompok 1.5×–3× di sini).</p>
             </div>
+            <p className="text-sm text-slate-500">Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>
         </section>
 
@@ -296,20 +304,21 @@ export default function PanduanKaryawanPage() {
             <p>Beda dengan Izin/Sakit tanpa surat — Sakit <strong>dengan</strong> surat dokter dihitung per <strong>hari berturut</strong> (bukan per kejadian), jadi lebih ringan karena ada bukti resmi.</p>
             <div className="bg-slate-50 rounded-lg p-3 space-y-1">
               <p>Hari ke-1: <strong className="text-green-600">Gratis</strong> (ditanggung perusahaan)</p>
-              <p>Hari ke-2 &amp; ke-3: <strong>{fmtRp(Math.round(CONTOH_GAJI_HARIAN * 0.5))}/hari</strong> (0.5×)</p>
-              <p>Hari ke-4 dan seterusnya: <strong>{fmtRp(CONTOH_GAJI_HARIAN)}/hari</strong> (1×)</p>
+              <p>Hari ke-2 &amp; ke-3: <strong>{fmtRp(Math.round(contohGajiHarian * 0.5))}/hari</strong> (0.5×)</p>
+              <p>Hari ke-4 dan seterusnya: <strong>{fmtRp(contohGajiHarian)}/hari</strong> (1×)</p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
               <p className="text-blue-700 mt-0.5">Seperti asuransi — hari pertama sakit, perusahaan yang tanggung penuh selama ada surat dokter. Makin lama sakitnya, porsi yang Anda tanggung sendiri makin besar, tapi tetap lebih ringan daripada sakit tanpa surat sama sekali.</p>
             </div>
-            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi: Sakit 5 hari berturut dengan surat dokter (gaji harian contoh {fmtRp(CONTOH_GAJI_HARIAN)}):</p>
+            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi: Sakit 5 hari berturut dengan surat dokter (gaji harian standar sistem {fmtRp(contohGajiHarian)}):</p>
             <ul className="list-disc pl-5 space-y-1">
               <li>Hari 1: Gratis = <strong>Rp 0</strong></li>
-              <li>Hari 2 &amp; 3: 2 × {fmtRp(Math.round(CONTOH_GAJI_HARIAN * 0.5))} = <strong>{fmtRp(2 * Math.round(CONTOH_GAJI_HARIAN * 0.5))}</strong></li>
-              <li>Hari 4 &amp; 5: 2 × {fmtRp(CONTOH_GAJI_HARIAN)} = <strong>{fmtRp(2 * CONTOH_GAJI_HARIAN)}</strong></li>
-              <li>Total potongan: <strong>{fmtRp(2 * Math.round(CONTOH_GAJI_HARIAN * 0.5) + 2 * CONTOH_GAJI_HARIAN)}</strong></li>
+              <li>Hari 2 &amp; 3: 2 × {fmtRp(Math.round(contohGajiHarian * 0.5))} = <strong>{fmtRp(2 * Math.round(contohGajiHarian * 0.5))}</strong></li>
+              <li>Hari 4 &amp; 5: 2 × {fmtRp(contohGajiHarian)} = <strong>{fmtRp(2 * contohGajiHarian)}</strong></li>
+              <li>Total potongan: <strong>{fmtRp(2 * Math.round(contohGajiHarian * 0.5) + 2 * contohGajiHarian)}</strong></li>
             </ul>
+            <p className="text-sm text-slate-500">Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>
         </section>
 
@@ -317,13 +326,13 @@ export default function PanduanKaryawanPage() {
         <section id="ringkasan" className="bg-white rounded-xl shadow-sm border-2 border-emerald-300 p-5 scroll-mt-4">
           <h2 className="text-lg font-bold text-slate-800 mb-3">10. ✅ Ringkasan Cepat — Supaya Gaji Tidak Terpotong</h2>
           <ul className="space-y-2 text-sm text-slate-700">
-            <li>✔️ Absen tepat waktu sesuai jam shift Anda — kalau pakai QR, telat sampai {QR_LATE_TOLERANCE_MINUTES} menit masih dimaafkan.</li>
+            <li>✔️ Absen tepat waktu sesuai jam shift Anda.</li>
             <li>✔️ Selalu absen, walau cuma sebentar di kantor/cabang — jangan sampai dianggap Alpha karena lupa absen.</li>
             <li>✔️ Kalau benar-benar tidak bisa masuk (sakit/ada urusan), segera absen klarifikasi Alpha dalam <strong>2 hari</strong> — jangan didiamkan.</li>
             <li>✔️ Simpan surat dokter kalau sakit lebih dari 1 hari — potongannya jauh lebih ringan dibanding tanpa surat.</li>
             <li>✔️ Manfaatkan jatah 4 hari libur tiap periode — kalau tidak dipakai penuh, sisanya tetap dibayar tunai, jadi tidak rugi.</li>
             <li>✔️ Weekend cuma boleh pilih 1 tanggal per periode — atur dari awal periode supaya kebagian tanggal yang diinginkan.</li>
-            <li>✔️ Masih bingung soal gaji atau absen Anda sendiri? Buka menu <em>Aturan Potongan Gaji</em> untuk lihat angka asli Anda, atau tanya HR langsung.</li>
+            <li>✔️ Masih bingung soal gaji atau absen Anda sendiri? Klik <DiSiniLink /> untuk lihat angka asli Anda, atau tanya HR langsung.</li>
           </ul>
         </section>
 

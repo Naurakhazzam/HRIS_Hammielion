@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr, localDateStr } from '@/lib/date'
 import { resolveHomeSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
-import { QR_LATE_TOLERANCE_MINUTES } from '@/lib/lateTolerance'
 import { fetchAlphaAlerts } from '@/lib/alphaDetection'
 import Link from 'next/link'
 
@@ -588,12 +587,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       })
       if (error) { showMessage('error', 'Gagal mencatat absen masuk: ' + error.message); setStep('preview'); return }
       const jamStr = now.toLocaleTimeString('id-ID')
+      // Sengaja TIDAK menyebut apakah telat ini kena potongan atau masuk toleransi -- supaya
+      // ambang toleransi absen QR (lihat lib/lateTolerance.ts) tidak jadi "target" yang bisa
+      // sengaja dimanfaatkan karyawan untuk telat aman tiap hari. Rincian potongan sesungguhnya
+      // tetap bisa dilihat karyawan sendiri lewat menu Aturan Potongan Gaji / slip gaji.
       if (lateMinutes <= 0) {
         showMessage('success', `Absen masuk tercatat jam ${jamStr}.${perbantuanSuffix}`)
-      } else if (mode === 'qr' && lateMinutes <= QR_LATE_TOLERANCE_MINUTES) {
-        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit (masih dalam toleransi ${QR_LATE_TOLERANCE_MINUTES} menit, tidak dipotong).${perbantuanSuffix}`)
       } else {
-        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit, kena potongan keterlambatan.${perbantuanSuffix}`)
+        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit.${perbantuanSuffix}`)
       }
     }
 

@@ -84,7 +84,7 @@ function RateCard({ label, base, pos, meal, special, dailyRate, overtimeRate, ov
       <div>
         <p className="text-sm font-semibold text-slate-700 mb-2">Terlambat &amp; Lembur</p>
         <div className="text-sm bg-slate-50 rounded-lg p-3 space-y-1">
-          <p>Terlambat: <strong>{fmtRp(lateRate)}/menit</strong> — tarif sama untuk semua staff (toleransi 5 menit khusus absen QR)</p>
+          <p>Terlambat: <strong>{fmtRp(lateRate)}/menit</strong> — tarif sama untuk semua staff{label ? ' (toleransi 5 menit khusus absen QR — HR/Owner saja)' : ''}</p>
           <p>Lembur: <strong>{fmtRp(overtimeRate)}/jam</strong>
             {overtimeEligible
               ? <span className="text-green-600"> — berlaku untuk penempatan ini</span>
