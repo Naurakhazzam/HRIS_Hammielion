@@ -71,6 +71,7 @@ export default function PanduanKaryawanPage() {
   const [deptSchedules, setDeptSchedules] = useState<SchedRow[]>([])
   const [branchSchedules, setBranchSchedules] = useState<SchedRow[]>([])
   const [lateRate, setLateRate] = useState(1000)
+  const [overtimeRate, setOvertimeRate] = useState(7500)
   // Gaji standar acuan sistem (salary_defaults) -- dipakai HR sebagai isian awal saat menambah
   // karyawan baru. Dipakai di sini sebagai dasar simulasi supaya angkanya REAL (bukan karangan),
   // walau tetap bukan gaji pribadi siapa pun -- gaji asli tiap orang beda-beda.
@@ -89,7 +90,7 @@ export default function PanduanKaryawanPage() {
       supabase.from('branch_shift_schedules')
         .select('check_in_time, check_out_time, detect_until, allow_overtime, branches(name)')
         .eq('is_active', true).order('check_in_time'),
-      supabase.from('salary_defaults').select('base_salary, position_allowance, meal_allowance, late_penalty_per_minute').limit(1).maybeSingle(),
+      supabase.from('salary_defaults').select('base_salary, position_allowance, meal_allowance, late_penalty_per_minute, overtime_rate_per_hour').limit(1).maybeSingle(),
     ])
     setDeptSchedules((dept || []).map((d: any) => ({
       label: d.departments?.name ?? 'Departemen', check_in_time: d.check_in_time,
@@ -100,6 +101,7 @@ export default function PanduanKaryawanPage() {
       check_out_time: b.check_out_time, detect_until: b.detect_until, allow_overtime: b.allow_overtime,
     })))
     setLateRate(Number(def?.late_penalty_per_minute ?? 1000))
+    setOvertimeRate(Number(def?.overtime_rate_per_hour ?? 7500))
     setContohGajiBulanan(Number(def?.base_salary ?? 0) + Number(def?.position_allowance ?? 0) + Number(def?.meal_allowance ?? 0))
     setLoading(false)
   }
@@ -211,13 +213,13 @@ export default function PanduanKaryawanPage() {
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
               <p className="text-blue-700 mt-0.5">Seperti reimburse struk belanja kantor — biar kelihatan di struk kasir (terdeteksi), tetap harus difoto & diajukan supaya benar-benar diganti uangnya. Kelamaan disimpan tanpa diklaim, ya tidak bisa diganti lagi.</p>
             </div>
-            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi jam yang terdeteksi (tarif Rupiah per jam beda-beda tiap orang, lihat di bawah):</p>
+            <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi (tarif standar sistem: {fmtRp(overtimeRate)}/jam, berlaku semua staff kecuali Team Gudang):</p>
             <ul className="list-disc pl-5 space-y-1">
               <li>Pulang 45 menit lewat jam shift → belum genap 60 menit → lembur <strong>0 jam</strong>, tidak ada yang perlu diklaim</li>
-              <li>Pulang 95 menit lewat jam shift → dibulatkan ke bawah → terdeteksi <strong>1 jam</strong> → wajib klaim+foto dalam 3 hari</li>
-              <li>Pulang 130 menit lewat jam shift → dibulatkan ke bawah → terdeteksi <strong>2 jam</strong> → wajib klaim+foto dalam 3 hari</li>
+              <li>Pulang 95 menit lewat jam shift → dibulatkan ke bawah → terdeteksi <strong>1 jam</strong> = {fmtRp(overtimeRate)} → wajib klaim+foto dalam 3 hari, baru dibayar setelah Owner setuju</li>
+              <li>Pulang 130 menit lewat jam shift → dibulatkan ke bawah → terdeteksi <strong>2 jam</strong> = {fmtRp(overtimeRate * 2)} → wajib klaim+foto dalam 3 hari, baru dibayar setelah Owner setuju</li>
             </ul>
-            <p className="text-sm text-slate-500">Tarif lembur per jam Anda sendiri tergantung gaji pokok masing-masing, jadi tidak sama untuk semua orang. Untuk lihat tarif asli & simulasi lembur dalam Rupiah berdasarkan gaji Anda, klik <DiSiniLink />.</p>
+            <p className="text-sm text-slate-500">Tarif di atas tarif standar sistem — tarif Anda sendiri bisa dicek pasti lewat klik <DiSiniLink />.</p>
           </div>
         </section>
 
