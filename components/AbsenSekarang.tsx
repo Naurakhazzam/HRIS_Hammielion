@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr, localDateStr } from '@/lib/date'
-import { resolveSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
+import { resolveHomeSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
 import { QR_LATE_TOLERANCE_MINUTES } from '@/lib/lateTolerance'
 import { fetchAlphaAlerts } from '@/lib/alphaDetection'
 import Link from 'next/link'
@@ -58,6 +58,11 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const isBranchMismatch = mode === 'qr' && !!qrBranchId && !!branch?.id && qrBranchId !== branch.id
   const [isPerbantuanAction, setIsPerbantuanAction] = useState(false)
   const [branchShifts, setBranchShifts] = useState<BranchShiftRow[]>([])
+  // Jadwal shift CABANG SENDIRI (bukan perbantuan) -- dipakai supaya pesan telat/lembur yang
+  // muncul langsung di HP sama persis dengan yang nanti tersimpan di database (trigger
+  // calc_attendance_times() sekarang juga mengutamakan jadwal cabang di atas jadwal departemen
+  // generik, lihat lib/attendanceSchedule.ts resolveHomeSchedule()).
+  const [homeBranchShifts, setHomeBranchShifts] = useState<BranchShiftRow[]>([])
   // null = belum ada jadwal roster untuk hari ini (HR belum atur — biarkan absen jalan seperti biasa).
   // true/false = roster HARI INI (dibaca ulang tiap fetchContext, jadi kalau HR menggeser jadwal
   // libur ke tanggal lain, nilai ini otomatis ikut berubah tanpa perlu kode tambahan).
@@ -135,6 +140,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         .select('id, check_in_time, check_out_time, detect_until, allow_overtime, applies_to_dept')
         .eq('applies_to_dept', emp.department_id)
       setSchedules((sched as WorkScheduleRow[]) || [])
+    }
+    if (b?.id) {
+      const { data: homeShifts } = await supabase.from('branch_shift_schedules')
+        .select('check_in_time, check_out_time, detect_until, allow_overtime')
+        .eq('branch_id', b.id).eq('is_active', true)
+      setHomeBranchShifts((homeShifts as BranchShiftRow[]) || [])
     }
 
     const { data: att } = await supabase.from('attendances')
@@ -539,7 +550,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       // lembur/potongan sampai HR setup (bukan nebak/error).
       const sched = isPerbantuanAction
         ? matchSchedule(nowTimeStr, branchShifts)
-        : resolveSchedule(nowTimeStr, schedules, customCheckIn, customCheckOut)
+        : resolveHomeSchedule(nowTimeStr, schedules, homeBranchShifts, customCheckIn, customCheckOut)
       // Sama seperti trigger DB: Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang
       // juga tidak (dicek dari cabang PENEMPATAN karyawan, bukan cabang tempat scan/perbantuan).
       const otExcluded = deptName === 'Team Gudang' || (posName === 'Helper' && branch?.name === 'Gudang')
@@ -558,7 +569,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     } else {
       const sched = isPerbantuanAction
         ? matchSchedule(nowTimeStr, branchShifts)
-        : resolveSchedule(nowTimeStr, schedules, customCheckIn, customCheckOut)
+        : resolveHomeSchedule(nowTimeStr, schedules, homeBranchShifts, customCheckIn, customCheckOut)
       const lateMinutes = calcLateMinutes(nowTimeStr, sched)
       const { error } = await supabase.from('attendances').insert({
         employee_id: employeeId,

@@ -49,6 +49,25 @@ export function resolveSchedule(
   return deptSched
 }
 
+// Sama seperti resolveSchedule(), tapi untuk absen NORMAL di cabang sendiri (bukan perbantuan)
+// -- jadwal shift cabang sendiri (branch_shift_schedules) diutamakan di atas jadwal departemen
+// generik kalau cabang itu sudah diatur sendiri (jam buka toko beda-beda per cabang, mis. Raja
+// Petshop/Markas Petshop buka 08:00 vs default Team Toko 07:00). Jam kerja khusus pribadi tetap
+// prioritas tertinggi. HARUS selalu sama persis dengan prioritas di trigger DB
+// calc_attendance_times() supaya pesan langsung di HP tidak beda dari yang tersimpan di database.
+export function resolveHomeSchedule(
+  checkInStr: string,
+  deptSchedules: WorkSchedule[],
+  branchSchedules: { check_in_time: string; check_out_time: string | null; detect_until: string | null; allow_overtime: boolean }[],
+  customCheckIn: string | null,
+  customCheckOut: string | null
+): { check_in_time: string; check_out_time: string | null; allow_overtime: boolean } | null {
+  if (customCheckIn || customCheckOut) {
+    return resolveSchedule(checkInStr, deptSchedules, customCheckIn, customCheckOut)
+  }
+  return matchSchedule(checkInStr, branchSchedules) ?? matchSchedule(checkInStr, deptSchedules)
+}
+
 export function calcLateMinutes(checkInStr: string, sched: { check_in_time: string } | null): number {
   if (!sched) return 0
   const diff = timeToMinutes(checkInStr) - timeToMinutes(sched.check_in_time)

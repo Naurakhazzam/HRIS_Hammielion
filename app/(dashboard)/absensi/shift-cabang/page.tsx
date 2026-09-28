@@ -141,7 +141,7 @@ export default function ShiftCabangPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Jadwal Shift Cabang</h1>
-          <p className="text-sm text-slate-500">Jam buka & shift per cabang — dipakai khusus untuk hitung telat/lembur saat karyawan absen "Perbantuan" di cabang yang bukan penempatannya.</p>
+          <p className="text-sm text-slate-500">Jam buka & shift per cabang — dipakai untuk hitung telat/lembur saat karyawan absen di cabang ini, baik cabang penempatannya sendiri maupun saat "Perbantuan" di cabang lain.</p>
         </div>
         <button
           onClick={() => { if (showForm) resetForm(); setShowForm(!showForm) }}
@@ -159,8 +159,8 @@ export default function ShiftCabangPage() {
 
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-sm text-blue-700">
         <p className="font-semibold mb-1">💡 Kapan jadwal ini dipakai</p>
-        <p>Absen normal di cabang sendiri tetap pakai <strong>Jadwal Kerja</strong> per departemen seperti biasa (menu terpisah) — jadwal ini TIDAK berpengaruh ke situ. Jadwal ini cuma dipakai saat karyawan scan QR cabang lain dan memilih "Perbantuan": telat/pulang-cepat/lembur hari itu dihitung dari shift cabang tempat dia perbantuan, bukan jadwal departemennya.</p>
-        <p className="mt-1">Cabang yang belum punya shift di sini: kalau ada yang perbantuan ke situ, dianggap tidak telat/tidak lembur dulu sampai di-setup.</p>
+        <p>Kalau cabang penempatan karyawan sudah punya jadwal di sini, jadwal ini yang dipakai untuk absen normal sehari-hari — lebih diutamakan daripada <strong>Jadwal Kerja</strong> per departemen (menu terpisah), karena jam buka toko memang beda-beda per cabang. Jadwal departemen jadi cadangan kalau cabang belum diatur di sini sama sekali. Jam Kerja Khusus pribadi (per karyawan) tetap prioritas paling tinggi, mengalahkan keduanya.</p>
+        <p className="mt-1">Jadwal ini juga yang dipakai saat karyawan scan QR cabang lain dan memilih "Perbantuan": telat/pulang-cepat/lembur hari itu dihitung dari shift cabang tempat dia perbantuan. Cabang tujuan perbantuan yang belum punya shift di sini dianggap tidak telat/tidak lembur dulu sampai di-setup (beda dari cabang sendiri, yang tetap jatuh ke jadwal departemen).</p>
       </div>
 
       {showForm && (
