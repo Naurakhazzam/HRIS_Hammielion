@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getCurrentPeriodRangeStr, rosterPeriodLabel } from '@/lib/rosterPeriod'
 import { IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS } from '@/lib/escalatingDeduction'
+import { LATE_CLARIFICATION_THRESHOLD_MINUTES } from '@/lib/lateClarification'
 
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
 const fmtJam = (t: string) => t.substring(0, 5).replace(':', '.')
@@ -176,9 +177,13 @@ export default function PanduanKaryawanPage() {
           <h2 className="text-lg font-bold text-slate-800 mb-3">3. ⏱️ Aturan Terlambat</h2>
           <div className="space-y-3 text-sm text-slate-600">
             <p>Telat dihitung dari <strong>selisih menit</strong> antara jam Anda absen masuk dengan jam masuk shift Anda. Kalau datang lebih awal atau tepat waktu, telatnya dianggap 0 menit (tidak pernah minus). Setiap menit telat berpotensi kena potongan — jadi usahakan selalu datang tepat waktu.</p>
+            <div className="bg-orange-50 border-2 border-orange-300 rounded-lg p-3">
+              <p className="font-bold text-orange-800">⏱️ Telat lebih dari {LATE_CLARIFICATION_THRESHOLD_MINUTES} menit? Wajib dijelaskan!</p>
+              <p className="text-orange-700 mt-0.5">Kalau telat Anda lebih dari {LATE_CLARIFICATION_THRESHOLD_MINUTES} menit, akan muncul pengingat untuk menjelaskan kendalanya (ban bocor, kecelakaan, urusan keluarga mendadak, dll) lewat Portal Saya. HR/Owner akan meninjau — kalau alasannya masuk akal, <strong>potongan keterlambatan hari itu bisa dihapuskan sepenuhnya</strong> sebagai kompensasi. Tidak ada batas waktu keras untuk menjelaskan, tapi lebih cepat lebih baik.</p>
+            </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
-              <p className="text-blue-700 mt-0.5">Bayangkan naik angkot langganan yang berangkat jam 7 pagi tepat. Datang jam 7 lewat 12 menit? Angkotnya sudah jalan duluan — Anda yang menanggung 12 menit itu.</p>
+              <p className="text-blue-700 mt-0.5">Bayangkan naik angkot langganan yang berangkat jam 7 pagi tepat. Datang jam 7 lewat 12 menit? Angkotnya sudah jalan duluan — Anda yang menanggung 12 menit itu. Tapi kalau telatnya sudah parah (lebih dari {LATE_CLARIFICATION_THRESHOLD_MINUTES} menit) karena kejadian di luar kendali, cerita dulu ke HR — bisa saja dimaafkan.</p>
             </div>
             <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi (tarif standar sistem: {fmtRp(lateRate)}/menit):</p>
             <ul className="list-disc pl-5 space-y-1">

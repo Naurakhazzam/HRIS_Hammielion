@@ -12,6 +12,7 @@ import { localDateStr } from '@/lib/date'
 import { fetchIncompleteCheckouts as fetchIncompleteCheckoutsShared, type IncompleteCheckoutItem } from '@/lib/checkoutClarification'
 import AlphaKlarifikasiPanel from '@/components/AlphaKlarifikasiPanel'
 import { fetchOvertimeClaimAlerts as fetchOvertimeClaimAlertsShared, type OvertimeClaimAlertItem } from '@/lib/overtimeClaim'
+import { fetchLateClarificationAlerts as fetchLateClarificationAlertsShared, LATE_CLARIFICATION_THRESHOLD_MINUTES, type LateClarificationAlertItem } from '@/lib/lateClarification'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const DAYS_AHEAD = 30
@@ -84,6 +85,14 @@ export default function PortalDashboardPage() {
   const [overtimeError, setOvertimeError] = useState('')
   const [overtimeSubmitting, setOvertimeSubmitting] = useState(false)
 
+  // Klarifikasi Telat >30 menit -- HR bisa beri kompensasi (potongan telat dihapuskan) kalau
+  // ada kendala yang masuk akal (lihat lib/lateClarification.ts).
+  const [lateAlerts, setLateAlerts] = useState<LateClarificationAlertItem[]>([])
+  const [lateModal, setLateModal] = useState<LateClarificationAlertItem | null>(null)
+  const [lateReason, setLateReason] = useState('')
+  const [lateError, setLateError] = useState('')
+  const [lateSubmitting, setLateSubmitting] = useState(false)
+
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
@@ -114,6 +123,7 @@ export default function PortalDashboardPage() {
       fetchQuotaLibur(effectiveId),
       fetchIncompleteCheckouts(effectiveId),
       fetchOvertimeAlerts(effectiveId),
+      fetchLateAlerts(effectiveId),
       emp?.join_date ? fetchLeaveInfo(effectiveId, emp.join_date) : Promise.resolve(),
     ])
     setLoading(false)
@@ -286,6 +296,34 @@ export default function PortalDashboardPage() {
     setOvertimeSubmitting(false)
   }
 
+  async function fetchLateAlerts(employeeId: string) {
+    setLateAlerts(await fetchLateClarificationAlertsShared(supabase, employeeId))
+  }
+
+  function openLateModal(item: LateClarificationAlertItem) {
+    setLateModal(item)
+    setLateReason('')
+    setLateError('')
+  }
+
+  async function submitLateClarification() {
+    if (!lateModal) return
+    if (!lateReason.trim()) { setLateError('Keterangan wajib diisi -- jelaskan kendalanya.'); return }
+    setLateSubmitting(true)
+    setLateError('')
+    const { error } = await supabase.rpc('submit_late_clarification', {
+      p_attendance_id: lateModal.attendanceId,
+      p_reason: lateReason.trim(),
+    })
+    if (error) {
+      setLateError(error.message)
+    } else {
+      setLateModal(null)
+      await fetchLateAlerts(myEmployeeId)
+    }
+    setLateSubmitting(false)
+  }
+
   // Sisa saldo kasbon aktif -- rumus sama persis dengan yang dipakai halaman Kasbon (Tab
   // Limit): jumlah (amount_requested - total_deducted) dari kasbon_requests yang sudah
   // disetujui & dicairkan, bukan dari kasbon_limits yang sudah tidak sinkron.
@@ -387,6 +425,38 @@ export default function PortalDashboardPage() {
                   )}
                   {a.actionable && !isPending && (
                     <p className="text-xs text-purple-600 font-medium mt-1.5">⏰ Batas klaim: paling lambat {deadlineLabel} (3 hari setelah tanggal lembur)</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {lateAlerts.filter(a => a.actionable).length > 0 && (
+        <div className="bg-orange-50 border-2 border-orange-400 rounded-xl p-4">
+          <p className="text-base font-bold text-orange-800">⏱️ Ada keterlambatan lebih dari {LATE_CLARIFICATION_THRESHOLD_MINUTES} menit yang belum dijelaskan</p>
+          <p className="text-sm text-orange-700 mt-1">Jelaskan kendalanya di bawah ini — HR bisa memberi kompensasi (potongan telat dihapuskan) kalau alasannya masuk akal.</p>
+          <div className="mt-3 space-y-2">
+            {lateAlerts.filter(a => a.actionable).map(a => {
+              const isPending = a.clarification?.status === 'pending'
+              return (
+                <div key={a.attendanceId} className="bg-white border border-orange-200 rounded-lg p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-800">
+                      {new Date(a.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                      <span className="text-slate-400 font-normal"> — telat {a.lateMinutes} menit</span>
+                    </p>
+                    {isPending ? (
+                      <span className="text-xs px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg font-medium">⏳ Menunggu review HR</span>
+                    ) : (
+                      <button onClick={() => openLateModal(a)} className="text-xs px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-semibold">
+                        {a.clarification ? 'Jelaskan Lagi' : 'Jelaskan Kendala'}
+                      </button>
+                    )}
+                  </div>
+                  {!isPending && a.clarification?.status === 'rejected' && (
+                    <p className="text-xs text-slate-500 mt-1.5">Penjelasan sebelumnya ditolak{a.clarification.rejection_note ? `: ${a.clarification.rejection_note}` : ''}.</p>
                   )}
                 </div>
               )
@@ -597,6 +667,32 @@ export default function PortalDashboardPage() {
             <button onClick={submitOvertimeClaim} disabled={overtimeSubmitting}
               className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
               {overtimeSubmitting ? 'Mengirim...' : 'Kirim Klaim'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {lateModal && (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-5">
+          <h3 className="text-lg font-bold text-slate-800 mb-1">Jelaskan Keterlambatan</h3>
+          <p className="text-sm text-slate-500 mb-4">
+            {new Date(lateModal.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+            {' — telat '}{lateModal.lateMinutes} menit
+          </p>
+          <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 mb-3">Kalau disetujui HR, potongan keterlambatan hari ini dihapuskan sepenuhnya (kompensasi).</p>
+          {lateError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{lateError}</p>}
+          <div>
+            <label className="text-xs font-medium text-slate-600 block mb-1">Kenapa telat lebih dari {LATE_CLARIFICATION_THRESHOLD_MINUTES} menit? Apakah ada kendala? *</label>
+            <textarea value={lateReason} onChange={e => setLateReason(e.target.value)} rows={3}
+              placeholder="Jelaskan kendalanya, misal: ban bocor, kecelakaan di jalan, urusan keluarga mendadak, dll." className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+          </div>
+          <div className="flex gap-2 mt-5">
+            <button onClick={() => setLateModal(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+            <button onClick={submitLateClarification} disabled={lateSubmitting}
+              className="flex-1 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
+              {lateSubmitting ? 'Mengirim...' : 'Kirim Penjelasan'}
             </button>
           </div>
         </div>

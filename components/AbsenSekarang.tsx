@@ -7,6 +7,7 @@ import { resolveHomeSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours,
 import { fetchAlphaAlerts } from '@/lib/alphaDetection'
 import { fetchIncompleteCheckouts } from '@/lib/checkoutClarification'
 import { fetchOvertimeClaimAlerts } from '@/lib/overtimeClaim'
+import { fetchLateClarificationAlerts } from '@/lib/lateClarification'
 import Link from 'next/link'
 
 type Props = { employeeId: string; employeeName: string; onDone?: () => void; mode?: 'gps' | 'qr'; qrBranchId?: string; qrBranchName?: string }
@@ -49,6 +50,8 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   // Sama pola-nya lagi, untuk lembur yang terdeteksi tapi belum diklaim (foto kertas lembur) --
   // lihat lib/overtimeClaim.ts. Batas klaim 3 hari, jadi pengingat ini penting supaya tidak hangus.
   const [showOvertimeReminder, setShowOvertimeReminder] = useState(false)
+  // Telat lebih dari 30 menit wajib dijelaskan -- lihat lib/lateClarification.ts.
+  const [showLateReminder, setShowLateReminder] = useState(false)
   // Dept/posisi karyawan — dipakai buat replikasi PERSIS aturan pengecualian lembur/telat yang
   // sudah berlaku di trigger DB calc_attendance_times() (dipakai absen masuk & import fingerprint):
   // Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang tidak pernah dapat lembur/telat.
@@ -636,6 +639,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     } catch {
       // Gagal diam-diam, sama seperti pengecekan Alpha di atas.
     }
+    try {
+      const lateAlerts = await fetchLateClarificationAlerts(supabase, employeeId)
+      setShowLateReminder(lateAlerts.some(a => a.actionable))
+    } catch {
+      // Gagal diam-diam, sama seperti pengecekan Alpha di atas.
+    }
     onDone?.()
   }
 
@@ -695,6 +704,13 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         <Link href="/portal" className="block p-3 mb-3 rounded-lg border-2 border-purple-400 bg-purple-50 text-sm hover:bg-purple-100 transition">
           <p className="font-bold text-purple-800">🕗 Ada lembur belum diklaim!</p>
           <p className="text-purple-700 mt-0.5">Upload foto kertas lembur di Portal Saya paling lama 3 hari sejak tanggal lembur, atau hangus tidak dibayar.</p>
+        </Link>
+      )}
+
+      {showLateReminder && (
+        <Link href="/portal" className="block p-3 mb-3 rounded-lg border-2 border-orange-400 bg-orange-50 text-sm hover:bg-orange-100 transition">
+          <p className="font-bold text-orange-800">⏱️ Ada keterlambatan lebih dari 30 menit yang belum dijelaskan!</p>
+          <p className="text-orange-700 mt-0.5">Ketuk di sini untuk jelaskan kendalanya di Portal Saya — HR bisa beri kompensasi kalau memang ada alasan yang masuk akal.</p>
         </Link>
       )}
 

@@ -174,7 +174,18 @@ export default function RekapAbsensiPage() {
   const [overtimeRejectId, setOvertimeRejectId] = useState<string | null>(null)
   const [overtimeRejectNote, setOvertimeRejectNote] = useState('')
 
-  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); fetchCheckoutClarifications(); fetchOvertimeClaims(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection() }, [])
+  // Klarifikasi Telat >30 menit yang menunggu review -- disetujui berarti potongan telat hari
+  // itu dihapuskan (kompensasi). Lihat lib/lateClarification.ts + migrasi late_clarifications.
+  type LateClarificationRow = {
+    id: string; attendance_id: string; employee_id: string; date: string; late_minutes: number; reason: string; created_at: string
+    employees: { full_name: string } | null
+  }
+  const [lateClarifications, setLateClarifications] = useState<LateClarificationRow[]>([])
+  const [lateReviewingId, setLateReviewingId] = useState<string | null>(null)
+  const [lateRejectId, setLateRejectId] = useState<string | null>(null)
+  const [lateRejectNote, setLateRejectNote] = useState('')
+
+  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); fetchCheckoutClarifications(); fetchOvertimeClaims(); fetchLateClarifications(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection() }, [])
   useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
   // Kalau karyawan yang sedang dipilih jadi tidak termasuk lagi setelah Cabang/Departemen
   // diganti, kosongkan lagi pilihannya — supaya tidak nyangkut ke karyawan di luar cakupan filter.
@@ -295,6 +306,30 @@ export default function RekapAbsensiPage() {
       fetchAttendances()
     }
     setOvertimeReviewingId(null)
+  }
+
+  async function fetchLateClarifications() {
+    const { data } = await supabase.from('late_clarifications')
+      .select('id,attendance_id,employee_id,date,late_minutes,reason,created_at,employees(full_name)')
+      .eq('status', 'pending')
+      .order('created_at')
+    setLateClarifications((data as unknown as LateClarificationRow[]) || [])
+  }
+
+  async function reviewLate(id: string, approve: boolean, rejectionNote?: string) {
+    setLateReviewingId(id)
+    const { error } = await supabase.rpc('review_late_clarification', {
+      p_id: id, p_reviewed_by: myEmployeeId, p_approve: approve, p_rejection_note: rejectionNote || null,
+    })
+    if (error) {
+      showMsg('error', 'Gagal memproses klarifikasi: ' + error.message)
+    } else {
+      showMsg('success', approve ? 'Disetujui, potongan telat hari itu dihapuskan.' : 'Klarifikasi ditolak, potongan telat tetap berlaku.')
+      setLateRejectId(null); setLateRejectNote('')
+      fetchLateClarifications()
+      fetchAttendances()
+    }
+    setLateReviewingId(null)
   }
 
   // Periode filter di halaman ini pakai siklus tanggal 26–25 (lihat getPeriodLabel), jadi
@@ -812,6 +847,35 @@ export default function RekapAbsensiPage() {
                       <button disabled={overtimeReviewingId === c.id} onClick={() => setOvertimeRejectId(c.id)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium disabled:opacity-50">✕ Tolak</button>
                     </div>
                   )
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {lateClarifications.length > 0 && (
+        <div className="mb-6 bg-orange-50 border border-orange-200 rounded-xl p-4">
+          <p className="text-sm font-semibold text-orange-800 mb-3">⏱️ {lateClarifications.length} klarifikasi telat &gt;30 menit menunggu review</p>
+          <div className="space-y-3">
+            {lateClarifications.map(c => (
+              <div key={c.id} className="bg-white border border-orange-200 rounded-lg p-3">
+                <p className="text-sm font-semibold text-slate-800 mb-1.5">{c.employees?.full_name} — {new Date(c.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' })} — telat {c.late_minutes} menit</p>
+                <p className="text-sm text-slate-600 bg-slate-50 rounded px-2.5 py-1.5 mb-2">"{c.reason}"</p>
+                {lateRejectId === c.id ? (
+                  <div className="space-y-2">
+                    <textarea value={lateRejectNote} onChange={e => setLateRejectNote(e.target.value)} placeholder="Alasan penolakan (opsional, untuk arsip)..." rows={2}
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none" />
+                    <div className="flex gap-2">
+                      <button disabled={lateReviewingId === c.id} onClick={() => reviewLate(c.id, false, lateRejectNote)} className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium disabled:opacity-50">Konfirmasi Tolak</button>
+                      <button onClick={() => { setLateRejectId(null); setLateRejectNote('') }} className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">Batal</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button disabled={lateReviewingId === c.id} onClick={() => reviewLate(c.id, true)} className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium disabled:opacity-50">✓ Setujui (hapus potongan telat)</button>
+                    <button disabled={lateReviewingId === c.id} onClick={() => setLateRejectId(c.id)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium disabled:opacity-50">✕ Tolak</button>
+                  </div>
                 )}
               </div>
             ))}
