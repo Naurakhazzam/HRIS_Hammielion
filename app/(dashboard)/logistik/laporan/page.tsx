@@ -84,6 +84,7 @@ export default function LaporanPengirimanPage() {
   const [verifyingId, setVerifyingId] = useState<string | null>(null)
   const [verifyAmount, setVerifyAmount] = useState('')
   const [verifySaving, setVerifySaving] = useState(false)
+  const [onlyUnverified, setOnlyUnverified] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   const fetchData = useCallback(async () => {
@@ -201,8 +202,19 @@ export default function LaporanPengirimanPage() {
   // jadi sama-sama butuh verifikasi kantor -- bukan cuma cash.
   const verifiableStores = allStores.filter(s => s.payment_method === 'cash' || s.payment_method === 'deposit')
   const verifiedCashStores = verifiableStores.filter(s => s.office_verified_amount != null)
-  const unverifiedCashCount = verifiableStores.length - verifiedCashStores.length
-  const totalSelisihKas = verifiedCashStores.reduce((sum, s) => sum + (Number(s.office_verified_amount) - Number(s.payment_amount || 0)), 0)
+  const unverifiedStores = verifiableStores.filter(s => s.office_verified_amount == null)
+
+  // Uang dipisah: yang sudah diverifikasi (nominal DITERIMA kantor, bukan yang dilaporkan driver)
+  // vs yang belum -- jangan dijumlah jadi satu supaya kelihatan berapa yang benar-benar sudah masuk.
+  const sumReported = (list: PlanStore[]) => list.reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
+  const sumReceived = (list: PlanStore[]) => list.reduce((sum, s) => sum + Number(s.office_verified_amount || 0), 0)
+  const byMethod = (list: PlanStore[], m: string) => list.filter(s => s.payment_method === m)
+  const verifiedReported = sumReported(verifiedCashStores)
+  const verifiedReceived = sumReceived(verifiedCashStores)
+  const totalSelisihKas = verifiedReceived - verifiedReported
+  const unverifiedAmount = sumReported(unverifiedStores)
+  const unverifiedPlanIds = new Set(unverifiedStores.map(s => s.plan_id))
+  const visiblePlans = onlyUnverified ? plans.filter(p => unverifiedPlanIds.has(p.id)) : plans
 
   const monthOptions = Array.from({ length: 12 }, (_, i) => {
     const d = new Date()
@@ -236,17 +248,62 @@ export default function LaporanPengirimanPage() {
               className="w-full sm:w-64 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
               {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
+            {canVerify && (
+              <label className="mt-3 flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={onlyUnverified} onChange={e => setOnlyUnverified(e.target.checked)} className="rounded" />
+                Tampilkan hanya trip yang uangnya belum diverifikasi ({unverifiedPlanIds.size} trip)
+              </label>
+            )}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
-              <p className="text-[11px] text-slate-500 uppercase mb-1">Total Cash</p>
-              <p className="text-sm font-bold text-green-600">{fmtRp(totalCash)}</p>
+          {canVerify && (
+            <div className="mb-6">
+              <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Uang Tunai dari Driver (Cash + Deposit)</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-green-700 uppercase">✅ Sudah Diverifikasi &amp; Diterima Kantor</p>
+                  <p className="text-2xl font-bold text-green-700 mt-1">{fmtRp(verifiedReceived)}</p>
+                  <p className="text-xs text-green-700 mt-1">
+                    {verifiedCashStores.length} toko · Cash {fmtRp(sumReceived(byMethod(verifiedCashStores, 'cash')))} · Deposit {fmtRp(sumReceived(byMethod(verifiedCashStores, 'deposit')))}
+                  </p>
+                  <p className="text-xs text-slate-600 mt-2">
+                    Yang dilaporkan driver {fmtRp(verifiedReported)} · Selisih{' '}
+                    <span className={`font-semibold ${totalSelisihKas === 0 ? 'text-green-700' : totalSelisihKas < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                      {totalSelisihKas === 0 ? 'cocok' : totalSelisihKas < 0 ? `kurang ${fmtRp(Math.abs(totalSelisihKas))}` : `lebih ${fmtRp(totalSelisihKas)}`}
+                    </span>
+                  </p>
+                </div>
+                <div className={`rounded-xl p-4 border ${unverifiedStores.length > 0 ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+                  <p className={`text-xs font-semibold uppercase ${unverifiedStores.length > 0 ? 'text-amber-700' : 'text-slate-500'}`}>⏳ Belum Diverifikasi</p>
+                  <p className={`text-2xl font-bold mt-1 ${unverifiedStores.length > 0 ? 'text-amber-700' : 'text-slate-400'}`}>{fmtRp(unverifiedAmount)}</p>
+                  <p className={`text-xs mt-1 ${unverifiedStores.length > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
+                    {unverifiedStores.length} toko · Cash {fmtRp(sumReported(byMethod(unverifiedStores, 'cash')))} · Deposit {fmtRp(sumReported(byMethod(unverifiedStores, 'deposit')))}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-2">Nominal menurut laporan driver. Belum dihitung sebagai uang diterima kantor.</p>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase">Total Dilaporkan Driver</p>
+                  <p className="text-2xl font-bold text-slate-700 mt-1">{fmtRp(totalCash + totalDeposit)}</p>
+                  <p className="text-xs text-slate-500 mt-1">{verifiableStores.length} toko · Cash {fmtRp(totalCash)} · Deposit {fmtRp(totalDeposit)}</p>
+                  <p className="text-xs text-slate-500 mt-2">= sudah diverifikasi + belum diverifikasi (menurut laporan driver).</p>
+                </div>
+              </div>
             </div>
-            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
-              <p className="text-[11px] text-slate-500 uppercase mb-1">Total Deposit</p>
-              <p className="text-sm font-bold text-blue-600">{fmtRp(totalDeposit)}</p>
-            </div>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            {!canVerify && (
+              <>
+                <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+                  <p className="text-[11px] text-slate-500 uppercase mb-1">Total Cash</p>
+                  <p className="text-sm font-bold text-green-600">{fmtRp(totalCash)}</p>
+                </div>
+                <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+                  <p className="text-[11px] text-slate-500 uppercase mb-1">Total Deposit</p>
+                  <p className="text-sm font-bold text-blue-600">{fmtRp(totalDeposit)}</p>
+                </div>
+              </>
+            )}
             <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
               <p className="text-[11px] text-slate-500 uppercase mb-1">Toko Transfer</p>
               <p className="text-sm font-bold text-slate-700">{totalTransfer} toko</p>
@@ -263,28 +320,21 @@ export default function LaporanPengirimanPage() {
               <p className="text-[11px] text-slate-500 uppercase mb-1">Gagal Kirim</p>
               <p className="text-sm font-bold text-red-500">{totalFailed} toko</p>
             </div>
-            {canVerify && (
-              <>
-                <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
-                  <p className="text-[11px] text-slate-500 uppercase mb-1">Cash/Deposit Belum Diverifikasi</p>
-                  <p className={`text-sm font-bold ${unverifiedCashCount > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{unverifiedCashCount} toko</p>
-                </div>
-                <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
-                  <p className="text-[11px] text-slate-500 uppercase mb-1">Selisih Kas (Terverifikasi)</p>
-                  <p className={`text-sm font-bold ${totalSelisihKas === 0 ? 'text-slate-400' : totalSelisihKas < 0 ? 'text-red-600' : 'text-blue-600'}`}>{fmtRp(totalSelisihKas)}</p>
-                </div>
-              </>
-            )}
           </div>
 
           {loading ? (
             <div className="text-center py-12 text-slate-500 text-sm">Memuat...</div>
-          ) : plans.length === 0 ? (
-            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada trip selesai di periode ini.</div>
+          ) : visiblePlans.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
+              {plans.length === 0 ? 'Belum ada trip selesai di periode ini.' : 'Semua uang tunai di periode ini sudah diverifikasi. 👍'}
+            </div>
           ) : (
             <div className="space-y-3">
-              {plans.map(p => {
+              {visiblePlans.map(p => {
                 const stores = storesByPlan[p.id] || []
+                const planCash = stores.filter(s => s.payment_method === 'cash' || s.payment_method === 'deposit')
+                const planUnverified = planCash.filter(s => s.office_verified_amount == null)
+                const planVerified = planCash.filter(s => s.office_verified_amount != null)
                 const tasks = supplierTasksByPlan[p.id] || []
                 const isOpen = expanded.has(p.id)
                 return (
@@ -298,6 +348,20 @@ export default function LaporanPengirimanPage() {
                           </span>
                         </div>
                         <p className="text-xs text-slate-500">{new Date(p.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {p.driver?.full_name}{p.helper?.full_name ? ` / ${p.helper.full_name}` : ''} · {stores.length} toko</p>
+                        {canVerify && planCash.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {planVerified.length > 0 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-green-100 text-green-700 font-semibold">
+                                ✅ Diterima kantor {fmtRp(sumReceived(planVerified))} ({planVerified.length} toko)
+                              </span>
+                            )}
+                            {planUnverified.length > 0 && (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">
+                                ⏳ Belum diverifikasi {fmtRp(sumReported(planUnverified))} ({planUnverified.length} toko)
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <span className="text-xs text-blue-600 font-medium shrink-0">{isOpen ? 'Tutup ▲' : 'Rincian ▼'}</span>
                     </button>
