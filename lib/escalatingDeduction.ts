@@ -10,6 +10,11 @@
 export const IZIN_GROUP_MULTIPLIERS = [1, 1.25, 1.5, 1.75, 2]
 export const ALPHA_GROUP_MULTIPLIERS = [1.5, 2, 2.25, 2.5, 2.75, 3]
 
+// Karyawan TRAINING tidak kena eskalasi -- Izin/Sakit-tanpa-surat maupun Alpha dipotong FLAT
+// 1x gaji harian per hari, kejadian ke berapa pun, karena mereka belum permanent. Dipakai lewat
+// calcEscalatingDeduction() yang sama persis (cuma multiplier-nya selalu 1x, tidak pernah naik).
+export const TRAINING_FLAT_MULTIPLIER = [1]
+
 export type EscalatingBlock = { dates: string[]; occurrence: number; multiplier: number; subtotal: number }
 export type EscalatingResult = { total: number; blocks: EscalatingBlock[] }
 

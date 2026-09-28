@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import { todayLocalStr } from '@/lib/date'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
-import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, type EscalatingResult } from '@/lib/escalatingDeduction'
+import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, type EscalatingResult } from '@/lib/escalatingDeduction'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -858,13 +858,15 @@ export default function PenggajianBulananPage() {
     const liburKompensasi = flatSalaryForEmp ? 0 : Math.round(kurangLibur * dailyRate)
 
     // Kelompok Izin (Duka/Periksa/Sakit-tanpa-surat) — eskalasi per kejadian (blok tanggal
-    // bersambung), reset tiap periode: 1x, 1.25x, 1.5x, 1.75x, mentok 2x.
-    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, IZIN_GROUP_MULTIPLIERS)
+    // bersambung), reset tiap periode: 1x, 1.25x, 1.5x, 1.75x, mentok 2x. Karyawan TRAINING
+    // dikecualikan dari eskalasi ini -- selalu flat 1x gaji harian per hari, karena belum
+    // permanent (kebijakan eksplisit, lihat TRAINING_FLAT_MULTIPLIER).
+    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
 
     // Kelompok Alpha — mangkir eksplisit + hari kosong di luar kuota, digabung jadi satu deret
-    // kejadian: 1.5x, 2x, 2.25x, 2.5x, 2.75x, mentok 3x.
+    // kejadian: 1.5x, 2x, 2.25x, 2.5x, 2.75x, mentok 3x. Sama seperti Izin di atas, training flat 1x.
     const alphaGroupDates = [...explicitAlphaDates, ...excessEmptyDates]
-    const alphaGroup = calcEscalatingDeduction(alphaGroupDates, dailyRate, ALPHA_GROUP_MULTIPLIERS)
+    const alphaGroup = calcEscalatingDeduction(alphaGroupDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
     // Sakit DENGAN surat dokter: tetap seperti semula — hari ke-1 gratis, ke-2&3 = 0.5×, ke-4+ = 1×
     // (dihitung kumulatif per hari dalam periode, bukan per kejadian).
@@ -1546,8 +1548,8 @@ export default function PenggajianBulananPage() {
 
     const izinGroupDates = atts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
     const explicitAlphaDates = atts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
-    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, IZIN_GROUP_MULTIPLIERS)
-    const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, ALPHA_GROUP_MULTIPLIERS)
+    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
+    const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
     const sickDays   = atts.filter((a: any) => a.status === 'sick_doc').length
     const sick1Free  = Math.min(sickDays, 1)

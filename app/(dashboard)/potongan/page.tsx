@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { getCurrentPeriodRangeStr, rosterPeriodLabel } from '@/lib/rosterPeriod'
-import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, type EscalatingResult } from '@/lib/escalatingDeduction'
+import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, type EscalatingResult } from '@/lib/escalatingDeduction'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
@@ -12,14 +12,14 @@ const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency',
 type SalarySummary = {
   base_salary: number; position_allowance: number; meal_allowance: number; special_allowance: number
   daily_rate: number; overtime_rate_per_hour: number; overtime_eligible: boolean
-  branch_name: string | null; department_name: string | null
+  branch_name: string | null; department_name: string | null; employee_type: string | null
 }
 
 type EmployeeRow = {
   id: string; full_name: string; employee_code: string
   branchName: string; departmentName: string
   base_salary: number; position_allowance: number; meal_allowance: number; special_allowance: number
-  dailyRate: number; overtimeRate: number; overtimeEligible: boolean
+  dailyRate: number; overtimeRate: number; overtimeEligible: boolean; isTraining: boolean
   izin: EscalatingResult; alpha: EscalatingResult; sickDocDays: number
 }
 
@@ -29,9 +29,9 @@ function fmtDateShort(d: string) {
 
 // Kartu rincian aturan + sumber angka, dipakai untuk tampilan diri sendiri (karyawan) maupun
 // modal detail per-orang (Owner/HR) — supaya rumus & angkanya selalu identik di kedua tempat.
-function RateCard({ label, base, pos, meal, special, dailyRate, overtimeRate, overtimeEligible, lateRate }: {
+function RateCard({ label, base, pos, meal, special, dailyRate, overtimeRate, overtimeEligible, lateRate, isTraining }: {
   label?: string; base: number; pos: number; meal: number; special: number
-  dailyRate: number; overtimeRate: number; overtimeEligible: boolean; lateRate: number
+  dailyRate: number; overtimeRate: number; overtimeEligible: boolean; lateRate: number; isTraining?: boolean
 }) {
   return (
     <div className="space-y-5">
@@ -44,14 +44,21 @@ function RateCard({ label, base, pos, meal, special, dailyRate, overtimeRate, ov
         <p className="text-xs text-blue-500 mt-1">Angka ini yang jadi dasar SEMUA potongan izin/sakit/alpha di bawah.</p>
       </div>
 
+      {isTraining && (
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3 text-sm">
+          <p className="font-bold text-amber-800">🔰 Status: Training — potongan Izin/Sakit-tanpa-surat &amp; Alpha FLAT, tidak eskalasi</p>
+          <p className="text-amber-700 mt-1">Karyawan training dipotong <strong>{fmtRp(dailyRate)}/hari (1×)</strong> untuk Izin/Sakit-tanpa-surat maupun Alpha, kejadian ke berapa pun — tidak naik bertahap seperti karyawan permanent (yang bisa sampai 2× untuk Izin dan 3× untuk Alpha).</p>
+        </div>
+      )}
+
       <div>
-        <p className="text-sm font-semibold text-orange-700 mb-2">Izin Duka / Periksa-Keperluan / Sakit Tanpa Surat — per kejadian, reset tiap periode</p>
+        <p className="text-sm font-semibold text-orange-700 mb-2">Izin Duka / Periksa-Keperluan / Sakit Tanpa Surat — {isTraining ? 'flat, tidak eskalasi (training)' : 'per kejadian, reset tiap periode'}</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead><tr className="bg-orange-50 text-orange-800"><th className="px-3 py-1.5 text-left">Kejadian</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan</th></tr></thead>
             <tbody className="divide-y divide-orange-100">
-              {IZIN_GROUP_MULTIPLIERS.map((m, i) => (
-                <tr key={i}><td className="px-3 py-1.5">Ke-{i + 1}{i === IZIN_GROUP_MULTIPLIERS.length - 1 ? ' (mentok)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(dailyRate * m))}</td></tr>
+              {(isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS).map((m, i) => (
+                <tr key={i}><td className="px-3 py-1.5">{isTraining ? 'Semua kejadian' : `Ke-${i + 1}`}{!isTraining && i === IZIN_GROUP_MULTIPLIERS.length - 1 ? ' (mentok)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(dailyRate * m))}</td></tr>
               ))}
             </tbody>
           </table>
@@ -59,13 +66,13 @@ function RateCard({ label, base, pos, meal, special, dailyRate, overtimeRate, ov
       </div>
 
       <div>
-        <p className="text-sm font-semibold text-red-700 mb-2">Alpha (termasuk hari kosong tanpa keterangan di luar kuota) — per kejadian, reset tiap periode</p>
+        <p className="text-sm font-semibold text-red-700 mb-2">Alpha (termasuk hari kosong tanpa keterangan di luar kuota) — {isTraining ? 'flat, tidak eskalasi (training)' : 'per kejadian, reset tiap periode'}</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Kejadian</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan</th></tr></thead>
             <tbody className="divide-y divide-red-100">
-              {ALPHA_GROUP_MULTIPLIERS.map((m, i) => (
-                <tr key={i}><td className="px-3 py-1.5">Ke-{i + 1}{i === ALPHA_GROUP_MULTIPLIERS.length - 1 ? ' (mentok)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(dailyRate * m))}</td></tr>
+              {(isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS).map((m, i) => (
+                <tr key={i}><td className="px-3 py-1.5">{isTraining ? 'Semua kejadian' : `Ke-${i + 1}`}{!isTraining && i === ALPHA_GROUP_MULTIPLIERS.length - 1 ? ' (mentok)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(dailyRate * m))}</td></tr>
               ))}
             </tbody>
           </table>
@@ -173,7 +180,7 @@ export default function AturanPotonganPage() {
   // penuh lewat RLS owner/hr/finance) query tabel langsung, bukan lewat RPC.
   async function fetchPreviewStatus(empId: string) {
     const [{ data: emp }, { data: sc }, { data: atts }] = await Promise.all([
-      supabase.from('employees').select('overtime_applicable, branches(name), departments(name)').eq('id', empId).single(),
+      supabase.from('employees').select('overtime_applicable, employee_type, branches(name), departments(name)').eq('id', empId).single(),
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
         .eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('attendances').select('date, status').eq('employee_id', empId).gte('date', period.start).lte('date', period.end),
@@ -187,6 +194,7 @@ export default function AturanPotonganPage() {
       daily_rate: dailyRate, overtime_rate_per_hour: Number(sc?.overtime_rate_per_hour ?? 0),
       overtime_eligible: (emp as any)?.overtime_applicable !== false && deptName !== 'Team Gudang',
       branch_name: (emp as any)?.branches?.name ?? null, department_name: deptName,
+      employee_type: (emp as any)?.employee_type ?? null,
     }
     applyStatus(s, atts || [])
   }
@@ -194,17 +202,19 @@ export default function AturanPotonganPage() {
   function applyStatus(s: SalarySummary | null, atts: { date: string; status: string }[]) {
     setMySummary(s)
     const dailyRate = s?.daily_rate ?? 0
+    // Training tidak eskalasi -- flat 1x gaji harian per hari (kebijakan eksplisit).
+    const isTraining = s?.employee_type === 'training'
     const izinDates = atts.filter(a => a.status === 'sick' || a.status === 'permission').map(a => a.date)
     const alphaDates = atts.filter(a => a.status === 'absent').map(a => a.date)
-    setMyIzin(calcEscalatingDeduction(izinDates, dailyRate, IZIN_GROUP_MULTIPLIERS))
-    setMyAlpha(calcEscalatingDeduction(alphaDates, dailyRate, ALPHA_GROUP_MULTIPLIERS))
+    setMyIzin(calcEscalatingDeduction(izinDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS))
+    setMyAlpha(calcEscalatingDeduction(alphaDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS))
     setMySickDoc(atts.filter(a => a.status === 'sick_doc').length)
   }
 
   async function fetchAllEmployees() {
     const [{ data: emps }, { data: scAll }, { data: attAll }] = await Promise.all([
       supabase.from('employees')
-        .select('id, full_name, employee_code, overtime_applicable, branches(name), departments(name)')
+        .select('id, full_name, employee_code, overtime_applicable, employee_type, branches(name), departments(name)')
         .eq('is_active', true).order('full_name'),
       supabase.from('salary_components')
         .select('employee_id, base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour, effective_date')
@@ -236,13 +246,15 @@ export default function AturanPotonganPage() {
       const alphaDates = atts.filter(a => a.status === 'absent').map(a => a.date)
       const sickDocDays = atts.filter(a => a.status === 'sick_doc').length
       const deptName = e.departments?.name ?? null
+      const isTraining = e.employee_type === 'training'
       return {
         id: e.id, full_name: e.full_name, employee_code: e.employee_code,
         branchName: e.branches?.name ?? '-', departmentName: deptName ?? '-',
         base_salary: sc.base, position_allowance: sc.pos, meal_allowance: sc.meal, special_allowance: sc.special,
         dailyRate, overtimeRate: sc.ot, overtimeEligible: e.overtime_applicable !== false && deptName !== 'Team Gudang',
-        izin: calcEscalatingDeduction(izinDates, dailyRate, IZIN_GROUP_MULTIPLIERS),
-        alpha: calcEscalatingDeduction(alphaDates, dailyRate, ALPHA_GROUP_MULTIPLIERS),
+        isTraining,
+        izin: calcEscalatingDeduction(izinDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS),
+        alpha: calcEscalatingDeduction(alphaDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS),
         sickDocDays,
       }
     })
@@ -267,6 +279,7 @@ export default function AturanPotonganPage() {
               <RateCard
                 base={mySummary.base_salary} pos={mySummary.position_allowance} meal={mySummary.meal_allowance} special={mySummary.special_allowance}
                 dailyRate={mySummary.daily_rate} overtimeRate={mySummary.overtime_rate_per_hour} overtimeEligible={mySummary.overtime_eligible} lateRate={lateRate}
+                isTraining={mySummary.employee_type === 'training'}
               />
               <div className="pt-4 border-t border-slate-100 space-y-3">
                 <p className="text-sm font-semibold text-slate-800">Status Periode Ini</p>
@@ -348,6 +361,7 @@ export default function AturanPotonganPage() {
                 label={detailRow.full_name}
                 base={detailRow.base_salary} pos={detailRow.position_allowance} meal={detailRow.meal_allowance} special={detailRow.special_allowance}
                 dailyRate={detailRow.dailyRate} overtimeRate={detailRow.overtimeRate} overtimeEligible={detailRow.overtimeEligible} lateRate={lateRate}
+                isTraining={detailRow.isTraining}
               />
               <div className="pt-4 mt-4 border-t border-slate-100 space-y-3">
                 <p className="text-sm font-semibold text-slate-800">Status Periode Ini</p>

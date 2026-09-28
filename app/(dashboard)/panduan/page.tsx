@@ -286,6 +286,10 @@ export default function PanduanKaryawanPage() {
           <h2 className="text-lg font-bold text-slate-800 mb-3">8. 💸 Potongan Izin / Sakit Tanpa Surat</h2>
           <div className="space-y-3 text-sm text-slate-600">
             <p>Izin (duka, keperluan pribadi, dll) dan Sakit <strong>tanpa</strong> surat dokter digabung jadi satu kelompok yang sama. Aturannya per <strong>"kejadian"</strong>: kalau izin 2-3 hari berturut-turut tanpa jeda masuk kerja, itu dihitung <strong>1 kejadian saja</strong> (bukan dihitung per hari). Begitu Anda masuk kerja lagi lalu izin lagi di lain waktu (dalam periode yang sama), itu jadi kejadian berikutnya — dan tarifnya naik. Setiap masuk periode baru (tanggal 26), hitungan kembali dari kejadian pertama lagi.</p>
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3">
+              <p className="font-bold text-amber-800">🔰 Kecuali karyawan Training</p>
+              <p className="text-amber-700 mt-0.5">Kalau status Anda masih <strong>Training</strong>, aturan di atas TIDAK berlaku — potongannya <strong>flat 1× gaji harian per hari</strong>, kejadian ke berapa pun, tidak pernah naik bertahap. Berlaku sama untuk Alpha di bagian 9.</p>
+            </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
               <p className="text-blue-700 mt-0.5">Ibarat kartu pelanggaran wasit sepak bola dalam satu musim pertandingan (1 periode gaji). Pelanggaran pertama masih kartu ringan. Begitu bikin pelanggaran <em>terpisah</em> lagi di hari lain, kartunya makin berat. Masuk musim baru (periode baru), papan kartu direset dari nol.</p>
@@ -315,7 +319,7 @@ export default function PanduanKaryawanPage() {
         <section id="potongan-alpha" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
           <h2 className="text-lg font-bold text-slate-800 mb-3">9. 💸 Potongan Alpha</h2>
           <div className="space-y-3 text-sm text-slate-600">
-            <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (per kejadian, blok tanggal berturut dihitung 1 kejadian, reset tiap periode) — bedanya tarifnya jauh lebih berat karena ini absen tanpa keterangan sama sekali. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama. Kalau sebenarnya Anda masuk kerja tapi cuma lupa scan, itu bukan Alpha biasa — lihat jalur "Lupa Absen" di bagian 7.</p>
+            <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (per kejadian, blok tanggal berturut dihitung 1 kejadian, reset tiap periode, <strong>kecuali karyawan Training</strong> yang flat 1× — lihat catatan di bagian 8) — bedanya tarifnya jauh lebih berat karena ini absen tanpa keterangan sama sekali. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama. Kalau sebenarnya Anda masuk kerja tapi cuma lupa scan, itu bukan Alpha biasa — lihat jalur "Lupa Absen" di bagian 7.</p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
                 <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari</th></tr></thead>
