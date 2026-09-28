@@ -85,6 +85,7 @@ export default function LaporanPengirimanPage() {
   const [verifyAmount, setVerifyAmount] = useState('')
   const [verifySaving, setVerifySaving] = useState(false)
   const [onlyUnverified, setOnlyUnverified] = useState(false)
+  const [detailModal, setDetailModal] = useState<'incident' | 'failed' | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   const fetchData = useCallback(async () => {
@@ -216,6 +217,13 @@ export default function LaporanPengirimanPage() {
   const unverifiedPlanIds = new Set(unverifiedStores.map(s => s.plan_id))
   const visiblePlans = onlyUnverified ? plans.filter(p => unverifiedPlanIds.has(p.id)) : plans
 
+  // Rincian kartu Kejadian / Gagal Kirim: satu baris per toko, lengkap dengan trip, keterangan, dan foto.
+  const planById = new Map(plans.map(p => [p.id, p]))
+  const detailStores = (detailModal === 'incident'
+    ? allStores.filter(s => s.incident_type !== 'tidak_ada')
+    : detailModal === 'failed' ? allStores.filter(s => s.status === 'failed') : []
+  ).sort((a, b) => (planById.get(b.plan_id)?.plan_date ?? '').localeCompare(planById.get(a.plan_id)?.plan_date ?? ''))
+
   const monthOptions = Array.from({ length: 12 }, (_, i) => {
     const d = new Date()
     d.setDate(1)
@@ -312,14 +320,18 @@ export default function LaporanPengirimanPage() {
               <p className="text-[11px] text-slate-500 uppercase mb-1">Toko Tempo</p>
               <p className="text-sm font-bold text-amber-600">{totalTempo} toko</p>
             </div>
-            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+            <button type="button" onClick={() => totalIncident > 0 && setDetailModal('incident')} disabled={totalIncident === 0}
+              className="text-left bg-white p-3 rounded-xl shadow-sm border border-slate-200 enabled:hover:border-red-300 enabled:hover:bg-red-50/40 transition disabled:cursor-default">
               <p className="text-[11px] text-slate-500 uppercase mb-1">Kejadian</p>
               <p className="text-sm font-bold text-red-500">{totalIncident} toko</p>
-            </div>
-            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+              {totalIncident > 0 && <p className="text-[10px] text-blue-600 mt-1">Klik untuk lihat rincian ›</p>}
+            </button>
+            <button type="button" onClick={() => totalFailed > 0 && setDetailModal('failed')} disabled={totalFailed === 0}
+              className="text-left bg-white p-3 rounded-xl shadow-sm border border-slate-200 enabled:hover:border-red-300 enabled:hover:bg-red-50/40 transition disabled:cursor-default">
               <p className="text-[11px] text-slate-500 uppercase mb-1">Gagal Kirim</p>
               <p className="text-sm font-bold text-red-500">{totalFailed} toko</p>
-            </div>
+              {totalFailed > 0 && <p className="text-[10px] text-blue-600 mt-1">Klik untuk lihat rincian ›</p>}
+            </button>
           </div>
 
           {loading ? (
@@ -530,6 +542,71 @@ export default function LaporanPengirimanPage() {
             </div>
           )}
         </>
+      )}
+
+      {detailModal && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" onClick={() => setDetailModal(null)}>
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">
+                  {detailModal === 'incident' ? 'Rincian Kejadian (Salah Muat / Retur)' : 'Rincian Gagal Kirim'}
+                </h2>
+                <p className="text-xs text-slate-500">{detailStores.length} toko · periode {monthOptions.find(m => m.value === filterMonth)?.label}</p>
+              </div>
+              <button onClick={() => setDetailModal(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
+            </div>
+            <div className="overflow-y-auto divide-y divide-slate-100">
+              {detailStores.map(s => {
+                const plan = planById.get(s.plan_id)
+                const photos: { url: string; label: string }[] = [
+                  ...(s.incident_photo_url ? [{ url: s.incident_photo_url, label: 'Foto Kejadian' }] : []),
+                  ...(detailModal === 'failed' ? (s.delivery_photo_urls ?? []).map((url, i) => ({ url, label: `Foto ${i + 1}` })) : []),
+                ]
+                return (
+                  <div key={s.id} className="px-5 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-800">{s.logistics_stores?.name ?? '-'}</p>
+                      {detailModal === 'incident' ? (
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">
+                          {s.incident_type === 'salah_muat' ? 'Salah Muat' : s.incident_type === 'retur' ? 'Retur' : s.incident_type}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-red-100 text-red-600 font-semibold">Gagal Kirim</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {plan ? new Date(plan.plan_date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
+                      {s.resolved_at && <> · jam {fmtJam(s.resolved_at)}</>}
+                      {plan && <> · {plan.vehicles?.name} — {plan.delivery_routes?.name} · {plan.driver?.full_name}{plan.helper?.full_name ? ` / ${plan.helper.full_name}` : ''}</>}
+                    </p>
+                    <p className="text-sm text-slate-700 mt-1.5 whitespace-pre-wrap">
+                      {detailModal === 'incident'
+                        ? (s.incident_description || <span className="text-slate-400 italic">Tidak ada keterangan</span>)
+                        : (s.failed_reason || <span className="text-slate-400 italic">Tidak ada alasan tercatat</span>)}
+                    </p>
+                    {detailModal === 'failed' && s.incident_description && (
+                      <p className="text-xs text-amber-600 mt-1">{s.incident_description}</p>
+                    )}
+                    {photos.length > 0 ? (
+                      <div className="flex flex-wrap gap-3 mt-2">
+                        {photos.map((ph, i) => (
+                          <button key={i} type="button" onClick={() => openLightbox(ph.url, `${s.logistics_stores?.name} — ${ph.label}`)} className="flex flex-col items-center gap-1">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={ph.url} alt={ph.label} className="w-24 h-24 object-cover rounded-lg border border-slate-200" />
+                            <span className="text-[10px] text-slate-500 font-medium">{ph.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-400 mt-2">Tidak ada foto.</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
