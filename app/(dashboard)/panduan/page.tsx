@@ -276,12 +276,20 @@ export default function PanduanKaryawanPage() {
         <section id="alpha" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
           <h2 className="text-lg font-bold text-slate-800 mb-3">7. 🚨 Alpha &amp; Cara Klarifikasi</h2>
           <div className="space-y-3 text-sm text-slate-600">
-            <p><strong>Alpha</strong> = tidak absen sama sekali di hari kerja, padahal hari itu bukan hari libur terjadwal Anda. Sistem mendeteksi ini otomatis, tidak perlu dilaporkan HR. Ini adalah <strong>jalur darurat/susulan</strong> — kalau Anda sudah tahu dari awal tidak bisa masuk, seharusnya ajukan lewat <strong>Cuti &amp; Izin</strong> (bagian 6) SEBELUM terjadi, bukan menunggu dianggap Alpha dulu.</p>
+            <p><strong>Alpha</strong> = tidak absen sama sekali di hari kerja, padahal hari itu bukan hari libur terjadwal Anda. Sistem mengecek ini <strong>otomatis setiap hari</strong> (bukan cuma kalau kebetulan ada yang buka halaman tertentu), tidak perlu dilaporkan HR. Ini adalah <strong>jalur darurat/susulan</strong> — kalau Anda sudah tahu dari awal tidak bisa masuk, seharusnya ajukan lewat <strong>Cuti &amp; Izin</strong> (bagian 6) SEBELUM terjadi, bukan menunggu dianggap Alpha dulu.</p>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+              <p className="font-medium text-emerald-800">📍 Ada tab khusus untuk ini!</p>
+              <p className="text-emerald-700 mt-0.5">Jangan cuma andalkan pengingat yang muncul di dashboard — kalau kelewat/ter-skip, buka langsung menu <strong>Portal Saya → Klarifikasi Alpha</strong>. Semua Alpha yang masih perlu ditindaklanjuti selalu ada di sana, kapan pun Anda buka.</p>
+            </div>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
               <p className="font-medium text-red-800">⏳ Anda punya waktu 2 hari untuk klarifikasi!</p>
               <p className="text-red-700 mt-0.5">
-                Begitu terdeteksi Alpha, buka <strong>Portal Saya</strong> dan klarifikasi sebenarnya kenapa: pilih <em>Sakit (tanpa surat)</em>, <em>Sakit (dengan surat dokter — wajib lampirkan foto/scan surat)</em>, atau <em>Izin</em>. Batas waktunya <strong>2 hari</strong> dari tanggal Alpha itu terjadi.
+                Buka <strong>Portal Saya → Klarifikasi Alpha</strong> dan klarifikasi sebenarnya kenapa: pilih <em>Sakit (tanpa surat)</em>, <em>Sakit (dengan surat dokter — wajib lampirkan foto/scan surat)</em>, <em>Izin</em>, <em>Libur</em> (lihat kotak di bawah), atau <em>Lupa Absen</em> (bagian 8). Batas waktunya <strong>2 hari</strong> dari tanggal Alpha itu terjadi.
               </p>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="font-medium text-blue-800">🏖️ Opsi "Libur" — pakai jatah 4 hari/periode</p>
+              <p className="text-blue-700 mt-0.5">Kalau hari Alpha itu sebenarnya memang mau Anda jadikan libur (belum sempat diajukan di muka), pilih opsi <em>Libur</em> saat klarifikasi — <strong>gratis, tidak ada potongan sama sekali</strong>, selama jatah 4 hari libur periode ini belum habis (lihat bagian 5). Kalau jatahnya sudah habis, ajukan sebagai Izin biasa.</p>
             </div>
             <ul className="list-disc pl-5 space-y-1">
               <li>Klarifikasi tepat waktu → HR akan meninjau, dan statusnya berubah sesuai yang Anda pilih (bukan Alpha lagi kalau disetujui).</li>
