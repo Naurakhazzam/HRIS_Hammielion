@@ -15,6 +15,16 @@ export const ALPHA_GROUP_MULTIPLIERS = [1.5, 2, 2.25, 2.5, 2.75, 3]
 // calcEscalatingDeduction() yang sama persis (cuma multiplier-nya selalu 1x, tidak pernah naik).
 export const TRAINING_FLAT_MULTIPLIER = [1]
 
+// Aturan-aturan potongan/denda BARU (eskalasi Izin/Alpha, denda Lupa Absen Masuk/Pulang, dst)
+// cuma berlaku mulai periode yang DIMULAI tanggal ini -- periode SEBELUMNYA (termasuk 26 Agustus
+// - 25 September 2026 yang penuh masalah data transisi fingerprint->QR) tetap dihitung FLAT 1x
+// gaji harian per hari untuk semua jenis tidak-hadir (Izin/Sakit-tanpa-surat/Sakit-dengan-surat/
+// Alpha), tanpa eskalasi dan tanpa denda administratif apa pun -- dikonfirmasi user, supaya
+// periode transisi yang penuh bug tidak dihukum dengan aturan yang baru selesai diperbaiki
+// belakangan. Bandingkan terhadap TANGGAL AKHIR periode (lastDay/period_end): periode yang
+// berakhir SEBELUM tanggal ini dianggap "periode lama".
+export const NEW_RULES_CUTOFF_DATE = '2026-09-26'
+
 export type EscalatingBlock = { dates: string[]; occurrence: number; multiplier: number; subtotal: number }
 export type EscalatingResult = { total: number; blocks: EscalatingBlock[] }
 

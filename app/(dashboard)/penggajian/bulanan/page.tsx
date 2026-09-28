@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import { todayLocalStr } from '@/lib/date'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
-import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, type EscalatingResult } from '@/lib/escalatingDeduction'
+import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, NEW_RULES_CUTOFF_DATE, type EscalatingResult } from '@/lib/escalatingDeduction'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -224,6 +224,9 @@ export default function PenggajianBulananPage() {
     izinGroup: EscalatingResult; alphaGroup: EscalatingResult
     sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number; sickDed: number
     adminFeeTotal: number
+    // true = periode ini berakhir sebelum NEW_RULES_CUTOFF_DATE -- semua potongan di atas flat
+    // 1x gaji harian, eskalasi/denda baru belum berlaku (dikonfirmasi user).
+    isPreNewRulesPeriod: boolean
   }
   const [absentBreakdownDetail, setAbsentBreakdownDetail] = useState<AbsentBreakdownDetail | null>(null)
 
@@ -857,29 +860,37 @@ export default function PenggajianBulananPage() {
     const kurangLibur     = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - freeEmptyUsed, 0)
     const liburKompensasi = flatSalaryForEmp ? 0 : Math.round(kurangLibur * dailyRate)
 
+    // Periode yang berakhir SEBELUM NEW_RULES_CUTOFF_DATE (26 Sep 2026) masih dihitung FLAT --
+    // aturan eskalasi/denda baru cuma berlaku mulai periode itu (dikonfirmasi user, supaya
+    // periode transisi fingerprint->QR yang penuh bug tidak kena aturan yang baru selesai
+    // diperbaiki belakangan). Karyawan training SUDAH flat sejak awal, jadi tidak terpengaruh.
+    const isPreNewRulesPeriod = lastDay < NEW_RULES_CUTOFF_DATE
+    const useFlatDeduction = isTraining || isPreNewRulesPeriod
+
     // Kelompok Izin (Duka/Periksa/Sakit-tanpa-surat) — eskalasi per kejadian (blok tanggal
-    // bersambung), reset tiap periode: 1x, 1.25x, 1.5x, 1.75x, mentok 2x. Karyawan TRAINING
-    // dikecualikan dari eskalasi ini -- selalu flat 1x gaji harian per hari, karena belum
-    // permanent (kebijakan eksplisit, lihat TRAINING_FLAT_MULTIPLIER).
-    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
+    // bersambung), reset tiap periode: 1x, 1.25x, 1.5x, 1.75x, mentok 2x. Flat 1x untuk training
+    // maupun periode sebelum aturan baru berlaku (lihat NEW_RULES_CUTOFF_DATE).
+    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
 
     // Kelompok Alpha — mangkir eksplisit + hari kosong di luar kuota, digabung jadi satu deret
-    // kejadian: 1.5x, 2x, 2.25x, 2.5x, 2.75x, mentok 3x. Sama seperti Izin di atas, training flat 1x.
+    // kejadian: 1.5x, 2x, 2.25x, 2.5x, 2.75x, mentok 3x. Sama seperti Izin di atas.
     const alphaGroupDates = [...explicitAlphaDates, ...excessEmptyDates]
-    const alphaGroup = calcEscalatingDeduction(alphaGroupDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
+    const alphaGroup = calcEscalatingDeduction(alphaGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
-    // Sakit DENGAN surat dokter: tetap seperti semula — hari ke-1 gratis, ke-2&3 = 0.5×, ke-4+ = 1×
-    // (dihitung kumulatif per hari dalam periode, bukan per kejadian).
+    // Sakit DENGAN surat dokter: hari ke-1 gratis, ke-2&3 = 0.5×, ke-4+ = 1× (dihitung kumulatif
+    // per hari dalam periode, bukan per kejadian) -- KECUALI periode sebelum aturan baru, flat 1x
+    // dari hari pertama (tidak ada hari gratis).
     const sickCount   = sickDocRecs.length
-    const sick1Free   = Math.min(sickCount, 1)
-    const sick23Half  = Math.max(0, Math.min(sickCount - 1, 2))
-    const sick4Full   = Math.max(0, sickCount - 3)
-    const sickDed     = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
+    const sick1Free   = isPreNewRulesPeriod ? 0 : Math.min(sickCount, 1)
+    const sick23Half  = isPreNewRulesPeriod ? 0 : Math.max(0, Math.min(sickCount - 1, 2))
+    const sick4Full   = isPreNewRulesPeriod ? 0 : Math.max(0, sickCount - 3)
+    const sickDed     = isPreNewRulesPeriod ? Math.round(sickCount * dailyRate) : Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
 
     // Denda administratif Lupa Absen Masuk/Pulang -- nominal flat per kejadian (Rp15.000/Rp5.000,
     // lihat migrasi checkout_clarifications & submit_alpha_clarification), BUKAN bagian dari
-    // eskalasi Izin/Alpha, jadi cuma dijumlah langsung dari kolom attendances.admin_fee.
-    const adminFeeTotal = flatSalaryForEmp ? 0 : validAtts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
+    // eskalasi Izin/Alpha. TIDAK berlaku untuk periode sebelum aturan baru (dendanya sendiri baru
+    // ada mulai periode ini, jadi tidak adil ditagih surut).
+    const adminFeeTotal = (flatSalaryForEmp || isPreNewRulesPeriod) ? 0 : validAtts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
 
     const absentDed        = flatSalaryForEmp ? 0 : izinGroup.total + alphaGroup.total + sickDed + adminFeeTotal
     const absentDays       = flatSalaryForEmp ? 0 : izinGroupDates.length + alphaGroupDates.length + sickCount
@@ -894,6 +905,7 @@ export default function PenggajianBulananPage() {
       sick23Half,
       sick4Full,
       adminFeeTotal,
+      isPreNewRulesPeriod,
     }
 
     // Bonus kondisional — fetch langsung dari DB (hindari race condition dengan state)
@@ -1546,19 +1558,24 @@ export default function PenggajianBulananPage() {
     const freeEmptyUsed = Math.min(emptyDateList.length, kuotaLibur)
     const excessEmptyDates = emptyDateList.slice(freeEmptyUsed)
 
+    // Periode yang berakhir sebelum NEW_RULES_CUTOFF_DATE masih dihitung FLAT -- lihat catatan
+    // lengkap di buildSlipPreview di atas.
+    const isPreNewRulesPeriod = lastDay < NEW_RULES_CUTOFF_DATE
+    const useFlatDeduction = isTraining || isPreNewRulesPeriod
+
     const izinGroupDates = atts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
     const explicitAlphaDates = atts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
-    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
-    const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
+    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
+    const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
     const sickDays   = atts.filter((a: any) => a.status === 'sick_doc').length
-    const sick1Free  = Math.min(sickDays, 1)
-    const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
-    const sick4Full  = Math.max(0, sickDays - 3)
-    const sickDed    = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
-    const adminFeeTotal = atts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
+    const sick1Free  = isPreNewRulesPeriod ? 0 : Math.min(sickDays, 1)
+    const sick23Half = isPreNewRulesPeriod ? 0 : Math.max(0, Math.min(sickDays - 1, 2))
+    const sick4Full  = isPreNewRulesPeriod ? 0 : Math.max(0, sickDays - 3)
+    const sickDed    = isPreNewRulesPeriod ? Math.round(sickDays * dailyRate) : Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
+    const adminFeeTotal = isPreNewRulesPeriod ? 0 : atts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
 
-    setAbsentBreakdownDetail({ dailyRate, izinGroup, alphaGroup, sickDays, sick1Free, sick23Half, sick4Full, sickDed, adminFeeTotal })
+    setAbsentBreakdownDetail({ dailyRate, izinGroup, alphaGroup, sickDays, sick1Free, sick23Half, sick4Full, sickDed, adminFeeTotal, isPreNewRulesPeriod })
   }
 
   // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
@@ -2721,6 +2738,9 @@ export default function PenggajianBulananPage() {
                       <div>Tidak Hadir ({selectedPayroll.absent_days ?? 0} hari)</div>
                       {absentBreakdownDetail && (
                         <div className="mt-1 space-y-0.5">
+                          {absentBreakdownDetail.isPreNewRulesPeriod && (
+                            <div className="text-xs text-amber-600 font-medium">⚠️ Periode ini sebelum 26 Sep 2026 — masih flat 1x gaji harian, belum eskalasi/denda baru.</div>
+                          )}
                           <div className="text-xs text-slate-400">└ Gaji harian (total komponen ÷ 26): <span className="font-medium text-slate-600">{formatRupiah(absentBreakdownDetail.dailyRate)}</span></div>
                           {absentBreakdownDetail.izinGroup.blocks.length > 0 && (
                             <div>
@@ -3174,6 +3194,9 @@ export default function PenggajianBulananPage() {
                   ))}
                   {slipPreview.absentBreakdown && (slipPreview.absentBreakdown.izinGroup.blocks.length > 0 || slipPreview.absentBreakdown.alphaGroup.blocks.length > 0 || slipPreview.absentBreakdown.sickDays > 0 || slipPreview.absentBreakdown.adminFeeTotal > 0) && (
                     <div className="px-4 py-2 border-t border-slate-100 text-xs text-slate-400 space-y-0.5">
+                      {slipPreview.absentBreakdown.isPreNewRulesPeriod && (
+                        <div className="text-amber-600 font-medium">⚠️ Periode ini sebelum 26 Sep 2026 — masih flat 1x gaji harian, belum eskalasi/denda baru.</div>
+                      )}
                       <div>└ Gaji harian (total komponen ÷ 26): <span className="text-slate-600 font-medium">{formatRupiah(slipPreview.absentBreakdown.dailyRate)}</span></div>
                       {slipPreview.absentBreakdown.izinGroup.blocks.length > 0 && (
                         <div>
