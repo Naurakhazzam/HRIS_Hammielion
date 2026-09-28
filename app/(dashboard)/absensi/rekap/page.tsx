@@ -332,6 +332,20 @@ export default function RekapAbsensiPage() {
     setLateReviewingId(null)
   }
 
+  // Semua panel klarifikasi (Alpha/Lupa Absen Pulang/Lembur/Telat) cuma dimuat SEKALI saat
+  // halaman pertama dibuka (useEffect on-mount) -- kalau tab ini sudah lama terbuka sebelum
+  // karyawan mengirim klarifikasi baru, panelnya tidak otomatis update. Tombol ini muat ulang
+  // keempatnya sekaligus tanpa perlu reload seluruh halaman.
+  async function refreshAllClarificationPanels() {
+    await Promise.all([
+      fetchAlphaClarifications(),
+      fetchCheckoutClarifications(),
+      fetchOvertimeClaims(),
+      fetchLateClarifications(),
+    ])
+    showMsg('success', 'Panel klarifikasi diperbarui.')
+  }
+
   // Periode filter di halaman ini pakai siklus tanggal 26–25 (lihat getPeriodLabel), jadi
   // tanggal 26-31 masuk periode BULAN BERIKUTNYA — hitung dulu supaya baris yang dituju
   // benar-benar muncul di tabel setelah "Lihat" diklik.
@@ -726,6 +740,8 @@ export default function RekapAbsensiPage() {
           <p className="text-sm text-slate-500">Pantau kehadiran harian dan hitung keterlambatan/lembur.</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={refreshAllClarificationPanels} title="Panel klarifikasi (Alpha/Lupa Absen/Lembur/Telat) cuma dimuat sekali saat halaman dibuka -- pencet ini untuk cek klarifikasi baru tanpa reload seluruh halaman."
+            className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg text-sm font-medium transition shadow-sm">🔄 Refresh Klarifikasi</button>
           <button onClick={()=>{setAbsenModal(true);setAbsenForm({employee_id:filterEmployee||'',date:new Date().toISOString().split('T')[0],status:'absent',notes:''})}} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">Keterangan Tidak Hadir</button>
           <button onClick={()=>setShowForm(!showForm)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">{showForm?'Batal':'+ Input Hadir Manual'}</button>
         </div>
