@@ -223,6 +223,7 @@ export default function PenggajianBulananPage() {
     dailyRate: number
     izinGroup: EscalatingResult; alphaGroup: EscalatingResult
     sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number; sickDed: number
+    adminFeeTotal: number
   }
   const [absentBreakdownDetail, setAbsentBreakdownDetail] = useState<AbsentBreakdownDetail | null>(null)
 
@@ -684,7 +685,7 @@ export default function PenggajianBulananPage() {
 
     const [scRes, attRes, kpiRes, empRes, loyBalRes, lateDefRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1),
-      supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes, source').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
+      supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes, source, admin_fee').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
@@ -867,7 +868,12 @@ export default function PenggajianBulananPage() {
     const sick4Full   = Math.max(0, sickCount - 3)
     const sickDed     = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
 
-    const absentDed        = flatSalaryForEmp ? 0 : izinGroup.total + alphaGroup.total + sickDed
+    // Denda administratif Lupa Absen Masuk/Pulang -- nominal flat per kejadian (Rp15.000/Rp5.000,
+    // lihat migrasi checkout_clarifications & submit_alpha_clarification), BUKAN bagian dari
+    // eskalasi Izin/Alpha, jadi cuma dijumlah langsung dari kolom attendances.admin_fee.
+    const adminFeeTotal = flatSalaryForEmp ? 0 : validAtts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
+
+    const absentDed        = flatSalaryForEmp ? 0 : izinGroup.total + alphaGroup.total + sickDed + adminFeeTotal
     const absentDays       = flatSalaryForEmp ? 0 : izinGroupDates.length + alphaGroupDates.length + sickCount
     const absentRatePerDay = dailyRate
     const absentBreakdown: AbsentBreakdownDetail = {
@@ -879,6 +885,7 @@ export default function PenggajianBulananPage() {
       sick1Free,
       sick23Half,
       sick4Full,
+      adminFeeTotal,
     }
 
     // Bonus kondisional — fetch langsung dari DB (hindari race condition dengan state)
@@ -1495,7 +1502,7 @@ export default function PenggajianBulananPage() {
 
     const [scRes, attRes, empRes] = await Promise.all([
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
-      supabase.from('attendances').select('date, status').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
+      supabase.from('attendances').select('date, status, admin_fee').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
       supabase.from('employees').select('join_date, employee_type').eq('id', p.employee_id).single(),
     ])
 
@@ -1541,8 +1548,9 @@ export default function PenggajianBulananPage() {
     const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
     const sick4Full  = Math.max(0, sickDays - 3)
     const sickDed    = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
+    const adminFeeTotal = atts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
 
-    setAbsentBreakdownDetail({ dailyRate, izinGroup, alphaGroup, sickDays, sick1Free, sick23Half, sick4Full, sickDed })
+    setAbsentBreakdownDetail({ dailyRate, izinGroup, alphaGroup, sickDays, sick1Free, sick23Half, sick4Full, sickDed, adminFeeTotal })
   }
 
   // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
@@ -2726,6 +2734,11 @@ export default function PenggajianBulananPage() {
                               {absentBreakdownDetail.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(absentBreakdownDetail.sick4Full * absentBreakdownDetail.dailyRate)}</span>}
                             </div>
                           )}
+                          {absentBreakdownDetail.adminFeeTotal > 0 && (
+                            <div className="text-xs text-amber-600">
+                              └ Denda Lupa Absen Masuk/Pulang: {formatRupiah(absentBreakdownDetail.adminFeeTotal)}
+                            </div>
+                          )}
                         </div>
                       )}
                     </td>
@@ -3151,7 +3164,7 @@ export default function PenggajianBulananPage() {
                       <span className="text-red-500 font-medium">-{formatRupiah(Number(v))}</span>
                     </div>
                   ))}
-                  {slipPreview.absentBreakdown && (slipPreview.absentBreakdown.izinGroup.blocks.length > 0 || slipPreview.absentBreakdown.alphaGroup.blocks.length > 0 || slipPreview.absentBreakdown.sickDays > 0) && (
+                  {slipPreview.absentBreakdown && (slipPreview.absentBreakdown.izinGroup.blocks.length > 0 || slipPreview.absentBreakdown.alphaGroup.blocks.length > 0 || slipPreview.absentBreakdown.sickDays > 0 || slipPreview.absentBreakdown.adminFeeTotal > 0) && (
                     <div className="px-4 py-2 border-t border-slate-100 text-xs text-slate-400 space-y-0.5">
                       <div>└ Gaji harian (total komponen ÷ 26): <span className="text-slate-600 font-medium">{formatRupiah(slipPreview.absentBreakdown.dailyRate)}</span></div>
                       {slipPreview.absentBreakdown.izinGroup.blocks.length > 0 && (
@@ -3172,6 +3185,9 @@ export default function PenggajianBulananPage() {
                           {slipPreview.absentBreakdown.sick23Half > 0 && <span> · hari ke-{1+slipPreview.absentBreakdown.sick1Free}–{1+slipPreview.absentBreakdown.sick1Free+slipPreview.absentBreakdown.sick23Half-1} = {formatRupiah(Math.round(slipPreview.absentBreakdown.sick23Half * slipPreview.absentBreakdown.dailyRate * 0.5))}</span>}
                           {slipPreview.absentBreakdown.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(slipPreview.absentBreakdown.sick4Full * slipPreview.absentBreakdown.dailyRate)}</span>}
                         </div>
+                      )}
+                      {slipPreview.absentBreakdown.adminFeeTotal > 0 && (
+                        <div className="text-amber-600">└ Denda Lupa Absen Masuk/Pulang: {formatRupiah(slipPreview.absentBreakdown.adminFeeTotal)}</div>
                       )}
                     </div>
                   )}

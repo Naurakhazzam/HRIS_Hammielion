@@ -142,7 +142,19 @@ export default function RekapAbsensiPage() {
   const [alphaRejectId, setAlphaRejectId] = useState<string | null>(null)
   const [alphaRejectNote, setAlphaRejectNote] = useState('')
 
-  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection() }, [])
+  // Klarifikasi "Lupa Absen Pulang" yang menunggu review HR -- beda precondition dari Alpha
+  // (attendance status='present', check_out null), jadi tabel & RPC-nya terpisah (lihat
+  // lib/checkoutClarification.ts + migrasi checkout_clarifications).
+  type CheckoutClarificationRow = {
+    id: string; attendance_id: string; employee_id: string; date: string; reason: string; created_at: string
+    employees: { full_name: string } | null
+  }
+  const [checkoutClarifications, setCheckoutClarifications] = useState<CheckoutClarificationRow[]>([])
+  const [checkoutReviewingId, setCheckoutReviewingId] = useState<string | null>(null)
+  const [checkoutRejectId, setCheckoutRejectId] = useState<string | null>(null)
+  const [checkoutRejectNote, setCheckoutRejectNote] = useState('')
+
+  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); fetchCheckoutClarifications(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection() }, [])
   useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
   // Kalau karyawan yang sedang dipilih jadi tidak termasuk lagi setelah Cabang/Departemen
   // diganti, kosongkan lagi pilihannya — supaya tidak nyangkut ke karyawan di luar cakupan filter.
@@ -212,6 +224,31 @@ export default function RekapAbsensiPage() {
       fetchAttendances()
     }
     setAlphaReviewingId(null)
+  }
+
+  async function fetchCheckoutClarifications() {
+    const { data } = await supabase.from('checkout_clarifications')
+      .select('id,attendance_id,employee_id,date,reason,created_at,employees(full_name)')
+      .eq('status', 'pending')
+      .order('created_at')
+    setCheckoutClarifications((data as unknown as CheckoutClarificationRow[]) || [])
+  }
+
+  async function reviewCheckout(id: string, approve: boolean, rejectionNote?: string) {
+    setCheckoutReviewingId(id)
+    const { error } = await supabase.rpc('review_checkout_clarification', {
+      p_id: id, p_reviewed_by: myEmployeeId, p_approve: approve, p_rejection_note: rejectionNote || null,
+    })
+    if (error) {
+      showMsg('error', 'Gagal memproses klarifikasi: ' + error.message)
+    } else {
+      showMsg('success', approve ? 'Klarifikasi disetujui, denda Rp5.000 ditambahkan.' : 'Klarifikasi ditolak.')
+      setCheckoutRejectId(null); setCheckoutRejectNote('')
+      fetchCheckoutClarifications()
+      fetchIncompleteCheckouts()
+      fetchAttendances()
+    }
+    setCheckoutReviewingId(null)
   }
 
   // Periode filter di halaman ini pakai siklus tanggal 26–25 (lihat getPeriodLabel), jadi
@@ -618,7 +655,7 @@ export default function RekapAbsensiPage() {
           <p className="text-sm font-semibold text-red-800 mb-3">🔴 {alphaClarifications.length} klarifikasi Alpha menunggu review — potongan besar, mohon segera diputuskan</p>
           <div className="space-y-3">
             {alphaClarifications.map(c => {
-              const typeLabel = c.requested_type === 'sick' ? 'Sakit (tanpa surat)' : c.requested_type === 'sick_doc' ? 'Sakit (dengan surat dokter)' : 'Izin'
+              const typeLabel = c.requested_type === 'sick' ? 'Sakit (tanpa surat)' : c.requested_type === 'sick_doc' ? 'Sakit (dengan surat dokter)' : c.requested_type === 'lupa_absen' ? 'Lupa Absen Masuk (hadir, denda Rp15.000)' : 'Izin'
               return (
                 <div key={c.id} className="bg-white border border-red-200 rounded-lg p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2 mb-1.5">
@@ -649,6 +686,35 @@ export default function RekapAbsensiPage() {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {checkoutClarifications.length > 0 && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <p className="text-sm font-semibold text-amber-800 mb-3">🟡 {checkoutClarifications.length} klarifikasi Lupa Absen Pulang menunggu review</p>
+          <div className="space-y-3">
+            {checkoutClarifications.map(c => (
+              <div key={c.id} className="bg-white border border-amber-200 rounded-lg p-3">
+                <p className="text-sm font-semibold text-slate-800 mb-1.5">{c.employees?.full_name} — {new Date(c.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                <p className="text-sm text-slate-600 bg-slate-50 rounded px-2.5 py-1.5 mb-2">"{c.reason}"</p>
+                {checkoutRejectId === c.id ? (
+                  <div className="space-y-2">
+                    <textarea value={checkoutRejectNote} onChange={e => setCheckoutRejectNote(e.target.value)} placeholder="Alasan penolakan (opsional, untuk arsip)..." rows={2}
+                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none" />
+                    <div className="flex gap-2">
+                      <button disabled={checkoutReviewingId === c.id} onClick={() => reviewCheckout(c.id, false, checkoutRejectNote)} className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium disabled:opacity-50">Konfirmasi Tolak</button>
+                      <button onClick={() => { setCheckoutRejectId(null); setCheckoutRejectNote('') }} className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">Batal</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button disabled={checkoutReviewingId === c.id} onClick={() => reviewCheckout(c.id, true)} className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium disabled:opacity-50">✓ Setujui (denda Rp5.000)</button>
+                    <button disabled={checkoutReviewingId === c.id} onClick={() => setCheckoutRejectId(c.id)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 font-medium disabled:opacity-50">✕ Tolak</button>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -58,10 +58,11 @@ const TOC = [
   { id: 'lembur', label: '4. Aturan Lembur' },
   { id: 'libur', label: '5. Jatah Libur' },
   { id: 'alpha', label: '6. Alpha & Klarifikasi' },
-  { id: 'potongan-izin', label: '7. Potongan Izin/Sakit' },
-  { id: 'potongan-alpha', label: '8. Potongan Alpha' },
-  { id: 'potongan-sakit', label: '9. Potongan Sakit + Surat' },
-  { id: 'ringkasan', label: '10. Ringkasan Cepat' },
+  { id: 'lupa-absen', label: '7. Lupa Absen (Masuk/Pulang)' },
+  { id: 'potongan-izin', label: '8. Potongan Izin/Sakit' },
+  { id: 'potongan-alpha', label: '9. Potongan Alpha' },
+  { id: 'potongan-sakit', label: '10. Potongan Sakit + Surat' },
+  { id: 'ringkasan', label: '11. Ringkasan Cepat' },
 ]
 
 export default function PanduanKaryawanPage() {
@@ -218,7 +219,7 @@ export default function PanduanKaryawanPage() {
               <li>Setiap periode, Anda punya jatah <strong>4 hari libur gratis</strong>. Ajukan tanggalnya sendiri lewat menu <em>Ajukan Libur</em> di Portal.</li>
               <li>Maksimal <strong>1 tanggal Sabtu/Minggu</strong> per periode boleh dipilih jadi hari libur — supaya weekend bisa bergantian dengan rekan kerja, tidak dikuasai orang yang sama terus.</li>
               <li>Kalau libur yang Anda ambil <strong>kurang dari 4 hari</strong> dalam satu periode, sisanya <strong>dibayar tunai</strong> sebagai kompensasi (dianggap Anda "menabung" hari libur jadi uang).</li>
-              <li>Kalau hari kosong (tidak ada absen sama sekali) <strong>lebih dari 4 hari</strong>, kelebihannya bukan lagi dianggap libur — masuk hitungan Izin/Alpha (lihat bagian 7 &amp; 8).</li>
+              <li>Kalau hari kosong (tidak ada absen sama sekali) <strong>lebih dari 4 hari</strong>, kelebihannya bukan lagi dianggap libur — masuk hitungan Izin/Alpha (lihat bagian 8 &amp; 9).</li>
               <li>Kalau ternyata hari itu terjadwal libur tapi Anda tetap masuk kerja, sistem akan minta Anda memilih <strong>tanggal pengganti</strong> untuk libur Anda — pilih lewat kalender yang muncul saat absen masuk.</li>
             </ul>
           </div>
@@ -244,9 +245,32 @@ export default function PanduanKaryawanPage() {
           </div>
         </section>
 
-        {/* 7. Potongan Izin/Sakit */}
+        {/* 7. Lupa Absen */}
+        <section id="lupa-absen" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
+          <h2 className="text-lg font-bold text-slate-800 mb-3">7. 🙈 Lupa Absen (Masuk atau Pulang)</h2>
+          <div className="space-y-3 text-sm text-slate-600">
+            <p>Manusiawi kalau sesekali lupa scan — sistem punya jalur khusus untuk ini, beda dari Sakit/Izin/Alpha, dengan denda tetap yang jauh lebih kecil:</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead><tr className="bg-amber-50 text-amber-800"><th className="px-3 py-1.5 text-left">Kasus</th><th className="px-3 py-1.5 text-left">Diajukan lewat</th><th className="px-3 py-1.5 text-right">Denda per kejadian</th></tr></thead>
+                <tbody className="divide-y divide-amber-100">
+                  <tr><td className="px-3 py-1.5">Lupa Absen Masuk (sebenarnya masuk kerja, tidak absen sama sekali)</td><td className="px-3 py-1.5">Klarifikasi Alpha (bagian 6), pilih "Lupa Absen"</td><td className="px-3 py-1.5 text-right font-medium">Rp15.000</td></tr>
+                  <tr><td className="px-3 py-1.5">Lupa Absen Pulang (sudah absen masuk, lupa absen pulang)</td><td className="px-3 py-1.5">Portal Saya, muncul otomatis kalau terdeteksi</td><td className="px-3 py-1.5 text-right font-medium">Rp5.000</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Kedua jenis ini dibatasi <strong>maksimal 4 kali per periode gajian</strong> masing-masing (4x Lupa Absen Masuk + 4x Lupa Absen Pulang, dihitung terpisah).</li>
+              <li>Kalau disetujui HR, hari itu dianggap <strong>hadir normal</strong> — tidak masuk kelompok potongan Izin/Alpha yang eskalasi (bagian 8 &amp; 9), cuma kena denda tetap di atas.</li>
+              <li>HR berhak menolak kalau dianggap tidak masuk akal atau terlalu sering — jadi tetap usahakan absen tepat waktu, jangan mengandalkan jalur ini.</li>
+              <li>Lewat jatah 4x per periode, ajukan sebagai Izin biasa (bagian 8) untuk kasus Lupa Absen Masuk.</li>
+            </ul>
+          </div>
+        </section>
+
+        {/* 8. Potongan Izin/Sakit */}
         <section id="potongan-izin" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
-          <h2 className="text-lg font-bold text-slate-800 mb-3">7. 💸 Potongan Izin / Sakit Tanpa Surat</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-3">8. 💸 Potongan Izin / Sakit Tanpa Surat</h2>
           <div className="space-y-3 text-sm text-slate-600">
             <p>Izin (duka, keperluan pribadi, dll) dan Sakit <strong>tanpa</strong> surat dokter digabung jadi satu kelompok yang sama. Aturannya per <strong>"kejadian"</strong>: kalau izin 2-3 hari berturut-turut tanpa jeda masuk kerja, itu dihitung <strong>1 kejadian saja</strong> (bukan dihitung per hari). Begitu Anda masuk kerja lagi lalu izin lagi di lain waktu (dalam periode yang sama), itu jadi kejadian berikutnya — dan tarifnya naik. Setiap masuk periode baru (tanggal 26), hitungan kembali dari kejadian pertama lagi.</p>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -274,11 +298,11 @@ export default function PanduanKaryawanPage() {
           </div>
         </section>
 
-        {/* 8. Potongan Alpha */}
+        {/* 9. Potongan Alpha */}
         <section id="potongan-alpha" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
-          <h2 className="text-lg font-bold text-slate-800 mb-3">8. 💸 Potongan Alpha</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-3">9. 💸 Potongan Alpha</h2>
           <div className="space-y-3 text-sm text-slate-600">
-            <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (per kejadian, blok tanggal berturut dihitung 1 kejadian, reset tiap periode) — bedanya tarifnya jauh lebih berat karena ini absen tanpa keterangan sama sekali. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama.</p>
+            <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (per kejadian, blok tanggal berturut dihitung 1 kejadian, reset tiap periode) — bedanya tarifnya jauh lebih berat karena ini absen tanpa keterangan sama sekali. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama. Kalau sebenarnya Anda masuk kerja tapi cuma lupa scan, itu bukan Alpha biasa — lihat jalur "Lupa Absen" di bagian 7.</p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
                 <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari</th></tr></thead>
@@ -291,15 +315,15 @@ export default function PanduanKaryawanPage() {
             </div>
             <p className="text-xs text-slate-400">(Pakai gaji harian standar sistem {fmtRp(contohGajiHarian)} sebagai contoh — lihat angka Anda sendiri di link bawah.)</p>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-red-700">Ini kenapa klarifikasi Alpha (bagian 6) penting dilakukan cepat — kalau berhasil diubah jadi Izin/Sakit, potongannya jauh lebih ringan (kelompok 1×–2× di bagian 7), dibanding dibiarkan jadi Alpha permanen (kelompok 1.5×–3× di sini).</p>
+              <p className="text-red-700">Ini kenapa klarifikasi Alpha (bagian 6) penting dilakukan cepat — kalau berhasil diubah jadi Izin/Sakit, potongannya jauh lebih ringan (kelompok 1×–2× di bagian 8), dibanding dibiarkan jadi Alpha permanen (kelompok 1.5×–3× di sini).</p>
             </div>
             <p className="text-sm text-slate-500">Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>
         </section>
 
-        {/* 9. Potongan Sakit + Surat */}
+        {/* 10. Potongan Sakit + Surat */}
         <section id="potongan-sakit" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
-          <h2 className="text-lg font-bold text-slate-800 mb-3">9. 💸 Potongan Sakit Dengan Surat Dokter</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-3">10. 💸 Potongan Sakit Dengan Surat Dokter</h2>
           <div className="space-y-3 text-sm text-slate-600">
             <p>Beda dengan Izin/Sakit tanpa surat — Sakit <strong>dengan</strong> surat dokter dihitung per <strong>hari berturut</strong> (bukan per kejadian), jadi lebih ringan karena ada bukti resmi.</p>
             <div className="bg-slate-50 rounded-lg p-3 space-y-1">
@@ -322,12 +346,12 @@ export default function PanduanKaryawanPage() {
           </div>
         </section>
 
-        {/* 10. Ringkasan */}
+        {/* 11. Ringkasan */}
         <section id="ringkasan" className="bg-white rounded-xl shadow-sm border-2 border-emerald-300 p-5 scroll-mt-4">
-          <h2 className="text-lg font-bold text-slate-800 mb-3">10. ✅ Ringkasan Cepat — Supaya Gaji Tidak Terpotong</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-3">11. ✅ Ringkasan Cepat — Supaya Gaji Tidak Terpotong</h2>
           <ul className="space-y-2 text-sm text-slate-700">
             <li>✔️ Absen tepat waktu sesuai jam shift Anda.</li>
-            <li>✔️ Selalu absen, walau cuma sebentar di kantor/cabang — jangan sampai dianggap Alpha karena lupa absen.</li>
+            <li>✔️ Selalu absen masuk & pulang — kalau benar-benar lupa, ajukan "Lupa Absen" (bagian 7, denda kecil Rp5.000–15.000) daripada dibiarkan jadi Alpha (potongan jauh lebih besar).</li>
             <li>✔️ Kalau benar-benar tidak bisa masuk (sakit/ada urusan), segera absen klarifikasi Alpha dalam <strong>2 hari</strong> — jangan didiamkan.</li>
             <li>✔️ Simpan surat dokter kalau sakit lebih dari 1 hari — potongannya jauh lebih ringan dibanding tanpa surat.</li>
             <li>✔️ Manfaatkan jatah 4 hari libur tiap periode — kalau tidak dipakai penuh, sisanya tetap dibayar tunai, jadi tidak rugi.</li>

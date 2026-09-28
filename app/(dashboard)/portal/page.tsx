@@ -10,6 +10,7 @@ import { chargeableLateMinutes } from '@/lib/lateTolerance'
 import { getUpcomingRosterPeriod, rosterPeriodLabel } from '@/lib/rosterPeriod'
 import { localDateStr } from '@/lib/date'
 import { fetchAlphaAlerts as fetchAlphaAlertsShared, type AlphaAlertItem } from '@/lib/alphaDetection'
+import { fetchIncompleteCheckouts as fetchIncompleteCheckoutsShared, type IncompleteCheckoutItem } from '@/lib/checkoutClarification'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const DAYS_AHEAD = 30
@@ -69,11 +70,19 @@ export default function PortalDashboardPage() {
   // dari tanggal Alpha (ditegakkan di database, lihat computed "actionable"/"deadline").
   const [alphaAlerts, setAlphaAlerts] = useState<AlphaAlertItem[]>([])
   const [clarifyModal, setClarifyModal] = useState<AlphaAlertItem | null>(null)
-  const [clarifyType, setClarifyType] = useState<'sick' | 'sick_doc' | 'permission'>('sick')
+  const [clarifyType, setClarifyType] = useState<'sick' | 'sick_doc' | 'permission' | 'lupa_absen'>('sick')
   const [clarifyReason, setClarifyReason] = useState('')
   const [clarifyFile, setClarifyFile] = useState<File | null>(null)
   const [clarifyError, setClarifyError] = useState('')
   const [clarifySubmitting, setClarifySubmitting] = useState(false)
+
+  // "Lupa Absen Pulang" -- sudah absen masuk tapi belum absen pulang (lihat
+  // lib/checkoutClarification.ts). Beda dari Alpha, jadi state & modal terpisah.
+  const [incompleteCheckouts, setIncompleteCheckouts] = useState<IncompleteCheckoutItem[]>([])
+  const [checkoutModal, setCheckoutModal] = useState<IncompleteCheckoutItem | null>(null)
+  const [checkoutReason, setCheckoutReason] = useState('')
+  const [checkoutError, setCheckoutError] = useState('')
+  const [checkoutSubmitting, setCheckoutSubmitting] = useState(false)
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -104,6 +113,7 @@ export default function PortalDashboardPage() {
       fetchEstimasiPotongan(effectiveId),
       fetchQuotaLibur(effectiveId),
       fetchAlphaAlerts(effectiveId),
+      fetchIncompleteCheckouts(effectiveId),
       emp?.join_date ? fetchLeaveInfo(effectiveId, emp.join_date) : Promise.resolve(),
     ])
     setLoading(false)
@@ -224,6 +234,34 @@ export default function PortalDashboardPage() {
     setClarifyError('')
   }
 
+  async function fetchIncompleteCheckouts(employeeId: string) {
+    setIncompleteCheckouts(await fetchIncompleteCheckoutsShared(supabase, employeeId))
+  }
+
+  function openCheckoutModal(item: IncompleteCheckoutItem) {
+    setCheckoutModal(item)
+    setCheckoutReason('')
+    setCheckoutError('')
+  }
+
+  async function submitCheckoutClarification() {
+    if (!checkoutModal) return
+    if (!checkoutReason.trim()) { setCheckoutError('Keterangan wajib diisi -- jelaskan alasannya.'); return }
+    setCheckoutSubmitting(true)
+    setCheckoutError('')
+    const { error } = await supabase.rpc('submit_checkout_clarification', {
+      p_attendance_id: checkoutModal.attendanceId,
+      p_reason: checkoutReason.trim(),
+    })
+    if (error) {
+      setCheckoutError(error.message)
+    } else {
+      setCheckoutModal(null)
+      await fetchIncompleteCheckouts(myEmployeeId)
+    }
+    setCheckoutSubmitting(false)
+  }
+
   async function submitClarification() {
     if (!clarifyModal) return
     if (!clarifyReason.trim()) { setClarifyError('Keterangan wajib diisi -- jelaskan alasannya.'); return }
@@ -325,6 +363,38 @@ export default function PortalDashboardPage() {
                   )}
                   {!a.actionable && !isPending && (
                     <p className="text-xs text-slate-400 mt-1.5">Sudah lewat dari batas waktu {deadlineLabel} — status Alpha tidak bisa diubah lagi.</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {incompleteCheckouts.length > 0 && (
+        <div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4">
+          <p className="text-base font-bold text-amber-800">🟡 Ada {incompleteCheckouts.length} hari absen pulang belum lengkap</p>
+          <p className="text-sm text-amber-700 mt-1">Sudah absen masuk, tapi belum absen pulang. Kalau memang lupa scan pulang, ajukan klarifikasi di bawah ini (kena denda administratif Rp5.000 per kejadian, maksimal 4x per periode).</p>
+          <div className="mt-3 space-y-2">
+            {incompleteCheckouts.map(c => {
+              const isPending = c.clarification?.status === 'pending'
+              return (
+                <div key={c.attendanceId} className="bg-white border border-amber-200 rounded-lg p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-800">
+                      {new Date(c.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                      <span className="text-slate-400 font-normal"> — masuk {new Date(c.checkIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </p>
+                    {isPending ? (
+                      <span className="text-xs px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg font-medium">⏳ Menunggu review HR</span>
+                    ) : c.actionable ? (
+                      <button onClick={() => openCheckoutModal(c)} className="text-xs px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold">
+                        {c.clarification ? 'Klarifikasi Lagi' : 'Klarifikasi Lupa Pulang'}
+                      </button>
+                    ) : null}
+                  </div>
+                  {!isPending && c.clarification?.status === 'rejected' && (
+                    <p className="text-xs text-slate-500 mt-1.5">Klarifikasi sebelumnya ditolak{c.clarification.rejection_note ? `: ${c.clarification.rejection_note}` : ''}.</p>
                   )}
                 </div>
               )
@@ -504,12 +574,16 @@ export default function PortalDashboardPage() {
           <div className="space-y-3">
             <div>
               <label className="text-xs font-medium text-slate-600 block mb-1">Sebenarnya kenapa?</label>
-              <select value={clarifyType} onChange={e => setClarifyType(e.target.value as 'sick' | 'sick_doc' | 'permission')}
+              <select value={clarifyType} onChange={e => setClarifyType(e.target.value as 'sick' | 'sick_doc' | 'permission' | 'lupa_absen')}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none bg-white">
                 <option value="sick">Sakit (tanpa surat dokter)</option>
                 <option value="sick_doc">Sakit (dengan surat dokter)</option>
                 <option value="permission">Izin</option>
+                <option value="lupa_absen">Lupa Absen (sebenarnya masuk kerja)</option>
               </select>
+              {clarifyType === 'lupa_absen' && (
+                <p className="text-xs text-amber-600 mt-1">Kalau disetujui HR, dianggap hadir (bukan Alpha/Izin) tapi tetap kena denda administratif Rp15.000. Maksimal 4x per periode gajian.</p>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-slate-600 block mb-1">Keterangan *</label>
@@ -528,6 +602,31 @@ export default function PortalDashboardPage() {
             <button onClick={submitClarification} disabled={clarifySubmitting}
               className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
               {clarifySubmitting ? 'Mengirim...' : 'Kirim Klarifikasi'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {checkoutModal && (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-5">
+          <h3 className="text-lg font-bold text-slate-800 mb-1">Klarifikasi Lupa Absen Pulang</h3>
+          <p className="text-sm text-slate-500 mb-4">
+            {new Date(checkoutModal.date + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+          </p>
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">Kalau disetujui HR, kena denda administratif <strong>Rp5.000</strong> untuk kejadian ini.</p>
+          {checkoutError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{checkoutError}</p>}
+          <div>
+            <label className="text-xs font-medium text-slate-600 block mb-1">Keterangan *</label>
+            <textarea value={checkoutReason} onChange={e => setCheckoutReason(e.target.value)} rows={3}
+              placeholder="Jelaskan alasannya, misal: lupa scan pulang, sudah kerja sampai jam biasa..." className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+          </div>
+          <div className="flex gap-2 mt-5">
+            <button onClick={() => setCheckoutModal(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+            <button onClick={submitCheckoutClarification} disabled={checkoutSubmitting}
+              className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
+              {checkoutSubmitting ? 'Mengirim...' : 'Kirim Klarifikasi'}
             </button>
           </div>
         </div>
