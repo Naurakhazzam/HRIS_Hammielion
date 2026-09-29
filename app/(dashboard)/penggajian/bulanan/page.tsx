@@ -843,11 +843,16 @@ export default function PenggajianBulananPage() {
     const recordedDates = new Set(validAtts.map((a: any) => a.date))
     // Izin Duka/Periksa + Sakit TANPA surat digabung 1 kelompok (disamakan — supaya tidak jadi
     // celah pura-pura sakit). Sakit DENGAN surat (sick_doc) tetap dihitung terpisah, per hari
-    // berturut (bukan per kejadian). Cuti Tahunan ('leave') sekarang TIDAK PERNAH dipotong sama
-    // sekali dan TIDAK ikut kuota 4-hari — itu memang hak karyawan.
+    // berturut (bukan per kejadian). Cuti Tahunan ('leave') tidak pernah dipotong gajinya, tapi
+    // TETAP memakan kuota 4 hari/periode yang sama (lihat blok Kuota Libur di bawah) — baik yang
+    // diajukan resmi di muka (Cuti & Izin) maupun yang dipilih lewat klarifikasi Alpha "pakai
+    // jatah 4 hari/periode", dua-duanya sama-sama status 'leave' dan sekarang dianggap SATU
+    // kuota (keputusan Owner, supaya tidak dobel: bebas potongan Alpha DAN masih dibayar
+    // "Kompensasi Libur" seolah belum pakai jatah sama sekali).
     const izinGroupDates  = validAtts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
     const sickDocRecs     = validAtts.filter((a: any) => a.status === 'sick_doc')
     const explicitAlphaDates = validAtts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
+    const leaveDates      = validAtts.filter((a: any) => a.status === 'leave').map((a: any) => a.date as string)
 
     // Hari kosong (tidak ada record sama sekali)
     const allPeriodDates: string[] = []
@@ -870,15 +875,21 @@ export default function PenggajianBulananPage() {
     const emptyDays = emptyDateList.length
 
     // ── Kuota libur 4 hari/periode ───────────────────────────────────────────
-    // HANYA hari kosong (tanpa record apa pun) yang konsumsi kuota ini — Cuti Tahunan sudah
-    // dikeluarkan total (lihat atas), jadi tidak lagi ikut menghabiskan/melebihi kuota.
+    // Kuota dipakai lewat DUA cara yang sama-sama sah: (1) hari berstatus 'leave' (Cuti Tahunan
+    // resmi ATAU klarifikasi Alpha "pakai jatah 4 hari"), dan (2) hari kosong tanpa record sama
+    // sekali (ditoleransi diam-diam). 'leave' diprioritaskan menghabiskan kuota duluan -- baru
+    // sisanya dipakai menutup hari kosong. 'leave' yang melebihi kuota TETAP tidak dipotong (cuti
+    // panjang asli tidak dihukum), tapi tidak lagi ikut mengurangi Kompensasi Libur karena
+    // kuotanya sudah habis oleh hari 'leave' itu sendiri.
     // Kuota ikut di-pro-rata pakai proRataFactor yang sama dengan gaji pokok — karyawan training
     // yang baru join di tengah periode tidak adil kalau dianggap harus punya 4 hari libur penuh
     // dari periode yang cuma dijalani sebagian.
     const kuotaLibur     = Math.round(4 * proRataFactor)
-    const freeEmptyUsed  = Math.min(emptyDays, kuotaLibur)
+    const leaveUsed      = Math.min(leaveDates.length, kuotaLibur)
+    const quotaLeftAfterLeave = Math.max(kuotaLibur - leaveUsed, 0)
+    const freeEmptyUsed  = Math.min(emptyDays, quotaLeftAfterLeave)
     const excessEmptyDates = emptyDateList.slice(freeEmptyUsed) // sisa di luar kuota → gabung ke kelompok Alpha
-    const kurangLibur     = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - freeEmptyUsed, 0)
+    const kurangLibur     = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - leaveUsed - freeEmptyUsed, 0)
     const liburKompensasi = flatSalaryForEmp ? 0 : Math.round(kurangLibur * dailyRate)
 
     // Periode yang berakhir SEBELUM NEW_RULES_CUTOFF_DATE (26 Sep 2026) masih dihitung FLAT --
@@ -1577,8 +1588,14 @@ export default function PenggajianBulananPage() {
         proRataFactor = activeDays / totalPeriodDays
       }
     }
+    // 'leave' (Cuti Tahunan resmi ATAU klarifikasi Alpha "pakai jatah 4 hari") menghabiskan
+    // kuota duluan, sama seperti buildSlipPreview -- supaya rincian di modal ini konsisten
+    // dengan yang benar-benar dipotong saat slip dibuat.
+    const leaveDatesForQuota = atts.filter((a: any) => a.status === 'leave').map((a: any) => a.date as string)
     const kuotaLibur = Math.round(4 * proRataFactor)
-    const freeEmptyUsed = Math.min(emptyDateList.length, kuotaLibur)
+    const leaveUsedForQuota = Math.min(leaveDatesForQuota.length, kuotaLibur)
+    const quotaLeftAfterLeaveForBreakdown = Math.max(kuotaLibur - leaveUsedForQuota, 0)
+    const freeEmptyUsed = Math.min(emptyDateList.length, quotaLeftAfterLeaveForBreakdown)
     const excessEmptyDates = emptyDateList.slice(freeEmptyUsed)
 
     // Periode yang berakhir sebelum NEW_RULES_CUTOFF_DATE masih dihitung FLAT -- lihat catatan
