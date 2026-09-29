@@ -54,6 +54,7 @@ const adminNavItems: NavNode[] = [
     submenu: [
       { name: 'Dashboard Saya', href: '/portal' },
       { name: 'Klarifikasi Alpha', href: '/portal/alpha' },
+      { name: 'Klaim Lembur', href: '/portal/lembur' },
       { name: 'Profil Saya', href: '/portal/profil' },
       { name: 'Slip Gaji', href: '/portal/slip-gaji' },
       { name: 'Rekap Absensi', href: '/portal/absensi' },
@@ -230,6 +231,7 @@ const employeeNavItems: NavNode[] = [
     submenu: [
       { name: 'Dashboard Saya', href: '/portal' },
       { name: 'Klarifikasi Alpha', href: '/portal/alpha' },
+      { name: 'Klaim Lembur', href: '/portal/lembur' },
       { name: 'Profil Saya', href: '/portal/profil' },
       { name: 'Slip Gaji', href: '/portal/slip-gaji' },
       { name: 'Rekap Absensi', href: '/portal/absensi' },
