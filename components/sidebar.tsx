@@ -93,6 +93,7 @@ const adminNavItems: NavNode[] = [
         ]
       },
       { name: 'Cuti & Izin', href: '/cuti' },
+      { name: 'Tugas & Laporan', href: '/tugas-harian' },
       { name: 'Aturan Potongan Gaji', href: '/potongan' },
       {
         name: 'KPI',
@@ -239,6 +240,7 @@ const employeeNavItems: NavNode[] = [
     ]
   },
   { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
+  { name: 'Tugas & Laporan', href: '/tugas-harian', icon: '📋' },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
   { name: 'Aturan Potongan Gaji', href: '/potongan', icon: '📉' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
@@ -284,6 +286,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [isDriverOrKenek, setIsDriverOrKenek] = useState(false)
   const [isKepalaGudang, setIsKepalaGudang] = useState(false)
   const [meetingBadge, setMeetingBadge] = useState(0)
+  const [dailyTaskBadge, setDailyTaskBadge] = useState(0)
 
   // Angka merah di menu Catatan Meeting: catatan belum dibaca + tugas yang belum dilaporkan
   // (karyawan), atau laporan yang menunggu review (Owner/HR). Dihitung di server.
@@ -297,6 +300,21 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     const timer = setInterval(load, 60000)
     window.addEventListener('meeting-badge-refresh', load)
     return () => { cancelled = true; clearInterval(timer); window.removeEventListener('meeting-badge-refresh', load) }
+  }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Angka merah di menu Tugas & Laporan: tugas harian yang belum dilapor hari ini + tugas
+  // sekali yang belum pernah dilapor. Berlaku untuk siapa saja yang punya employee_id
+  // (termasuk Owner/HR kalau mereka sendiri ditugaskan).
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      const { data } = await supabase.rpc('get_daily_task_badge_count')
+      if (!cancelled && data != null) setDailyTaskBadge(Number(data) || 0)
+    }
+    load()
+    const timer = setInterval(load, 60000)
+    window.addEventListener('daily-task-badge-refresh', load)
+    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('daily-task-badge-refresh', load) }
   }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -520,6 +538,11 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                     {item.href === '/catatan-meeting' && meetingBadge > 0 && (
                       <span className="ml-auto inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
                         {meetingBadge > 99 ? '99+' : meetingBadge}
+                      </span>
+                    )}
+                    {item.href === '/tugas-harian' && dailyTaskBadge > 0 && (
+                      <span className="ml-auto inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
+                        {dailyTaskBadge > 99 ? '99+' : dailyTaskBadge}
                       </span>
                     )}
                   </Link>
