@@ -267,12 +267,13 @@ export default function PenggajianBulananPage() {
   const [buildingPreview, setBuildingPreview] = useState(false)
   const [finalizing, setFinalizing]         = useState(false)
 
-  // ── State: Preview Semua Karyawan (tabel estimasi, murni untuk dilihat) ──
+  // ── State: Perkiraan Slip (karyawan yang BELUM punya slip periode ini) — auto terisi begitu
+  // filter berubah, tidak perlu diklik. Cuma untuk dilihat, angka final tetap lewat wizard
+  // "Buat Slip Karyawan" (checklist validasi lembur & konfirmasi kasbon manual).
   type BulkPreviewRow = {
-    employeeId: string; isFinal: boolean
+    employeeId: string
     preview: SlipPreview | null   // null kalau gagal dihitung (mis. komponen gaji belum diisi)
   }
-  const [bulkPreviewOpen, setBulkPreviewOpen]     = useState(false)
   const [bulkPreviewLoading, setBulkPreviewLoading] = useState(false)
   const [bulkPreviewRows, setBulkPreviewRows]     = useState<BulkPreviewRow[]>([])
 
@@ -305,6 +306,7 @@ export default function PenggajianBulananPage() {
   // Fetch payrolls setiap filter berubah
   useEffect(() => {
     fetchPayrolls()
+    fetchAutoPreview()
     setSelectedPayrollIds(new Set())
   }, [filterMonth, filterYear, filterBranch])
 
@@ -608,6 +610,7 @@ export default function PenggajianBulananPage() {
     } else {
       showMessage('success', `Slip gaji ${employeeName} berhasil dihapus.${kasbonDed > 0 ? ` Saldo kasbon ${formatRupiah(kasbonDed)} dikembalikan.` : ''}`)
       fetchPayrolls()
+      fetchAutoPreview()
     }
     setSubmitting(null)
   }
@@ -642,26 +645,41 @@ export default function PenggajianBulananPage() {
 
   // ─── Buat Slip Per Karyawan ────────────────────────────────────────────────────
 
-  // Preview estimasi gaji SEMUA karyawan sekaligus — murni untuk dilihat, bukan final.
-  // Lembur diasumsikan semuanya valid, kasbon diasumsikan 0, bonus kondisional diasumsikan semua
-  // terpenuhi — angka final tetap lewat "Buat Slip Karyawan" seperti biasa (lengkap dengan
-  // checklist validasi lembur & input kasbon manual).
-  async function openBulkPreview() {
-    setBulkPreviewOpen(true)
+  // Perkiraan gaji untuk karyawan yang BELUM punya slip periode ini — murni untuk dilihat, bukan
+  // final. Lembur dihitung dari jam mentah di absensi (belum tentu sudah di-ACC Owner — ditandai
+  // jelas di tabelnya), kasbon diambil dari cicilan yang memang DIJADWALKAN jatuh tempo periode
+  // ini (bukan ditebak/dianggap 0), bonus kondisional dikosongkan (butuh penilaian manual).
+  // Dipanggil otomatis tiap filter berubah — tidak perlu diklik supaya datanya "sudah ada"
+  // begitu halaman dibuka. Query existSet & data karyawan independen dari state `payrolls`
+  // supaya tidak balapan dengan fetchPayrolls() yang jalan bersamaan.
+  async function fetchAutoPreview() {
     setBulkPreviewLoading(true)
     setBulkPreviewRows([])
 
-    const { data: emps } = await supabase
-      .from('employees')
-      .select('id')
-      .in('employee_type', ['permanent', 'training']).eq('is_active', true)
+    const [{ data: emps }, { data: existingRows }] = await Promise.all([
+      supabase.from('employees').select('id, branch_id')
+        .in('employee_type', ['permanent', 'training']).eq('is_active', true),
+      supabase.from('payrolls').select('employee_id')
+        .eq('period_month', filterMonth).eq('period_year', filterYear),
+    ])
 
-    const existSet = new Set(payrolls.map(p => p.employee_id))
+    const existSet = new Set((existingRows || []).map((p: any) => p.employee_id))
+    let candidates = ((emps || []) as { id: string; branch_id: string | null }[]).filter(e => !existSet.has(e.id))
+    if (filterBranch) candidates = candidates.filter(e => e.branch_id === filterBranch)
+
+    if (candidates.length === 0) { setBulkPreviewRows([]); setBulkPreviewLoading(false); return }
+
+    const { data: kasbonRows } = await supabase.from('kasbon_deductions')
+      .select('employee_id, amount')
+      .eq('status', 'pending').eq('deduction_month', filterMonth).eq('deduction_year', filterYear)
+      .in('employee_id', candidates.map(c => c.id))
+    const kasbonMap: Record<string, number> = {}
+    ;(kasbonRows || []).forEach((k: any) => { kasbonMap[k.employee_id] = (kasbonMap[k.employee_id] || 0) + Number(k.amount) })
+
     const results = await Promise.all(
-      ((emps || []) as { id: string }[]).map(async e => ({
+      candidates.map(async e => ({
         employeeId: e.id,
-        isFinal: existSet.has(e.id),
-        preview: await buildSlipPreview(e.id, 0, new Map<string, number>(), { silent: true }),
+        preview: await buildSlipPreview(e.id, kasbonMap[e.id] ?? 0, new Map<string, number>(), { silent: true }),
       }))
     )
     results.sort((a, b) => (a.preview?.employeeName || '').localeCompare(b.preview?.employeeName || ''))
@@ -1019,6 +1037,7 @@ export default function PenggajianBulananPage() {
       setOtChecked({})
       setOtAdjusted({})
       fetchPayrolls()
+      fetchAutoPreview()
     }
     setFinalizing(false)
   }
@@ -1906,15 +1925,9 @@ export default function PenggajianBulananPage() {
           </button>
         </div>
 
-        {/* Tombol Buat Slip Per Karyawan & Preview Semua Karyawan */}
+        {/* Tombol Buat Slip Per Karyawan — Perkiraan semua karyawan lain sudah otomatis
+            tampil di bagian bawah halaman, tidak perlu tombol terpisah lagi. */}
         <div className="flex gap-2">
-          <button
-            onClick={openBulkPreview}
-            disabled={loading}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50"
-          >
-            📊 Preview Semua Karyawan
-          </button>
           <button
             onClick={openCreateModal}
             disabled={loading}
@@ -3270,101 +3283,98 @@ export default function PenggajianBulananPage() {
       </div>
     )}
 
-    {bulkPreviewOpen && (
-      <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl max-h-[90vh] flex flex-col">
-          <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-200">
-            <div>
-              <h2 className="text-base font-bold text-slate-700">📊 Preview Semua Karyawan</h2>
-              <p className="text-xs text-slate-500 mt-0.5">{getPeriodLabel(filterMonth, filterYear)} — cuma untuk dilihat, bukan slip resmi. Lembur diasumsikan semuanya valid, kasbon diasumsikan 0, bonus kondisional dikosongkan (butuh penilaian manual).</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={openBulkPreview} disabled={bulkPreviewLoading}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg disabled:opacity-50">
-                🔄 Muat Ulang
-              </button>
-              <button onClick={() => setBulkPreviewOpen(false)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg">✕</button>
-            </div>
-          </div>
-
-          <div className="overflow-auto flex-1 p-4">
-            {bulkPreviewLoading && bulkPreviewRows.length === 0 ? (
-              <div className="py-16 text-center text-slate-400 text-sm">Menghitung estimasi semua karyawan, mohon tunggu...</div>
-            ) : bulkPreviewRows.length === 0 ? (
-              <div className="py-16 text-center text-slate-400 text-sm">Tidak ada karyawan tetap/training aktif.</div>
-            ) : (() => {
-              const okRows = bulkPreviewRows.filter(r => r.preview)
-              const failedRows = bulkPreviewRows.filter(r => !r.preview)
-              return (
-              <>
-              {failedRows.length > 0 && (
-                <p className="text-xs text-slate-400 mb-2">
-                  {failedRows.length} karyawan dilewati (komponen gaji belum diisi — lengkapi dulu di Data Karyawan → Komponen Gaji kalau perlu ditampilkan).
-                </p>
-              )}
-              <table className="w-full text-left border-separate border-spacing-0 text-xs whitespace-nowrap">
-                <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase sticky top-0 left-0 z-30 bg-slate-50 border-b border-slate-200 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Gaji Pokok+Tunjangan</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Menit Telat</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Potongan Telat</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Jam Lembur</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Nominal Lembur</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Bonus KPI+Kondisional</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Tidak Hadir (hari)</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Potongan Tidak Hadir</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Kompensasi Libur</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Kehilangan Barang</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Kerugian Kasir</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Tabungan Loyalitas</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Estimasi Gaji Bersih</th>
-                    <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-center sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {okRows.map(row => (
-                    <tr key={row.employeeId} className="hover:bg-slate-50 transition group">
-                      {row.preview && (
-                        <>
-                          <td className="px-3 py-2 sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">
-                            <div className="font-medium text-slate-800">{row.preview.employeeName}</div>
-                            <div className="text-slate-400">{row.preview.positionName} · {row.preview.branchName}</div>
-                            {row.isFinal && <span className="inline-block mt-0.5 px-1.5 py-0.5 bg-green-50 text-green-700 rounded text-[10px] font-medium">✅ Slip resmi sudah dibuat</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right">{formatRupiah(row.preview.base + row.preview.pos + row.preview.meal)}</td>
-                          <td className="px-3 py-2 text-right">{row.preview.latMinutes > 0 ? `${row.preview.latMinutes} mnt` : '—'}</td>
-                          <td className="px-3 py-2 text-right text-red-500">{row.preview.latDed > 0 ? formatRupiah(row.preview.latDed) : '—'}</td>
-                          <td className="px-3 py-2 text-right">{row.preview.otHours > 0 ? `${row.preview.otHours} jam` : '—'}</td>
-                          <td className="px-3 py-2 text-right text-green-600">{row.preview.otTotal > 0 ? formatRupiah(row.preview.otTotal) : '—'}</td>
-                          <td className="px-3 py-2 text-right text-green-600">{(row.preview.kpiBonus + row.preview.conditionalBonus) > 0 ? formatRupiah(row.preview.kpiBonus + row.preview.conditionalBonus) : '—'}</td>
-                          <td className="px-3 py-2 text-right">{row.preview.absentDays > 0 ? row.preview.absentDays : '—'}</td>
-                          <td className="px-3 py-2 text-right text-red-500">{row.preview.absentDed > 0 ? formatRupiah(row.preview.absentDed) : '—'}</td>
-                          <td className="px-3 py-2 text-right text-green-600">{row.preview.liburKompensasi > 0 ? formatRupiah(row.preview.liburKompensasi) : '—'}</td>
-                          <td className="px-3 py-2 text-right text-red-500">{row.preview.invLoss > 0 ? formatRupiah(row.preview.invLoss) : '—'}</td>
-                          <td className="px-3 py-2 text-right text-red-500">{row.preview.cashierLoss > 0 ? formatRupiah(row.preview.cashierLoss) : '—'}</td>
-                          <td className="px-3 py-2 text-right text-red-500">{row.preview.loyalitasDed > 0 ? formatRupiah(row.preview.loyalitasDed) : '—'}</td>
-                          <td className="px-3 py-2 text-right font-bold text-slate-800">{formatRupiah(row.preview.net)}</td>
-                          <td className="px-3 py-2 text-center">
-                            {!row.isFinal && (
-                              <button
-                                onClick={async () => { setBulkPreviewOpen(false); await openCreateModal(); setSelectedEmpId(row.employeeId) }}
-                                className="text-blue-600 hover:underline font-medium">Buat Slip →</button>
-                            )}
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              </>
-              )
-            })()}
-          </div>
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 mt-6 print-hide">
+      <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-slate-200">
+        <div>
+          <h2 className="text-base font-bold text-slate-700">📋 Perkiraan Karyawan yang Belum Dibuat Slip-nya</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {getPeriodLabel(filterMonth, filterYear)} — otomatis terisi dari data yang sudah pasti (gaji pokok, tunjangan) ditambah{' '}
+            <span className="font-semibold text-amber-600">perkiraan lembur (belum di-ACC Owner)</span>, dikurangi potongan telat/ketidakhadiran, dan{' '}
+            <span className="font-semibold">kasbon sesuai cicilan yang dijadwalkan periode ini</span>. Bukan slip resmi — angka final tetap lewat &quot;Buat Slip Karyawan&quot;.
+          </p>
         </div>
+        <button onClick={fetchAutoPreview} disabled={bulkPreviewLoading}
+          className="shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg disabled:opacity-50">
+          🔄 Muat Ulang
+        </button>
       </div>
-    )}
+
+      <div className="overflow-auto p-4">
+        {bulkPreviewLoading && bulkPreviewRows.length === 0 ? (
+          <div className="py-16 text-center text-slate-400 text-sm">Menghitung perkiraan, mohon tunggu...</div>
+        ) : bulkPreviewRows.length === 0 ? (
+          <div className="py-10 text-center text-slate-400 text-sm">🎉 Semua karyawan tetap/training aktif di cabang ini sudah punya slip periode ini.</div>
+        ) : (() => {
+          const okRows = bulkPreviewRows.filter(r => r.preview)
+          const failedRows = bulkPreviewRows.filter(r => !r.preview)
+          return (
+          <>
+          {failedRows.length > 0 && (
+            <p className="text-xs text-slate-400 mb-2">
+              {failedRows.length} karyawan dilewati (komponen gaji belum diisi — lengkapi dulu di Data Karyawan → Komponen Gaji kalau perlu ditampilkan).
+            </p>
+          )}
+          <table className="w-full text-left border-separate border-spacing-0 text-xs whitespace-nowrap">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase sticky top-0 left-0 z-30 bg-slate-50 border-b border-slate-200 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Karyawan</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Gaji Pokok+Tunjangan</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Menit Telat</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Potongan Telat</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Jam Lembur*</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Nominal Lembur*</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Bonus KPI+Kondisional</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Tidak Hadir (hari)</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Potongan Tidak Hadir</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Kompensasi Libur</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Potongan Kasbon</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Kehilangan Barang</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Kerugian Kasir</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Tabungan Loyalitas</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Perkiraan Gaji Bersih</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-center sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {okRows.map(row => (
+                <tr key={row.employeeId} className="hover:bg-slate-50 transition group">
+                  {row.preview && (
+                    <>
+                      <td className="px-3 py-2 sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">
+                        <div className="font-medium text-slate-800">{row.preview.employeeName}</div>
+                        <div className="text-slate-400">{row.preview.positionName} · {row.preview.branchName}</div>
+                      </td>
+                      <td className="px-3 py-2 text-right">{formatRupiah(row.preview.base + row.preview.pos + row.preview.meal)}</td>
+                      <td className="px-3 py-2 text-right">{row.preview.latMinutes > 0 ? `${row.preview.latMinutes} mnt` : '—'}</td>
+                      <td className="px-3 py-2 text-right text-red-500">{row.preview.latDed > 0 ? formatRupiah(row.preview.latDed) : '—'}</td>
+                      <td className="px-3 py-2 text-right">{row.preview.otHours > 0 ? `${row.preview.otHours} jam` : '—'}</td>
+                      <td className="px-3 py-2 text-right text-amber-600">{row.preview.otTotal > 0 ? formatRupiah(row.preview.otTotal) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-green-600">{(row.preview.kpiBonus + row.preview.conditionalBonus) > 0 ? formatRupiah(row.preview.kpiBonus + row.preview.conditionalBonus) : '—'}</td>
+                      <td className="px-3 py-2 text-right">{row.preview.absentDays > 0 ? row.preview.absentDays : '—'}</td>
+                      <td className="px-3 py-2 text-right text-red-500">{row.preview.absentDed > 0 ? formatRupiah(row.preview.absentDed) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-green-600">{row.preview.liburKompensasi > 0 ? formatRupiah(row.preview.liburKompensasi) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-red-500">{row.preview.kasbonDed > 0 ? formatRupiah(row.preview.kasbonDed) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-red-500">{row.preview.invLoss > 0 ? formatRupiah(row.preview.invLoss) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-red-500">{row.preview.cashierLoss > 0 ? formatRupiah(row.preview.cashierLoss) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-red-500">{row.preview.loyalitasDed > 0 ? formatRupiah(row.preview.loyalitasDed) : '—'}</td>
+                      <td className="px-3 py-2 text-right font-bold text-slate-800">{formatRupiah(row.preview.net)}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={async () => { await openCreateModal(); setSelectedEmpId(row.employeeId) }}
+                          className="text-blue-600 hover:underline font-medium">Buat Slip →</button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-slate-400 mt-2">* Jam &amp; nominal lembur di sini dihitung dari jam kerja mentah yang tercatat di mesin absen — belum tentu sudah disetujui (ACC) Owner lewat Klaim Lembur. Bisa berubah saat slip resmi dibuat.</p>
+          </>
+          )
+        })()}
+      </div>
+    </div>
 
     {/* Print styles — hanya untuk rekap tabel */}
     <style>{`
