@@ -64,6 +64,7 @@ export default function PortalDashboardPage() {
   const [leaveInfo, setLeaveInfo] = useState<{ joinDate: string | null; usedDays: number }>({ joinDate: null, usedDays: 0 })
   const [kasbonSaldo, setKasbonSaldo] = useState(0)
   const [estPotongan, setEstPotongan] = useState({ keterlambatan: 0, kasbon: 0 })
+  const [estPendapatan, setEstPendapatan] = useState({ base: 0, posAllow: 0, mealAllow: 0, specAllow: 0, lembur: 0 })
   const [quotaLibur, setQuotaLibur] = useState<{ submitted: number; draft: number; label: string; daysUntil: number } | null>(null)
 
   // Klarifikasi Alpha sekarang dikelola AlphaKlarifikasiPanel (components/AlphaKlarifikasiPanel.tsx)
@@ -112,6 +113,7 @@ export default function PortalDashboardPage() {
       fetchUpcomingOff(effectiveId),
       fetchKasbonSaldo(effectiveId),
       fetchEstimasiPotongan(effectiveId),
+      fetchEstimasiPendapatan(effectiveId),
       fetchQuotaLibur(effectiveId),
       fetchIncompleteCheckouts(effectiveId),
       fetchLateAlerts(effectiveId),
@@ -203,6 +205,32 @@ export default function PortalDashboardPage() {
     const keterlambatan = (atts || []).reduce((s, a: any) => s + chargeableLateMinutes(Number(a.late_minutes), a.source) * rate, 0)
     const kasbon = (kasbonDed || []).reduce((s, d: any) => s + Number(d.amount), 0)
     setEstPotongan({ keterlambatan, kasbon })
+  }
+
+  // Perkiraan pendapatan BULAN BERJALAN -- gaji pokok & tunjangan diambil dari salary_components
+  // aktif (bukan dari slip gaji, karena bulan berjalan belum tentu ada slipnya), lembur diambil
+  // dari overtime_claims yang sudah APPROVED periode ini (bukan pending, biar tidak terlalu
+  // optimis). Bonus (KPI, dll) sengaja tidak diikutkan -- itu baru final saat Finance proses slip.
+  async function fetchEstimasiPendapatan(employeeId: string) {
+    const y = today.getFullYear(), m = today.getMonth() + 1
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const firstDay = `${y}-${pad(m)}-01`
+    const lastDay = `${y}-${pad(m)}-${pad(new Date(y, m, 0).getDate())}`
+
+    const [{ data: sc }, { data: claims }] = await Promise.all([
+      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
+        .eq('employee_id', employeeId).lte('effective_date', toDateStr(today)).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('overtime_claims').select('overtime_hours_detected').eq('employee_id', employeeId).eq('status', 'approved').gte('date', firstDay).lte('date', lastDay),
+    ])
+    const rate = Number(sc?.overtime_rate_per_hour ?? 0)
+    const jamLembur = (claims || []).reduce((s, c: any) => s + Number(c.overtime_hours_detected), 0)
+    setEstPendapatan({
+      base: Number(sc?.base_salary ?? 0),
+      posAllow: Number(sc?.position_allowance ?? 0),
+      mealAllow: Number(sc?.meal_allowance ?? 0),
+      specAllow: Number(sc?.special_allowance ?? 0),
+      lembur: jamLembur * rate,
+    })
   }
 
   // Jatah libur 4 tanggal untuk periode roster BERIKUTNYA -- selalu diperingatkan sampai
@@ -444,6 +472,25 @@ export default function PortalDashboardPage() {
               </div>
             </>
           )}
+        </div>
+
+        {/* Perkiraan Pendapatan Bulan Berjalan -- gaji pokok & tunjangan dari salary_components
+            aktif (bukan slip gaji, karena bulan berjalan belum tentu ada slipnya), lembur dari
+            klaim yang sudah disetujui periode ini. */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <h2 className="text-sm font-bold text-slate-700 mb-1">💰 Perkiraan Pendapatan Bulan Ini</h2>
+          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[today.getMonth()]} {today.getFullYear()}, berjalan</p>
+          <p className="text-3xl font-bold text-emerald-600">{fmtRp(estPendapatan.base + estPendapatan.posAllow + estPendapatan.mealAllow + estPendapatan.specAllow + estPendapatan.lembur)}</p>
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
+            <div className="flex justify-between"><span>Gaji Pokok</span><span className="font-medium">{fmtRp(estPendapatan.base)}</span></div>
+            {estPendapatan.posAllow > 0 && <div className="flex justify-between"><span>Tunjangan Jabatan</span><span className="font-medium">{fmtRp(estPendapatan.posAllow)}</span></div>}
+            {estPendapatan.mealAllow > 0 && <div className="flex justify-between"><span>Tunjangan Tetap</span><span className="font-medium">{fmtRp(estPendapatan.mealAllow)}</span></div>}
+            {estPendapatan.specAllow > 0 && <div className="flex justify-between"><span>Tunjangan Khusus</span><span className="font-medium">{fmtRp(estPendapatan.specAllow)}</span></div>}
+            {estPendapatan.lembur > 0 && <div className="flex justify-between"><span>Upah Lembur (disetujui)</span><span className="font-medium text-emerald-600">+{fmtRp(estPendapatan.lembur)}</span></div>}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100">
+            Perkiraan sementara, belum termasuk bonus (KPI, dll) dan potongan. Angka final baru muncul saat slip gaji diproses Finance.
+          </p>
         </div>
 
         {/* Perkiraan Potongan Bulan Berjalan (bukan potongan bulan lalu yang sudah final) */}

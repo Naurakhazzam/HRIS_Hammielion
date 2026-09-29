@@ -1316,8 +1316,8 @@ export default function RekapAbsensiPage() {
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Lembur (jam)</label>
-                  <input type="number" min="0" step="0.5" value={editForm.overtime_hours} onChange={e=>setEditForm({...editForm,overtime_hours:Math.max(0,parseFloat(e.target.value)||0)})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Lembur (jam) <span className="text-slate-400 font-normal">-- maks 3 jam/hari</span></label>
+                  <input type="number" min="0" max="3" step="0.5" value={editForm.overtime_hours} onChange={e=>setEditForm({...editForm,overtime_hours:Math.min(3,Math.max(0,parseFloat(e.target.value)||0))})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
               </div>
               <div>
