@@ -244,7 +244,7 @@ export default function PenggajianBulananPage() {
     absentDays: number; absentDed: number; absentRatePerDay: number
     absentBreakdown: AbsentBreakdownDetail | null
     liburCompDays: number; liburKompensasi: number
-    liburQuota: number; liburUsedDays: number; liburFromLeave: number; liburFromIzin: number; liburFromKosong: number
+    liburQuota: number; liburUsedDays: number; liburFromLeave: number; liburFromIzin: number; liburFromSickDoc: number; liburFromKosong: number
     invLoss: number; cashierLoss: number
     loyAutoRelease: number; loyBalSaldo: number; loyDurasi: number
     gross: number; net: number
@@ -856,7 +856,7 @@ export default function PenggajianBulananPage() {
     // kuota (keputusan Owner, supaya tidak dobel: bebas potongan Alpha DAN masih dibayar
     // "Kompensasi Libur" seolah belum pakai jatah sama sekali).
     const izinGroupDatesRaw = validAtts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
-    const sickDocRecs     = validAtts.filter((a: any) => a.status === 'sick_doc')
+    const sickDocDatesRaw = validAtts.filter((a: any) => a.status === 'sick_doc').map((a: any) => a.date as string)
     const explicitAlphaDates = validAtts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
     const leaveDates      = validAtts.filter((a: any) => a.status === 'leave').map((a: any) => a.date as string)
 
@@ -881,28 +881,37 @@ export default function PenggajianBulananPage() {
     const emptyDays = emptyDateList.length
 
     // ── Kuota libur 4 hari/periode ───────────────────────────────────────────
-    // Kuota dipakai lewat TIGA cara, berurutan sesuai prioritas (yang duluan menghabiskan kuota):
+    // Kuota dipakai lewat EMPAT cara, berurutan sesuai prioritas (yang duluan menghabiskan kuota):
     // (1) hari berstatus 'leave' (Cuti Tahunan resmi ATAU klarifikasi Alpha "pakai jatah 4 hari"),
-    // (2) hari Izin/Sakit-tanpa-surat (dipromosikan jadi "Libur" kalau kuota belum penuh -- dari
-    // yang tanggalnya paling awal duluan -- supaya karyawan yang alasannya ditulis "izin" tidak
-    // dihukum lebih berat cuma karena tidak menyebutnya "libur", padahal jatahnya sama), (3) hari
-    // kosong tanpa record sama sekali (ditoleransi diam-diam, prioritas terakhir -- supaya
-    // karyawan yang setidaknya kasih alasan/izin didahulukan daripada yang diam saja).
-    // 'leave' & Izin yang melebihi sisa kuota TETAP tidak "dipromosikan" tapi Izin-nya sendiri
-    // tetap kena eskalasi seperti biasa (bukan dihukum ganda, cuma tidak lagi gratis).
+    // (2) hari Izin/Sakit-tanpa-surat DAN Sakit-dengan-surat digabung satu antrean, dipromosikan
+    // jadi "Libur" kalau kuota belum penuh -- dari yang tanggalnya paling awal duluan -- supaya
+    // karyawan yang alasannya ditulis "izin"/"sakit" tidak dihukum lebih berat cuma karena tidak
+    // disebut "libur", padahal jatahnya sama (izin & sakit sama-sama bisa mengisi jatah libur),
+    // (3) hari kosong tanpa record sama sekali (ditoleransi diam-diam, prioritas terakhir --
+    // supaya karyawan yang setidaknya kasih alasan didahulukan daripada yang diam saja).
+    // Alpha (eksplisit ATAU hari kosong di luar kuota) TIDAK PERNAH ikut dipromosikan -- tetap
+    // kena eskalasi Alpha penuh, sesuai arahan Owner.
+    // 'leave', Izin, & Sakit yang melebihi sisa kuota TETAP tidak "dipromosikan" tapi kena
+    // potongannya masing-masing seperti biasa (bukan dihukum ganda, cuma tidak lagi gratis).
     // Kuota ikut di-pro-rata pakai proRataFactor yang sama dengan gaji pokok — karyawan training
     // yang baru join di tengah periode tidak adil kalau dianggap harus punya 4 hari libur penuh
     // dari periode yang cuma dijalani sebagian.
     const kuotaLibur     = Math.round(4 * proRataFactor)
     const leaveUsed      = Math.min(leaveDates.length, kuotaLibur)
     const quotaAfterLeave = Math.max(kuotaLibur - leaveUsed, 0)
-    const izinSortedDates = [...izinGroupDatesRaw].sort()
-    const izinUsedForQuota = Math.min(izinSortedDates.length, quotaAfterLeave)
-    const izinGroupDates  = izinSortedDates.slice(izinUsedForQuota) // sisa yang benar-benar kena eskalasi Izin
-    const quotaAfterIzin  = quotaAfterLeave - izinUsedForQuota
-    const freeEmptyUsed  = Math.min(emptyDays, quotaAfterIzin)
+    const fillableDates = [
+      ...izinGroupDatesRaw.map(d => ({ date: d, kind: 'izin' as const })),
+      ...sickDocDatesRaw.map(d => ({ date: d, kind: 'sick_doc' as const })),
+    ].sort((a, b) => a.date.localeCompare(b.date))
+    const fillUsedForQuota = Math.min(fillableDates.length, quotaAfterLeave)
+    const izinUsedForQuota = fillableDates.slice(0, fillUsedForQuota).filter(x => x.kind === 'izin').length
+    const sickDocUsedForQuota = fillUsedForQuota - izinUsedForQuota
+    const izinGroupDates  = fillableDates.slice(fillUsedForQuota).filter(x => x.kind === 'izin').map(x => x.date) // sisa yang benar-benar kena eskalasi Izin
+    const sickDocDates    = fillableDates.slice(fillUsedForQuota).filter(x => x.kind === 'sick_doc').map(x => x.date) // sisa yang benar-benar kena tarif Sakit+Surat
+    const quotaAfterFill  = quotaAfterLeave - fillUsedForQuota
+    const freeEmptyUsed  = Math.min(emptyDays, quotaAfterFill)
     const excessEmptyDates = emptyDateList.slice(freeEmptyUsed) // sisa di luar kuota → gabung ke kelompok Alpha
-    const kurangLibur     = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - leaveUsed - izinUsedForQuota - freeEmptyUsed, 0)
+    const kurangLibur     = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - leaveUsed - fillUsedForQuota - freeEmptyUsed, 0)
     const liburKompensasi = flatSalaryForEmp ? 0 : Math.round(kurangLibur * dailyRate)
 
     // Periode yang berakhir SEBELUM NEW_RULES_CUTOFF_DATE (26 Sep 2026) masih dihitung FLAT --
@@ -923,10 +932,11 @@ export default function PenggajianBulananPage() {
     const alphaGroup = calcEscalatingDeduction(alphaGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
     // Sakit DENGAN surat dokter: hari ke-1 gratis, ke-2&3 = 0.5×, ke-4+ = 1× (dihitung kumulatif
-    // per hari dalam periode, bukan per kejadian). Aturan ini SUDAH lama berlaku (bukan bagian
-    // dari eskalasi Izin/Alpha yang baru), jadi TETAP sama untuk periode lama maupun baru --
-    // dikonfirmasi user, hari pertama sakit dengan surat selalu gratis, tidak ikut aturan flat.
-    const sickCount   = sickDocRecs.length
+    // per hari dalam periode, bukan per kejadian, dan cuma dari SISA hari yang tidak kepakai
+    // mengisi jatah libur di atas). Aturan ini SUDAH lama berlaku (bukan bagian dari eskalasi
+    // Izin/Alpha yang baru), jadi TETAP sama untuk periode lama maupun baru -- dikonfirmasi user,
+    // hari pertama sakit dengan surat selalu gratis, tidak ikut aturan flat.
+    const sickCount   = sickDocDates.length
     const sick1Free   = Math.min(sickCount, 1)
     const sick23Half  = Math.max(0, Math.min(sickCount - 1, 2))
     const sick4Full   = Math.max(0, sickCount - 3)
@@ -989,8 +999,8 @@ export default function PenggajianBulananPage() {
       kasbonDed,
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
       liburCompDays: kurangLibur, liburKompensasi,
-      liburQuota: kuotaLibur, liburUsedDays: leaveUsed + izinUsedForQuota + freeEmptyUsed,
-      liburFromLeave: leaveUsed, liburFromIzin: izinUsedForQuota, liburFromKosong: freeEmptyUsed,
+      liburQuota: kuotaLibur, liburUsedDays: leaveUsed + fillUsedForQuota + freeEmptyUsed,
+      liburFromLeave: leaveUsed, liburFromIzin: izinUsedForQuota, liburFromSickDoc: sickDocUsedForQuota, liburFromKosong: freeEmptyUsed,
       invLoss, cashierLoss: cashLoss,
       loyAutoRelease, loyBalSaldo, loyDurasi,
       conditionalBonus,
@@ -1603,19 +1613,25 @@ export default function PenggajianBulananPage() {
         proRataFactor = activeDays / totalPeriodDays
       }
     }
-    // 'leave' lalu Izin/Sakit-tanpa-surat (dipromosikan dari yang tanggalnya paling awal) lalu
-    // hari kosong menghabiskan kuota berurutan, sama seperti buildSlipPreview -- supaya rincian
-    // di modal ini konsisten dengan yang benar-benar dipotong saat slip dibuat.
+    // 'leave' lalu Izin/Sakit-tanpa-surat DAN Sakit-dengan-surat (satu antrean, dipromosikan dari
+    // yang tanggalnya paling awal) lalu hari kosong menghabiskan kuota berurutan, sama seperti
+    // buildSlipPreview -- supaya rincian di modal ini konsisten dengan yang benar-benar dipotong
+    // saat slip dibuat. Alpha tidak pernah ikut dipromosikan.
     const leaveDatesForQuota = atts.filter((a: any) => a.status === 'leave').map((a: any) => a.date as string)
     const izinGroupDatesRaw = atts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
+    const sickDocDatesRaw = atts.filter((a: any) => a.status === 'sick_doc').map((a: any) => a.date as string)
     const kuotaLibur = Math.round(4 * proRataFactor)
     const leaveUsedForQuota = Math.min(leaveDatesForQuota.length, kuotaLibur)
     const quotaAfterLeaveForBreakdown = Math.max(kuotaLibur - leaveUsedForQuota, 0)
-    const izinSortedDatesForBreakdown = [...izinGroupDatesRaw].sort()
-    const izinUsedForQuotaForBreakdown = Math.min(izinSortedDatesForBreakdown.length, quotaAfterLeaveForBreakdown)
-    const izinGroupDates = izinSortedDatesForBreakdown.slice(izinUsedForQuotaForBreakdown)
-    const quotaAfterIzinForBreakdown = quotaAfterLeaveForBreakdown - izinUsedForQuotaForBreakdown
-    const freeEmptyUsed = Math.min(emptyDateList.length, quotaAfterIzinForBreakdown)
+    const fillableDatesForBreakdown = [
+      ...izinGroupDatesRaw.map((d: string) => ({ date: d, kind: 'izin' as const })),
+      ...sickDocDatesRaw.map((d: string) => ({ date: d, kind: 'sick_doc' as const })),
+    ].sort((a, b) => a.date.localeCompare(b.date))
+    const fillUsedForQuotaForBreakdown = Math.min(fillableDatesForBreakdown.length, quotaAfterLeaveForBreakdown)
+    const izinGroupDates = fillableDatesForBreakdown.slice(fillUsedForQuotaForBreakdown).filter(x => x.kind === 'izin').map(x => x.date)
+    const sickDocDates = fillableDatesForBreakdown.slice(fillUsedForQuotaForBreakdown).filter(x => x.kind === 'sick_doc').map(x => x.date)
+    const quotaAfterFillForBreakdown = quotaAfterLeaveForBreakdown - fillUsedForQuotaForBreakdown
+    const freeEmptyUsed = Math.min(emptyDateList.length, quotaAfterFillForBreakdown)
     const excessEmptyDates = emptyDateList.slice(freeEmptyUsed)
 
     // Periode yang berakhir sebelum NEW_RULES_CUTOFF_DATE masih dihitung FLAT -- lihat catatan
@@ -1628,8 +1644,9 @@ export default function PenggajianBulananPage() {
     const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
     // Sakit dengan surat dokter: hari-1 gratis, dst -- aturan lama, TETAP sama untuk semua
-    // periode (tidak ikut disederhanakan jadi flat), dikonfirmasi user.
-    const sickDays   = atts.filter((a: any) => a.status === 'sick_doc').length
+    // periode (tidak ikut disederhanakan jadi flat), dikonfirmasi user. Cuma dihitung dari SISA
+    // hari yang tidak kepakai mengisi jatah libur di atas.
+    const sickDays   = sickDocDates.length
     const sick1Free  = Math.min(sickDays, 1)
     const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
     const sick4Full  = Math.max(0, sickDays - 3)
@@ -3388,11 +3405,23 @@ export default function PenggajianBulananPage() {
                       <td className="px-3 py-2 text-right text-amber-600">{row.preview.otTotal > 0 ? formatRupiah(row.preview.otTotal) : '—'}</td>
                       <td className="px-3 py-2 text-right text-green-600">{(row.preview.kpiBonus + row.preview.conditionalBonus) > 0 ? formatRupiah(row.preview.kpiBonus + row.preview.conditionalBonus) : '—'}</td>
                       <td className="px-3 py-2 text-right">{row.preview.absentDays > 0 ? row.preview.absentDays : '—'}</td>
-                      <td className="px-3 py-2 text-right text-red-500">{row.preview.absentDed > 0 ? formatRupiah(row.preview.absentDed) : '—'}</td>
+                      <td className="px-3 py-2 text-right text-red-500" title={
+                        (() => {
+                          const b = row.preview!.absentBreakdown
+                          if (!b) return undefined
+                          return [
+                            b.izinGroup.total > 0 ? `Izin ${formatRupiah(b.izinGroup.total)}` : '',
+                            b.alphaGroup.total > 0 ? `Alpha ${formatRupiah(b.alphaGroup.total)}` : '',
+                            b.sickDed > 0 ? `Sakit+Surat ${formatRupiah(b.sickDed)}` : '',
+                            b.adminFeeTotal > 0 ? `Denda Lupa Absen ${formatRupiah(b.adminFeeTotal)}` : '',
+                          ].filter(Boolean).join(' + ') || undefined
+                        })()
+                      }>{row.preview.absentDed > 0 ? formatRupiah(row.preview.absentDed) : '—'}</td>
                       <td className="px-3 py-2 text-right" title={
                         [
                           row.preview.liburFromLeave > 0 ? `${row.preview.liburFromLeave} libur/cuti` : '',
                           row.preview.liburFromIzin > 0 ? `${row.preview.liburFromIzin} dari izin` : '',
+                          row.preview.liburFromSickDoc > 0 ? `${row.preview.liburFromSickDoc} dari sakit+surat` : '',
                           row.preview.liburFromKosong > 0 ? `${row.preview.liburFromKosong} hari kosong` : '',
                         ].filter(Boolean).join(' + ') || 'Belum ambil libur periode ini'
                       }>
