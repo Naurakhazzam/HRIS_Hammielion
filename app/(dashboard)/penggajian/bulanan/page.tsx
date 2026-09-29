@@ -244,6 +244,7 @@ export default function PenggajianBulananPage() {
     absentDays: number; absentDed: number; absentRatePerDay: number
     absentBreakdown: AbsentBreakdownDetail | null
     liburCompDays: number; liburKompensasi: number
+    liburQuota: number; liburUsedDays: number; liburFromLeave: number; liburFromIzin: number; liburFromKosong: number
     invLoss: number; cashierLoss: number
     loyAutoRelease: number; loyBalSaldo: number; loyDurasi: number
     gross: number; net: number
@@ -983,6 +984,8 @@ export default function PenggajianBulananPage() {
       kasbonDed,
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
       liburCompDays: kurangLibur, liburKompensasi,
+      liburQuota: kuotaLibur, liburUsedDays: leaveUsed + izinUsedForQuota + freeEmptyUsed,
+      liburFromLeave: leaveUsed, liburFromIzin: izinUsedForQuota, liburFromKosong: freeEmptyUsed,
       invLoss, cashierLoss: cashLoss,
       loyAutoRelease, loyBalSaldo, loyDurasi,
       conditionalBonus,
@@ -3354,6 +3357,7 @@ export default function PenggajianBulananPage() {
                 <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Bonus KPI+Kondisional</th>
                 <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Tidak Hadir (hari)</th>
                 <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Potongan Tidak Hadir</th>
+                <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Libur Diambil</th>
                 <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Kompensasi Libur</th>
                 <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Potongan Kasbon</th>
                 <th className="px-3 py-2 font-semibold text-slate-500 uppercase text-right sticky top-0 z-20 bg-slate-50 border-b border-slate-200">Kehilangan Barang</th>
@@ -3380,6 +3384,15 @@ export default function PenggajianBulananPage() {
                       <td className="px-3 py-2 text-right text-green-600">{(row.preview.kpiBonus + row.preview.conditionalBonus) > 0 ? formatRupiah(row.preview.kpiBonus + row.preview.conditionalBonus) : '—'}</td>
                       <td className="px-3 py-2 text-right">{row.preview.absentDays > 0 ? row.preview.absentDays : '—'}</td>
                       <td className="px-3 py-2 text-right text-red-500">{row.preview.absentDed > 0 ? formatRupiah(row.preview.absentDed) : '—'}</td>
+                      <td className="px-3 py-2 text-right" title={
+                        [
+                          row.preview.liburFromLeave > 0 ? `${row.preview.liburFromLeave} libur/cuti` : '',
+                          row.preview.liburFromIzin > 0 ? `${row.preview.liburFromIzin} dari izin` : '',
+                          row.preview.liburFromKosong > 0 ? `${row.preview.liburFromKosong} hari kosong` : '',
+                        ].filter(Boolean).join(' + ') || 'Belum ambil libur periode ini'
+                      }>
+                        {row.preview.liburUsedDays}/{row.preview.liburQuota}
+                      </td>
                       <td className="px-3 py-2 text-right text-green-600">{row.preview.liburKompensasi > 0 ? formatRupiah(row.preview.liburKompensasi) : '—'}</td>
                       <td className="px-3 py-2 text-right text-red-500">{row.preview.kasbonDed > 0 ? formatRupiah(row.preview.kasbonDed) : '—'}</td>
                       <td className="px-3 py-2 text-right text-red-500">{row.preview.invLoss > 0 ? formatRupiah(row.preview.invLoss) : '—'}</td>
