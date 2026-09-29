@@ -74,7 +74,9 @@ type BankAccount = { id: string; bank_name: string; account_number: string | nul
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 /** Satu fungsi terpusat untuk hitung gaji bersih.
- *  Semua tempat yang update net_total harus pakai ini. */
+ *  Semua tempat yang update net_total harus pakai ini.
+ *  Gaji karyawan tidak boleh minus -- kalau total potongan (telat/kasbon/kehilangan/dst)
+ *  lebih besar dari gross_total, gaji bersihnya mentok di 0, bukan jadi utang karyawan. */
 function calcNet(p: {
   gross_total: number | string
   late_deduction: number | string
@@ -84,7 +86,7 @@ function calcNet(p: {
   cashier_loss_deduction?: number | string | null
   absent_deduction?: number | string | null
 }): number {
-  return (
+  const raw = (
     Number(p.gross_total)
     - Number(p.late_deduction)
     - Number(p.kasbon_deduction)
@@ -93,6 +95,7 @@ function calcNet(p: {
     - Number(p.cashier_loss_deduction ?? 0)
     - Number(p.absent_deduction ?? 0)
   )
+  return Math.max(0, raw)
 }
 
 const MONTHS = [
