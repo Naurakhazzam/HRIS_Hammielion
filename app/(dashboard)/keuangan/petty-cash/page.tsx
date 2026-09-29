@@ -296,7 +296,7 @@ export default function PettyCashPage() {
           </div>
         )}
 
-        {loading ? (
+        {loading && allRows.length === 0 ? (
           <div className="py-10 text-center text-slate-500">Memuat data...</div>
         ) : (
           <div className={`grid grid-cols-1 gap-6 ${isViewingSelf ? 'lg:grid-cols-3' : ''}`}>

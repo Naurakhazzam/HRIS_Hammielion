@@ -37,6 +37,11 @@ export default function KalenderLiburPage() {
   const [viewYear, setViewYear] = useState(today.getFullYear())
   const [viewMonth, setViewMonth] = useState(today.getMonth())
   const [loading, setLoading] = useState(true)
+  // Sesudah tambah/hapus hari libur, fetchMonth() dipanggil ulang untuk bulan yang SAMA --
+  // kalau grid kalender ikut kolaps jadi placeholder tiap kali itu terjadi, tinggi halaman
+  // menyusut sesaat dan scroll ikut ter-reset ke atas. Placeholder cukup tampil sekali saja,
+  // waktu pertama kali dibuka.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   const [entriesByDate, setEntriesByDate] = useState<Record<string, DayOffEntry[]>>({})
   const [holidaysByDate, setHolidaysByDate] = useState<Record<string, Holiday>>({})
   const [canManage, setCanManage] = useState(false)
@@ -104,6 +109,7 @@ export default function KalenderLiburPage() {
     }
     setHolidaysByDate(Object.fromEntries((hols || []).map((h: any) => [h.holiday_date, h])))
     setLoading(false)
+    setHasLoadedOnce(true)
   }
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -251,7 +257,7 @@ export default function KalenderLiburPage() {
             <div key={w} className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase">{w}</div>
           ))}
         </div>
-        {loading ? (
+        {loading && !hasLoadedOnce ? (
           <div className="py-16 text-center text-slate-400 text-sm">Memuat kalender...</div>
         ) : (
           <div className="grid grid-cols-7">

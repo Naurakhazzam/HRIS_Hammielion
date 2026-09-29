@@ -423,7 +423,7 @@ export default function RingkasanOwnerPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && rows.length === 0 ? (
                 <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400 text-sm">Memuat ringkasan...</td></tr>
               ) : rows.length === 0 ? (
                 <tr><td colSpan={7} className="px-4 py-14 text-center text-slate-400 text-sm">Belum ada slip gaji untuk periode ini.</td></tr>
@@ -501,7 +501,7 @@ export default function RingkasanOwnerPage() {
           </table>
         </div>
 
-        {!loading && rows.length > 0 && (
+        {rows.length > 0 && (
           <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-slate-500">
             <span>{rows.length} karyawan · periode {getPeriodLabel(filterMonth, filterYear)}</span>
             <div className="flex gap-4">

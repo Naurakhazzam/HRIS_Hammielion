@@ -221,7 +221,7 @@ export default function MeetingNotes({ isAdmin, myUserId, myRole, myEmployeeId, 
         <div className={`p-4 mb-4 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>{message.text}</div>
       )}
 
-      {loading ? (
+      {loading && notes.length === 0 ? (
         <div className="py-10 text-center text-slate-500">Memuat...</div>
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">

@@ -200,7 +200,7 @@ export default function SetupTarifBoronganPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
+                {loading && rates.length === 0 ? (
                   <tr>
                     <td colSpan={3} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat histori tarif...</td>
                   </tr>

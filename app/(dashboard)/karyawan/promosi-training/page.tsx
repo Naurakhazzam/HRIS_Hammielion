@@ -96,7 +96,7 @@ export default function PromosiTrainingPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && rows.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Memuat...</td></tr>
               ) : rows.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Belum ada kandidat{showDecided ? '' : ' yang menunggu verifikasi'}.</td></tr>

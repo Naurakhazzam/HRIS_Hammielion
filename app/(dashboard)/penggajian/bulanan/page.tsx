@@ -2136,7 +2136,7 @@ export default function PenggajianBulananPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && payrolls.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="px-4 py-12 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-400">
@@ -2366,7 +2366,7 @@ export default function PenggajianBulananPage() {
         </div>
 
         {/* Footer info */}
-        {!loading && payrolls.length > 0 && (
+        {payrolls.length > 0 && (
           <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs text-slate-500">
             <span>
               {payrolls.length} karyawan tetap terdaftar periode {getPeriodLabel(filterMonth, filterYear)}
@@ -3285,7 +3285,7 @@ export default function PenggajianBulananPage() {
           </div>
 
           <div className="overflow-auto flex-1 p-4">
-            {bulkPreviewLoading ? (
+            {bulkPreviewLoading && bulkPreviewRows.length === 0 ? (
               <div className="py-16 text-center text-slate-400 text-sm">Menghitung estimasi semua karyawan, mohon tunggu...</div>
             ) : bulkPreviewRows.length === 0 ? (
               <div className="py-16 text-center text-slate-400 text-sm">Tidak ada karyawan tetap/training aktif.</div>

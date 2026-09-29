@@ -141,7 +141,7 @@ export default function LogistikPage() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && pemasukan.length === 0 && pengeluaran.length === 0 ? (
         <div className="py-10 text-center text-slate-500">Memuat data...</div>
       ) : (
         <>

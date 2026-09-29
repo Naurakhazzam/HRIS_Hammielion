@@ -605,7 +605,7 @@ export default function ApprovalKasKeluarPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && currentList.length === 0 ? (
                 <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
               ) : currentList.length === 0 ? (
                 <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-sm">{hasActiveFilter ? 'Tidak ada entri yang cocok dengan pencarian/filter.' : 'Tidak ada entri yang menunggu verifikasi.'}</td></tr>

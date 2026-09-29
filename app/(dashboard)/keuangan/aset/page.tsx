@@ -366,7 +366,7 @@ export default function AsetKontrakPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {loading ? (
+                    {loading && assets.length === 0 ? (
                       <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                     ) : assets.length === 0 ? (
                       <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada aset tercatat.</td></tr>
@@ -474,7 +474,7 @@ export default function AsetKontrakPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {loading ? (
+                    {loading && contracts.length === 0 ? (
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                     ) : contracts.length === 0 ? (
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kontrak tercatat.</td></tr>

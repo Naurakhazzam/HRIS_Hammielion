@@ -212,7 +212,7 @@ export default function MasterTokoPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {loading ? (
+            {loading && stores.length === 0 ? (
               <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">Memuat data...</td></tr>
             ) : stores.length === 0 ? (
               <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada toko.</td></tr>

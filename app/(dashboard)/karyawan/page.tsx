@@ -642,7 +642,7 @@ export default function KaryawanPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && employees.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
               ) : employees.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data karyawan.</td></tr>

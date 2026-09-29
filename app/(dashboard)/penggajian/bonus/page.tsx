@@ -614,7 +614,7 @@ function TabBulanan({ showMessage }: { showMessage: (type: 'success'|'error', te
         </div>
       </div>
 
-      {loading ? (
+      {loading && rules.length === 0 ? (
         <div className="text-center p-8 text-slate-500">Memuat data...</div>
       ) : rules.length === 0 ? (
         <div className="text-center p-8 bg-white border border-slate-200 rounded-xl text-slate-500">Tidak ada aturan bonus yang aktif.</div>
@@ -946,7 +946,7 @@ function TabSiklus({ showMessage }: { showMessage: (type: 'success'|'error', tex
         </div>
       </div>
 
-      {loading ? (
+      {loading && cycles.length === 0 ? (
         <div className="text-center p-8 text-slate-500">Memuat data siklus...</div>
       ) : cycles.length === 0 ? (
         <div className="text-center p-8 bg-white border border-slate-200 rounded-xl text-slate-500">Belum ada siklus berjalan.</div>

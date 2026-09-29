@@ -234,7 +234,7 @@ export default function JabatanPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {loading ? (
+                  {loading && positions.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td>
                     </tr>

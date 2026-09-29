@@ -265,7 +265,7 @@ export default function TabunganLoyalitasPage() {
             <span className="text-sm font-semibold text-slate-700">Saldo Tabungan Loyalitas per Karyawan</span>
           </div>
           <div className="divide-y divide-slate-100">
-            {loading ? (
+            {loading && employees.length === 0 ? (
               <div className="px-5 py-8 text-center text-slate-400 text-sm">Memuat...</div>
             ) : employees.length === 0 ? (
               <div className="px-5 py-8 text-center text-slate-400 text-sm">Belum ada karyawan tetap.</div>

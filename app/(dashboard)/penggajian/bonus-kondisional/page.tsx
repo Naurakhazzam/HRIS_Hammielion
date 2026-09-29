@@ -168,7 +168,7 @@ export default function BonusKondisionalPage() {
         />
       </div>
 
-      {loading ? (
+      {loading && filtered.length === 0 ? (
         <div className="text-center py-12 text-slate-500">Memuat data...</div>
       ) : (
         <div className="space-y-3">

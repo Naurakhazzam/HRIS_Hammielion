@@ -288,7 +288,7 @@ export default function BiayaTetapPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
+                {loading && items.length === 0 ? (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                 ) : items.length === 0 ? (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada item biaya tetap.</td></tr>

@@ -265,7 +265,7 @@ export default function RekeningPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
+                {loading && accounts.length === 0 ? (
                   <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                 ) : accounts.length === 0 ? (
                   <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada rekening.</td></tr>

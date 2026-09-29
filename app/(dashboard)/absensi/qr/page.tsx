@@ -136,7 +136,7 @@ export default function AbsenQrAdminPage() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && branches.length === 0 ? (
         <div className="text-center py-12 text-slate-500">Memuat...</div>
       ) : (
         <>

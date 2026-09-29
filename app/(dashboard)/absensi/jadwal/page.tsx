@@ -234,7 +234,7 @@ export default function JadwalKerjaPage() {
       )}
 
       {/* Tabel Grouped by Dept */}
-      {loading ? (
+      {loading && schedules.length === 0 ? (
         <div className="flex justify-center items-center h-32 text-slate-400 text-sm">Memuat data...</div>
       ) : Object.keys(grouped).length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada jadwal.</div>

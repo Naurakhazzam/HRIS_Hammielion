@@ -384,7 +384,7 @@ export default function SetupDriverPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {loading ? (
+                  {loading && rates.length === 0 ? (
                     <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
                   ) : rates.length === 0 ? (
                     <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada konfigurasi tarif.</td></tr>

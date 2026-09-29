@@ -199,7 +199,7 @@ export default function PortalAbsensiPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && attendances.length === 0 ? (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">Memuat data...</td></tr>
               ) : attendances.length === 0 ? (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">Belum ada data absensi periode ini.</td></tr>

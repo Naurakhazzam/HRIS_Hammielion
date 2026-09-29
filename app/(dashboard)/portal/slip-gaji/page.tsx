@@ -205,7 +205,7 @@ export default function PortalSlipGajiPage() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && payrolls.length === 0 ? (
         <div className="text-center py-12 text-slate-500 print:hidden">Memuat slip gaji...</div>
       ) : payrolls.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-xl border border-slate-200 text-slate-500 print:hidden">

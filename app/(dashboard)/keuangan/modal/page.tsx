@@ -331,7 +331,7 @@ export default function ModalCabangPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {loading ? (
+                    {loading && baselines.length === 0 ? (
                       <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                     ) : baselines.length === 0 ? (
                       <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>
@@ -420,7 +420,7 @@ export default function ModalCabangPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {loading ? (
+                    {loading && snapshots.length === 0 ? (
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat...</td></tr>
                     ) : snapshots.length === 0 ? (
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada data.</td></tr>

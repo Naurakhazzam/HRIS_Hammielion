@@ -256,7 +256,7 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        {loading ? (
+        {loading && filtered.length === 0 ? (
           <div className="p-10 text-center text-slate-500">Memuat data...</div>
         ) : filtered.length === 0 ? (
           <div className="p-10 text-center text-slate-500">Tidak ada pengajuan ditemukan.</div>
@@ -448,7 +448,7 @@ function TabLimit({ showMessage }: { showMessage: (t: 'success' | 'error', msg: 
       <div className="px-5 py-3 border-b border-slate-200 bg-slate-50">
         <span className="text-sm font-semibold text-slate-700">Limit Kasbon Karyawan</span>
       </div>
-      {loading ? (
+      {loading && employees.length === 0 ? (
         <div className="p-10 text-center text-slate-500">Memuat data...</div>
       ) : (
         <div className="overflow-x-auto">
@@ -582,7 +582,7 @@ function TabRiwayat({ showMessage }: { showMessage: (t: 'success' | 'error', msg
           karyawan itu ditandai lunas di Penggajian Bulanan, bukan diklik manual di sini —
           supaya tidak ada dua tempat yang bisa saling tidak sinkron. */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        {loading ? (
+        {loading && deductions.length === 0 ? (
           <div className="p-10 text-center text-slate-500">Memuat data...</div>
         ) : deductions.length === 0 ? (
           <div className="p-10 text-center text-slate-500">Tidak ada cicilan untuk periode ini.</div>
@@ -795,7 +795,7 @@ function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | '
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            {loading ? (
+            {loading && filtered.length === 0 ? (
               <div className="p-10 text-center text-slate-500">Memuat data...</div>
             ) : filtered.length === 0 ? (
               <div className="p-10 text-center text-slate-500">Belum ada kasbon driver.</div>
@@ -915,7 +915,7 @@ function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | '
             <span className="text-sm font-semibold text-slate-700">Riwayat Potongan Kasbon Driver</span>
             <button onClick={fetchAll} className="text-xs text-blue-600 hover:underline">🔄 Refresh</button>
           </div>
-          {loading ? (
+          {loading && deductions.length === 0 ? (
             <div className="p-10 text-center text-slate-500">Memuat data...</div>
           ) : deductions.length === 0 ? (
             <div className="p-10 text-center text-slate-500">Belum ada riwayat potongan.</div>
@@ -1141,7 +1141,7 @@ function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'e
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            {loading ? (
+            {loading && filtered.length === 0 ? (
               <div className="p-10 text-center text-slate-500">Memuat data...</div>
             ) : filtered.length === 0 ? (
               <div className="p-10 text-center text-slate-500">Belum ada kasbon kenek.</div>
@@ -1261,7 +1261,7 @@ function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'e
             <span className="text-sm font-semibold text-slate-700">Riwayat Potongan Kasbon Kenek</span>
             <button onClick={fetchAll} className="text-xs text-blue-600 hover:underline">🔄 Refresh</button>
           </div>
-          {loading ? (
+          {loading && deductions.length === 0 ? (
             <div className="p-10 text-center text-slate-500">Memuat data...</div>
           ) : deductions.length === 0 ? (
             <div className="p-10 text-center text-slate-500">Belum ada riwayat potongan.</div>

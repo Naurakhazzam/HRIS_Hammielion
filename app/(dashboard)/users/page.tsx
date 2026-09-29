@@ -220,7 +220,7 @@ export default function UsersPage() {
 
       {/* Ringkasan pendaftar baru — supaya bisa langsung lihat siapa yang baru bikin akun tanpa
           perlu tanya/cek manual satu-satu di tabel bawah. */}
-      {!loading && (() => {
+      {(() => {
         const recent = users.filter(u => daysSince(u.created_at) < RECENT_DAYS)
         if (recent.length === 0) return null
         return (
@@ -327,7 +327,7 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && users.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">Memuat data...</td></tr>
               ) : users.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">Belum ada akun.</td></tr>

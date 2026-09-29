@@ -225,7 +225,7 @@ export default function MeetingTasks({ isAdmin, myEmployeeId, branches, departme
           </div>
         )}
         {message && <div className={`p-4 mb-4 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>{message.text}</div>}
-        {loading ? <div className="py-10 text-center text-slate-500">Memuat...</div>
+        {loading && tasks.length === 0 ? <div className="py-10 text-center text-slate-500">Memuat...</div>
           : (mine.length === 0 && infoOnly.length === 0) ? (
             <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada tugas untuk Anda. 👍</div>
           ) : (
@@ -291,7 +291,7 @@ export default function MeetingTasks({ isAdmin, myEmployeeId, branches, departme
       </div>
       {message && <div className={`p-4 mb-4 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>{message.text}</div>}
 
-      {loading ? <div className="py-10 text-center text-slate-500">Memuat...</div>
+      {loading && tasks.length === 0 ? <div className="py-10 text-center text-slate-500">Memuat...</div>
         : visibleTasks.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
             {tasks.length === 0 ? 'Belum ada tugas. Buat dari halaman Catatan lewat tombol "Tambah Tugas".' : 'Tidak ada tugas yang cocok dengan filter ini.'}

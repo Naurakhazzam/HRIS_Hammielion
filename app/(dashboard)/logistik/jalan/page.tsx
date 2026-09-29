@@ -453,7 +453,7 @@ export default function JalanPengirimanPage() {
         </div>
       )}
 
-      {loading ? (
+      {loading && plans.length === 0 ? (
         <div className="text-center py-12 text-slate-500 text-sm">Memuat...</div>
       ) : plans.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">

@@ -233,7 +233,7 @@ export default function ShiftCabangPage() {
         </div>
       )}
 
-      {loading ? (
+      {loading && shifts.length === 0 ? (
         <div className="flex justify-center items-center h-32 text-slate-400 text-sm">Memuat data...</div>
       ) : Object.keys(grouped).length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada shift cabang.</div>

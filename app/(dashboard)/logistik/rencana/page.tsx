@@ -231,7 +231,7 @@ export default function RencanaPengirimanPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {loading ? (
+            {loading && plans.length === 0 ? (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400 text-sm">Memuat data...</td></tr>
             ) : plans.length === 0 ? (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada rencana pengiriman.</td></tr>

@@ -935,7 +935,7 @@ export default function PenggajianDriverPage() {
       {/* Tab Overview */}
       {activeTab === 'overview' && (
         <div>
-          {loading ? (
+          {loading && trips.length === 0 ? (
             <div className="flex justify-center items-center h-32 text-slate-400 text-sm">Memuat data...</div>
           ) : Object.keys(groupedByDriver).length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
@@ -990,7 +990,7 @@ export default function PenggajianDriverPage() {
       {/* Tab Overview Kenek */}
       {activeTab === 'kenek' && (
         <div>
-          {loading ? (
+          {loading && trips.length === 0 ? (
             <div className="flex justify-center items-center h-32 text-slate-400 text-sm">Memuat data...</div>
           ) : Object.keys(groupedByHelper).length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">

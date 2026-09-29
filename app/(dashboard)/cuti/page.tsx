@@ -231,7 +231,7 @@ export default function CutiIzinPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && requests.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat pengajuan...</td>
                 </tr>

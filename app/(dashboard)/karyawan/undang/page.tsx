@@ -187,7 +187,7 @@ export default function UndangKaryawanPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && invites.length === 0 ? (
                 <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Memuat...</td></tr>
               ) : invites.length === 0 ? (
                 <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Belum ada undangan dibuat.</td></tr>
