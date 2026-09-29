@@ -74,6 +74,10 @@ export default function KPIPage() {
   const [branches, setBranches] = useState<{id: string; name: string}[]>([])
   const [entries, setEntries] = useState<DailyEntry[]>([])
   const [nominalBonus, setNominalBonus] = useState('0')
+  // Bobot & persentase "Kepatuhan Tugas Rutin" -- lihat lib Tugas & Laporan. taskWeight diatur
+  // sekali di Setup KPI (berlaku semua jabatan), taskCompletionPct dihitung per karyawan+periode.
+  const [taskWeight, setTaskWeight] = useState(0)
+  const [taskCompletionPct, setTaskCompletionPct] = useState<number | null>(null)
   const [savingCell, setSavingCell] = useState<string | null>(null)
   const [savingEval, setSavingEval] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -90,7 +94,7 @@ export default function KPIPage() {
     if (currentUser && viewMode === 'dashboard' && templates.length > 0) {
       fetchDashboardData()
     }
-  }, [viewMode, filterMonth, filterYear, filterBranch, currentUser, templates])
+  }, [viewMode, filterMonth, filterYear, filterBranch, currentUser, templates, taskWeight])
 
   function showMessage(type: 'success'|'error', text: string) {
     setMessage({ type, text })
@@ -120,6 +124,9 @@ export default function KPIPage() {
 
     const { data: tData } = await supabase.from('kpi_templates').select('*').eq('is_active', true)
     if (tData) setTemplates(tData)
+
+    const { data: twData } = await supabase.from('kpi_task_weight').select('weight_percent').single()
+    if (twData) setTaskWeight(Number(twData.weight_percent) || 0)
 
     // Fetch employees
     let empQ = supabase
@@ -173,6 +180,12 @@ export default function KPIPage() {
       .lte('entry_date', toDateStr(end))
 
     setEntries((entryData || []) as DailyEntry[])
+
+    const { data: taskPct } = await supabase.rpc('get_employee_task_completion_pct', {
+      p_employee_id: selectedEmployeeId, p_period_start: toDateStr(start), p_period_end: toDateStr(end),
+    })
+    setTaskCompletionPct(taskPct == null ? null : Number(taskPct))
+
     setLoadingEntries(false)
   }
 
@@ -215,14 +228,26 @@ export default function KPIPage() {
       .eq('period_month', filterMonth)
       .eq('period_year', filterYear)
 
+    // Kepatuhan Tugas Rutin per karyawan -- cuma perlu ditanya kalau bobotnya memang diisi,
+    // supaya tidak nambah puluhan panggilan RPC percuma kalau fitur ini belum dipakai.
+    const taskPctByEmp: Record<string, number | null> = {}
+    if (taskWeight > 0) {
+      await Promise.all((empData as any[]).map(async emp => {
+        const { data } = await supabase.rpc('get_employee_task_completion_pct', {
+          p_employee_id: emp.id, p_period_start: toDateStr(start), p_period_end: toDateStr(end),
+        })
+        taskPctByEmp[emp.id] = data == null ? null : Number(data)
+      }))
+    }
+
     const result = (empData as any[]).map(emp => {
       const empTemplates = templates.filter(t => t.position_id === emp.position_id)
       const empEntries = (allEntries || []).filter(e => e.employee_id === emp.id)
       const savedEval = (allEvals || []).find(e => e.employee_id === emp.id)
 
-      let overallPct = 0
+      let templatesPct = 0
       if (empTemplates.length > 0 && passedDates.length > 0) {
-        overallPct = empTemplates.reduce((acc, t) => {
+        templatesPct = empTemplates.reduce((acc, t) => {
           const checked = passedDates.filter(d =>
             empEntries.some(e => e.criteria_id === t.id && e.entry_date === toDateStr(d) && e.is_checked)
           ).length
@@ -230,6 +255,10 @@ export default function KPIPage() {
           return acc + (t.weight_percent * ach) / 100
         }, 0)
       }
+      const empTaskPct = taskPctByEmp[emp.id] ?? null
+      const overallPct = taskWeight > 0 && empTaskPct !== null
+        ? templatesPct * (1 - taskWeight / 100) + empTaskPct * (taskWeight / 100)
+        : templatesPct
 
       const nominalMax = savedEval?.kpi_bonus_amount ?? emp.kpi_bonus_max ?? 0
       const bonusCair = nominalMax * overallPct / 100
@@ -298,9 +327,16 @@ export default function KPIPage() {
     return Math.round((checked / allDates.length) * 100)
   }
 
-  const overallPct = empTemplates.reduce((acc, t) => {
+  const templatesPct = empTemplates.reduce((acc, t) => {
     return acc + (t.weight_percent * getCriteriaAchievement(t.id)) / 100
   }, 0)
+  // Kepatuhan Tugas Rutin dicampur proporsional -- templatesPct disusutkan sesuai sisa bobotnya,
+  // supaya overallPct tetap terjaga 0-100% berapa pun taskWeight-nya, tanpa perlu Owner
+  // menyesuaikan ulang bobot kriteria per-jabatan yang sudah ada. taskCompletionPct null (belum
+  // punya Tugas Rutin sama sekali periode ini) -> abaikan, KPI murni dari kriteria seperti biasa.
+  const overallPct = taskWeight > 0 && taskCompletionPct !== null
+    ? templatesPct * (1 - taskWeight / 100) + taskCompletionPct * (taskWeight / 100)
+    : templatesPct
 
   const bonusCair = (parseFloat(nominalBonus) || 0) * overallPct / 100
 
@@ -327,16 +363,23 @@ export default function KPIPage() {
       console.error('Save eval error:', JSON.stringify(error, null, 2))
       showMessage('error', 'Gagal menyimpan rekap: ' + error.message)
     } else {
-      // Sync ke penggajian bulanan
-      await supabase
-        .from('monthly_payrolls')
+      // Sync ke penggajian bulanan -- HARUS ke tabel 'payrolls' (nama tabel nyata), bukan
+      // 'monthly_payrolls' yang tidak pernah ada sama sekali (bug lama: langkah sync ini diam-diam
+      // selalu gagal tanpa dicek error-nya, jadi bonus KPI tidak pernah benar-benar tersinkron
+      // ke slip gaji sungguhan -- ditemukan & diperbaiki di sesi ini).
+      const { error: syncErr } = await supabase
+        .from('payrolls')
         .update({ kpi_bonus: parseFloat(bonusCair.toFixed(2)) })
         .eq('employee_id', selectedEmployeeId)
         .eq('period_month', filterMonth)
         .eq('period_year', filterYear)
         .eq('status', 'draft')
 
-      showMessage('success', 'Rekap KPI berhasil disimpan. Bonus cair sudah tersync ke penggajian.')
+      if (syncErr) {
+        showMessage('error', 'Rekap KPI tersimpan, tapi gagal sync ke penggajian: ' + syncErr.message)
+      } else {
+        showMessage('success', 'Rekap KPI berhasil disimpan. Kalau slip gaji periode ini statusnya masih Draft, bonus cair sudah tersync otomatis.')
+      }
     }
     setSavingEval(false)
   }
@@ -537,6 +580,13 @@ export default function KPIPage() {
                 <p className={`font-bold text-2xl ${overallPct >= 80 ? 'text-green-600' : overallPct >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
                   {overallPct.toFixed(1)}%
                 </p>
+                {taskWeight > 0 && (
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    {taskCompletionPct !== null
+                      ? `Termasuk Tugas Rutin ${taskCompletionPct}% (bobot ${taskWeight}%)`
+                      : 'Belum punya Tugas Rutin periode ini'}
+                  </p>
+                )}
               </div>
               <div>
                 <p className="text-xs text-slate-500 mb-1">Bonus Cair</p>

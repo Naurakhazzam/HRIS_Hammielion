@@ -31,9 +31,28 @@ export default function KPISetupPage() {
     weight_percent: '20'
   })
 
+  // Bobot "Kepatuhan Tugas Rutin" -- satu angka global (bukan per-jabatan), menggabungkan
+  // penyelesaian Tugas Rutin (lihat menu Tugas & Laporan) ke skor KPI. 0 = tidak berpengaruh.
+  const [taskWeight, setTaskWeight] = useState('0')
+  const [taskWeightSaving, setTaskWeightSaving] = useState(false)
+
   useEffect(() => {
     checkRoleAndFetchData()
   }, [])
+
+  async function fetchTaskWeight() {
+    const { data } = await supabase.from('kpi_task_weight').select('weight_percent').single()
+    if (data) setTaskWeight(String(data.weight_percent))
+  }
+
+  async function saveTaskWeight() {
+    setTaskWeightSaving(true)
+    const val = Math.min(100, Math.max(0, parseFloat(taskWeight) || 0))
+    const { error } = await supabase.from('kpi_task_weight').update({ weight_percent: val, updated_at: new Date().toISOString() }).eq('id', true)
+    setTaskWeightSaving(false)
+    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
+    else { setTaskWeight(String(val)); showMessage('success', 'Bobot Tugas Rutin disimpan.') }
+  }
 
   async function checkRoleAndFetchData() {
     setLoading(true)
@@ -55,8 +74,9 @@ export default function KPISetupPage() {
     if (role === 'owner' || role === 'hr') {
       await fetchPositions()
       await fetchTemplates()
+      await fetchTaskWeight()
     }
-    
+
     setLoading(false)
   }
 
@@ -210,6 +230,23 @@ export default function KPISetupPage() {
           {message.text}
         </div>
       )}
+
+      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+        <h2 className="text-lg font-bold text-slate-800 mb-1">🔁 Bobot Kepatuhan Tugas Rutin</h2>
+        <p className="text-sm text-slate-500 mb-3">
+          Berapa persen skor KPI berasal dari penyelesaian Tugas Rutin (menu Tugas & Laporan)? Berlaku untuk SEMUA jabatan sekaligus, tidak perlu diatur per jabatan.
+          Isi 0 kalau belum mau dipakai — KPI tetap berjalan seperti biasa.
+        </p>
+        <div className="flex items-center gap-2">
+          <input type="number" min="0" max="100" value={taskWeight} onChange={e => setTaskWeight(e.target.value)}
+            className="w-28 px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          <span className="text-sm text-slate-500">%</span>
+          <button onClick={saveTaskWeight} disabled={taskWeightSaving}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+            {taskWeightSaving ? 'Menyimpan...' : 'Simpan'}
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Kolom Kiri: Form Tambah Kriteria */}
