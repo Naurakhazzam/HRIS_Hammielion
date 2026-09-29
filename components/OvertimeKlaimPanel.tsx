@@ -94,7 +94,10 @@ export default function OvertimeKlaimPanel({ employeeId, hideWhenEmpty }: { empl
                 {!isPending && a.claim?.status === 'rejected' && (
                   <p className="text-xs text-slate-500 mt-1.5">Klaim sebelumnya ditolak{a.claim.rejection_note ? `: ${a.claim.rejection_note}` : ''}.</p>
                 )}
-                {a.actionable && !isPending && (
+                {a.actionable && !isPending && a.noDeadline && (
+                  <p className="text-xs text-amber-600 font-medium mt-1.5">⏳ Periode ini boleh diklaim kapan saja, tanpa batas waktu.</p>
+                )}
+                {a.actionable && !isPending && !a.noDeadline && (
                   <p className="text-xs text-purple-600 font-medium mt-1.5">⏰ Batas klaim: paling lambat {deadlineLabel} (3 hari setelah tanggal lembur)</p>
                 )}
               </div>

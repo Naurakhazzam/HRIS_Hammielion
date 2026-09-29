@@ -11,12 +11,23 @@ export type OvertimeClaimAlertItem = {
   date: string
   hoursDetected: number
   deadline: string // date + 3 hari
+  // true = tanggal lembur ini masuk periode pengecualian (26 Agu - 25 Sep 2026) yang boleh
+  // diklaim kapan saja, tanpa batas 3 hari -- sama persis dengan pengecualian di RPC
+  // submit_overtime_claim. Dikonfirmasi Owner: periode ini belum pernah ada proses klaim sama
+  // sekali, jadi tidak adil ditagih aturan 3 hari yang baru berlaku belakangan.
+  noDeadline: boolean
   claim: { status: string; rejection_note: string | null } | null
   // true = masih bisa/perlu diklaim (belum ada klaim, atau klaim lama ditolak, DAN belum lewat
-  // batas 3 hari). false + expired=true = sudah hangus (lewat batas, tidak pernah disetujui).
+  // batas 3 hari kecuali noDeadline). false + expired=true = sudah hangus (lewat batas, tidak
+  // pernah disetujui).
   actionable: boolean
   expired: boolean
 }
+
+// Periode pengecualian batas waktu klaim -- lihat migrasi
+// overtime_claim_no_deadline_aug_sep_2026, HARUS selalu sama persis dengan RPC.
+const NO_DEADLINE_PERIOD_START = '2026-08-26'
+const NO_DEADLINE_PERIOD_END = '2026-09-25'
 
 function addDaysStr(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00')
@@ -31,10 +42,15 @@ export async function fetchOvertimeClaimAlerts(
 ): Promise<OvertimeClaimAlertItem[]> {
   const since = new Date()
   since.setDate(since.getDate() - daysBack)
+  // Jendela pencarian selalu mencakup periode pengecualian (26 Agu - 25 Sep 2026), berapa pun
+  // daysBack-nya -- kalau tidak, lembur periode itu tidak akan pernah muncul di daftar sama
+  // sekali walau sudah dibebaskan dari batas waktu di RPC.
+  const sinceStr = localDateStr(since)
+  const effectiveSince = sinceStr < NO_DEADLINE_PERIOD_START ? sinceStr : NO_DEADLINE_PERIOD_START
   const { data: rows } = await supabase.from('attendances')
     .select('id, date, overtime_hours')
     .eq('employee_id', employeeId).gt('overtime_hours', 0)
-    .gte('date', localDateStr(since)).lte('date', todayLocalStr())
+    .gte('date', effectiveSince).lte('date', todayLocalStr())
     .order('date', { ascending: false })
   if (!rows || rows.length === 0) return []
 
@@ -49,11 +65,12 @@ export async function fetchOvertimeClaimAlerts(
   const todayStr = todayLocalStr()
   return (rows as any[]).map(r => {
     const deadline = addDaysStr(r.date, 3)
+    const noDeadline = r.date >= NO_DEADLINE_PERIOD_START && r.date <= NO_DEADLINE_PERIOD_END
     const claim = latestByAtt.get(r.id) ?? null
-    const withinWindow = todayStr <= deadline
+    const withinWindow = noDeadline || todayStr <= deadline
     const approved = claim?.status === 'approved'
     const actionable = withinWindow && !approved && (!claim || claim.status === 'rejected')
     const expired = !withinWindow && !approved
-    return { attendanceId: r.id, date: r.date, hoursDetected: Number(r.overtime_hours), deadline, claim, actionable, expired }
+    return { attendanceId: r.id, date: r.date, hoursDetected: Number(r.overtime_hours), deadline, noDeadline, claim, actionable, expired }
   })
 }
