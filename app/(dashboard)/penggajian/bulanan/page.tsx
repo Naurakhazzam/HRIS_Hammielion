@@ -849,7 +849,7 @@ export default function PenggajianBulananPage() {
     // jatah 4 hari/periode", dua-duanya sama-sama status 'leave' dan sekarang dianggap SATU
     // kuota (keputusan Owner, supaya tidak dobel: bebas potongan Alpha DAN masih dibayar
     // "Kompensasi Libur" seolah belum pakai jatah sama sekali).
-    const izinGroupDates  = validAtts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
+    const izinGroupDatesRaw = validAtts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
     const sickDocRecs     = validAtts.filter((a: any) => a.status === 'sick_doc')
     const explicitAlphaDates = validAtts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
     const leaveDates      = validAtts.filter((a: any) => a.status === 'leave').map((a: any) => a.date as string)
@@ -875,21 +875,28 @@ export default function PenggajianBulananPage() {
     const emptyDays = emptyDateList.length
 
     // ── Kuota libur 4 hari/periode ───────────────────────────────────────────
-    // Kuota dipakai lewat DUA cara yang sama-sama sah: (1) hari berstatus 'leave' (Cuti Tahunan
-    // resmi ATAU klarifikasi Alpha "pakai jatah 4 hari"), dan (2) hari kosong tanpa record sama
-    // sekali (ditoleransi diam-diam). 'leave' diprioritaskan menghabiskan kuota duluan -- baru
-    // sisanya dipakai menutup hari kosong. 'leave' yang melebihi kuota TETAP tidak dipotong (cuti
-    // panjang asli tidak dihukum), tapi tidak lagi ikut mengurangi Kompensasi Libur karena
-    // kuotanya sudah habis oleh hari 'leave' itu sendiri.
+    // Kuota dipakai lewat TIGA cara, berurutan sesuai prioritas (yang duluan menghabiskan kuota):
+    // (1) hari berstatus 'leave' (Cuti Tahunan resmi ATAU klarifikasi Alpha "pakai jatah 4 hari"),
+    // (2) hari Izin/Sakit-tanpa-surat (dipromosikan jadi "Libur" kalau kuota belum penuh -- dari
+    // yang tanggalnya paling awal duluan -- supaya karyawan yang alasannya ditulis "izin" tidak
+    // dihukum lebih berat cuma karena tidak menyebutnya "libur", padahal jatahnya sama), (3) hari
+    // kosong tanpa record sama sekali (ditoleransi diam-diam, prioritas terakhir -- supaya
+    // karyawan yang setidaknya kasih alasan/izin didahulukan daripada yang diam saja).
+    // 'leave' & Izin yang melebihi sisa kuota TETAP tidak "dipromosikan" tapi Izin-nya sendiri
+    // tetap kena eskalasi seperti biasa (bukan dihukum ganda, cuma tidak lagi gratis).
     // Kuota ikut di-pro-rata pakai proRataFactor yang sama dengan gaji pokok — karyawan training
     // yang baru join di tengah periode tidak adil kalau dianggap harus punya 4 hari libur penuh
     // dari periode yang cuma dijalani sebagian.
     const kuotaLibur     = Math.round(4 * proRataFactor)
     const leaveUsed      = Math.min(leaveDates.length, kuotaLibur)
-    const quotaLeftAfterLeave = Math.max(kuotaLibur - leaveUsed, 0)
-    const freeEmptyUsed  = Math.min(emptyDays, quotaLeftAfterLeave)
+    const quotaAfterLeave = Math.max(kuotaLibur - leaveUsed, 0)
+    const izinSortedDates = [...izinGroupDatesRaw].sort()
+    const izinUsedForQuota = Math.min(izinSortedDates.length, quotaAfterLeave)
+    const izinGroupDates  = izinSortedDates.slice(izinUsedForQuota) // sisa yang benar-benar kena eskalasi Izin
+    const quotaAfterIzin  = quotaAfterLeave - izinUsedForQuota
+    const freeEmptyUsed  = Math.min(emptyDays, quotaAfterIzin)
     const excessEmptyDates = emptyDateList.slice(freeEmptyUsed) // sisa di luar kuota → gabung ke kelompok Alpha
-    const kurangLibur     = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - leaveUsed - freeEmptyUsed, 0)
+    const kurangLibur     = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - leaveUsed - izinUsedForQuota - freeEmptyUsed, 0)
     const liburKompensasi = flatSalaryForEmp ? 0 : Math.round(kurangLibur * dailyRate)
 
     // Periode yang berakhir SEBELUM NEW_RULES_CUTOFF_DATE (26 Sep 2026) masih dihitung FLAT --
@@ -1588,14 +1595,19 @@ export default function PenggajianBulananPage() {
         proRataFactor = activeDays / totalPeriodDays
       }
     }
-    // 'leave' (Cuti Tahunan resmi ATAU klarifikasi Alpha "pakai jatah 4 hari") menghabiskan
-    // kuota duluan, sama seperti buildSlipPreview -- supaya rincian di modal ini konsisten
-    // dengan yang benar-benar dipotong saat slip dibuat.
+    // 'leave' lalu Izin/Sakit-tanpa-surat (dipromosikan dari yang tanggalnya paling awal) lalu
+    // hari kosong menghabiskan kuota berurutan, sama seperti buildSlipPreview -- supaya rincian
+    // di modal ini konsisten dengan yang benar-benar dipotong saat slip dibuat.
     const leaveDatesForQuota = atts.filter((a: any) => a.status === 'leave').map((a: any) => a.date as string)
+    const izinGroupDatesRaw = atts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
     const kuotaLibur = Math.round(4 * proRataFactor)
     const leaveUsedForQuota = Math.min(leaveDatesForQuota.length, kuotaLibur)
-    const quotaLeftAfterLeaveForBreakdown = Math.max(kuotaLibur - leaveUsedForQuota, 0)
-    const freeEmptyUsed = Math.min(emptyDateList.length, quotaLeftAfterLeaveForBreakdown)
+    const quotaAfterLeaveForBreakdown = Math.max(kuotaLibur - leaveUsedForQuota, 0)
+    const izinSortedDatesForBreakdown = [...izinGroupDatesRaw].sort()
+    const izinUsedForQuotaForBreakdown = Math.min(izinSortedDatesForBreakdown.length, quotaAfterLeaveForBreakdown)
+    const izinGroupDates = izinSortedDatesForBreakdown.slice(izinUsedForQuotaForBreakdown)
+    const quotaAfterIzinForBreakdown = quotaAfterLeaveForBreakdown - izinUsedForQuotaForBreakdown
+    const freeEmptyUsed = Math.min(emptyDateList.length, quotaAfterIzinForBreakdown)
     const excessEmptyDates = emptyDateList.slice(freeEmptyUsed)
 
     // Periode yang berakhir sebelum NEW_RULES_CUTOFF_DATE masih dihitung FLAT -- lihat catatan
@@ -1603,7 +1615,6 @@ export default function PenggajianBulananPage() {
     const isPreNewRulesPeriod = lastDay < NEW_RULES_CUTOFF_DATE
     const useFlatDeduction = isTraining || isPreNewRulesPeriod
 
-    const izinGroupDates = atts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
     const explicitAlphaDates = atts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
     const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
     const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
