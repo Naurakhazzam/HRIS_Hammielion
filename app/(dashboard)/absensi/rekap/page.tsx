@@ -39,7 +39,7 @@ type Attendance = {
   id: string; date: string; check_in: string | null; check_out: string | null
   late_minutes: number; overtime_hours: number; status: string; notes: string | null
   source: string; check_in_photo_url: string | null; check_out_photo_url: string | null
-  employees: { full_name: string; branch_id: string; department_id: string; custom_check_in_time: string | null; custom_check_out_time: string | null; branches: { name: string }; departments: { name: string } }
+  employees: { full_name: string; branch_id: string; department_id: string; custom_check_in_time: string | null; custom_check_out_time: string | null; late_penalty_applicable: boolean; branches: { name: string }; departments: { name: string } }
 }
 
 const STATUS_LABEL: { [k: string]: string } = { present:'Hadir', absent:'Alpha', sick:'Sakit', sick_doc:'Sakit+Surat', permission:'Izin', leave:'Libur' }
@@ -370,7 +370,7 @@ export default function RekapAbsensiPage() {
     }
 
     let q = supabase.from('attendances')
-      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,source,check_in_photo_url,check_out_photo_url,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,branches(name),departments(name))')
+      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,source,check_in_photo_url,check_out_photo_url,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,late_penalty_applicable,branches(name),departments(name))')
       .order('date', { ascending: true })
     if (periodFrom) q = q.gte('date', periodFrom).lte('date', periodTo)
     if (filterBranch) q = q.eq('employees.branch_id', filterBranch)
@@ -674,7 +674,11 @@ export default function RekapAbsensiPage() {
     return true
   })
 
-  const totalTelat  = validAtts.reduce((s,a)=>s+(a.late_minutes??0),0)
+  // Karyawan dengan late_penalty_applicable=false (mis. Saepulloh -- dikecualikan total dari
+  // aturan telat karena bug jadwal cabang) tidak boleh ikut menaikkan angka kartu ini, walau
+  // late_minutes mentah tetap tersimpan di attendances untuk keperluan lain.
+  const totalTelat  = validAtts.reduce((s,a)=> a.employees?.late_penalty_applicable === false ? s : s+(a.late_minutes??0),0)
+  const excludedTelat = validAtts.reduce((s,a)=> a.employees?.late_penalty_applicable === false ? s+(a.late_minutes??0) : s,0)
   const totalLembur = Math.round(validAtts.reduce((s,a)=>s+Number(a.overtime_hours??0),0) * 100) / 100
   const totalHadir  = validAtts.filter(a=>a.status==='present').length
   const totalAlpha  = validAtts.filter(a=>a.status==='absent').length
@@ -963,7 +967,11 @@ export default function RekapAbsensiPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-orange-50 rounded-xl border border-orange-200 shadow-sm p-3 flex items-center justify-between">
-              <div><p className="text-xs font-medium text-orange-600 uppercase mb-1">Total Keterlambatan</p><p className="text-xl font-bold text-orange-700">{totalTelat} menit</p></div>
+              <div>
+                <p className="text-xs font-medium text-orange-600 uppercase mb-1">Total Keterlambatan</p>
+                <p className="text-xl font-bold text-orange-700">{totalTelat} menit</p>
+                {excludedTelat > 0 && <p className="text-[10px] text-orange-400 mt-0.5">Tidak termasuk {excludedTelat} menit dari karyawan yang dikecualikan aturan telat</p>}
+              </div>
               <p className="text-sm text-orange-500">{Math.floor(totalTelat/60)}j {totalTelat%60}m</p>
             </div>
             <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-3 flex items-center justify-between">
