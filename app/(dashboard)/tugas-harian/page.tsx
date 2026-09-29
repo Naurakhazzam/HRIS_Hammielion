@@ -25,12 +25,14 @@ type MyProgress = {
   task_id: string; title: string; description: string | null; task_type: 'once' | 'daily'
   due_date: string | null; photo_mode: PhotoMode
   work_days: number | null; done_days: number | null
-  today_phase: Phase; has_logged_once: boolean; once_phase: Phase; last_log_date: string | null
+  today_phase: Phase; today_done_count: number | null
+  has_logged_once: boolean; once_phase: Phase; once_done_count: number | null; last_log_date: string | null
 }
 type AdminProgressRow = {
   employee_id: string; full_name: string; branch_name: string | null
   work_days: number | null; done_days: number | null
-  today_phase: Phase; has_logged_once: boolean; once_phase: Phase; last_log_date: string | null
+  today_phase: Phase; today_done_count: number | null
+  has_logged_once: boolean; once_phase: Phase; once_done_count: number | null; last_log_date: string | null
 }
 
 export default function TugasHarianPage() {
@@ -391,6 +393,7 @@ export default function TugasHarianPage() {
               const logs = myLogs[p.task_id] ?? []
               const isOpen = myExpanded === p.task_id
               const phase = p.task_type === 'daily' ? p.today_phase : p.once_phase
+              const doneCount = p.task_type === 'daily' ? p.today_done_count : p.once_done_count
               return (
                 <div key={p.task_id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
                   <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -417,17 +420,23 @@ export default function TugasHarianPage() {
                     </div>
                   )}
 
+                  {p.photo_mode === 'before_after' && !!doneCount && (
+                    <p className="text-sm text-green-700 font-medium mt-3">✓ {doneCount} rangkaian selesai {p.task_type === 'daily' ? 'hari ini' : ''}</p>
+                  )}
+
                   <div className="mt-4 flex flex-wrap gap-2 items-center">
-                    {phase === 'done' ? (
-                      <span className="text-sm text-green-700 font-medium">✓ {p.task_type === 'daily' ? 'Sudah lapor hari ini' : 'Sudah dilaporkan'}</span>
-                    ) : p.photo_mode === 'before_after' ? (
+                    {p.photo_mode === 'before_after' ? (
                       phase === 'before_only' ? (
                         <button onClick={() => openReport(p.task_id, p.title, p.photo_mode, 'after')}
                           className="px-5 py-3 rounded-xl text-base font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition">✅ Kirim Foto Sesudah</button>
                       ) : (
                         <button onClick={() => openReport(p.task_id, p.title, p.photo_mode, 'before')}
-                          className="px-5 py-3 rounded-xl text-base font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition">📷 Kirim Foto Sebelum</button>
+                          className="px-5 py-3 rounded-xl text-base font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition">
+                          📷 {doneCount ? 'Tambah Rangkaian Baru' : 'Kirim Foto Sebelum'}
+                        </button>
                       )
+                    ) : phase === 'done' ? (
+                      <span className="text-sm text-green-700 font-medium">✓ {p.task_type === 'daily' ? 'Sudah lapor hari ini' : 'Sudah dilaporkan'}</span>
                     ) : (
                       <button onClick={() => openReport(p.task_id, p.title, p.photo_mode, 'single')}
                         className="px-5 py-3 rounded-xl text-base font-bold bg-green-600 hover:bg-green-700 text-white shadow-sm transition">

@@ -31,27 +31,43 @@ export default function KPISetupPage() {
     weight_percent: '20'
   })
 
-  // Bobot "Kepatuhan Tugas Rutin" -- satu angka global (bukan per-jabatan), menggabungkan
-  // penyelesaian Tugas Rutin (lihat menu Tugas & Laporan) ke skor KPI. 0 = tidak berpengaruh.
+  // Bobot global (bukan per-jabatan) untuk 3 hal yang dihitung OTOMATIS dari data yang sudah
+  // ada -- Tugas Rutin (lihat menu Tugas & Laporan), Tepat Waktu & Kehadiran (dari absensi asli).
+  // Semuanya default 0 = tidak berpengaruh ke KPI sampai Owner sengaja mengisi angka.
   const [taskWeight, setTaskWeight] = useState('0')
-  const [taskWeightSaving, setTaskWeightSaving] = useState(false)
+  const [punctualityWeight, setPunctualityWeight] = useState('0')
+  const [attendanceWeight, setAttendanceWeight] = useState('0')
+  const [autoWeightSaving, setAutoWeightSaving] = useState(false)
 
   useEffect(() => {
     checkRoleAndFetchData()
   }, [])
 
   async function fetchTaskWeight() {
-    const { data } = await supabase.from('kpi_task_weight').select('weight_percent').single()
-    if (data) setTaskWeight(String(data.weight_percent))
+    const { data } = await supabase.from('kpi_task_weight').select('task_weight_percent, punctuality_weight_percent, attendance_weight_percent').single()
+    if (data) {
+      setTaskWeight(String(data.task_weight_percent))
+      setPunctualityWeight(String(data.punctuality_weight_percent))
+      setAttendanceWeight(String(data.attendance_weight_percent))
+    }
   }
 
-  async function saveTaskWeight() {
-    setTaskWeightSaving(true)
-    const val = Math.min(100, Math.max(0, parseFloat(taskWeight) || 0))
-    const { error } = await supabase.from('kpi_task_weight').update({ weight_percent: val, updated_at: new Date().toISOString() }).eq('id', true)
-    setTaskWeightSaving(false)
+  async function saveAutoWeights() {
+    setAutoWeightSaving(true)
+    const clamp = (v: string) => Math.min(100, Math.max(0, parseFloat(v) || 0))
+    const task = clamp(taskWeight), punc = clamp(punctualityWeight), att = clamp(attendanceWeight)
+    if (task + punc + att > 100) {
+      setAutoWeightSaving(false)
+      showMessage('error', `Total bobot Tugas Rutin + Tepat Waktu + Kehadiran (${task + punc + att}%) tidak boleh lebih dari 100%.`)
+      return
+    }
+    const { error } = await supabase.from('kpi_task_weight').update({
+      task_weight_percent: task, punctuality_weight_percent: punc, attendance_weight_percent: att,
+      updated_at: new Date().toISOString(),
+    }).eq('id', true)
+    setAutoWeightSaving(false)
     if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-    else { setTaskWeight(String(val)); showMessage('success', 'Bobot Tugas Rutin disimpan.') }
+    else { setTaskWeight(String(task)); setPunctualityWeight(String(punc)); setAttendanceWeight(String(att)); showMessage('success', 'Bobot disimpan.') }
   }
 
   async function checkRoleAndFetchData() {
@@ -232,18 +248,33 @@ export default function KPISetupPage() {
       )}
 
       <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-        <h2 className="text-lg font-bold text-slate-800 mb-1">🔁 Bobot Kepatuhan Tugas Rutin</h2>
-        <p className="text-sm text-slate-500 mb-3">
-          Berapa persen skor KPI berasal dari penyelesaian Tugas Rutin (menu Tugas & Laporan)? Berlaku untuk SEMUA jabatan sekaligus, tidak perlu diatur per jabatan.
-          Isi 0 kalau belum mau dipakai — KPI tetap berjalan seperti biasa.
+        <h2 className="text-lg font-bold text-slate-800 mb-1">⚙️ Bobot Otomatis (dari data yang sudah ada)</h2>
+        <p className="text-sm text-slate-500 mb-4">
+          Tiga hal ini dihitung SISTEM sendiri (bukan checklist manual), berlaku untuk SEMUA jabatan sekaligus. Isi 0 kalau belum mau dipakai — KPI tetap berjalan seperti biasa dari kriteria di bawah.
+          Kalau diisi, skor kriteria manual di bawah otomatis disusutkan proporsional supaya totalnya tetap 0-100%.
         </p>
-        <div className="flex items-center gap-2">
-          <input type="number" min="0" max="100" value={taskWeight} onChange={e => setTaskWeight(e.target.value)}
-            className="w-28 px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-          <span className="text-sm text-slate-500">%</span>
-          <button onClick={saveTaskWeight} disabled={taskWeightSaving}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="w-40 text-sm text-slate-700">🔁 Kepatuhan Tugas Rutin</span>
+            <input type="number" min="0" max="100" value={taskWeight} onChange={e => setTaskWeight(e.target.value)}
+              className="w-24 px-3 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            <span className="text-sm text-slate-500">%</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-40 text-sm text-slate-700">⏰ Tepat Waktu</span>
+            <input type="number" min="0" max="100" value={punctualityWeight} onChange={e => setPunctualityWeight(e.target.value)}
+              className="w-24 px-3 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            <span className="text-sm text-slate-500">% <span className="text-slate-400">— % hari hadir tanpa telat</span></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-40 text-sm text-slate-700">✅ Kehadiran</span>
+            <input type="number" min="0" max="100" value={attendanceWeight} onChange={e => setAttendanceWeight(e.target.value)}
+              className="w-24 px-3 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            <span className="text-sm text-slate-500">% <span className="text-slate-400">— 100% dikurangi izin/sakit/alpha di luar jatah 4x/periode</span></span>
+          </div>
+          <button onClick={saveAutoWeights} disabled={autoWeightSaving}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
-            {taskWeightSaving ? 'Menyimpan...' : 'Simpan'}
+            {autoWeightSaving ? 'Menyimpan...' : 'Simpan Bobot'}
           </button>
         </div>
       </div>

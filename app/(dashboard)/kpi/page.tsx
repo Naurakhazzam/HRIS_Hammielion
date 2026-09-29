@@ -49,6 +49,19 @@ function formatRupiah(n: number) {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 }
 
+// Campur skor kriteria manual (templatesPct) dengan metrik otomatis (Tugas Rutin/Tepat Waktu/
+// Kehadiran) sesuai bobot masing-masing dari Setup KPI. Metrik dengan pct null (mis. belum punya
+// Tugas Rutin sama sekali periode ini) diabaikan total -- bobotnya TIDAK ikut menyusutkan
+// templatesPct, supaya karyawan yang memang tidak punya data metrik itu tidak dirugikan begitu
+// saja. Hasilnya selalu 0-100% berapa pun kombinasi bobotnya (dijaga di Setup KPI, total bobot
+// otomatis tidak boleh lebih dari 100%).
+function blendOverallPct(templatesPct: number, autos: { weight: number; pct: number | null }[]): number {
+  const usable = autos.filter(a => a.weight > 0 && a.pct !== null)
+  const usedWeight = usable.reduce((s, a) => s + a.weight, 0)
+  const autoContribution = usable.reduce((s, a) => s + (a.pct as number) * a.weight / 100, 0)
+  return templatesPct * (1 - usedWeight / 100) + autoContribution
+}
+
 export default function KPIPage() {
   const router = useRouter()
   const supabase = createClient()
@@ -74,10 +87,15 @@ export default function KPIPage() {
   const [branches, setBranches] = useState<{id: string; name: string}[]>([])
   const [entries, setEntries] = useState<DailyEntry[]>([])
   const [nominalBonus, setNominalBonus] = useState('0')
-  // Bobot & persentase "Kepatuhan Tugas Rutin" -- lihat lib Tugas & Laporan. taskWeight diatur
-  // sekali di Setup KPI (berlaku semua jabatan), taskCompletionPct dihitung per karyawan+periode.
+  // Bobot & persentase 3 hal otomatis -- Tugas Rutin (lihat menu Tugas & Laporan), Tepat Waktu &
+  // Kehadiran (dari absensi asli). Bobot diatur sekali di Setup KPI (berlaku semua jabatan),
+  // persentasenya dihitung per karyawan+periode.
   const [taskWeight, setTaskWeight] = useState(0)
+  const [punctualityWeight, setPunctualityWeight] = useState(0)
+  const [attendanceWeight, setAttendanceWeight] = useState(0)
   const [taskCompletionPct, setTaskCompletionPct] = useState<number | null>(null)
+  const [punctualityPct, setPunctualityPct] = useState<number | null>(null)
+  const [attendancePct, setAttendancePct] = useState<number | null>(null)
   const [savingCell, setSavingCell] = useState<string | null>(null)
   const [savingEval, setSavingEval] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -94,7 +112,7 @@ export default function KPIPage() {
     if (currentUser && viewMode === 'dashboard' && templates.length > 0) {
       fetchDashboardData()
     }
-  }, [viewMode, filterMonth, filterYear, filterBranch, currentUser, templates, taskWeight])
+  }, [viewMode, filterMonth, filterYear, filterBranch, currentUser, templates, taskWeight, punctualityWeight, attendanceWeight])
 
   function showMessage(type: 'success'|'error', text: string) {
     setMessage({ type, text })
@@ -125,8 +143,12 @@ export default function KPIPage() {
     const { data: tData } = await supabase.from('kpi_templates').select('*').eq('is_active', true)
     if (tData) setTemplates(tData)
 
-    const { data: twData } = await supabase.from('kpi_task_weight').select('weight_percent').single()
-    if (twData) setTaskWeight(Number(twData.weight_percent) || 0)
+    const { data: twData } = await supabase.from('kpi_task_weight').select('task_weight_percent, punctuality_weight_percent, attendance_weight_percent').single()
+    if (twData) {
+      setTaskWeight(Number(twData.task_weight_percent) || 0)
+      setPunctualityWeight(Number(twData.punctuality_weight_percent) || 0)
+      setAttendanceWeight(Number(twData.attendance_weight_percent) || 0)
+    }
 
     // Fetch employees
     let empQ = supabase
@@ -186,6 +208,13 @@ export default function KPIPage() {
     })
     setTaskCompletionPct(taskPct == null ? null : Number(taskPct))
 
+    const { data: attKpi } = await supabase.rpc('get_employee_attendance_kpi', {
+      p_employee_id: selectedEmployeeId, p_period_start: toDateStr(start), p_period_end: toDateStr(end),
+    })
+    const attRow = Array.isArray(attKpi) ? attKpi[0] : attKpi
+    setPunctualityPct(attRow?.punctuality_pct == null ? null : Number(attRow.punctuality_pct))
+    setAttendancePct(attRow?.attendance_pct == null ? null : Number(attRow.attendance_pct))
+
     setLoadingEntries(false)
   }
 
@@ -228,17 +257,27 @@ export default function KPIPage() {
       .eq('period_month', filterMonth)
       .eq('period_year', filterYear)
 
-    // Kepatuhan Tugas Rutin per karyawan -- cuma perlu ditanya kalau bobotnya memang diisi,
-    // supaya tidak nambah puluhan panggilan RPC percuma kalau fitur ini belum dipakai.
+    // Metrik otomatis per karyawan -- cuma perlu ditanya kalau bobotnya memang diisi, supaya
+    // tidak nambah puluhan panggilan RPC percuma kalau fiturnya belum dipakai.
     const taskPctByEmp: Record<string, number | null> = {}
-    if (taskWeight > 0) {
-      await Promise.all((empData as any[]).map(async emp => {
+    const puncPctByEmp: Record<string, number | null> = {}
+    const attPctByEmp: Record<string, number | null> = {}
+    await Promise.all((empData as any[]).map(async emp => {
+      if (taskWeight > 0) {
         const { data } = await supabase.rpc('get_employee_task_completion_pct', {
           p_employee_id: emp.id, p_period_start: toDateStr(start), p_period_end: toDateStr(end),
         })
         taskPctByEmp[emp.id] = data == null ? null : Number(data)
-      }))
-    }
+      }
+      if (punctualityWeight > 0 || attendanceWeight > 0) {
+        const { data } = await supabase.rpc('get_employee_attendance_kpi', {
+          p_employee_id: emp.id, p_period_start: toDateStr(start), p_period_end: toDateStr(end),
+        })
+        const row = Array.isArray(data) ? data[0] : data
+        puncPctByEmp[emp.id] = row?.punctuality_pct == null ? null : Number(row.punctuality_pct)
+        attPctByEmp[emp.id] = row?.attendance_pct == null ? null : Number(row.attendance_pct)
+      }
+    }))
 
     const result = (empData as any[]).map(emp => {
       const empTemplates = templates.filter(t => t.position_id === emp.position_id)
@@ -255,10 +294,11 @@ export default function KPIPage() {
           return acc + (t.weight_percent * ach) / 100
         }, 0)
       }
-      const empTaskPct = taskPctByEmp[emp.id] ?? null
-      const overallPct = taskWeight > 0 && empTaskPct !== null
-        ? templatesPct * (1 - taskWeight / 100) + empTaskPct * (taskWeight / 100)
-        : templatesPct
+      const overallPct = blendOverallPct(templatesPct, [
+        { weight: taskWeight, pct: taskPctByEmp[emp.id] ?? null },
+        { weight: punctualityWeight, pct: puncPctByEmp[emp.id] ?? null },
+        { weight: attendanceWeight, pct: attPctByEmp[emp.id] ?? null },
+      ])
 
       const nominalMax = savedEval?.kpi_bonus_amount ?? emp.kpi_bonus_max ?? 0
       const bonusCair = nominalMax * overallPct / 100
@@ -330,13 +370,11 @@ export default function KPIPage() {
   const templatesPct = empTemplates.reduce((acc, t) => {
     return acc + (t.weight_percent * getCriteriaAchievement(t.id)) / 100
   }, 0)
-  // Kepatuhan Tugas Rutin dicampur proporsional -- templatesPct disusutkan sesuai sisa bobotnya,
-  // supaya overallPct tetap terjaga 0-100% berapa pun taskWeight-nya, tanpa perlu Owner
-  // menyesuaikan ulang bobot kriteria per-jabatan yang sudah ada. taskCompletionPct null (belum
-  // punya Tugas Rutin sama sekali periode ini) -> abaikan, KPI murni dari kriteria seperti biasa.
-  const overallPct = taskWeight > 0 && taskCompletionPct !== null
-    ? templatesPct * (1 - taskWeight / 100) + taskCompletionPct * (taskWeight / 100)
-    : templatesPct
+  const overallPct = blendOverallPct(templatesPct, [
+    { weight: taskWeight, pct: taskCompletionPct },
+    { weight: punctualityWeight, pct: punctualityPct },
+    { weight: attendanceWeight, pct: attendancePct },
+  ])
 
   const bonusCair = (parseFloat(nominalBonus) || 0) * overallPct / 100
 
@@ -580,12 +618,12 @@ export default function KPIPage() {
                 <p className={`font-bold text-2xl ${overallPct >= 80 ? 'text-green-600' : overallPct >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
                   {overallPct.toFixed(1)}%
                 </p>
-                {taskWeight > 0 && (
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    {taskCompletionPct !== null
-                      ? `Termasuk Tugas Rutin ${taskCompletionPct}% (bobot ${taskWeight}%)`
-                      : 'Belum punya Tugas Rutin periode ini'}
-                  </p>
+                {(taskWeight > 0 || punctualityWeight > 0 || attendanceWeight > 0) && (
+                  <div className="text-[11px] text-slate-400 mt-0.5 space-y-0.5">
+                    {taskWeight > 0 && <p>{taskCompletionPct !== null ? `Tugas Rutin ${taskCompletionPct}% (bobot ${taskWeight}%)` : 'Belum punya Tugas Rutin periode ini'}</p>}
+                    {punctualityWeight > 0 && <p>{punctualityPct !== null ? `Tepat Waktu ${punctualityPct}% (bobot ${punctualityWeight}%)` : 'Belum ada hari hadir periode ini'}</p>}
+                    {attendanceWeight > 0 && <p>{attendancePct !== null ? `Kehadiran ${attendancePct}% (bobot ${attendanceWeight}%)` : ''}</p>}
+                  </div>
                 )}
               </div>
               <div>
