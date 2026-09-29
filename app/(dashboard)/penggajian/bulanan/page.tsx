@@ -683,8 +683,13 @@ export default function PenggajianBulananPage() {
         preview: await buildSlipPreview(e.id, kasbonMap[e.id] ?? 0, new Map<string, number>(), { silent: true }),
       }))
     )
-    results.sort((a, b) => (a.preview?.employeeName || '').localeCompare(b.preview?.employeeName || ''))
-    setBulkPreviewRows(results)
+    // Karyawan gaji flat Rp0 (mis. Owner yang cuma dicatat administratif) tidak relevan
+    // ditampilkan di sini — semua angkanya pasti nol, cuma bikin daftar penuh baris kosong.
+    // Baris yang GAGAL dihitung (preview null, mis. komponen gaji belum diisi) tetap disimpan
+    // supaya pesan "X karyawan dilewati" di bawah tabel tetap akurat.
+    const relevant = results.filter(r => !r.preview || r.preview.gross > 0)
+    relevant.sort((a, b) => (a.preview?.employeeName || '').localeCompare(b.preview?.employeeName || ''))
+    setBulkPreviewRows(relevant)
     setBulkPreviewLoading(false)
   }
 
