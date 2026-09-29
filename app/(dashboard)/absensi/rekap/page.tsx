@@ -956,7 +956,11 @@ export default function RekapAbsensiPage() {
         </div>
       )}
 
-      {!loading && attendances.length > 0 && (
+      {/* Sengaja TIDAK digerbang oleh `loading` -- selama refresh (mis. sehabis Simpan di modal
+          Edit), data lama tetap ditampilkan dulu sampai data baru datang. Kalau digerbang, kartu
+          ini & tabel di bawah sempat kolaps jadi satu baris "Memuat...", tinggi halaman menyusut
+          drastis, dan browser otomatis menggeser scroll ke atas -- terasa seperti "reset". */}
+      {attendances.length > 0 && (
         <div className="mb-6 space-y-3">
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="bg-white rounded-xl border border-green-200 shadow-sm p-3"><p className="text-xs font-medium text-green-600 uppercase mb-1">Hadir</p><p className="text-2xl font-bold text-green-700">{totalHadir} <span className="text-xs font-normal">hari</span></p></div>
@@ -1036,7 +1040,7 @@ export default function RekapAbsensiPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && attendances.length === 0 ? (
                 <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500 text-sm">Memuat data...</td></tr>
               ) : filterEmployee ? (
                 // Mode per karyawan: tampilkan SEMUA tanggal dalam periode
