@@ -8,29 +8,47 @@ import {
 } from '@/lib/meeting'
 import AudiencePicker from '@/components/meeting/AudiencePicker'
 
-type SourceType = 'manual' | 'task_completion' | 'punctuality' | 'attendance'
+type SourceType = 'manual' | 'task_completion' | 'punctuality' | 'attendance' | 'sales_target' | 'stock_shrinkage' | 'cash_variance' | 'rack_display'
 
 const SOURCE_LABEL: Record<SourceType, string> = {
   manual: '✍️ Manual (HR isi skor tiap periode)',
   task_completion: '🔁 Kepatuhan Tugas Rutin',
   punctuality: '⏰ Tepat Waktu',
   attendance: '✅ Kehadiran',
+  sales_target: '🎯 Target Omset',
+  stock_shrinkage: '📦 Akurasi Stok (kehilangan barang)',
+  cash_variance: '💵 Selisih Kas',
+  rack_display: '🪴 Kerapian Display (jatah rak)',
 }
 const SOURCE_HINT: Record<SourceType, string> = {
   manual: 'HR/Owner mengisi satu angka 0-100 untuk kriteria ini setiap periode.',
   task_completion: 'Dihitung otomatis dari penyelesaian Tugas Rutin (menu Tugas & Laporan).',
   punctuality: 'Dihitung otomatis: % hari hadir tanpa telat.',
   attendance: 'Dihitung otomatis: 100% dikurangi izin/sakit/alpha di luar jatah 4x/periode.',
+  sales_target: 'Dihitung otomatis: realisasi Kas Masuk (approved) dibagi target omset cabang. Atur target di bawah.',
+  stock_shrinkage: 'Dihitung otomatis dari data Kehilangan Barang, dibandingkan toleransi % dari target omset cabang.',
+  cash_variance: 'Dihitung otomatis dari selisih kas (Kas Masuk) per transaksi yang diinput karyawan, dibandingkan toleransi Rp per transaksi.',
+  rack_display: 'Dihitung otomatis dari jumlah ronde before-after Tugas Rutin tertentu, dibagi jatah rak karyawan. Atur jatah rak di bawah.',
 }
 
 type AudRow = { branch_id: string | null; department_id: string | null; employee_id: string | null }
+type Template = { id: string; title: string }
 type Criteria = {
   id: string; title: string; description: string | null; source_type: SourceType
   weight_percent: number; audience_all: boolean; is_active: boolean
+  threshold_value: number | null; linked_daily_task_template_id: string | null
   kpi_criteria_audiences: AudRow[]
 }
 
-const emptyForm = { title: '', description: '', source_type: 'manual' as SourceType, weight_percent: '20', is_active: true }
+const emptyForm = { title: '', description: '', source_type: 'manual' as SourceType, weight_percent: '20', is_active: true, threshold_value: '', linked_template_id: '' }
+const NEEDS_THRESHOLD: SourceType[] = ['stock_shrinkage', 'cash_variance']
+const NEEDS_TEMPLATE: SourceType[] = ['rack_display']
+const THRESHOLD_LABEL: Partial<Record<SourceType, string>> = {
+  stock_shrinkage: 'Toleransi kehilangan (% dari target omset cabang)',
+  cash_variance: 'Toleransi selisih kas per transaksi (Rp)',
+}
+
+const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
 
 export default function KPISetupPage() {
   const supabase = createClient()
@@ -39,6 +57,7 @@ export default function KPISetupPage() {
   const [branches, setBranches] = useState<Branch[]>([])
   const [departments, setDepartments] = useState<Dept[]>([])
   const [employees, setEmployees] = useState<Emp[]>([])
+  const [templates, setTemplates] = useState<Template[]>([])
   const [criteria, setCriteria] = useState<Criteria[]>([])
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -48,6 +67,14 @@ export default function KPISetupPage() {
   const [audience, setAudience] = useState<AudienceValue>(emptyAudience)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // Target Omset & Jatah Rak per cabang -- dipakai kriteria sales_target/stock_shrinkage/rack_display
+  const [salesTargets, setSalesTargets] = useState<Record<string, number>>({})
+  const [salesTargetDraft, setSalesTargetDraft] = useState<Record<string, string>>({})
+  const [savingTarget, setSavingTarget] = useState<string | null>(null)
+  const [racks, setRacks] = useState<Record<string, number>>({})
+  const [racksDraft, setRacksDraft] = useState<Record<string, string>>({})
+  const [savingRack, setSavingRack] = useState<string | null>(null)
 
   useEffect(() => { init() }, [])
 
@@ -67,17 +94,53 @@ export default function KPISetupPage() {
       setBranches((bRes.data as Branch[]) || [])
       setDepartments((dRes.data as Dept[]) || [])
       setEmployees((eRes.data as Emp[]) || [])
-      await fetchCriteria()
+      const { data: tplData } = await supabase.from('daily_task_templates').select('id,title').eq('is_active', true).order('title')
+      setTemplates((tplData as Template[]) || [])
+      await Promise.all([fetchCriteria(), fetchSalesTargets(), fetchRacks()])
     }
     setLoading(false)
   }
 
   async function fetchCriteria() {
     const { data, error: err } = await supabase.from('kpi_criteria')
-      .select('id,title,description,source_type,weight_percent,audience_all,is_active,kpi_criteria_audiences(branch_id,department_id,employee_id)')
+      .select('id,title,description,source_type,weight_percent,audience_all,is_active,threshold_value,linked_daily_task_template_id,kpi_criteria_audiences(branch_id,department_id,employee_id)')
       .order('title')
     if (err) console.error('kpi_criteria:', err.message)
     setCriteria((data as unknown as Criteria[]) || [])
+  }
+
+  async function fetchSalesTargets() {
+    const { data } = await supabase.from('branch_sales_targets').select('branch_id, target_amount')
+    const map: Record<string, number> = {}
+    ;(data || []).forEach(r => { map[r.branch_id] = Number(r.target_amount) })
+    setSalesTargets(map)
+    setSalesTargetDraft(Object.fromEntries(Object.entries(map).map(([k, v]) => [k, String(v)])))
+  }
+
+  async function saveSalesTarget(branchId: string) {
+    const val = parseFloat(salesTargetDraft[branchId] ?? '0') || 0
+    setSavingTarget(branchId)
+    const { error: err } = await supabase.from('branch_sales_targets').upsert({ branch_id: branchId, target_amount: val, updated_at: new Date().toISOString() }, { onConflict: 'branch_id' })
+    setSavingTarget(null)
+    if (err) showMessage('error', 'Gagal menyimpan target: ' + err.message)
+    else { showMessage('success', 'Target omset disimpan.'); fetchSalesTargets() }
+  }
+
+  async function fetchRacks() {
+    const { data } = await supabase.from('branch_racks').select('branch_id, rack_count')
+    const map: Record<string, number> = {}
+    ;(data || []).forEach(r => { map[r.branch_id] = Number(r.rack_count) })
+    setRacks(map)
+    setRacksDraft(Object.fromEntries(Object.entries(map).map(([k, v]) => [k, String(v)])))
+  }
+
+  async function saveRack(branchId: string) {
+    const val = parseInt(racksDraft[branchId] ?? '0') || 0
+    setSavingRack(branchId)
+    const { error: err } = await supabase.from('branch_racks').upsert({ branch_id: branchId, rack_count: val, updated_at: new Date().toISOString() }, { onConflict: 'branch_id' })
+    setSavingRack(null)
+    if (err) showMessage('error', 'Gagal menyimpan jatah rak: ' + err.message)
+    else { showMessage('success', 'Jatah rak disimpan.'); fetchRacks() }
   }
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -96,7 +159,11 @@ export default function KPISetupPage() {
 
   function openEdit(c: Criteria) {
     setEditing(c)
-    setForm({ title: c.title, description: c.description ?? '', source_type: c.source_type, weight_percent: String(c.weight_percent), is_active: c.is_active })
+    setForm({
+      title: c.title, description: c.description ?? '', source_type: c.source_type, weight_percent: String(c.weight_percent), is_active: c.is_active,
+      threshold_value: c.threshold_value === null ? '' : String(c.threshold_value),
+      linked_template_id: c.linked_daily_task_template_id ?? '',
+    })
     setAudience(c.audience_all
       ? { ...emptyAudience, all: true }
       : {
@@ -114,6 +181,8 @@ export default function KPISetupPage() {
     setError('')
     if (!form.title.trim()) { setError('Judul kriteria wajib diisi.'); return }
     if (audienceIsEmpty(audience)) { setError('Pilih dulu kriteria ini berlaku untuk siapa.'); return }
+    if (NEEDS_THRESHOLD.includes(form.source_type) && !form.threshold_value.trim()) { setError('Isi dulu toleransinya.'); return }
+    if (NEEDS_TEMPLATE.includes(form.source_type) && !form.linked_template_id) { setError('Pilih dulu judul Tugas Rutin yang dihitung.'); return }
     setSaving(true)
     const { error: err } = await supabase.rpc('save_kpi_criteria', {
       p_id: editing?.id ?? null,
@@ -123,6 +192,8 @@ export default function KPISetupPage() {
       p_weight_percent: parseFloat(form.weight_percent) || 0,
       p_is_active: form.is_active,
       p_targets: audienceToTargets(audience),
+      p_threshold_value: NEEDS_THRESHOLD.includes(form.source_type) ? (parseFloat(form.threshold_value) || 0) : null,
+      p_linked_template_id: NEEDS_TEMPLATE.includes(form.source_type) ? form.linked_template_id : null,
     })
     setSaving(false)
     if (err) { setError('Gagal menyimpan: ' + err.message); return }
@@ -194,6 +265,46 @@ export default function KPISetupPage() {
         </div>
       )}
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <h2 className="text-sm font-bold text-slate-800 mb-1">🎯 Target Omset per Cabang</h2>
+          <p className="text-xs text-slate-500 mb-3">Dipakai kriteria sumber &quot;Target Omset&quot; dan &quot;Akurasi Stok&quot;. Realisasi diambil otomatis dari Kas Masuk yang sudah approved.</p>
+          <div className="space-y-2">
+            {branches.map(b => (
+              <div key={b.id} className="flex items-center gap-2">
+                <span className="text-sm text-slate-700 w-32 shrink-0 truncate">{b.name}</span>
+                <input type="number" min="0" value={salesTargetDraft[b.id] ?? ''} onChange={e => setSalesTargetDraft(prev => ({ ...prev, [b.id]: e.target.value }))}
+                  placeholder="0" className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded text-sm" />
+                <button onClick={() => saveSalesTarget(b.id)} disabled={savingTarget === b.id}
+                  className="text-xs px-2.5 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50 shrink-0">
+                  {savingTarget === b.id ? '...' : 'Simpan'}
+                </button>
+                {salesTargets[b.id] > 0 && <span className="text-[11px] text-slate-400 shrink-0 w-28 text-right">{fmtRp(salesTargets[b.id])}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <h2 className="text-sm font-bold text-slate-800 mb-1">🪴 Jatah Rak per Cabang</h2>
+          <p className="text-xs text-slate-500 mb-3">Dipakai kriteria sumber &quot;Kerapian Display&quot;. Sistem otomatis bagi rata ke tiap karyawan aktif di cabang itu.</p>
+          <div className="space-y-2">
+            {branches.map(b => (
+              <div key={b.id} className="flex items-center gap-2">
+                <span className="text-sm text-slate-700 w-32 shrink-0 truncate">{b.name}</span>
+                <input type="number" min="0" value={racksDraft[b.id] ?? ''} onChange={e => setRacksDraft(prev => ({ ...prev, [b.id]: e.target.value }))}
+                  placeholder="0" className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded text-sm" />
+                <button onClick={() => saveRack(b.id)} disabled={savingRack === b.id}
+                  className="text-xs px-2.5 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50 shrink-0">
+                  {savingRack === b.id ? '...' : 'Simpan'}
+                </button>
+                {racks[b.id] > 0 && <span className="text-[11px] text-slate-400 shrink-0 w-16 text-right">{racks[b.id]} rak</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-200 bg-slate-50">
           <h2 className="text-sm font-bold text-slate-800">Daftar Kriteria KPI</h2>
@@ -252,6 +363,27 @@ export default function KPISetupPage() {
                 </select>
                 <p className="text-xs text-slate-400 mt-1">{SOURCE_HINT[form.source_type]}</p>
               </div>
+              {NEEDS_THRESHOLD.includes(form.source_type) && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">{THRESHOLD_LABEL[form.source_type]} <span className="text-red-500">*</span></label>
+                  <input type="number" min="0" step="0.1" value={form.threshold_value} onChange={e => setForm({ ...form, threshold_value: e.target.value })}
+                    className="w-40 px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+              )}
+              {NEEDS_TEMPLATE.includes(form.source_type) && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Judul Tugas Rutin yang dihitung <span className="text-red-500">*</span></label>
+                  {templates.length === 0 ? (
+                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Belum ada judul di Master Tugas Rutin. Buat dulu di menu Tugas & Laporan.</p>
+                  ) : (
+                    <select value={form.linked_template_id} onChange={e => setForm({ ...form, linked_template_id: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm bg-white">
+                      <option value="">-- Pilih judul --</option>
+                      {templates.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Bobot (%) <span className="text-red-500">*</span></label>
                 <input type="number" min="0" max="100" value={form.weight_percent} onChange={e => setForm({ ...form, weight_percent: e.target.value })}

@@ -9,9 +9,10 @@ type Employee = {
   id: string; full_name: string; branch_id: string; kpi_bonus_max: number
   branches?: { name: string }
 }
-type SourceType = 'manual' | 'task_completion' | 'punctuality' | 'attendance'
+type SourceType = 'manual' | 'task_completion' | 'punctuality' | 'attendance' | 'sales_target' | 'stock_shrinkage' | 'cash_variance' | 'rack_display'
 const SOURCE_LABEL: Record<SourceType, string> = {
   manual: '✍️ Manual', task_completion: '🔁 Tugas Rutin', punctuality: '⏰ Tepat Waktu', attendance: '✅ Kehadiran',
+  sales_target: '🎯 Target Omset', stock_shrinkage: '📦 Akurasi Stok', cash_variance: '💵 Selisih Kas', rack_display: '🪴 Kerapian Display',
 }
 type BreakdownRow = { criteria_id: string; title: string; source_type: SourceType; weight_percent: number; achievement_pct: number | null }
 
