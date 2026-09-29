@@ -8,7 +8,7 @@ import {
 } from '@/lib/meeting'
 import AudiencePicker from '@/components/meeting/AudiencePicker'
 
-type SourceType = 'manual' | 'task_completion' | 'punctuality' | 'attendance' | 'sales_target' | 'stock_shrinkage' | 'cash_variance' | 'rack_display'
+type SourceType = 'manual' | 'task_completion' | 'punctuality' | 'attendance' | 'sales_target' | 'stock_shrinkage' | 'cash_variance' | 'rack_display' | 'promo_sales'
 
 const SOURCE_LABEL: Record<SourceType, string> = {
   manual: '✍️ Manual (HR isi skor tiap periode)',
@@ -19,6 +19,7 @@ const SOURCE_LABEL: Record<SourceType, string> = {
   stock_shrinkage: '📦 Akurasi Stok (kehilangan barang)',
   cash_variance: '💵 Selisih Kas',
   rack_display: '🪴 Kerapian Display (jatah rak)',
+  promo_sales: '🛍️ Target Penjualan Promo',
 }
 const SOURCE_HINT: Record<SourceType, string> = {
   manual: 'HR/Owner mengisi satu angka 0-100 untuk kriteria ini setiap periode.',
@@ -29,6 +30,7 @@ const SOURCE_HINT: Record<SourceType, string> = {
   stock_shrinkage: 'Dihitung otomatis dari data Kehilangan Barang, dibandingkan toleransi % dari target omset cabang.',
   cash_variance: 'Dihitung otomatis dari selisih kas (Kas Masuk) per transaksi yang diinput karyawan, dibandingkan toleransi Rp per transaksi.',
   rack_display: 'Dihitung otomatis dari jumlah ronde before-after Tugas Rutin tertentu, dibagi jatah rak karyawan. Atur jatah rak di bawah.',
+  promo_sales: 'Dihitung otomatis dari menu Target Penjualan Promo -- total qty terlapor (semua karyawan cabang) dibagi total target produk aktif periode itu.',
 }
 
 type AudRow = { branch_id: string | null; department_id: string | null; employee_id: string | null }

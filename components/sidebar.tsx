@@ -95,6 +95,7 @@ const adminNavItems: NavNode[] = [
       },
       { name: 'Cuti & Izin', href: '/cuti' },
       { name: 'Tugas & Laporan', href: '/tugas-harian' },
+      { name: 'Target Penjualan Promo', href: '/penjualan-promo' },
       { name: 'Aturan Potongan Gaji', href: '/potongan' },
       {
         name: 'KPI',
@@ -243,6 +244,7 @@ const employeeNavItems: NavNode[] = [
   },
   { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
   { name: 'Tugas & Laporan', href: '/tugas-harian', icon: '📋' },
+  { name: 'Target Penjualan Promo', href: '/penjualan-promo', icon: '🎯' },
   { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
   { name: 'Aturan Potongan Gaji', href: '/potongan', icon: '📉' },
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
