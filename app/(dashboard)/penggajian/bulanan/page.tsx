@@ -34,6 +34,7 @@ type Payroll = {
   libur_compensation_days: number
   libur_compensation_amount: number
   extra_bonus_total: number
+  promo_bonus: number
   gross_total: number
   net_total: number
   status: 'draft' | 'pending_approval' | 'approved' | 'paid'
@@ -473,7 +474,7 @@ export default function PenggajianBulananPage() {
         inventory_loss_deduction, cashier_loss_deduction,
         absent_days, absent_deduction,
         libur_compensation_days, libur_compensation_amount,
-        extra_bonus_total,
+        extra_bonus_total, promo_bonus,
         gross_total, net_total,
         status, approved_by, created_at,
         employee:employees!payrolls_employee_id_fkey(
@@ -1713,7 +1714,7 @@ export default function PenggajianBulananPage() {
 
     // Update payroll: conditional_bonus + recalc gross & net
     const p = bonusModal
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + totalBonus
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + Number(p.promo_bonus ?? 0) + totalBonus
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const { error: updateErr } = await supabase
@@ -1767,7 +1768,7 @@ export default function PenggajianBulananPage() {
     if (insertErr) { showMessage('error', 'Gagal menyimpan bonus: ' + insertErr.message); setExtraBonusSaving(false); return }
 
     const newExtraTotal = Number(p.extra_bonus_total ?? 0) + amt
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + newExtraTotal
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + Number(p.promo_bonus ?? 0) + newExtraTotal
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const wasFinalized = p.status === 'pending_approval' || p.status === 'approved'
@@ -1929,6 +1930,7 @@ export default function PenggajianBulananPage() {
       <tr><td>Bonus KPI</td><td>${Number(p.kpi_bonus)>0?fmtR(Number(p.kpi_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus Kondisional</td><td>${Number((p as any).conditional_bonus??0)>0?fmtR(Number((p as any).conditional_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus Tambahan</td><td>${Number((p as any).extra_bonus_total??0)>0?fmtR(Number((p as any).extra_bonus_total)):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Bonus Promo</td><td>${Number((p as any).promo_bonus??0)>0?fmtR(Number((p as any).promo_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Kompensasi Libur Tidak Diambil (${(p as any).libur_compensation_days??0} hari)</td><td>${Number((p as any).libur_compensation_days??0)>0?fmtR(Number((p as any).libur_compensation_amount??0)):'<span class="zero">—</span>'}</td></tr>
       <tr class="section-label ded"><td colspan="2">Potongan</td></tr>
       <tr><td>Potongan Keterlambatan${lateDetailHtml}</td><td>${lateDed>0?'-'+fmtR(lateDed):'<span class="zero">—</span>'}</td></tr>
@@ -2696,6 +2698,7 @@ export default function PenggajianBulananPage() {
                     ['Bonus KPI',            selectedPayroll.kpi_bonus],
                     ['Bonus Kondisional',    (selectedPayroll as any).conditional_bonus ?? 0],
                     ['Bonus Tambahan',       (selectedPayroll as any).extra_bonus_total ?? 0],
+                    ['Bonus Promo',          (selectedPayroll as any).promo_bonus ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>

@@ -7,22 +7,22 @@ import { usePhotoLightbox } from '@/components/PhotoLightbox'
 import { uploadReportPhotos, signedPhotoUrls, fmtDate, fmtDateTime } from '@/lib/meeting'
 
 type Branch = { id: string; name: string }
-type PromoProduct = {
-  id: string; branch_id: string; product_name: string; target_qty: number
-  period_month: number; period_year: number; is_active: boolean
-}
+type Emp = { id: string; full_name: string; branch_id: string | null }
+type ReportStatus = 'pending' | 'approved' | 'rejected'
 type AdminRow = {
   product_id: string; branch_id: string; branch_name: string; product_name: string
-  target_qty: number; total_qty: number; achievement_pct: number; is_active: boolean
+  target_qty: number; total_qty: number; pending_count: number; achievement_pct: number; is_active: boolean
+  bonus_rate_reached: number | null; bonus_rate_below: number | null
 }
 type ReportRow = {
   id: string; employee_id: string; full_name: string; qty: number; receipt_photo_paths: string[]
-  report_date: string; notes: string | null; is_invalid: boolean; invalid_reason: string | null; created_at: string
+  report_date: string; notes: string | null; status: ReportStatus; rejection_reason: string | null; created_at: string
 }
-type MyProgress = { product_id: string; product_name: string; target_qty: number; total_qty: number; my_qty: number }
+type MyProgress = { product_id: string; product_name: string; target_qty: number; total_qty: number; my_qty: number; my_pending_qty: number }
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
-const emptyForm = { id: null as string | null, branch_id: '', product_name: '', target_qty: '', period_month: 1, period_year: 2026, is_active: true }
+const emptyForm = { id: null as string | null, branch_id: '', product_name: '', target_qty: '', period_month: 1, period_year: 2026, is_active: true, bonus_rate_reached: '', bonus_rate_below: '' }
+const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
 
 export default function PenjualanPromoPage() {
   const supabase = createClient()
@@ -30,7 +30,9 @@ export default function PenjualanPromoPage() {
   const today = new Date()
   const [ready, setReady] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [canReview, setCanReview] = useState(false) // owner/hr/finance -- boleh approve/reject laporan
   const [branches, setBranches] = useState<Branch[]>([])
+  const [employees, setEmployees] = useState<Emp[]>([])
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // Admin state
@@ -47,11 +49,18 @@ export default function PenjualanPromoPage() {
   const [reports, setReports] = useState<ReportRow[]>([])
   const [loadingReports, setLoadingReports] = useState(false)
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
-  const [invalidateFor, setInvalidateFor] = useState<ReportRow | null>(null)
-  const [invalidateReason, setInvalidateReason] = useState('')
+  const [rejectFor, setRejectFor] = useState<ReportRow | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
+
+  // Sinkron bonus ke penggajian
+  const [syncEmployeeId, setSyncEmployeeId] = useState('')
+  const [syncPreview, setSyncPreview] = useState<number | null>(null)
+  const [syncLoadingPreview, setSyncLoadingPreview] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   // Employee state
   const [myProgress, setMyProgress] = useState<MyProgress[]>([])
+  const [myBonus, setMyBonus] = useState<number | null>(null)
   const [loadingMine, setLoadingMine] = useState(true)
   const [reportModal, setReportModal] = useState<{ productId: string; productName: string } | null>(null)
   const [rQty, setRQty] = useState('')
@@ -67,9 +76,23 @@ export default function PenjualanPromoPage() {
 
   const fetchMine = useCallback(async () => {
     setLoadingMine(true)
-    const { data, error } = await supabase.rpc('get_my_promo_sales_progress')
+    const [{ data, error }, { data: periodData }] = await Promise.all([
+      supabase.rpc('get_my_promo_sales_progress'),
+      supabase.rpc('current_payroll_period'),
+    ])
     if (error) console.error('get_my_promo_sales_progress:', error.message)
     setMyProgress((data as MyProgress[]) || [])
+    const period = Array.isArray(periodData) ? periodData[0] : periodData
+    if (period?.period_end) {
+      const end = new Date(period.period_end)
+      const { data: myEmp } = await supabase.from('users').select('employee_id').eq('id', (await supabase.auth.getUser()).data.user?.id ?? '').single()
+      if (myEmp?.employee_id) {
+        const { data: bonus } = await supabase.rpc('get_employee_promo_bonus', {
+          p_employee_id: myEmp.employee_id, p_period_month: end.getMonth() + 1, p_period_year: end.getFullYear(),
+        })
+        setMyBonus(bonus == null ? null : Number(bonus))
+      }
+    }
     setLoadingMine(false)
   }, [supabase])
 
@@ -89,19 +112,27 @@ export default function PenjualanPromoPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       const { data: userData } = await supabase.from('users').select('role').eq('id', user.id).single()
-      const admin = !!userData && ['owner', 'hr'].includes(userData.role) && !preview
+      const role = userData?.role ?? ''
+      const admin = ['owner', 'hr'].includes(role) && !preview
+      const review = ['owner', 'hr', 'finance'].includes(role) && !preview
       setIsAdmin(admin)
+      setCanReview(review)
       const { data: bData } = await supabase.from('branches').select('id,name').order('name')
       setBranches((bData as Branch[]) || [])
-      if (admin) await fetchAdmin()
-      else await fetchMine()
+      if (review) {
+        const { data: eData } = await supabase.from('employees').select('id,full_name,branch_id').eq('is_active', true).order('full_name')
+        setEmployees((eData as Emp[]) || [])
+        await fetchAdmin()
+      } else {
+        await fetchMine()
+      }
       setReady(true)
     }
     init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => { if (ready && isAdmin) fetchAdmin() }, [ready, isAdmin, fetchAdmin])
+  useEffect(() => { if (ready && canReview) fetchAdmin() }, [ready, canReview, fetchAdmin])
 
   function openNew() {
     setForm({ ...emptyForm, period_month: filterMonth, period_year: filterYear, branch_id: filterBranch })
@@ -110,7 +141,12 @@ export default function PenjualanPromoPage() {
   }
 
   async function openEditProduct(row: AdminRow) {
-    setForm({ id: row.product_id, branch_id: row.branch_id, product_name: row.product_name, target_qty: String(row.target_qty), period_month: filterMonth, period_year: filterYear, is_active: row.is_active })
+    setForm({
+      id: row.product_id, branch_id: row.branch_id, product_name: row.product_name, target_qty: String(row.target_qty),
+      period_month: filterMonth, period_year: filterYear, is_active: row.is_active,
+      bonus_rate_reached: row.bonus_rate_reached === null ? '' : String(row.bonus_rate_reached),
+      bonus_rate_below: row.bonus_rate_below === null ? '' : String(row.bonus_rate_below),
+    })
     setFormError('')
     setShowForm(true)
   }
@@ -126,6 +162,8 @@ export default function PenjualanPromoPage() {
     const { error } = await supabase.rpc('save_promo_product', {
       p_id: form.id, p_branch_id: form.branch_id, p_product_name: form.product_name.trim(), p_target_qty: qty,
       p_period_month: form.period_month, p_period_year: form.period_year, p_is_active: form.is_active,
+      p_bonus_rate_reached: form.bonus_rate_reached.trim() ? parseFloat(form.bonus_rate_reached) : null,
+      p_bonus_rate_below: form.bonus_rate_below.trim() ? parseFloat(form.bonus_rate_below) : null,
     })
     setSaving(false)
     if (error) { setFormError('Gagal menyimpan: ' + error.message); return }
@@ -150,23 +188,54 @@ export default function PenjualanPromoPage() {
     await loadReports(row.product_id)
   }
 
-  async function confirmInvalidate() {
-    if (!invalidateFor) return
-    if (invalidateReason.trim().length < 3) { showMessage('error', 'Alasan wajib diisi.'); return }
-    const { error } = await supabase.rpc('review_promo_sales_report', { p_report_id: invalidateFor.id, p_invalid: true, p_reason: invalidateReason.trim() })
+  async function approveReport(r: ReportRow) {
+    const { error } = await supabase.rpc('review_promo_sales_report', { p_report_id: r.id, p_status: 'approved', p_reason: null })
     if (error) { showMessage('error', 'Gagal: ' + error.message); return }
-    setInvalidateFor(null); setInvalidateReason('')
-    showMessage('success', 'Laporan ditandai tidak valid.')
+    showMessage('success', 'Laporan disetujui.')
     if (expanded) await loadReports(expanded)
     fetchAdmin()
   }
 
-  async function unmarkInvalid(r: ReportRow) {
-    const { error } = await supabase.rpc('review_promo_sales_report', { p_report_id: r.id, p_invalid: false })
+  async function confirmReject() {
+    if (!rejectFor) return
+    if (rejectReason.trim().length < 3) { showMessage('error', 'Alasan wajib diisi.'); return }
+    const { error } = await supabase.rpc('review_promo_sales_report', { p_report_id: rejectFor.id, p_status: 'rejected', p_reason: rejectReason.trim() })
     if (error) { showMessage('error', 'Gagal: ' + error.message); return }
-    showMessage('success', 'Ditandai valid kembali.')
+    setRejectFor(null); setRejectReason('')
+    showMessage('success', 'Laporan ditolak.')
     if (expanded) await loadReports(expanded)
     fetchAdmin()
+  }
+
+  async function resetToPending(r: ReportRow) {
+    const { error } = await supabase.rpc('review_promo_sales_report', { p_report_id: r.id, p_status: 'pending', p_reason: null })
+    if (error) { showMessage('error', 'Gagal: ' + error.message); return }
+    showMessage('success', 'Dikembalikan ke menunggu review.')
+    if (expanded) await loadReports(expanded)
+    fetchAdmin()
+  }
+
+  async function previewSyncBonus() {
+    if (!syncEmployeeId) return
+    setSyncLoadingPreview(true)
+    const { data, error } = await supabase.rpc('get_employee_promo_bonus', {
+      p_employee_id: syncEmployeeId, p_period_month: filterMonth, p_period_year: filterYear,
+    })
+    setSyncLoadingPreview(false)
+    if (error) { showMessage('error', 'Gagal menghitung: ' + error.message); return }
+    setSyncPreview(Number(data))
+  }
+
+  async function doSyncBonus() {
+    if (!syncEmployeeId) return
+    setSyncing(true)
+    const { data, error } = await supabase.rpc('sync_promo_bonus_to_payroll', {
+      p_employee_id: syncEmployeeId, p_period_month: filterMonth, p_period_year: filterYear,
+    })
+    setSyncing(false)
+    if (error) { showMessage('error', 'Gagal sinkron: ' + error.message); return }
+    showMessage('success', `Bonus ${fmtRp(Number(data))} tersinkron ke slip gaji draft.`)
+    setSyncPreview(null)
   }
 
   function openReport(productId: string, productName: string) {
@@ -189,13 +258,18 @@ export default function PenjualanPromoPage() {
       })
       if (error) throw new Error(error.message)
       setReportModal(null)
-      showMessage('success', 'Laporan penjualan terkirim. Terima kasih!')
+      showMessage('success', 'Laporan terkirim, menunggu verifikasi Finance.')
       fetchMine()
     } catch (err: unknown) {
       setRError(err instanceof Error ? err.message : 'Gagal mengirim laporan')
     }
     setRSaving(false)
   }
+
+  const STATUS_BADGE: Record<ReportStatus, string> = {
+    pending: 'bg-amber-100 text-amber-700', approved: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-600',
+  }
+  const STATUS_LABEL: Record<ReportStatus, string> = { pending: 'MENUNGGU', approved: 'DISETUJUI', rejected: 'DITOLAK' }
 
   if (!ready) return <div className="py-10 text-center text-slate-500">Memuat...</div>
 
@@ -205,7 +279,7 @@ export default function PenjualanPromoPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">🎯 Target Penjualan Promo</h1>
           <p className="text-sm text-slate-500">
-            {isAdmin ? 'Kelola target produk promo per cabang & periode.' : 'Laporkan penjualan produk promo dengan foto struk.'}
+            {canReview ? 'Kelola target produk promo & verifikasi laporan penjualan karyawan.' : 'Laporkan penjualan produk promo dengan foto struk.'}
           </p>
         </div>
         {isAdmin && (
@@ -219,7 +293,7 @@ export default function PenjualanPromoPage() {
         <div className={`p-4 mb-4 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>{message.text}</div>
       )}
 
-      {isAdmin ? (
+      {canReview ? (
         <>
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
             <div className="flex flex-wrap gap-4 items-end">
@@ -242,77 +316,119 @@ export default function PenjualanPromoPage() {
             </div>
           </div>
 
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
+            <h2 className="text-sm font-bold text-slate-800 mb-1">💰 Sinkron Bonus ke Penggajian</h2>
+            <p className="text-xs text-slate-500 mb-3">Bonus dihitung dari laporan yang sudah <strong>disetujui</strong> saja. Sinkron hanya berhasil kalau slip gaji karyawan periode ini masih Draft.</p>
+            <div className="flex flex-wrap gap-2 items-end">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Karyawan</label>
+                <select value={syncEmployeeId} onChange={e => { setSyncEmployeeId(e.target.value); setSyncPreview(null) }} className="px-3 py-2 border border-slate-300 rounded text-sm bg-white w-56">
+                  <option value="">-- Pilih karyawan --</option>
+                  {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+                </select>
+              </div>
+              <button onClick={previewSyncBonus} disabled={!syncEmployeeId || syncLoadingPreview} className="px-3 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg disabled:opacity-50">
+                {syncLoadingPreview ? 'Menghitung...' : 'Hitung Bonus'}
+              </button>
+              {syncPreview !== null && (
+                <>
+                  <span className="text-sm font-bold text-blue-600 px-2">{fmtRp(syncPreview)}</span>
+                  <button onClick={doSyncBonus} disabled={syncing} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">
+                    {syncing ? 'Menyinkron...' : 'Sinkron ke Slip Gaji'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
           {loadingAdmin ? (
             <div className="py-10 text-center text-slate-500">Memuat...</div>
           ) : adminRows.length === 0 ? (
-            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada produk promo untuk periode ini. Klik &quot;Produk Baru&quot; untuk mulai.</div>
+            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada produk promo untuk periode ini. {isAdmin && 'Klik "Produk Baru" untuk mulai.'}</div>
           ) : (
             <div className="space-y-3">
-              {adminRows.map(row => (
-                <div key={row.product_id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                  <div className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                          <span className="text-sm font-semibold text-slate-800">{row.product_name}</span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">{row.branch_name}</span>
-                          {!row.is_active && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-600">NONAKTIF</span>}
+              {adminRows.map(row => {
+                const hasBonus = row.bonus_rate_reached !== null || row.bonus_rate_below !== null
+                return (
+                  <div key={row.product_id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                            <span className="text-sm font-semibold text-slate-800">{row.product_name}</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">{row.branch_name}</span>
+                            {row.pending_count > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">{row.pending_count} MENUNGGU</span>}
+                            {!row.is_active && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-600">NONAKTIF</span>}
+                          </div>
+                          <p className="text-xs text-slate-500">Target: {row.target_qty} · Terlapor (disetujui): {row.total_qty}</p>
+                          {hasBonus && (
+                            <p className="text-xs text-purple-700 mt-0.5">
+                              Bonus/pcs: {row.bonus_rate_reached !== null ? fmtRp(row.bonus_rate_reached) : '-'} (tercapai) / {row.bonus_rate_below !== null ? fmtRp(row.bonus_rate_below) : '-'} (belum tercapai)
+                            </p>
+                          )}
                         </div>
-                        <p className="text-xs text-slate-500">Target: {row.target_qty} · Terlapor: {row.total_qty}</p>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-sm font-bold px-2 py-0.5 rounded ${row.achievement_pct >= 80 ? 'bg-green-100 text-green-700' : row.achievement_pct >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600'}`}>{row.achievement_pct}%</span>
+                          {isAdmin && <button onClick={() => openEditProduct(row)} className="text-xs px-2.5 py-1 rounded border font-medium text-blue-600 border-blue-200 hover:bg-blue-50">Edit</button>}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className={`text-sm font-bold px-2 py-0.5 rounded ${row.achievement_pct >= 80 ? 'bg-green-100 text-green-700' : row.achievement_pct >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600'}`}>{row.achievement_pct}%</span>
-                        <button onClick={() => openEditProduct(row)} className="text-xs px-2.5 py-1 rounded border font-medium text-blue-600 border-blue-200 hover:bg-blue-50">Edit</button>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden mt-2">
+                        <div className="h-full bg-blue-500" style={{ width: `${Math.min(100, row.achievement_pct)}%` }} />
                       </div>
+                      <button onClick={() => toggleExpand(row)} className="mt-3 px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 transition">
+                        {expanded === row.product_id ? 'Tutup Laporan ▲' : `Lihat Laporan ▼`}
+                      </button>
                     </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden mt-2">
-                      <div className="h-full bg-blue-500" style={{ width: `${Math.min(100, row.achievement_pct)}%` }} />
-                    </div>
-                    <button onClick={() => toggleExpand(row)} className="mt-3 px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 transition">
-                      {expanded === row.product_id ? 'Tutup Laporan ▲' : 'Lihat Laporan ▼'}
-                    </button>
-                  </div>
-                  {expanded === row.product_id && (
-                    <div className="border-t border-slate-100 p-4 bg-slate-50/50">
-                      {loadingReports ? (
-                        <div className="py-4 text-center text-slate-400 text-sm">Memuat...</div>
-                      ) : reports.length === 0 ? (
-                        <div className="py-4 text-center text-slate-400 text-sm">Belum ada laporan.</div>
-                      ) : (
-                        <div className="space-y-2">
-                          {reports.map(r => (
-                            <div key={r.id} className={`rounded-lg border px-3 py-2 ${r.is_invalid ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
-                              <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-800">{r.full_name} <span className="font-normal text-slate-500">-- qty {r.qty}</span></p>
-                                  <p className="text-[11px] text-slate-400">{fmtDateTime(r.created_at)}{r.is_invalid && <span className="ml-1.5 font-semibold text-red-600">TIDAK VALID</span>}</p>
-                                  {r.notes && <p className="text-xs text-slate-600 mt-1">{r.notes}</p>}
-                                  {r.is_invalid && r.invalid_reason && <p className="text-xs text-red-600 mt-1">Alasan: {r.invalid_reason}</p>}
+                    {expanded === row.product_id && (
+                      <div className="border-t border-slate-100 p-4 bg-slate-50/50">
+                        {loadingReports ? (
+                          <div className="py-4 text-center text-slate-400 text-sm">Memuat...</div>
+                        ) : reports.length === 0 ? (
+                          <div className="py-4 text-center text-slate-400 text-sm">Belum ada laporan.</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {reports.map(r => (
+                              <div key={r.id} className={`rounded-lg border px-3 py-2 ${r.status === 'rejected' ? 'bg-red-50 border-red-200' : r.status === 'pending' ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-800">{r.full_name} <span className="font-normal text-slate-500">-- qty {r.qty}</span></p>
+                                    <p className="text-[11px] text-slate-400">
+                                      {fmtDateTime(r.created_at)} <span className={`ml-1.5 font-semibold px-1.5 py-0.5 rounded ${STATUS_BADGE[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+                                    </p>
+                                    {r.notes && <p className="text-xs text-slate-600 mt-1">{r.notes}</p>}
+                                    {r.status === 'rejected' && r.rejection_reason && <p className="text-xs text-red-600 mt-1">Alasan: {r.rejection_reason}</p>}
+                                  </div>
+                                  <div className="flex flex-col gap-1 items-end shrink-0">
+                                    {r.status === 'pending' && (
+                                      <>
+                                        <button onClick={() => approveReport(r)} className="text-xs text-green-700 hover:underline font-medium">✓ Setujui</button>
+                                        <button onClick={() => setRejectFor(r)} className="text-xs text-red-600 hover:underline">✕ Tolak</button>
+                                      </>
+                                    )}
+                                    {r.status !== 'pending' && (
+                                      <button onClick={() => resetToPending(r)} className="text-xs text-blue-600 hover:underline">Review ulang</button>
+                                    )}
+                                  </div>
                                 </div>
-                                {r.is_invalid ? (
-                                  <button onClick={() => unmarkInvalid(r)} className="text-xs text-blue-600 hover:underline shrink-0">Tandai valid lagi</button>
-                                ) : (
-                                  <button onClick={() => setInvalidateFor(r)} className="text-xs text-red-600 hover:underline shrink-0">Tandai tidak valid</button>
+                                {r.receipt_photo_paths.length > 0 && (
+                                  <div className="flex flex-wrap gap-2 mt-1.5">
+                                    {r.receipt_photo_paths.map(p => photoUrls[p] && (
+                                      <button key={p} type="button" onClick={() => openLightbox(photoUrls[p], 'Foto struk')}>
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img src={photoUrls[p]} alt="Foto struk" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                                      </button>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
-                              {r.receipt_photo_paths.length > 0 && (
-                                <div className="flex flex-wrap gap-2 mt-1.5">
-                                  {r.receipt_photo_paths.map(p => photoUrls[p] && (
-                                    <button key={p} type="button" onClick={() => openLightbox(photoUrls[p], 'Foto struk')}>
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img src={photoUrls[p]} alt="Foto struk" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </>
@@ -323,13 +439,22 @@ export default function PenjualanPromoPage() {
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada target penjualan promo untuk cabang Anda periode ini.</div>
         ) : (
           <div className="space-y-3">
+            {myBonus !== null && myBonus > 0 && (
+              <div className="bg-purple-50 border-2 border-purple-300 rounded-xl p-4">
+                <p className="text-sm font-semibold text-purple-800">💰 Estimasi bonus promo Anda periode ini: <span className="text-lg font-bold">{fmtRp(myBonus)}</span></p>
+                <p className="text-xs text-purple-600 mt-0.5">Dihitung dari laporan yang sudah disetujui Finance. Final saat disinkron ke slip gaji.</p>
+              </div>
+            )}
             {myProgress.map(p => (
               <div key={p.product_id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
                 <h2 className="text-lg font-semibold text-slate-800">{p.product_name}</h2>
-                <p className="text-xs text-slate-500 mt-1">Laporan Anda sendiri: <strong>{p.my_qty}</strong> qty</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Laporan Anda (disetujui): <strong>{p.my_qty}</strong> qty
+                  {p.my_pending_qty > 0 && <span className="text-amber-600"> · {p.my_pending_qty} qty menunggu verifikasi</span>}
+                </p>
                 <div className="mt-3">
                   <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="font-semibold text-slate-700">Progres cabang (semua karyawan)</span>
+                    <span className="font-semibold text-slate-700">Progres cabang (semua karyawan, disetujui)</span>
                     <span className="font-bold text-slate-800">{p.total_qty}/{p.target_qty}</span>
                   </div>
                   <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -348,8 +473,8 @@ export default function PenjualanPromoPage() {
 
       {showForm && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6">
-            <form onSubmit={saveProduct} className="space-y-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md max-h-[92vh] overflow-y-auto">
+            <form onSubmit={saveProduct} className="p-6 space-y-4">
               <h2 className="text-lg font-semibold text-slate-800 pb-2 border-b border-slate-100">{form.id ? 'Edit Produk Promo' : 'Produk Promo Baru'}</h2>
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
@@ -375,6 +500,22 @@ export default function PenjualanPromoPage() {
                     {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
                   </select>
                   <input type="number" value={form.period_year} onChange={e => setForm({ ...form, period_year: +e.target.value })} className="w-24 px-3 py-2 border border-slate-300 rounded text-sm" />
+                </div>
+              </div>
+              <div className="border-t border-slate-100 pt-3">
+                <p className="text-xs font-medium text-slate-700 mb-1">Bonus per Pcs (opsional)</p>
+                <p className="text-[11px] text-slate-400 mb-2">Kosongkan kalau produk ini cuma dipakai untuk skor KPI, tidak ada bonus Rupiah.</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Kalau target tercapai (Rp)</label>
+                    <input type="number" min="0" value={form.bonus_rate_reached} onChange={e => setForm({ ...form, bonus_rate_reached: e.target.value })} placeholder="1000"
+                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Kalau belum tercapai (Rp)</label>
+                    <input type="number" min="0" value={form.bonus_rate_below} onChange={e => setForm({ ...form, bonus_rate_below: e.target.value })} placeholder="500"
+                      className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
                 </div>
               </div>
               {form.id && (
@@ -420,6 +561,7 @@ export default function PenjualanPromoPage() {
                 <textarea value={rNotes} onChange={e => setRNotes(e.target.value)} rows={2}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
               </div>
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Laporan akan menunggu verifikasi Finance sebelum dihitung ke progres & bonus.</p>
               {rError && <div className="p-3 rounded-lg border text-sm bg-red-50 border-red-200 text-red-700">{rError}</div>}
               <div className="flex gap-3 pt-1">
                 <button type="button" onClick={() => setReportModal(null)} disabled={rSaving} className="flex-1 py-3 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">Batal</button>
@@ -432,17 +574,17 @@ export default function PenjualanPromoPage() {
         </div>
       )}
 
-      {invalidateFor && (
+      {rejectFor && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6">
-            <h2 className="text-base font-semibold text-slate-800">Tandai laporan tidak valid</h2>
-            <p className="text-sm text-slate-500 mb-3">{invalidateFor.full_name} -- qty {invalidateFor.qty}</p>
-            <textarea value={invalidateReason} onChange={e => setInvalidateReason(e.target.value)} rows={3} placeholder="Kenapa laporan ini tidak valid?"
+            <h2 className="text-base font-semibold text-slate-800">Tolak laporan</h2>
+            <p className="text-sm text-slate-500 mb-3">{rejectFor.full_name} -- qty {rejectFor.qty}</p>
+            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={3} placeholder="Kenapa laporan ini ditolak?"
               className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
             <div className="flex justify-end gap-3 mt-4">
-              <button onClick={() => { setInvalidateFor(null); setInvalidateReason('') }} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Batal</button>
-              <button disabled={invalidateReason.trim().length < 3} onClick={confirmInvalidate}
-                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg disabled:opacity-50">Tandai Tidak Valid</button>
+              <button onClick={() => { setRejectFor(null); setRejectReason('') }} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Batal</button>
+              <button disabled={rejectReason.trim().length < 3} onClick={confirmReject}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg disabled:opacity-50">Tolak Laporan</button>
             </div>
           </div>
         </div>
