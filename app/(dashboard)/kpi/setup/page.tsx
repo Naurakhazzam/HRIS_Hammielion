@@ -1,114 +1,83 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import {
+  AudienceValue, Branch, Dept, Emp, audienceIsEmpty, audienceLabels, audienceToTargets, emptyAudience,
+} from '@/lib/meeting'
+import AudiencePicker from '@/components/meeting/AudiencePicker'
 
-type Position = { id: string; name: string }
-type KPITemplate = {
-  id: string
-  position_id: string
-  criteria_name: string
-  weight_percent: number
-  is_active: boolean
-  positions?: { name: string }
+type SourceType = 'manual' | 'task_completion' | 'punctuality' | 'attendance'
+
+const SOURCE_LABEL: Record<SourceType, string> = {
+  manual: '✍️ Manual (HR isi skor tiap periode)',
+  task_completion: '🔁 Kepatuhan Tugas Rutin',
+  punctuality: '⏰ Tepat Waktu',
+  attendance: '✅ Kehadiran',
+}
+const SOURCE_HINT: Record<SourceType, string> = {
+  manual: 'HR/Owner mengisi satu angka 0-100 untuk kriteria ini setiap periode.',
+  task_completion: 'Dihitung otomatis dari penyelesaian Tugas Rutin (menu Tugas & Laporan).',
+  punctuality: 'Dihitung otomatis: % hari hadir tanpa telat.',
+  attendance: 'Dihitung otomatis: 100% dikurangi izin/sakit/alpha di luar jatah 4x/periode.',
 }
 
+type AudRow = { branch_id: string | null; department_id: string | null; employee_id: string | null }
+type Criteria = {
+  id: string; title: string; description: string | null; source_type: SourceType
+  weight_percent: number; audience_all: boolean; is_active: boolean
+  kpi_criteria_audiences: AudRow[]
+}
+
+const emptyForm = { title: '', description: '', source_type: 'manual' as SourceType, weight_percent: '20', is_active: true }
+
 export default function KPISetupPage() {
-  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
-  const [positions, setPositions] = useState<Position[]>([])
-  const [templates, setTemplates] = useState<KPITemplate[]>([])
-  
-  const [loading, setLoading] = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  
   const supabase = createClient()
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [departments, setDepartments] = useState<Dept[]>([])
+  const [employees, setEmployees] = useState<Emp[]>([])
+  const [criteria, setCriteria] = useState<Criteria[]>([])
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const [formData, setFormData] = useState({
-    position_id: '',
-    criteria_name: '',
-    weight_percent: '20'
-  })
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<Criteria | null>(null)
+  const [form, setForm] = useState(emptyForm)
+  const [audience, setAudience] = useState<AudienceValue>(emptyAudience)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
-  // Bobot global (bukan per-jabatan) untuk 3 hal yang dihitung OTOMATIS dari data yang sudah
-  // ada -- Tugas Rutin (lihat menu Tugas & Laporan), Tepat Waktu & Kehadiran (dari absensi asli).
-  // Semuanya default 0 = tidak berpengaruh ke KPI sampai Owner sengaja mengisi angka.
-  const [taskWeight, setTaskWeight] = useState('0')
-  const [punctualityWeight, setPunctualityWeight] = useState('0')
-  const [attendanceWeight, setAttendanceWeight] = useState('0')
-  const [autoWeightSaving, setAutoWeightSaving] = useState(false)
+  useEffect(() => { init() }, [])
 
-  useEffect(() => {
-    checkRoleAndFetchData()
-  }, [])
-
-  async function fetchTaskWeight() {
-    const { data } = await supabase.from('kpi_task_weight').select('task_weight_percent, punctuality_weight_percent, attendance_weight_percent').single()
-    if (data) {
-      setTaskWeight(String(data.task_weight_percent))
-      setPunctualityWeight(String(data.punctuality_weight_percent))
-      setAttendanceWeight(String(data.attendance_weight_percent))
-    }
-  }
-
-  async function saveAutoWeights() {
-    setAutoWeightSaving(true)
-    const clamp = (v: string) => Math.min(100, Math.max(0, parseFloat(v) || 0))
-    const task = clamp(taskWeight), punc = clamp(punctualityWeight), att = clamp(attendanceWeight)
-    if (task + punc + att > 100) {
-      setAutoWeightSaving(false)
-      showMessage('error', `Total bobot Tugas Rutin + Tepat Waktu + Kehadiran (${task + punc + att}%) tidak boleh lebih dari 100%.`)
-      return
-    }
-    const { error } = await supabase.from('kpi_task_weight').update({
-      task_weight_percent: task, punctuality_weight_percent: punc, attendance_weight_percent: att,
-      updated_at: new Date().toISOString(),
-    }).eq('id', true)
-    setAutoWeightSaving(false)
-    if (error) showMessage('error', 'Gagal menyimpan: ' + error.message)
-    else { setTaskWeight(String(task)); setPunctualityWeight(String(punc)); setAttendanceWeight(String(att)); showMessage('success', 'Bobot disimpan.') }
-  }
-
-  async function checkRoleAndFetchData() {
+  async function init() {
     setLoading(true)
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      setLoading(false)
-      return
-    }
-
-    const { data: userData } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
+    if (!user) { setLoading(false); return }
+    const { data: userData } = await supabase.from('users').select('role').eq('id', user.id).single()
     const role = userData?.role || ''
     setCurrentUserRole(role)
-
     if (role === 'owner' || role === 'hr') {
-      await fetchPositions()
-      await fetchTemplates()
-      await fetchTaskWeight()
+      const [bRes, dRes, eRes] = await Promise.all([
+        supabase.from('branches').select('id,name').order('name'),
+        supabase.from('departments').select('id,name').order('name'),
+        supabase.from('employees').select('id,full_name,branch_id,department_id').eq('is_active', true).order('full_name'),
+      ])
+      setBranches((bRes.data as Branch[]) || [])
+      setDepartments((dRes.data as Dept[]) || [])
+      setEmployees((eRes.data as Emp[]) || [])
+      await fetchCriteria()
     }
-
     setLoading(false)
   }
 
-  async function fetchPositions() {
-    const { data } = await supabase.from('positions').select('id, name').order('name')
-    if (data) setPositions(data)
-  }
-
-  async function fetchTemplates() {
-    const { data } = await supabase
-      .from('kpi_templates')
-      .select('id, position_id, criteria_name, weight_percent, is_active, positions(name)')
-      .order('position_id')
-      .order('criteria_name')
-      
-    if (data) setTemplates(data as unknown as KPITemplate[])
+  async function fetchCriteria() {
+    const { data, error: err } = await supabase.from('kpi_criteria')
+      .select('id,title,description,source_type,weight_percent,audience_all,is_active,kpi_criteria_audiences(branch_id,department_id,employee_id)')
+      .order('title')
+    if (err) console.error('kpi_criteria:', err.message)
+    setCriteria((data as unknown as Criteria[]) || [])
   }
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -117,80 +86,62 @@ export default function KPISetupPage() {
     setTimeout(() => setMessage(null), 5000)
   }
 
+  function openNew() {
+    setEditing(null)
+    setForm(emptyForm)
+    setAudience(emptyAudience)
+    setError('')
+    setShowForm(true)
+  }
+
+  function openEdit(c: Criteria) {
+    setEditing(c)
+    setForm({ title: c.title, description: c.description ?? '', source_type: c.source_type, weight_percent: String(c.weight_percent), is_active: c.is_active })
+    setAudience(c.audience_all
+      ? { ...emptyAudience, all: true }
+      : {
+          all: false,
+          branchIds: c.kpi_criteria_audiences.filter(a => a.branch_id).map(a => a.branch_id as string),
+          departmentIds: c.kpi_criteria_audiences.filter(a => a.department_id).map(a => a.department_id as string),
+          employeeIds: c.kpi_criteria_audiences.filter(a => a.employee_id).map(a => a.employee_id as string),
+        })
+    setError('')
+    setShowForm(true)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setSubmitting(true)
-    setMessage(null)
-    
-    const { error } = await supabase
-      .from('kpi_templates')
-      .insert({
-        position_id: formData.position_id,
-        criteria_name: formData.criteria_name,
-        weight_percent: parseFloat(formData.weight_percent) || 0,
-        is_active: true
-      })
-
-    if (error) {
-      console.error('Detail error:', JSON.stringify(error, null, 2))
-      showMessage('error', 'Gagal menyimpan kriteria: ' + error.message)
-    } else {
-      showMessage('success', 'Kriteria KPI berhasil ditambahkan.')
-      setFormData({ ...formData, criteria_name: '' })
-      fetchTemplates()
-    }
-    setSubmitting(false)
+    setError('')
+    if (!form.title.trim()) { setError('Judul kriteria wajib diisi.'); return }
+    if (audienceIsEmpty(audience)) { setError('Pilih dulu kriteria ini berlaku untuk siapa.'); return }
+    setSaving(true)
+    const { error: err } = await supabase.rpc('save_kpi_criteria', {
+      p_id: editing?.id ?? null,
+      p_title: form.title.trim(),
+      p_description: form.description.trim() || null,
+      p_source_type: form.source_type,
+      p_weight_percent: parseFloat(form.weight_percent) || 0,
+      p_is_active: form.is_active,
+      p_targets: audienceToTargets(audience),
+    })
+    setSaving(false)
+    if (err) { setError('Gagal menyimpan: ' + err.message); return }
+    setShowForm(false)
+    showMessage('success', editing ? 'Kriteria diperbarui.' : 'Kriteria ditambahkan.')
+    fetchCriteria()
   }
 
-  async function toggleStatus(templateId: string, currentStatus: boolean) {
-    setSubmitting(true)
-    const { error } = await supabase
-      .from('kpi_templates')
-      .update({ is_active: !currentStatus })
-      .eq('id', templateId)
-
-    if (error) {
-      console.error('Detail error:', JSON.stringify(error, null, 2))
-      showMessage('error', 'Gagal mengupdate status: ' + error.message)
-    } else {
-      showMessage('success', 'Status kriteria berhasil diperbarui.')
-      fetchTemplates()
-    }
-    setSubmitting(false)
+  async function toggleStatus(c: Criteria) {
+    const { error: err } = await supabase.from('kpi_criteria').update({ is_active: !c.is_active }).eq('id', c.id)
+    if (err) showMessage('error', 'Gagal mengubah status: ' + err.message)
+    else { showMessage('success', 'Status diperbarui.'); fetchCriteria() }
   }
 
-  async function handleDelete(templateId: string, criteriaName: string) {
-    if (!confirm(`Hapus kriteria "${criteriaName}"?\n\nSemua data checklist harian dan skor penilaian untuk kriteria ini juga akan ikut terhapus.`)) return
-    setSubmitting(true)
-
-    // 1. Hapus kpi_daily_entries (checklist harian) yang merujuk kriteria ini
-    const { error: e1 } = await supabase
-      .from('kpi_daily_entries')
-      .delete()
-      .eq('criteria_id', templateId)
-    if (e1) console.error('Delete daily_entries error:', JSON.stringify(e1, null, 2))
-
-    // 2. Hapus kpi_scores yang merujuk kriteria ini
-    const { error: e2 } = await supabase
-      .from('kpi_scores')
-      .delete()
-      .eq('criteria_id', templateId)
-    if (e2) console.error('Delete scores error:', JSON.stringify(e2, null, 2))
-
-    // 3. Baru hapus template kriteria
-    const { error: e3 } = await supabase
-      .from('kpi_templates')
-      .delete()
-      .eq('id', templateId)
-
-    if (e3) {
-      console.error('Delete template error:', JSON.stringify(e3, null, 2))
-      showMessage('error', 'Gagal menghapus kriteria: ' + e3.message)
-    } else {
-      showMessage('success', `Kriteria "${criteriaName}" berhasil dihapus.`)
-      fetchTemplates()
-    }
-    setSubmitting(false)
+  async function handleDelete(c: Criteria) {
+    if (!window.confirm(`Hapus kriteria "${c.title}"? Semua skor manual untuk kriteria ini juga ikut terhapus.`)) return
+    const { error: err } = await supabase.from('kpi_criteria').delete().eq('id', c.id)
+    if (err) showMessage('error', 'Gagal menghapus: ' + err.message)
+    else { showMessage('success', 'Kriteria dihapus.'); fetchCriteria() }
   }
 
   if (loading) {
@@ -213,202 +164,120 @@ export default function KPISetupPage() {
         <span className="text-4xl mb-3">🔒</span>
         <h2 className="text-xl font-bold text-slate-700">Akses Ditolak</h2>
         <p>Anda tidak memiliki akses ke halaman ini.</p>
-        <Link href="/dashboard" className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
-          Kembali ke Dashboard
-        </Link>
+        <Link href="/dashboard" className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">Kembali ke Dashboard</Link>
       </div>
     )
   }
 
-  const positionWeightWarnings = positions
-    .map(pos => {
-      const posTemplates = templates.filter(t => t.position_id === pos.id && t.is_active)
-      if (posTemplates.length === 0) return null
-      const total = posTemplates.reduce((acc, t) => acc + Number(t.weight_percent), 0)
-      return total !== 100 ? `${pos.name} (total: ${total}%)` : null
-    })
-    .filter(Boolean)
+  const allWeightTotal = criteria.filter(c => c.is_active && c.audience_all).reduce((a, c) => a + Number(c.weight_percent), 0)
 
   return (
     <div className="space-y-6">
-      <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="mb-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Setup Kriteria KPI</h1>
-          <p className="text-sm text-slate-500">Kelola kriteria penilaian KPI per jabatan.</p>
+          <p className="text-sm text-slate-500">Kriteria bisa ditargetkan ke cabang/divisi/karyawan tertentu, atau semua karyawan.</p>
         </div>
-        <Link href="/kpi" className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
-          Kembali ke Rekap KPI
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/kpi" className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">Kembali ke Dashboard KPI</Link>
+          <button onClick={openNew} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition">+ Kriteria Baru</button>
+        </div>
       </div>
 
       {message && (
-        <div className={`p-4 rounded-lg border ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-          {message.text}
+        <div className={`p-4 rounded-lg border ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>{message.text}</div>
+      )}
+
+      {allWeightTotal > 100 && (
+        <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-700">
+          ⚠️ Total bobot kriteria aktif untuk &quot;Semua karyawan&quot; sudah {allWeightTotal}% (lebih dari 100%). Bukan error, tapi cek lagi supaya bobotnya masuk akal.
         </div>
       )}
 
-      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-        <h2 className="text-lg font-bold text-slate-800 mb-1">⚙️ Bobot Otomatis (dari data yang sudah ada)</h2>
-        <p className="text-sm text-slate-500 mb-4">
-          Tiga hal ini dihitung SISTEM sendiri (bukan checklist manual), berlaku untuk SEMUA jabatan sekaligus. Isi 0 kalau belum mau dipakai — KPI tetap berjalan seperti biasa dari kriteria di bawah.
-          Kalau diisi, skor kriteria manual di bawah otomatis disusutkan proporsional supaya totalnya tetap 0-100%.
-        </p>
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="w-40 text-sm text-slate-700">🔁 Kepatuhan Tugas Rutin</span>
-            <input type="number" min="0" max="100" value={taskWeight} onChange={e => setTaskWeight(e.target.value)}
-              className="w-24 px-3 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-            <span className="text-sm text-slate-500">%</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-40 text-sm text-slate-700">⏰ Tepat Waktu</span>
-            <input type="number" min="0" max="100" value={punctualityWeight} onChange={e => setPunctualityWeight(e.target.value)}
-              className="w-24 px-3 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-            <span className="text-sm text-slate-500">% <span className="text-slate-400">— % hari hadir tanpa telat</span></span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-40 text-sm text-slate-700">✅ Kehadiran</span>
-            <input type="number" min="0" max="100" value={attendanceWeight} onChange={e => setAttendanceWeight(e.target.value)}
-              className="w-24 px-3 py-1.5 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-            <span className="text-sm text-slate-500">% <span className="text-slate-400">— 100% dikurangi izin/sakit/alpha di luar jatah 4x/periode</span></span>
-          </div>
-          <button onClick={saveAutoWeights} disabled={autoWeightSaving}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
-            {autoWeightSaving ? 'Menyimpan...' : 'Simpan Bobot'}
-          </button>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-4 border-b border-slate-200 bg-slate-50">
+          <h2 className="text-sm font-bold text-slate-800">Daftar Kriteria KPI</h2>
         </div>
+        {criteria.length === 0 ? (
+          <p className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kriteria KPI yang disetup.</p>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {criteria.map(c => {
+              const tujuan = c.audience_all ? 'Semua karyawan' : (audienceLabels(c.kpi_criteria_audiences, branches, departments, employees).join(', ') || '-')
+              return (
+                <div key={c.id} className={`px-4 py-3 flex items-start justify-between gap-3 ${!c.is_active ? 'opacity-60 bg-slate-50/50' : ''}`}>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                      <span className="text-sm font-semibold text-slate-800">{c.title}</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">{SOURCE_LABEL[c.source_type]}</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">Bobot {c.weight_percent}%</span>
+                      {!c.is_active && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-600">NONAKTIF</span>}
+                    </div>
+                    {c.description && <p className="text-xs text-slate-500">{c.description}</p>}
+                    <p className="text-xs text-slate-400 mt-0.5">Berlaku untuk: {tujuan}</p>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <button onClick={() => openEdit(c)} className="text-xs px-2.5 py-1 rounded border font-medium text-blue-600 border-blue-200 hover:bg-blue-50">Edit</button>
+                    <button onClick={() => toggleStatus(c)} className={`text-xs px-2.5 py-1 rounded border font-medium ${c.is_active ? 'text-slate-600 border-slate-200 hover:bg-slate-50' : 'text-green-600 border-green-200 hover:bg-green-50'}`}>{c.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
+                    <button onClick={() => handleDelete(c)} className="text-xs px-2.5 py-1 rounded border font-medium text-red-600 border-red-200 hover:bg-red-50">Hapus</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Kolom Kiri: Form Tambah Kriteria */}
-        <div className="xl:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
-          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Tambah Kriteria Baru</h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Jabatan <span className="text-red-500">*</span></label>
-              <select 
-                required 
-                value={formData.position_id} 
-                onChange={(e) => setFormData({...formData, position_id: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-              >
-                <option value="">-- Pilih Jabatan --</option>
-                {positions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Nama Kriteria <span className="text-red-500">*</span></label>
-              <input 
-                type="text" 
-                required 
-                placeholder="Cth: Kehadiran, Kualitas Kerja"
-                value={formData.criteria_name} 
-                onChange={(e) => setFormData({...formData, criteria_name: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
-              />
-            </div>
+      {showForm && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-xl max-h-[92vh] overflow-y-auto">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <h2 className="text-lg font-semibold text-slate-800 pb-2 border-b border-slate-100">{editing ? 'Edit Kriteria' : 'Kriteria Baru'}</h2>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Bobot (%) <span className="text-red-500">*</span></label>
-              <input 
-                type="number" 
-                required 
-                min="1"
-                max="100"
-                placeholder="Cth: 20"
-                value={formData.weight_percent} 
-                onChange={(e) => setFormData({...formData, weight_percent: e.target.value})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
-              />
-            </div>
-
-            <div className="pt-2">
-              <button 
-                type="submit" 
-                disabled={submitting} 
-                className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded shadow-sm transition disabled:opacity-50"
-              >
-                {submitting ? 'Menyimpan...' : 'Simpan Kriteria'}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* Kolom Kanan: Tabel Kriteria per Jabatan */}
-        <div className="xl:col-span-2 space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-              <h2 className="text-sm font-bold text-slate-800">Daftar Kriteria KPI</h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-white border-b border-slate-200">
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase w-1/4">Jabatan</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Nama Kriteria</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center w-24">Bobot (%)</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center w-24">Status</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center w-24">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {templates.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada kriteria KPI yang disetup.</td>
-                    </tr>
-                  ) : (
-                    templates.map((t) => (
-                      <tr key={t.id} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-3">
-                          <div className="text-sm font-medium text-slate-800">{t.positions?.name || '-'}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-slate-700">{t.criteria_name}</div>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="text-sm font-medium text-slate-600">{t.weight_percent}%</span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${t.is_active ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
-                            {t.is_active ? 'Aktif' : 'Nonaktif'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => toggleStatus(t.id, t.is_active)}
-                            disabled={submitting}
-                            className={`px-2.5 py-1 rounded text-xs font-medium transition disabled:opacity-50 ${
-                              t.is_active 
-                                ? 'bg-white border border-red-200 text-red-600 hover:bg-red-50' 
-                                : 'bg-white border border-green-200 text-green-600 hover:bg-green-50'
-                            }`}
-                          >
-                            {t.is_active ? 'Nonaktifkan' : 'Aktifkan'}
-                          </button>
-                          <button
-                            onClick={() => handleDelete(t.id, t.criteria_name)}
-                            disabled={submitting}
-                            className="px-2.5 py-1 rounded text-xs font-medium transition disabled:opacity-50 bg-white border border-red-200 text-red-600 hover:bg-red-50 ml-1"
-                          >
-                            Hapus
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-            
-            {positionWeightWarnings.length > 0 && (
-              <div className="mx-4 mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-700">
-                ⚠️ Total bobot belum 100% untuk jabatan: {positionWeightWarnings.join(', ')}
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Judul Kriteria <span className="text-red-500">*</span></label>
+                <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Contoh: Kerapian Toko"
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
-            )}
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Penjelasan</label>
+                <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Sumber Penilaian</label>
+                <select value={form.source_type} onChange={e => setForm({ ...form, source_type: e.target.value as SourceType })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm bg-white">
+                  {(Object.keys(SOURCE_LABEL) as SourceType[]).map(s => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">{SOURCE_HINT[form.source_type]}</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Bobot (%) <span className="text-red-500">*</span></label>
+                <input type="number" min="0" max="100" value={form.weight_percent} onChange={e => setForm({ ...form, weight_percent: e.target.value })}
+                  className="w-32 px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <p className="block text-xs font-medium text-slate-700 mb-1">Berlaku untuk</p>
+                <AudiencePicker value={audience} onChange={setAudience} branches={branches} departments={departments} employees={employees} />
+              </div>
+              {editing && (
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={form.is_active} onChange={e => setForm({ ...form, is_active: e.target.checked })} className="rounded" />
+                  Aktif
+                </label>
+              )}
+              {error && <div className="p-3 rounded-lg border text-sm bg-red-50 border-red-200 text-red-700">{error}</div>}
+              <div className="flex justify-end gap-3 pt-1">
+                <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Batal</button>
+                <button type="submit" disabled={saving} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg disabled:opacity-50">
+                  {saving ? 'Menyimpan...' : editing ? 'Simpan' : 'Buat Kriteria'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
