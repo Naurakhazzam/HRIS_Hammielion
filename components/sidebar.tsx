@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { isPreviewModeClient, setPreviewMode } from '@/lib/previewMode'
+import { isPreviewModeClient, setPreviewMode, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 type NavNode = {
   name: string
@@ -24,6 +24,31 @@ function hasActiveDescendant(item: NavNode, pathname: string): boolean {
   // supaya /keuangan/pembelian (Ringkasan, grup Laporan Keuangan) tidak ikut ke-anggap aktif
   // saat di /keuangan/pembelian/input (grup Keuangan), dua rute beda yang kebetulan mirip.
   return pathname === item.href
+}
+
+// Dipakai bareng oleh adminNavItems DAN getEmployeeNavItems — supaya isinya selalu identik,
+// tidak ada risiko salah satu ketinggalan diupdate kalau ada perubahan di lain waktu.
+// "Pendapatan Ritase" disisipkan lewat buildPortalSayaSubmenu (bukan ditulis statis di sini)
+// karena cuma relevan untuk Driver/Kenek.
+const PORTAL_SAYA_SUBMENU_BASE: NavNode[] = [
+  { name: 'Dashboard Saya', href: '/portal' },
+  { name: 'Klarifikasi Alpha', href: '/portal/alpha' },
+  { name: 'Klaim Lembur', href: '/portal/lembur' },
+  { name: 'Profil Saya', href: '/portal/profil' },
+  { name: 'Slip Gaji', href: '/portal/slip-gaji' },
+  { name: 'Rekap Absensi', href: '/portal/absensi' },
+  { name: 'Jadwal Saya', href: '/portal/jadwal' },
+  { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
+  { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
+  { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
+]
+
+function buildPortalSayaSubmenu(isDriverOrKenek: boolean): NavNode[] {
+  if (!isDriverOrKenek) return PORTAL_SAYA_SUBMENU_BASE
+  // Disisip persis setelah "Slip Gaji" — sama-sama halaman penghasilan, biar ketemu berdekatan.
+  const withEarnings = [...PORTAL_SAYA_SUBMENU_BASE]
+  withEarnings.splice(5, 0, { name: 'Pendapatan Ritase', href: '/portal/pendapatan-ritase' })
+  return withEarnings
 }
 
 // Dipakai bareng oleh adminNavItems DAN getEmployeeNavItems (untuk Kepala Gudang, yang
@@ -52,18 +77,7 @@ const adminNavItems: NavNode[] = [
     name: 'Portal Saya',
     href: '/portal',
     icon: '👤',
-    submenu: [
-      { name: 'Dashboard Saya', href: '/portal' },
-      { name: 'Klarifikasi Alpha', href: '/portal/alpha' },
-      { name: 'Klaim Lembur', href: '/portal/lembur' },
-      { name: 'Profil Saya', href: '/portal/profil' },
-      { name: 'Slip Gaji', href: '/portal/slip-gaji' },
-      { name: 'Rekap Absensi', href: '/portal/absensi' },
-      { name: 'Jadwal Saya', href: '/portal/jadwal' },
-      { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
-      { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
-      { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
-    ]
+    submenu: PORTAL_SAYA_SUBMENU_BASE
   },
   {
     name: 'SDM / HR',
@@ -230,18 +244,7 @@ const employeeNavItems: NavNode[] = [
     name: 'Portal Saya',
     href: '/portal',
     icon: '👤',
-    submenu: [
-      { name: 'Dashboard Saya', href: '/portal' },
-      { name: 'Klarifikasi Alpha', href: '/portal/alpha' },
-      { name: 'Klaim Lembur', href: '/portal/lembur' },
-      { name: 'Profil Saya', href: '/portal/profil' },
-      { name: 'Slip Gaji', href: '/portal/slip-gaji' },
-      { name: 'Rekap Absensi', href: '/portal/absensi' },
-      { name: 'Jadwal Saya', href: '/portal/jadwal' },
-      { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
-      { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
-      { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
-    ]
+    submenu: PORTAL_SAYA_SUBMENU_BASE
   },
   { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
   { name: 'Tugas & Laporan', href: '/tugas-harian', icon: '📋' },
@@ -252,15 +255,23 @@ const employeeNavItems: NavNode[] = [
 ]
 
 function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isTokoPusat: boolean): NavNode[] {
+  // "Pendapatan Ritase" (submenu Portal Saya) cuma relevan buat Driver/Kenek -- item dasarnya
+  // (index 0,1) tetap dipakai apa adanya, cuma Portal Saya (index 2) yang dibangun ulang di sini.
+  const baseItems = [
+    employeeNavItems[0], employeeNavItems[1],
+    { ...employeeNavItems[2], submenu: buildPortalSayaSubmenu(isDriverOrKenek) },
+    ...employeeNavItems.slice(3),
+  ]
+
   // Kepala Gudang dapat submenu LENGKAP (sama seperti admin) karena dia yang bikin Rencana
   // Pengiriman & kelola Master Toko — bukan cuma jalankan trip seperti driver/kenek. Dicek
   // duluan sebelum isDriverOrKenek supaya kalau kebetulan Kepala Gudang juga ditandai
   // can_drive/can_help, dia tetap dapat menu lengkap, bukan cuma link tunggal.
   if (isKepalaGudang) {
     return [
-      ...employeeNavItems.slice(0, 3),
+      ...baseItems.slice(0, 3),
       { name: 'Pengiriman Logistik', href: '/logistik/toko', icon: '🚚', submenu: LOGISTIK_SUBMENU },
-      ...employeeNavItems.slice(3),
+      ...baseItems.slice(3),
     ]
   }
   // Driver/Kenek & Team Toko Pusat bukan posisi yang saling eksklusif (jarang, tapi bisa
@@ -276,11 +287,11 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, 
   if (isTokoPusat) {
     extraLinks.push({ name: 'Laporan Muat', href: '/logistik/laporan-muat', icon: '📦' })
   }
-  if (extraLinks.length === 0) return employeeNavItems
+  if (extraLinks.length === 0) return baseItems
   return [
-    ...employeeNavItems.slice(0, 3),
+    ...baseItems.slice(0, 3),
     ...extraLinks,
-    ...employeeNavItems.slice(3),
+    ...baseItems.slice(3),
   ]
 }
 
@@ -334,13 +345,22 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const previewOn = isPreviewModeClient()
+    setPreviewModeState(previewOn)
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
       supabase.from('users').select('role, employee_id').eq('id', user.id).single().then(({ data }) => {
         if (data) {
           setUserRole(data.role)
-          if (data.employee_id) {
-            supabase.from('employees').select('employee_type, can_drive, can_help, departments(name), positions(name), branches(name)').eq('id', data.employee_id).single().then(({ data: emp }) => {
+          // Preview Tampilan Karyawan menampilkan data Portal Saya (Slip Gaji, dst.) memakai
+          // PREVIEW_EMPLOYEE_ID (lihat lib/previewMode.ts), BUKAN employee_id akun admin yang
+          // sedang login — sebelumnya menu sidebar ini tidak ikut aturan itu, jadi struktur
+          // menunya (mis. tab Laporan Muat/Jemput Toko Pusat) tidak nyambung dgn isi halaman
+          // Portal yang sedang di-preview. Disamakan di sini supaya preview representatif.
+          const realIsAdminNow = !['employee', 'supervisor'].includes(data.role)
+          const effectiveEmployeeId = (realIsAdminNow && previewOn) ? PREVIEW_EMPLOYEE_ID : data.employee_id
+          if (effectiveEmployeeId) {
+            supabase.from('employees').select('employee_type, can_drive, can_help, departments(name), positions(name), branches(name)').eq('id', effectiveEmployeeId).single().then(({ data: emp }) => {
               if (emp) {
                 // Driver "asli" (employee_type='driver') belum tentu punya can_drive=true —
                 // kolom itu dibuat belakangan khusus untuk menandai karyawan LAIN yang bisa
@@ -364,7 +384,6 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
         setLoadingRole(false)
       })
     })
-    setPreviewModeState(isPreviewModeClient())
   }, [])
 
   // realIsAdmin = role sungguhan (bukan lagi preview) — dipakai untuk tampilkan/sembunyikan
