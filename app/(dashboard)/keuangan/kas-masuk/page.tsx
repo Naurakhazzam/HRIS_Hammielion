@@ -65,6 +65,7 @@ export default function KasMasukPage() {
   const [filterMonth, setFilterMonth] = useState(thisMonth)
   const [filterBranch, setFilterBranch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [filterAccount, setFilterAccount] = useState('')
   const [activeSubTab, setActiveSubTab] = useState<'riwayat' | 'revisi' | 'selisih'>('riwayat')
   const [selisihTypeFilter, setSelisihTypeFilter] = useState<'all' | 'plus' | 'minus'>('all')
   const [selisihSortDir, setSelisihSortDir] = useState<'desc' | 'asc'>('desc')
@@ -94,12 +95,13 @@ export default function KasMasukPage() {
     if (!isAdmin && myBranchId) query = query.eq('branch_id', myBranchId)
     if (isAdmin && filterBranch) query = query.eq('branch_id', filterBranch)
     if (filterStatus) query = query.eq('status', filterStatus)
+    if (isAdmin && filterAccount) query = query.eq('account_id', filterAccount)
 
     const { data, error } = await query
     if (error) console.error('Detail error:', JSON.stringify(error, null, 2))
     else setRows((data as unknown as CashIn[]) || [])
     setLoading(false)
-  }, [supabase, filterMonth, filterBranch, filterStatus, isAdmin, myBranchId])
+  }, [supabase, filterMonth, filterBranch, filterStatus, filterAccount, isAdmin, myBranchId])
 
   // Fetch khusus tab Selisih Kasir — periode & cabangnya sendiri, tidak terikat filter di atas
   const fetchSelisihRows = useCallback(async () => {
@@ -675,6 +677,20 @@ export default function KasMasukPage() {
                   <option value="revisi">Revisi</option>
                 </select>
               </div>
+              {isAdmin && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Rekening</label>
+                  <select value={filterAccount} onChange={e => setFilterAccount(e.target.value)}
+                    className="w-52 px-2 py-1.5 border border-slate-300 rounded text-sm outline-none bg-white">
+                    <option value="">Semua Rekening</option>
+                    {bankAccounts.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.account_type === 'tunai' ? a.bank_name : `${a.bank_name} — ${a.account_number}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
             <div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-left border-separate border-spacing-0">
