@@ -35,6 +35,7 @@ const LOGISTIK_SUBMENU: NavNode[] = [
   { name: 'Jalankan Pengiriman', href: '/logistik/jalan' },
   { name: 'Laporan Pengiriman', href: '/logistik/laporan' },
   { name: 'Master Toko', href: '/logistik/toko' },
+  { name: 'Laporan Muat (Toko Pusat)', href: '/logistik/laporan-muat' },
 ]
 
 // Menu untuk HR, Owner, Finance, Supervisor — dikelompokkan jadi 4 kelompok besar (SDM/HR,
@@ -250,7 +251,7 @@ const employeeNavItems: NavNode[] = [
   { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
 ]
 
-function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean): NavNode[] {
+function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isTokoPusat: boolean): NavNode[] {
   // Kepala Gudang dapat submenu LENGKAP (sama seperti admin) karena dia yang bikin Rencana
   // Pengiriman & kelola Master Toko — bukan cuma jalankan trip seperti driver/kenek. Dicek
   // duluan sebelum isDriverOrKenek supaya kalau kebetulan Kepala Gudang juga ditandai
@@ -262,13 +263,23 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean):
       ...employeeNavItems.slice(3),
     ]
   }
-  if (!isDriverOrKenek) return employeeNavItems
-  // Disisip setelah Portal Saya, cuma link ke aplikasi lapangan (bukan submenu admin
-  // lengkap seperti Dashboard/Rencana/Laporan/Master Toko) — RLS di halaman itu sendiri
-  // sudah membatasi datanya ke rencana milik driver/kenek yang bersangkutan.
+  // Driver/Kenek & Team Toko Pusat bukan posisi yang saling eksklusif (jarang, tapi bisa
+  // keduanya) — jadi link masing-masing disisipkan independen, bukan if/else berantai.
+  const extraLinks: NavNode[] = []
+  if (isDriverOrKenek) {
+    // Disisip setelah Portal Saya, cuma link ke aplikasi lapangan (bukan submenu admin
+    // lengkap seperti Dashboard/Rencana/Laporan/Master Toko) — RLS di halaman itu sendiri
+    // sudah membatasi datanya ke rencana milik driver/kenek yang bersangkutan.
+    extraLinks.push({ name: 'Pengiriman Logistik', href: '/logistik/jalan', icon: '🚚' })
+    extraLinks.push({ name: 'Jemput Toko Pusat', href: '/logistik/jemput-toko-pusat', icon: '📦' })
+  }
+  if (isTokoPusat) {
+    extraLinks.push({ name: 'Laporan Muat', href: '/logistik/laporan-muat', icon: '📦' })
+  }
+  if (extraLinks.length === 0) return employeeNavItems
   return [
     ...employeeNavItems.slice(0, 3),
-    { name: 'Pengiriman Logistik', href: '/logistik/jalan', icon: '🚚' },
+    ...extraLinks,
     ...employeeNavItems.slice(3),
   ]
 }
@@ -289,6 +300,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [previewMode, setPreviewModeState] = useState(false)
   const [isDriverOrKenek, setIsDriverOrKenek] = useState(false)
   const [isKepalaGudang, setIsKepalaGudang] = useState(false)
+  const [isTokoPusat, setIsTokoPusat] = useState(false)
   const [meetingBadge, setMeetingBadge] = useState(0)
   const [dailyTaskBadge, setDailyTaskBadge] = useState(0)
 
@@ -328,7 +340,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
         if (data) {
           setUserRole(data.role)
           if (data.employee_id) {
-            supabase.from('employees').select('employee_type, can_drive, can_help, departments(name), positions(name)').eq('id', data.employee_id).single().then(({ data: emp }) => {
+            supabase.from('employees').select('employee_type, can_drive, can_help, departments(name), positions(name), branches(name)').eq('id', data.employee_id).single().then(({ data: emp }) => {
               if (emp) {
                 // Driver "asli" (employee_type='driver') belum tentu punya can_drive=true —
                 // kolom itu dibuat belakangan khusus untuk menandai karyawan LAIN yang bisa
@@ -341,8 +353,10 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                 // sekali, jadi Helper Gudang biasa (can_help masih false) tidak lolos di sini
                 // walau sudah lolos di halaman lain (kasus nyata: Riki Yusdinar Pahas).
                 const dept = Array.isArray((emp as any).departments) ? (emp as any).departments[0] : (emp as any).departments
+                const branch = Array.isArray((emp as any).branches) ? (emp as any).branches[0] : (emp as any).branches
                 setIsDriverOrKenek(emp.employee_type === 'driver' || !!emp.can_drive || !!emp.can_help || dept?.name === 'Team Gudang')
                 setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
+                setIsTokoPusat(branch?.name === 'Toko Pusat')
               }
             })
           }
@@ -357,7 +371,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // tombol toggle preview itu sendiri, supaya karyawan asli tidak bisa iseng balik ke menu admin.
   const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
   const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
-  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang) : adminNavItems
+  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isTokoPusat) : adminNavItems
 
   function togglePreview() {
     const next = !previewMode

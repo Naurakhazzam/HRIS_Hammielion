@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import LogisticsCameraCapture from '@/components/LogisticsCameraCapture'
@@ -133,6 +134,16 @@ export default function JalanPengirimanPage() {
   const [nowTick, setNowTick] = useState(Date.now())
   const [garageGapMinutes, setGarageGapMinutes] = useState(GARAGE_GAP_MINUTES_DEFAULT)
 
+  // Pengingat "Jemput Toko Pusat" -- muncul otomatis begitu driver buka rencana yang Siap
+  // Berangkat DAN ada paket titipan Toko Pusat yang masih menunggu diambil (siapa pun tokonya,
+  // bukan cuma yang kebetulan sudah ada di rencana ini -- lihat diskusi fitur: toko tujuannya
+  // bisa saja cuma ada di Toko Pusat, tidak ada di rencana Gudang sama sekali). Sifatnya
+  // pengingat (bisa ditutup), bukan penghalang -- ada tab permanen "Jemput Toko Pusat" buat
+  // jaga-jaga kalau pop-up ini kelewat/ke-close tidak sengaja.
+  const [showCentralReminder, setShowCentralReminder] = useState(false)
+  const [centralPendingCount, setCentralPendingCount] = useState(0)
+  const [reminderDismissedFor, setReminderDismissedFor] = useState<string | null>(null)
+
   useEffect(() => {
     const t = setInterval(() => setNowTick(Date.now()), 15000)
     return () => clearInterval(t)
@@ -150,6 +161,21 @@ export default function JalanPengirimanPage() {
   useEffect(() => {
     if (selectedPlanId) { fetchPlanStores(selectedPlanId); fetchSupplierTasks(selectedPlanId) }
   }, [selectedPlanId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    async function checkCentralPending() {
+      if (!selectedPlan || selectedPlan.status !== 'ready') { setShowCentralReminder(false); return }
+      const { count } = await supabase
+        .from('logistics_central_loading_packages')
+        .select('id, logistics_central_loadings!inner(status)', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .eq('logistics_central_loadings.status', 'selesai')
+      const n = count || 0
+      setCentralPendingCount(n)
+      if (n > 0 && reminderDismissedFor !== selectedPlan.id) setShowCentralReminder(true)
+    }
+    checkCentralPending()
+  }, [selectedPlanId, selectedPlan?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     setLoading(true)
@@ -557,6 +583,27 @@ export default function JalanPengirimanPage() {
                   if (url) await submitSupplierTaskDone(selectedSupplierTask, url)
                 }} />
               {supplierTaskSubmitting && <p className="text-xs text-slate-400 mt-2">Menyimpan...</p>}
+            </div>
+          )}
+
+          {showCentralReminder && selectedPlan && (
+            <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+                <h3 className="font-semibold text-slate-800 mb-2">📦 Ada Titipan di Toko Pusat</h3>
+                <p className="text-sm text-slate-600 mb-4">
+                  Ada <strong>{centralPendingCount} paket</strong> barang di Toko Pusat yang masih menunggu diambil driver — bisa saja bukan buat toko di rencana ini, cek dulu sebelum berangkat.
+                </p>
+                <div className="flex gap-3">
+                  <button onClick={() => { setShowCentralReminder(false); setReminderDismissedFor(selectedPlan.id) }}
+                    className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">
+                    Nanti Saja
+                  </button>
+                  <Link href="/logistik/jemput-toko-pusat"
+                    className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold text-center">
+                    Lihat & Ambil →
+                  </Link>
+                </div>
+              </div>
             </div>
           )}
 
