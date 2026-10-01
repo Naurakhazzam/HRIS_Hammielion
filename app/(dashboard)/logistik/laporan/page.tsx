@@ -60,6 +60,7 @@ type PlanSupplierTask = {
 }
 
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
+const INCIDENT_LABEL: Record<string, string> = { tidak_ada: 'Tidak Ada', salah_muat: 'Salah Muat', retur: 'Retur', barang_lebih: 'Barang Lebih' }
 
 const fmtJam = (ts: string) => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
 
@@ -457,7 +458,7 @@ export default function LaporanPengirimanPage() {
                                   )}
                                   {s.incident_type !== 'tidak_ada' && (
                                     <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-                                      {s.incident_type === 'salah_muat' ? 'Salah Muat' : 'Retur'}
+                                      {INCIDENT_LABEL[s.incident_type]}
                                     </span>
                                   )}
                                 </>
@@ -550,7 +551,7 @@ export default function LaporanPengirimanPage() {
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
               <div>
                 <h2 className="text-base font-bold text-slate-800">
-                  {detailModal === 'incident' ? 'Rincian Kejadian (Salah Muat / Retur)' : 'Rincian Gagal Kirim'}
+                  {detailModal === 'incident' ? 'Rincian Kejadian (Salah Muat / Retur / Barang Lebih)' : 'Rincian Gagal Kirim'}
                 </h2>
                 <p className="text-xs text-slate-500">{detailStores.length} toko · periode {monthOptions.find(m => m.value === filterMonth)?.label}</p>
               </div>
@@ -569,7 +570,7 @@ export default function LaporanPengirimanPage() {
                       <p className="text-sm font-semibold text-slate-800">{s.logistics_stores?.name ?? '-'}</p>
                       {detailModal === 'incident' ? (
                         <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">
-                          {s.incident_type === 'salah_muat' ? 'Salah Muat' : s.incident_type === 'retur' ? 'Retur' : s.incident_type}
+                          {INCIDENT_LABEL[s.incident_type] ?? s.incident_type}
                         </span>
                       ) : (
                         <span className="text-[11px] px-2 py-0.5 rounded bg-red-100 text-red-600 font-semibold">Gagal Kirim</span>

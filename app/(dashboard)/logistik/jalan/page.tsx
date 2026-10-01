@@ -40,7 +40,7 @@ type PlanStore = {
   payment_amount: number | null
   payment_photo_url: string | null
   payment_due_date: string | null
-  incident_type: 'tidak_ada' | 'salah_muat' | 'retur'
+  incident_type: 'tidak_ada' | 'salah_muat' | 'retur' | 'barang_lebih'
   incident_photo_url: string | null
   incident_description: string | null
   failed_reason: string | null
@@ -60,6 +60,7 @@ type ActionMode = null | 'kirim' | 'gagal'
 type PaymentMethod = '' | 'cash' | 'transfer' | 'deposit' | 'tempo'
 
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
+const INCIDENT_LABEL: Record<string, string> = { tidak_ada: 'Tidak Ada', salah_muat: 'Salah Muat', retur: 'Retur', barang_lebih: 'Barang Lebih' }
 
 const STATUS_LABEL: Record<string, string> = {
   ready: 'Siap Berangkat', departed: 'Sedang Jalan', closing: 'Menuju Garasi',
@@ -103,7 +104,7 @@ export default function JalanPengirimanPage() {
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentPhotoUrl, setPaymentPhotoUrl] = useState('')
   const [paymentDueDate, setPaymentDueDate] = useState('')
-  const [incidentType, setIncidentType] = useState<'tidak_ada' | 'salah_muat' | 'retur'>('tidak_ada')
+  const [incidentType, setIncidentType] = useState<'tidak_ada' | 'salah_muat' | 'retur' | 'barang_lebih'>('tidak_ada')
   const [incidentPhotoUrl, setIncidentPhotoUrl] = useState('')
   const [incidentDescription, setIncidentDescription] = useState('')
 
@@ -801,12 +802,12 @@ export default function JalanPengirimanPage() {
                   {kirimStep === 3 && (
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Langkah 3 — Kejadian</p>
-                      <p className="text-xs text-slate-400 mb-2">Ada barang retur atau salah muat di toko ini?</p>
-                      <div className="grid grid-cols-3 gap-2 mb-3">
-                        {(['tidak_ada', 'salah_muat', 'retur'] as const).map(k => (
+                      <p className="text-xs text-slate-400 mb-2">Ada barang retur, salah muat, atau barang lebih di toko ini?</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                        {(['tidak_ada', 'salah_muat', 'retur', 'barang_lebih'] as const).map(k => (
                           <button key={k} type="button" onClick={() => setIncidentType(k)}
                             className={`py-2 rounded-lg text-xs font-medium border transition ${incidentType === k ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
-                            {k === 'tidak_ada' ? 'Tidak Ada' : k === 'salah_muat' ? 'Salah Muat' : 'Retur'}
+                            {INCIDENT_LABEL[k]}
                           </button>
                         ))}
                       </div>
@@ -978,7 +979,7 @@ export default function JalanPengirimanPage() {
                     )}
                     {ps.incident_type !== 'tidak_ada' && (
                       <p className="text-xs text-amber-600 mt-1">
-                        {ps.incident_type === 'salah_muat' ? 'Salah Muat' : 'Retur'}{ps.incident_description ? `: ${ps.incident_description}` : ''}
+                        {INCIDENT_LABEL[ps.incident_type]}{ps.incident_description ? `: ${ps.incident_description}` : ''}
                       </p>
                     )}
 
