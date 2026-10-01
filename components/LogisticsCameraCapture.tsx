@@ -177,52 +177,81 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
 
   return (
     <div className="space-y-2">
-      {error && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+      {error && step === 'idle' && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
       {step === 'idle' && (
         <button type="button" onClick={openCamera}
           className="w-full py-2.5 bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium rounded-lg transition">
           📷 {label}
         </button>
       )}
-      {step === 'camera' && (
-        <div className="space-y-2">
-          <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setCameraReady(true)}
-            className="w-full rounded-lg bg-slate-900 aspect-[4/3] object-cover" />
-          <p className="text-[11px] text-slate-400 text-center">
-            Kamera tidak muncul? <button type="button" onClick={openNativeCameraFallback} className="text-blue-600 hover:underline font-medium">Pakai Kamera Bawaan HP</button>
-          </p>
-          <div className="flex gap-2">
-            <button type="button" onClick={cancel} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-            <button type="button" onClick={takePhoto} disabled={!cameraReady}
-              className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
-              {cameraReady ? 'Ambil Foto' : 'Menyiapkan kamera...'}
-            </button>
+
+      {/* Kamera & pratinjau full-screen -- sebelumnya inline di dalam kartu (max-w-2xl + rasio
+          4:3 dipaksa), jadi area previewnya kecil & kepotong buat HP portrait, menyulitkan motret
+          barang yang banyak/tinggi susunannya. Sekarang nutup seluruh layar, video/foto mengisi
+          penuh tinggi layar, tombol aksi melayang di bawah (pola sama dgn PhotoLightbox). */}
+      {(step === 'camera' || step === 'preview') && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col">
+          <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between gap-2 px-4 pb-3 bg-gradient-to-b from-black/70 to-transparent"
+            style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
+            <p className="text-white text-sm font-semibold truncate">{label}</p>
           </div>
-        </div>
-      )}
-      {step === 'preview' && capturedUrl && (
-        <div className="space-y-2">
-          {previewFailed ? (
-            <div className="w-full rounded-lg aspect-[4/3] bg-red-50 border-2 border-red-200 flex flex-col items-center justify-center text-center px-4">
-              <span className="text-3xl mb-2">⚠️</span>
-              <p className="text-sm font-semibold text-red-700">Pratinjau gagal ditampilkan</p>
-              <p className="text-xs text-red-500 mt-1">Kalau foto sebelumnya memang jelas, boleh tetap dikirim -- kalau ragu, ambil ulang saja.</p>
-            </div>
-          ) : (
-            // key berganti tiap retry supaya <img> benar-benar dipaksa mencoba muat ulang dari
-            // awal (bukan cuma re-render React biasa yang tidak mengulang proses decode gambar).
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={previewRetry} src={capturedUrl} alt={label} className="w-full rounded-lg aspect-[4/3] object-cover" onError={handlePreviewError} />
+
+          {error && (
+            <p className="absolute left-4 right-4 z-10 text-xs text-red-100 bg-red-900/80 rounded-lg px-3 py-2"
+              style={{ top: 'max(3.25rem, calc(env(safe-area-inset-top) + 2.5rem))' }}>
+              {error}
+            </p>
           )}
-          <div className="flex gap-2">
-            <button type="button" onClick={retake} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Ambil Ulang</button>
-            <button type="button" onClick={confirmPhoto}
-              className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold">
-              Gunakan Foto Ini
-            </button>
-          </div>
+
+          {step === 'camera' && (
+            <>
+              <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setCameraReady(true)}
+                className="flex-1 w-full h-full min-h-0 object-cover bg-slate-900" />
+              <div className="absolute bottom-0 left-0 right-0 z-10 px-4 pt-10 bg-gradient-to-t from-black/80 to-transparent space-y-2"
+                style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
+                <p className="text-[11px] text-white/70 text-center">
+                  Kamera tidak muncul? <button type="button" onClick={openNativeCameraFallback} className="text-blue-300 hover:underline font-medium">Pakai Kamera Bawaan HP</button>
+                </p>
+                <div className="flex gap-2">
+                  <button type="button" onClick={cancel} className="flex-1 py-3 bg-white/10 text-white rounded-lg text-sm font-medium backdrop-blur-sm">Batal</button>
+                  <button type="button" onClick={takePhoto} disabled={!cameraReady}
+                    className="flex-1 py-3 bg-blue-600 text-white rounded-lg text-sm font-semibold disabled:opacity-50">
+                    {cameraReady ? 'Ambil Foto' : 'Menyiapkan kamera...'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {step === 'preview' && capturedUrl && (
+            <>
+              {previewFailed ? (
+                <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center text-center px-6 bg-red-950">
+                  <span className="text-4xl mb-2">⚠️</span>
+                  <p className="text-sm font-semibold text-red-200">Pratinjau gagal ditampilkan</p>
+                  <p className="text-xs text-red-300 mt-1">Kalau foto sebelumnya memang jelas, boleh tetap dikirim -- kalau ragu, ambil ulang saja.</p>
+                </div>
+              ) : (
+                // key berganti tiap retry supaya <img> benar-benar dipaksa mencoba muat ulang dari
+                // awal (bukan cuma re-render React biasa yang tidak mengulang proses decode gambar).
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={previewRetry} src={capturedUrl} alt={label} className="flex-1 w-full h-full min-h-0 object-contain bg-black" onError={handlePreviewError} />
+              )}
+              <div className="absolute bottom-0 left-0 right-0 z-10 px-4 pt-10 bg-gradient-to-t from-black/80 to-transparent"
+                style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
+                <div className="flex gap-2">
+                  <button type="button" onClick={retake} className="flex-1 py-3 bg-white/10 text-white rounded-lg text-sm font-medium backdrop-blur-sm">Ambil Ulang</button>
+                  <button type="button" onClick={confirmPhoto}
+                    className="flex-1 py-3 bg-green-600 text-white rounded-lg text-sm font-semibold">
+                    Gunakan Foto Ini
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
+
       <canvas ref={canvasRef} className="hidden" />
       <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileCaptured} />
     </div>
