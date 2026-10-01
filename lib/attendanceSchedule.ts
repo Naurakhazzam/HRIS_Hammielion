@@ -75,13 +75,28 @@ export function calcLateMinutes(checkInStr: string, sched: { check_in_time: stri
 }
 
 // Lembur cuma dihitung kalau sudah penuh 60 menit, dibulatkan ke bawah (jam penuh).
+// HARUS selalu sama persis dengan blok lembur di trigger DB calc_attendance_times() -- absen
+// pulang lewat QR/HP mengisi overtime_hours dari sini LANGSUNG lewat UPDATE attendances yang
+// tidak mengubah check_in, jadi trigger DB skip (lihat guard TG_OP='UPDATE' di awal trigger) dan
+// TIDAK ikut menghitung ulang/membatasi nilainya. Kalau rumus di sini beda dari trigger, lembur
+// dari absen QR/HP bisa lolos tanpa batas 20:00 atau batas 3 jam/hari sama sekali.
 export function calcOvertimeHours(
   checkOutStr: string | null,
   sched: { check_out_time: string | null; allow_overtime: boolean } | null
 ): number {
   if (!sched?.allow_overtime || !sched.check_out_time || !checkOutStr) return 0
-  const diffMins = timeToMinutes(checkOutStr) - timeToMinutes(sched.check_out_time)
-  return diffMins >= 60 ? Math.floor(diffMins / 60) : 0
+  const schedOutMins = timeToMinutes(sched.check_out_time)
+  const CAP_MINS = 20 * 60 // batas jam lembur dihitung maksimal sampai jam 20:00
+  // Batas 20:00 cuma berlaku untuk jadwal yang jam pulang resminya sendiri di bawah jam 20:00 --
+  // shift yang jadwal pulangnya sendiri >= 20:00 (mis. shift sore Raja Petshop/Markas Petshop,
+  // jadwal 14:00-21:00) dikecualikan, supaya shift itu tetap bisa dapat lembur.
+  const effectiveOutMins = schedOutMins < CAP_MINS
+    ? Math.min(timeToMinutes(checkOutStr), CAP_MINS)
+    : timeToMinutes(checkOutStr)
+  const diffMins = effectiveOutMins - schedOutMins
+  if (diffMins < 60) return 0
+  // Batas maksimal 3 jam lembur/hari, berlaku semua karyawan.
+  return Math.min(3, Math.floor(diffMins / 60))
 }
 
 // Jarak antar 2 titik koordinat (meter) — rumus Haversine, dipakai buat cek radius absen HP.

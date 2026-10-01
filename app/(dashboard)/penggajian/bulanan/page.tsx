@@ -430,6 +430,26 @@ export default function PenggajianBulananPage() {
       })
   }, [selectedEmpId, createModal])
 
+  // Isi otomatis Potongan Kasbon Bulan Ini saat karyawan dipilih di modal buat slip -- sebelum
+  // ini field-nya selalu mulai dari 0 dan HR harus cek+ketik manual sendiri (lihat kasbon_deductions
+  // yang sudah dijadwalkan per bulan dari pengajuan yang disetujui), gampang kelupaan padahal
+  // datanya sudah ada. Tetap bisa diedit manual kalau HR perlu sesuaikan (lihat catatan "Cek
+  // saldo kasbon karyawan sebelum mengisi").
+  useEffect(() => {
+    if (!selectedEmpId || !createModal) { setCreateKasbon(0); return }
+    supabase
+      .from('kasbon_deductions')
+      .select('amount')
+      .eq('employee_id', selectedEmpId)
+      .eq('status', 'pending')
+      .eq('deduction_month', filterMonth)
+      .eq('deduction_year', filterYear)
+      .then(({ data, error }) => {
+        if (error) { console.error('Gagal fetch kasbon:', error); return }
+        setCreateKasbon((data || []).reduce((s, d: any) => s + Number(d.amount), 0))
+      })
+  }, [selectedEmpId, createModal, filterMonth, filterYear])
+
   // ─── Fetch functions ───────────────────────────────────────────────────────
 
   async function fetchCurrentUser() {
@@ -3128,7 +3148,7 @@ export default function PenggajianBulananPage() {
                     <div className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-lg">
                       <div>
                         <p className="text-sm font-medium text-slate-700">⚠️ Potongan Kasbon Bulan Ini</p>
-                        <p className="text-xs text-slate-500">Cek saldo kasbon karyawan sebelum mengisi</p>
+                        <p className="text-xs text-slate-500">Otomatis dari cicilan kasbon yang sudah dijadwalkan bulan ini -- bisa diedit manual kalau perlu</p>
                       </div>
                       <RupiahInput value={String(createKasbon)}
                         onChange={v => setCreateKasbon(Math.max(0, parseInt(v) || 0))}
