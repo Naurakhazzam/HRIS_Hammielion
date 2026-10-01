@@ -19,12 +19,25 @@ const DAYS_AHEAD = 30
 
 // Siklus gaji perusahaan ini 26-25 (sama persis dengan konvensi period_month di tabel payrolls /
 // getPeriodLabel di Slip Gaji), BUKAN kalender bulanan biasa -- tanggal 26 sampai akhir bulan
-// sudah masuk periode yang dilabeli bulan BERIKUTNYA. Dipakai supaya kartu "Perkiraan Bulan Ini"
-// selalu merujuk periode yang sedang benar-benar berjalan (dulu pakai kalender bulanan polos,
-// jadi salah tiap tanggal 26-31/habis bulan -- data lembur/telat ikut kepotong di batas yang salah).
+// sudah masuk periode yang dilabeli bulan BERIKUTNYA.
 function getCurrentPayrollPeriod(d: Date) {
   const start = d.getDate() >= 26 ? new Date(d.getFullYear(), d.getMonth(), 26) : new Date(d.getFullYear(), d.getMonth() - 1, 26)
   const end = new Date(start.getFullYear(), start.getMonth() + 1, 25)
+  return { start, end, labelMonth: end.getMonth(), labelYear: end.getFullYear() }
+}
+
+// Periode yang DITAMPILKAN sebagai "Perkiraan" ke karyawan -- sengaja SATU PERIODE DI BELAKANG
+// periode yang sungguhan sedang berjalan (getCurrentPayrollPeriod di atas). Owner minta: periode
+// yang baru saja ditutup (mis. September, 26 Agu-25 Sep) tetap ditampilkan sepanjang periode
+// BERIKUTNYA berjalan (26 Sep-25 Okt), baru pindah ke periode berikutnya pas tanggal 26 bulan
+// itu juga -- murni aturan tanggal, TIDAK mengecek apakah periode sebelumnya sudah benar-benar
+// dibayar Finance atau belum (status bayarnya cuma ditampilkan sbg keterangan terpisah, lihat
+// fetchStatusBayarPeriode). Supaya karyawan selalu lihat perkiraan utk periode yg relevan dgn
+// gaji yang sedang mereka tunggu, bukan periode baru yang datanya masih kosong/belum lengkap.
+function getDisplayedPayrollPeriod(d: Date) {
+  const real = getCurrentPayrollPeriod(d)
+  const start = new Date(real.start.getFullYear(), real.start.getMonth() - 1, 26)
+  const end = new Date(real.start.getFullYear(), real.start.getMonth(), 25)
   return { start, end, labelMonth: end.getMonth(), labelYear: end.getFullYear() }
 }
 
@@ -60,11 +73,17 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   paid:             { label: 'Lunas',             color: 'bg-green-100 text-green-700' },
 }
 
+const EST_STATUS_LABEL: Record<'belum' | 'proses' | 'lunas', { label: string; color: string }> = {
+  belum:  { label: 'Belum Dibayarkan', color: 'bg-amber-100 text-amber-700' },
+  proses: { label: 'Sedang Diproses',  color: 'bg-blue-100 text-blue-700' },
+  lunas:  { label: 'Sudah Dibayarkan', color: 'bg-green-100 text-green-700' },
+}
+
 export default function PortalDashboardPage() {
   const supabase = createClient()
   const router = useRouter()
   const today = new Date()
-  const currentPeriod = getCurrentPayrollPeriod(today)
+  const displayedPeriod = getDisplayedPayrollPeriod(today)
 
   const [loading, setLoading] = useState(true)
   const [myEmployeeId, setMyEmployeeId] = useState('')
@@ -77,6 +96,7 @@ export default function PortalDashboardPage() {
   const [kasbonSaldo, setKasbonSaldo] = useState(0)
   const [estPotongan, setEstPotongan] = useState({ keterlambatan: 0, kasbon: 0 })
   const [estPendapatan, setEstPendapatan] = useState({ base: 0, posAllow: 0, mealAllow: 0, specAllow: 0, lembur: 0 })
+  const [estPeriodStatus, setEstPeriodStatus] = useState<'belum' | 'proses' | 'lunas'>('belum')
   const [quotaLibur, setQuotaLibur] = useState<{ submitted: number; draft: number; label: string; daysUntil: number } | null>(null)
 
   // Klarifikasi Alpha sekarang dikelola AlphaKlarifikasiPanel (components/AlphaKlarifikasiPanel.tsx)
@@ -126,6 +146,7 @@ export default function PortalDashboardPage() {
       fetchKasbonSaldo(effectiveId),
       fetchEstimasiPotongan(effectiveId),
       fetchEstimasiPendapatan(effectiveId),
+      fetchStatusBayarPeriode(effectiveId),
       fetchQuotaLibur(effectiveId),
       fetchIncompleteCheckouts(effectiveId),
       fetchLateAlerts(effectiveId),
@@ -203,7 +224,7 @@ export default function PortalDashboardPage() {
   // Slip Gaji, termasuk toleransi QR) + cicilan Kasbon yang sudah dijadwalkan Finance untuk
   // bulan ini (dari kasbon_deductions, bukan re-hitung manual).
   async function fetchEstimasiPotongan(employeeId: string) {
-    const period = getCurrentPayrollPeriod(today)
+    const period = getDisplayedPayrollPeriod(today)
     const firstDay = toDateStr(period.start)
     const lastDay = toDateStr(period.end)
     const m = period.labelMonth + 1, y = period.labelYear
@@ -219,18 +240,31 @@ export default function PortalDashboardPage() {
     setEstPotongan({ keterlambatan, kasbon })
   }
 
+  // Keterangan "Sudah/Belum Dibayarkan" buat kartu Perkiraan -- murni informasi, TIDAK dipakai
+  // sebagai syarat pindah periode (lihat getDisplayedPayrollPeriod -- itu aturan tanggal murni).
+  async function fetchStatusBayarPeriode(employeeId: string) {
+    const period = getDisplayedPayrollPeriod(today)
+    const { data } = await supabase.from('payrolls').select('status')
+      .eq('employee_id', employeeId).eq('period_month', period.labelMonth + 1).eq('period_year', period.labelYear)
+      .maybeSingle()
+    setEstPeriodStatus(!data ? 'belum' : data.status === 'paid' ? 'lunas' : 'proses')
+  }
+
   // Perkiraan pendapatan BULAN BERJALAN -- gaji pokok & tunjangan diambil dari salary_components
   // aktif (bukan dari slip gaji, karena bulan berjalan belum tentu ada slipnya), lembur diambil
   // dari overtime_claims yang sudah APPROVED periode ini (bukan pending, biar tidak terlalu
   // optimis). Bonus (KPI, dll) sengaja tidak diikutkan -- itu baru final saat Finance proses slip.
   async function fetchEstimasiPendapatan(employeeId: string) {
-    const period = getCurrentPayrollPeriod(today)
+    const period = getDisplayedPayrollPeriod(today)
     const firstDay = toDateStr(period.start)
     const lastDay = toDateStr(period.end)
 
     const [{ data: sc }, { data: claims }] = await Promise.all([
+      // effective_date dibatasi sampai AKHIR periode yg ditampilkan (bukan "hari ini") -- supaya
+      // kalau gaji karyawan ini berubah SETELAH periode itu tutup, perkiraan tetap pakai gaji
+      // yang benar-benar berlaku SAAT periode itu, bukan gaji terbarunya sekarang.
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
-        .eq('employee_id', employeeId).lte('effective_date', toDateStr(today)).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
+        .eq('employee_id', employeeId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('overtime_claims').select('overtime_hours_detected').eq('employee_id', employeeId).eq('status', 'approved').gte('date', firstDay).lte('date', lastDay),
     ])
     const rate = Number(sc?.overtime_rate_per_hour ?? 0)
@@ -491,12 +525,15 @@ export default function PortalDashboardPage() {
           )}
         </div>
 
-        {/* Perkiraan Pendapatan Bulan Berjalan -- gaji pokok & tunjangan dari salary_components
-            aktif (bukan slip gaji, karena bulan berjalan belum tentu ada slipnya), lembur dari
-            klaim yang sudah disetujui periode ini. */}
+        {/* Perkiraan Pendapatan -- utk periode yg BARU DITUTUP (lihat getDisplayedPayrollPeriod),
+            gaji pokok & tunjangan dari salary_components yg berlaku saat itu, lembur dari klaim
+            yg sudah disetujui periode itu. */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-          <h2 className="text-sm font-bold text-slate-700 mb-1">💰 Perkiraan Pendapatan Bulan Ini</h2>
-          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[currentPeriod.labelMonth]} {currentPeriod.labelYear}, berjalan</p>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-bold text-slate-700">💰 Perkiraan Pendapatan</h2>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${EST_STATUS_LABEL[estPeriodStatus].color}`}>{EST_STATUS_LABEL[estPeriodStatus].label}</span>
+          </div>
+          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[displayedPeriod.labelMonth]} {displayedPeriod.labelYear}</p>
           <p className="text-3xl font-bold text-emerald-600">{fmtRp(estTotalPendapatan)}</p>
           <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
             <div className="flex justify-between"><span>Gaji Pokok</span><span className="font-medium">{fmtRp(estPendapatan.base)}</span></div>
@@ -510,18 +547,21 @@ export default function PortalDashboardPage() {
           </p>
         </div>
 
-        {/* Perkiraan Potongan Bulan Berjalan (bukan potongan bulan lalu yang sudah final) */}
+        {/* Perkiraan Potongan -- periode yg sama dgn kartu Pendapatan di atas (BARU DITUTUP) */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-          <h2 className="text-sm font-bold text-slate-700 mb-1">📉 Perkiraan Potongan Bulan Ini</h2>
-          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[currentPeriod.labelMonth]} {currentPeriod.labelYear}, berjalan</p>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-bold text-slate-700">📉 Perkiraan Potongan</h2>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${EST_STATUS_LABEL[estPeriodStatus].color}`}>{EST_STATUS_LABEL[estPeriodStatus].label}</span>
+          </div>
+          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[displayedPeriod.labelMonth]} {displayedPeriod.labelYear}</p>
           <p className="text-3xl font-bold text-red-500">{fmtRp(estTotalPotongan)}</p>
           <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
             {estPotongan.keterlambatan > 0 && <div className="flex justify-between"><span>Keterlambatan</span><span className="text-red-500">-{fmtRp(estPotongan.keterlambatan)}</span></div>}
             {estPotongan.kasbon > 0 && <div className="flex justify-between"><span>Cicilan Kasbon</span><span className="text-red-500">-{fmtRp(estPotongan.kasbon)}</span></div>}
-            {estPotongan.keterlambatan === 0 && estPotongan.kasbon === 0 && <p className="text-slate-300 italic">Belum ada potongan tercatat bulan ini 🎉</p>}
+            {estPotongan.keterlambatan === 0 && estPotongan.kasbon === 0 && <p className="text-slate-300 italic">Belum ada potongan tercatat periode ini 🎉</p>}
           </div>
           <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100">
-            Perkiraan sementara, berjalan sepanjang periode. Belum termasuk kehilangan kasir, kehilangan barang, sakit/izin/alpha, dll -- baru dihitung final saat slip gaji diproses Finance.
+            Perkiraan sementara. Belum termasuk kehilangan kasir, kehilangan barang, sakit/izin/alpha, dll -- baru dihitung final saat slip gaji diproses Finance.
           </p>
         </div>
 
@@ -529,8 +569,11 @@ export default function PortalDashboardPage() {
             bonus apa pun (KPI/kondisional/promo) dan TIDAK memasukkan potongan kehilangan
             kasir/barang -- itu baru final di slip gaji resmi lewat Finance. */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-          <h2 className="text-sm font-bold text-slate-700 mb-1">🧮 Perkiraan Gaji Diterima</h2>
-          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[currentPeriod.labelMonth]} {currentPeriod.labelYear}, berjalan</p>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-bold text-slate-700">🧮 Perkiraan Gaji Diterima</h2>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${EST_STATUS_LABEL[estPeriodStatus].color}`}>{EST_STATUS_LABEL[estPeriodStatus].label}</span>
+          </div>
+          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[displayedPeriod.labelMonth]} {displayedPeriod.labelYear}</p>
           <p className="text-3xl font-bold text-blue-600">{fmtRp(Math.max(0, estTotalPendapatan - estTotalPotongan))}</p>
           <p className="text-xs text-slate-400 mt-0.5">Gaji utuh dikurangi potongan di atas</p>
           <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100">
