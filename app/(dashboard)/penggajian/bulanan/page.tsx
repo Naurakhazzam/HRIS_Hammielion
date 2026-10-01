@@ -724,7 +724,7 @@ export default function PenggajianBulananPage() {
       supabase.from('salary_components').select('*').eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes, source, admin_fee').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
-      supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, libur_compensation_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
       supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
     ])
@@ -813,6 +813,7 @@ export default function PenggajianBulananPage() {
     // dikecualikan total dari perhitungan ini, terlepas dari checklist/data absensi apa pun.
     const otApplicableForEmp  = (emp as any).overtime_applicable !== false
     const lateApplicableForEmp = (emp as any).late_penalty_applicable !== false
+    const liburCompApplicableForEmp = (emp as any).libur_compensation_applicable !== false
     const otHours  = (!otApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[])
       .filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && (silent ? Number(a.overtime_hours ?? 0) > 0 : validatedOtDates.has(a.date)))
       .reduce((s: number, a: any) => s + (silent ? roundOvertimeHours(Number(a.overtime_hours ?? 0)) : (validatedOtDates.get(a.date) ?? roundOvertimeHours(Number(a.overtime_hours ?? 0)))), 0)
@@ -912,8 +913,8 @@ export default function PenggajianBulananPage() {
     const quotaAfterFill  = quotaAfterLeave - fillUsedForQuota
     const freeEmptyUsed  = Math.min(emptyDays, quotaAfterFill)
     const excessEmptyDates = emptyDateList.slice(freeEmptyUsed) // sisa di luar kuota → gabung ke kelompok Alpha
-    const kurangLibur     = flatSalaryForEmp ? 0 : Math.max(kuotaLibur - leaveUsed - fillUsedForQuota - freeEmptyUsed, 0)
-    const liburKompensasi = flatSalaryForEmp ? 0 : Math.round(kurangLibur * dailyRate)
+    const kurangLibur     = (flatSalaryForEmp || !liburCompApplicableForEmp) ? 0 : Math.max(kuotaLibur - leaveUsed - fillUsedForQuota - freeEmptyUsed, 0)
+    const liburKompensasi = (flatSalaryForEmp || !liburCompApplicableForEmp) ? 0 : Math.round(kurangLibur * dailyRate)
 
     // Periode yang berakhir SEBELUM NEW_RULES_CUTOFF_DATE (26 Sep 2026) masih dihitung FLAT --
     // aturan eskalasi/denda baru cuma berlaku mulai periode itu (dikonfirmasi user, supaya
