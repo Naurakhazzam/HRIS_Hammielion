@@ -8,12 +8,14 @@ import { usePhotoLightbox } from '@/components/PhotoLightbox'
 type Loading = {
   id: string
   store_id: string
-  status: 'proses' | 'selesai'
+  status: 'proses' | 'selesai' | 'dibatalkan'
   created_at: string
   completed_at: string | null
+  cancelled_at: string | null
   logistics_stores: { name: string; address: string | null } | null
   creator: { full_name: string } | null
   completer: { full_name: string } | null
+  canceller: { full_name: string } | null
 }
 
 type LoadingItem = {
@@ -64,6 +66,7 @@ export default function LaporanMuatPage() {
   const [itemCaptionDraft, setItemCaptionDraft] = useState('')
   const [packageCaptionDraft, setPackageCaptionDraft] = useState('')
   const [finishing, setFinishing] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
 
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
@@ -75,10 +78,11 @@ export default function LaporanMuatPage() {
     const { data, error } = await supabase
       .from('logistics_central_loadings')
       .select(`
-        id, store_id, status, created_at, completed_at,
+        id, store_id, status, created_at, completed_at, cancelled_at,
         logistics_stores(name, address),
         creator:employees!logistics_central_loadings_created_by_fkey(full_name),
-        completer:employees!logistics_central_loadings_completed_by_fkey(full_name)
+        completer:employees!logistics_central_loadings_completed_by_fkey(full_name),
+        canceller:employees!logistics_central_loadings_cancelled_by_fkey(full_name)
       `)
       .order('created_at', { ascending: false })
     if (error) { showMessage('error', 'Gagal memuat laporan muat: ' + error.message); return }
@@ -232,6 +236,20 @@ export default function LaporanMuatPage() {
     await fetchLoadings()
   }
 
+  async function handleBatalkan() {
+    if (!selectedLoadingId) return
+    if (!confirm('Batalkan laporan muat ini? Laporan tidak akan terlihat lagi oleh driver, tapi riwayatnya (foto & data) tetap tersimpan.')) return
+    setCancelling(true)
+    const { error } = await supabase.from('logistics_central_loadings').update({
+      status: 'dibatalkan', cancelled_by: myEmployeeId, cancelled_at: new Date().toISOString(),
+    }).eq('id', selectedLoadingId).eq('status', 'proses')
+    setCancelling(false)
+    if (error) { showMessage('error', 'Gagal membatalkan: ' + error.message); return }
+    showMessage('success', 'Laporan muat dibatalkan.')
+    await fetchLoadings()
+    await fetchDetail(selectedLoadingId)
+  }
+
   async function handleTandaiSelesai() {
     if (!selectedLoadingId || detailPackages.length === 0) return
     if (!confirm('Tandai laporan muat ini selesai? Foto tidak bisa ditambah/dihapus lagi setelah ini.')) return
@@ -318,8 +336,10 @@ export default function LaporanMuatPage() {
                     {itemCounts[l.id] || 0} foto barang · {pkg.total} paket{pkg.total > 0 ? ` (${pkg.diambil} diambil)` : ''}
                   </p>
                 </div>
-                <span className={`shrink-0 text-xs px-2.5 py-1 rounded-full font-semibold ${l.status === 'selesai' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                  {l.status === 'selesai' ? 'Selesai' : 'Proses'}
+                <span className={`shrink-0 text-xs px-2.5 py-1 rounded-full font-semibold ${
+                  l.status === 'selesai' ? 'bg-green-100 text-green-700' : l.status === 'dibatalkan' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {l.status === 'selesai' ? 'Selesai' : l.status === 'dibatalkan' ? 'Dibatalkan' : 'Proses'}
                 </span>
               </button>
 
@@ -327,6 +347,9 @@ export default function LaporanMuatPage() {
                 <div className="border-t border-slate-100 p-5 space-y-6">
                   {l.status === 'selesai' && (
                     <p className="text-xs text-slate-400">Diselesaikan oleh {l.completer?.full_name ?? '-'} · {l.completed_at ? fmtDateTime(l.completed_at) : '-'}</p>
+                  )}
+                  {l.status === 'dibatalkan' && (
+                    <p className="text-xs text-red-500">Dibatalkan oleh {l.canceller?.full_name ?? '-'} · {l.cancelled_at ? fmtDateTime(l.cancelled_at) : '-'}</p>
                   )}
 
                   {/* Foto Laporan Muat */}
@@ -399,10 +422,16 @@ export default function LaporanMuatPage() {
                   </div>
 
                   {canEdit && l.status === 'proses' && (
-                    <button onClick={handleTandaiSelesai} disabled={detailPackages.length === 0 || finishing}
-                      className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50">
-                      {finishing ? 'Menyimpan...' : detailPackages.length === 0 ? 'Tambah minimal 1 foto packing dulu' : '✓ Tandai Selesai — Bisa Dijemput Driver'}
-                    </button>
+                    <div className="flex gap-2">
+                      <button onClick={handleBatalkan} disabled={cancelling}
+                        className="px-4 py-2.5 border border-red-200 text-red-600 hover:bg-red-50 text-sm font-medium rounded-lg transition disabled:opacity-50">
+                        {cancelling ? 'Membatalkan...' : 'Batalkan Laporan'}
+                      </button>
+                      <button onClick={handleTandaiSelesai} disabled={detailPackages.length === 0 || finishing}
+                        className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50">
+                        {finishing ? 'Menyimpan...' : detailPackages.length === 0 ? 'Tambah minimal 1 foto packing dulu' : '✓ Tandai Selesai — Bisa Dijemput Driver'}
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
