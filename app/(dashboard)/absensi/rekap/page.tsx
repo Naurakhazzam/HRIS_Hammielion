@@ -174,6 +174,12 @@ export default function RekapAbsensiPage() {
   const [overtimeRejectId, setOvertimeRejectId] = useState<string | null>(null)
   const [overtimeRejectNote, setOvertimeRejectNote] = useState('')
 
+  // Foto klaim lembur per baris absensi (apapun statusnya -- pending/disetujui/ditolak), supaya
+  // ikon foto di tabel Rekap Absensi tetap bisa dibuka lagi kapan saja, tidak cuma selama masih
+  // pending di kotak ungu di atas. Kunci by attendance_id -- kalau sebuah hari diklaim ulang
+  // (ditolak lalu "Ajukan Lagi"), ambil klaim yang paling baru.
+  const [overtimePhotoMap, setOvertimePhotoMap] = useState<Record<string, { photo_url: string; status: string }>>({})
+
   // Klarifikasi Telat >30 menit yang menunggu review -- disetujui berarti potongan telat hari
   // itu dihapuskan (kompensasi). Lihat lib/lateClarification.ts + migrasi late_clarifications.
   type LateClarificationRow = {
@@ -395,6 +401,28 @@ export default function RekapAbsensiPage() {
     if (error) showMsg('error','Gagal memuat: '+error.message)
     else setAttendances((data as unknown as Attendance[])||[])
     setDayOffRows((dayOffRes.data as unknown as DayOffRow[]) || [])
+
+    // Foto klaim lembur (apapun status reviewnya) untuk baris-baris yang baru dimuat -- biar
+    // ikon foto di tabel bisa dibuka lagi meski klaimnya sudah lama di-ACC/ditolak, bukan cuma
+    // selama masih pending di kotak ungu. RLS overtime_claims cuma izinkan hr/owner baca, jadi
+    // untuk role lain (mis. finance) query ini diam-diam balik kosong -- ikonnya cuma tidak
+    // muncul, bukan error.
+    const attIds = ((data as any[]) || []).map(a => a.id)
+    if (attIds.length > 0) {
+      const { data: claimRows } = await supabase.from('overtime_claims')
+        .select('attendance_id, photo_url, status, created_at')
+        .in('attendance_id', attIds)
+        .order('created_at', { ascending: true })
+      if (mySeq !== fetchSeq.current) return
+      const photoMap: Record<string, { photo_url: string; status: string }> = {}
+      // Urut ascending lalu ditimpa terus -- baris terakhir yang menang otomatis jadi klaim
+      // paling baru (penting untuk kasus "Ajukan Lagi" setelah ditolak).
+      ;(claimRows || []).forEach((c: any) => { photoMap[c.attendance_id] = { photo_url: c.photo_url, status: c.status } })
+      setOvertimePhotoMap(photoMap)
+    } else {
+      setOvertimePhotoMap({})
+    }
+
     setLoading(false)
   }
 
@@ -509,6 +537,21 @@ export default function RekapAbsensiPage() {
     return detected
   }
   function fmtTime(t: string|null|undefined): string { return t?t.substring(0,5):'—' }
+  // Ikon foto klaim lembur di samping jam lembur -- warnanya beda per status klaim supaya HR
+  // langsung tahu tanpa buka foto dulu: hijau = sudah disetujui, kuning = masih pending, merah =
+  // ditolak (foto tetap bisa dibuka untuk arsip/pengecekan ulang).
+  function OvertimePhotoIcon({ attendanceId }: { attendanceId: string }) {
+    const claim = overtimePhotoMap[attendanceId]
+    if (!claim) return null
+    const colorClass = claim.status === 'approved' ? 'text-emerald-500 hover:text-emerald-700'
+      : claim.status === 'rejected' ? 'text-red-400 hover:text-red-600'
+      : 'text-amber-500 hover:text-amber-700'
+    const statusLabel = claim.status === 'approved' ? 'disetujui' : claim.status === 'rejected' ? 'ditolak' : 'menunggu review'
+    return (
+      <button type="button" onClick={() => openLightbox(claim.photo_url, 'Foto kertas lembur')}
+        className={`ml-1 ${colorClass}`} title={`Lihat foto kertas lembur (${statusLabel})`}>📎</button>
+    )
+  }
   function timeToMinutes(t: string): number {
     const [h, m] = t.substring(0, 5).split(':').map(Number)
     return h * 60 + m
@@ -1159,6 +1202,7 @@ export default function RekapAbsensiPage() {
                         </td>
                         <td className="px-4 py-3 text-center">
                           {att.overtime_hours > 0 ? <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-xs font-semibold">{att.overtime_hours} jam</span> : <span className="text-slate-300 text-xs">-</span>}
+                          <OvertimePhotoIcon attendanceId={att.id} />
                         </td>
                         <td className="px-4 py-3 text-center">
                           {(() => { const s = getStatusDisplay(att); return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${s.color}`}>{s.label}</span> })()}
@@ -1253,6 +1297,7 @@ export default function RekapAbsensiPage() {
                         </td>
                         <td className="px-4 py-3 text-center">
                           {att.overtime_hours > 0 ? <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-xs font-semibold">{att.overtime_hours} jam</span> : <span className="text-slate-300 text-xs">-</span>}
+                          <OvertimePhotoIcon attendanceId={att.id} />
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLOR[att.status]??'bg-purple-100 text-purple-800'}`}>{STATUS_LABEL[att.status]??att.status}</span>
