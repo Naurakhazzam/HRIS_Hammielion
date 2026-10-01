@@ -114,6 +114,13 @@ export default function JalanPengirimanPage() {
   // Edit nominal/metode bayar toko yang SUDAH terkirim — untuk perbaiki salah ketik tanpa
   // perlu ulang seluruh alur foto. Cuma boleh selama trip belum "Selesai Kirim" (completed).
   const [editHistoryStore, setEditHistoryStore] = useState<PlanStore | null>(null)
+  // Tambah foto susulan ke toko yang SUDAH Terkirim -- driver kadang baru sadar ada foto yang
+  // kelupaan padahal masih di lokasi toko itu. Beda dari editHistoryStore (cuma ganti data
+  // pembayaran) -- ini nambah ke delivery_photo_urls, tidak menghapus/mengganti yang lama. RLS
+  // sudah mengizinkan driver/kenek update baris tokonya sendiri terlepas dari status, jadi ini
+  // murni nambah pintu di tampilan, bukan perubahan izin.
+  const [addPhotoStore, setAddPhotoStore] = useState<PlanStore | null>(null)
+  const [addPhotoSaving, setAddPhotoSaving] = useState(false)
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>('')
   const [editPaymentAmount, setEditPaymentAmount] = useState('')
   const [editPaymentDueDate, setEditPaymentDueDate] = useState('')
@@ -295,6 +302,34 @@ export default function JalanPengirimanPage() {
     if (error) { showMessage('error', 'Gagal unggah foto: ' + error.message); return null }
     const { data } = supabase.storage.from('logistics-photos').getPublicUrl(path)
     return data.publicUrl
+  }
+
+  // Sama seperti uploadPhoto di atas, tapi untuk toko yang sudah Terkirim (bukan selectedStore
+  // yang lagi diproses) -- dipakai oleh form "+ Foto" di Riwayat Toko.
+  async function uploadHistoryPhoto(storeId: string, blob: Blob): Promise<string | null> {
+    if (!selectedPlan) return null
+    const path = `${selectedPlan.id}/${storeId}-tambahan-${Date.now()}.jpg`
+    const { error } = await supabase.storage.from('logistics-photos').upload(path, blob, { contentType: 'image/jpeg' })
+    if (error) { showMessage('error', 'Gagal unggah foto: ' + error.message); return null }
+    const { data } = supabase.storage.from('logistics-photos').getPublicUrl(path)
+    return data.publicUrl
+  }
+
+  function openAddHistoryPhoto(ps: PlanStore) {
+    setAddPhotoStore(ps)
+  }
+
+  async function handleAddHistoryPhoto(blob: Blob) {
+    if (!addPhotoStore) return
+    const url = await uploadHistoryPhoto(addPhotoStore.id, blob)
+    if (!url) return
+    const updated = [...(addPhotoStore.delivery_photo_urls || []), url]
+    setAddPhotoSaving(true)
+    const { error } = await supabase.from('logistics_plan_stores').update({ delivery_photo_urls: updated }).eq('id', addPhotoStore.id)
+    setAddPhotoSaving(false)
+    if (error) { showMessage('error', 'Foto sudah diunggah tapi gagal disimpan: ' + error.message); return }
+    setAddPhotoStore({ ...addPhotoStore, delivery_photo_urls: updated })
+    setPlanStores(prev => prev.map(p => p.id === addPhotoStore.id ? { ...p, delivery_photo_urls: updated } : p))
   }
 
   // Foto tingkat-rencana (box kosong, amper bensin) — bukan per-toko.
@@ -961,7 +996,10 @@ export default function JalanPengirimanPage() {
                           {ps.status === 'delivered' ? 'Terkirim' : 'Gagal'}
                         </span>
                         {ps.status === 'delivered' && (
-                          <button onClick={() => openEditHistory(ps)} className="text-xs text-blue-600 hover:underline font-medium">Edit</button>
+                          <>
+                            <button onClick={() => openAddHistoryPhoto(ps)} className="text-xs text-blue-600 hover:underline font-medium">+ Foto</button>
+                            <button onClick={() => openEditHistory(ps)} className="text-xs text-blue-600 hover:underline font-medium">Edit</button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -1013,6 +1051,35 @@ export default function JalanPengirimanPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {addPhotoStore && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="font-semibold text-slate-800 mb-1">Tambah Foto</h3>
+            <p className="text-xs text-slate-500 mb-4">{addPhotoStore.logistics_stores?.name} — foto lama tidak dihapus, ini cuma nambah.</p>
+            {addPhotoStore.delivery_photo_urls && addPhotoStore.delivery_photo_urls.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {addPhotoStore.delivery_photo_urls.map((url, idx) => (
+                  <button key={idx} type="button" onClick={() => openLightbox(url, `Bukti kirim ${idx + 1}`)}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt={`Bukti kirim ${idx + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* key berganti tiap foto baru masuk -- memaksa komponen kamera remount & balik ke
+                keadaan awal (idle), supaya bisa langsung motret foto berikutnya lagi kalau perlu,
+                bukan mentok di layar pratinjau foto yang baru saja diambil. */}
+            <LogisticsCameraCapture key={addPhotoStore.delivery_photo_urls?.length ?? 0}
+              label="Foto Tambahan" employeeName={myName} onCaptured={handleAddHistoryPhoto} />
+            {addPhotoSaving && <p className="text-xs text-slate-400 mt-2">Menyimpan...</p>}
+            <button type="button" onClick={() => setAddPhotoStore(null)}
+              className="w-full mt-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">
+              Selesai
+            </button>
+          </div>
         </div>
       )}
 
