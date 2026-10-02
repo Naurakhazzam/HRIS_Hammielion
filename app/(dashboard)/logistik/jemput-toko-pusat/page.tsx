@@ -45,7 +45,6 @@ export default function JemputTokoPusatPage() {
 
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMessage(null), 6000)
   }
 

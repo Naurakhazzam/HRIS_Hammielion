@@ -100,7 +100,6 @@ export default function UsersPage() {
 
   function showMsg(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMessage(null), 5000)
   }
 

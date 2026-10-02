@@ -639,7 +639,6 @@ export default function PenggajianBulananPage() {
 
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
     // Pesan error (apalagi yang berisi detail teknis, mis. error database) TIDAK auto-hilang —
     // biar sempat dibaca/di-copy. Cuma pesan sukses yang auto-dismiss.
     if (type === 'success') setTimeout(() => setMessage(null), 6000)

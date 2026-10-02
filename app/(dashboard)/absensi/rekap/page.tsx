@@ -427,7 +427,7 @@ export default function RekapAbsensiPage() {
   }
 
   function showMsg(type: 'success'|'error', text: string) {
-    setMessage({ type, text }); window.scrollTo({top:0,behavior:'smooth'}); setTimeout(()=>setMessage(null),5000)
+    setMessage({ type, text }); setTimeout(()=>setMessage(null),5000)
   }
 
   // ── Multi-select helpers ──────────────────────────────────────────────────

@@ -106,7 +106,6 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
 
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMessage(null), 5000)
   }
 
