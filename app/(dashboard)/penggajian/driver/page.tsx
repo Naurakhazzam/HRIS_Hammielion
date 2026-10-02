@@ -447,7 +447,6 @@ export default function PenggajianDriverPage() {
   // tidak lagi diketik manual yang berisiko salah cabang / dobel / lupa kurangi kasbon.
   async function confirmPayDriver() {
     if (!detailDriver || !myUserId) return
-    if (!payDriverAccountId) { showMessage('error', 'Pilih rekening/kas sumber dulu.'); return }
     if (!payDriverDate) { showMessage('error', 'Tanggal wajib diisi.'); return }
 
     const unpaidTrips = detailDriver.trips.filter(t => t.payment_status === 'unpaid')
@@ -463,7 +462,9 @@ export default function PenggajianDriverPage() {
     const totalKasbon = pendingKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
     const totalDenda = pendingFines.reduce((s, f) => s + Number(f.amount), 0)
     const netAmount = totalUpahUnpaid - totalKasbon - totalDenda
-    if (netAmount <= 0) { showMessage('error', 'Gaji bersih harus lebih besar dari Rp0. Cek potongan minggu ini.'); return }
+    if (netAmount < 0) { showMessage('error', 'Potongan kasbon/denda melebihi upah minggu ini. Kurangi dulu nominal potongannya.'); return }
+    // Rekening/kas sumber cuma wajib kalau memang ada uang yang dicairkan (net > Rp0).
+    if (netAmount > 0 && !payDriverAccountId) { showMessage('error', 'Pilih rekening/kas sumber dulu.'); return }
 
     const driverBranchId = drivers.find(d => d.id === detailDriver.driverId)?.branch_id
     if (!driverBranchId) { showMessage('error', 'Cabang driver ini tidak ditemukan di data karyawan. Perbaiki data karyawan dulu.'); return }
@@ -471,6 +472,19 @@ export default function PenggajianDriverPage() {
     setPayDriverSubmitting(true)
     const { error: updErr } = await supabase.from('delivery_trips').update({ payment_status: 'paid' }).in('id', unpaidTrips.map(t => t.id))
     if (updErr) { showMessage('error', 'Gagal menandai trip lunas: ' + updErr.message); setPayDriverSubmitting(false); return }
+
+    // Upah habis terpotong kasbon/denda (net Rp0) — tidak ada uang yang dicairkan, jadi tidak
+    // boleh bikin baris Kas Keluar (fin_cash_out mewajibkan amount > 0). Trip tetap ditandai
+    // lunas; potongan sengaja dibiarkan tidak terkunci ke cash_out_id karena memang tidak ada
+    // pembayaran yang dinetkan ke manapun.
+    if (netAmount === 0) {
+      showMessage('success', `Gaji driver ${detailDriver.driverName} lunas (Rp0 — seluruh upah habis terpotong kasbon/denda). Tidak ada Kas Keluar yang dicatat.`)
+      setPayDriverOpen(false)
+      await openDetailDriver(detailDriver.driverName, detailDriver.driverId)
+      fetchTrips()
+      setPayDriverSubmitting(false)
+      return
+    }
 
     const potonganNote = (totalKasbon > 0 || totalDenda > 0)
       ? ` (upah ${formatRupiah(totalUpahUnpaid)}${totalDenda > 0 ? ` - denda ${formatRupiah(totalDenda)}` : ''}${totalKasbon > 0 ? ` - kasbon ${formatRupiah(totalKasbon)}` : ''})`
@@ -515,7 +529,6 @@ export default function PenggajianDriverPage() {
   // sama seperti driver: cabang otomatis dari data karyawan, nominal otomatis net.
   async function confirmPayKenek() {
     if (!detailKenek || !myUserId) return
-    if (!payKenekAccountId) { showMessage('error', 'Pilih rekening/kas sumber dulu.'); return }
     if (!payKenekDate) { showMessage('error', 'Tanggal wajib diisi.'); return }
 
     const unpaidTrips = detailKenek.trips.filter(t => t.helper_payment_status === 'unpaid')
@@ -528,7 +541,8 @@ export default function PenggajianDriverPage() {
     const totalKasbon = pendingKasbonDeductions.reduce((s, d) => s + Number(d.deduction_amount), 0)
     const totalDenda = pendingFines.reduce((s, f) => s + Number(f.amount), 0)
     const netAmount = totalUpahUnpaid - totalKasbon - totalDenda
-    if (netAmount <= 0) { showMessage('error', 'Gaji bersih harus lebih besar dari Rp0. Cek potongan minggu ini.'); return }
+    if (netAmount < 0) { showMessage('error', 'Potongan kasbon/denda melebihi upah minggu ini. Kurangi dulu nominal potongannya.'); return }
+    if (netAmount > 0 && !payKenekAccountId) { showMessage('error', 'Pilih rekening/kas sumber dulu.'); return }
 
     const helperBranchId = helpers.find(h => h.id === detailKenek.helperId)?.branch_id
     if (!helperBranchId) { showMessage('error', 'Cabang kenek ini tidak ditemukan di data karyawan. Perbaiki data karyawan dulu.'); return }
@@ -536,6 +550,17 @@ export default function PenggajianDriverPage() {
     setPayKenekSubmitting(true)
     const { error: updErr } = await supabase.from('delivery_trips').update({ helper_payment_status: 'paid' }).in('id', unpaidTrips.map(t => t.id))
     if (updErr) { showMessage('error', 'Gagal menandai trip lunas: ' + updErr.message); setPayKenekSubmitting(false); return }
+
+    // Sama seperti driver: net Rp0 berarti upah habis terpotong, tidak ada uang dicairkan,
+    // jadi tidak boleh (dan tidak perlu) bikin baris Kas Keluar.
+    if (netAmount === 0) {
+      showMessage('success', `Gaji kenek ${detailKenek.helperName} lunas (Rp0 — seluruh upah habis terpotong kasbon/denda). Tidak ada Kas Keluar yang dicatat.`)
+      setPayKenekOpen(false)
+      await openDetailKenek(detailKenek.helperName, detailKenek.helperId, detailKenek.trips)
+      fetchTrips()
+      setPayKenekSubmitting(false)
+      return
+    }
 
     const potonganNote = (totalKasbon > 0 || totalDenda > 0)
       ? ` (upah ${formatRupiah(totalUpahUnpaid)}${totalDenda > 0 ? ` - denda ${formatRupiah(totalDenda)}` : ''}${totalKasbon > 0 ? ` - kasbon ${formatRupiah(totalKasbon)}` : ''})`
@@ -1372,8 +1397,14 @@ export default function PenggajianDriverPage() {
                 <div className="flex justify-between"><span className="text-slate-500">Upah (belum lunas)</span><span className="font-medium">{formatRupiah(totalUpahUnpaid)}</span></div>
                 {totalDenda > 0 && <div className="flex justify-between text-red-600"><span>Denda</span><span>-{formatRupiah(totalDenda)}</span></div>}
                 {totalKasbon > 0 && <div className="flex justify-between text-red-600"><span>Potongan Kasbon</span><span>-{formatRupiah(totalKasbon)}</span></div>}
-                <div className="flex justify-between font-bold text-green-700 pt-1 border-t border-slate-200"><span>Gaji Bersih (Kas Keluar)</span><span>{formatRupiah(netAmount)}</span></div>
+                <div className="flex justify-between font-bold text-green-700 pt-1 border-t border-slate-200"><span>Gaji Bersih{netAmount > 0 ? ' (Kas Keluar)' : ''}</span><span>{formatRupiah(netAmount)}</span></div>
               </div>
+
+              {netAmount === 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                  Upah habis terpotong kasbon/denda. Trip akan ditandai lunas tanpa mencatat Kas Keluar (tidak ada uang yang dicairkan).
+                </p>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Pembayaran <span className="text-red-500">*</span></label>
@@ -1381,8 +1412,8 @@ export default function PenggajianDriverPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
-                <select required value={payDriverAccountId} onChange={e => setPayDriverAccountId(e.target.value)}
+                <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber {netAmount > 0 && <span className="text-red-500">*</span>}</label>
+                <select required={netAmount > 0} value={payDriverAccountId} onChange={e => setPayDriverAccountId(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
                   <option value="">-- Pilih Rekening/Kas --</option>
                   {bankAccounts.map(a => (
@@ -1395,7 +1426,7 @@ export default function PenggajianDriverPage() {
                 <button onClick={() => setPayDriverOpen(false)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-lg transition">
                   Batal
                 </button>
-                <button onClick={confirmPayDriver} disabled={payDriverSubmitting || !payDriverAccountId || netAmount <= 0}
+                <button onClick={confirmPayDriver} disabled={payDriverSubmitting || (netAmount > 0 && !payDriverAccountId) || netAmount < 0}
                   className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                   {payDriverSubmitting ? 'Memproses...' : 'Konfirmasi Lunas'}
                 </button>
@@ -1428,8 +1459,14 @@ export default function PenggajianDriverPage() {
                 <div className="flex justify-between"><span className="text-slate-500">Upah (belum lunas)</span><span className="font-medium">{formatRupiah(totalUpahUnpaid)}</span></div>
                 {totalDenda > 0 && <div className="flex justify-between text-red-600"><span>Denda</span><span>-{formatRupiah(totalDenda)}</span></div>}
                 {totalKasbon > 0 && <div className="flex justify-between text-red-600"><span>Potongan Kasbon</span><span>-{formatRupiah(totalKasbon)}</span></div>}
-                <div className="flex justify-between font-bold text-green-700 pt-1 border-t border-slate-200"><span>Gaji Bersih (Kas Keluar)</span><span>{formatRupiah(netAmount)}</span></div>
+                <div className="flex justify-between font-bold text-green-700 pt-1 border-t border-slate-200"><span>Gaji Bersih{netAmount > 0 ? ' (Kas Keluar)' : ''}</span><span>{formatRupiah(netAmount)}</span></div>
               </div>
+
+              {netAmount === 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                  Upah habis terpotong kasbon/denda. Trip akan ditandai lunas tanpa mencatat Kas Keluar (tidak ada uang yang dicairkan).
+                </p>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Tanggal Pembayaran <span className="text-red-500">*</span></label>
@@ -1437,8 +1474,8 @@ export default function PenggajianDriverPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber <span className="text-red-500">*</span></label>
-                <select required value={payKenekAccountId} onChange={e => setPayKenekAccountId(e.target.value)}
+                <label className="block text-xs font-medium text-slate-700 mb-1">Rekening/Kas Sumber {netAmount > 0 && <span className="text-red-500">*</span>}</label>
+                <select required={netAmount > 0} value={payKenekAccountId} onChange={e => setPayKenekAccountId(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white">
                   <option value="">-- Pilih Rekening/Kas --</option>
                   {bankAccounts.map(a => (
@@ -1451,7 +1488,7 @@ export default function PenggajianDriverPage() {
                 <button onClick={() => setPayKenekOpen(false)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-lg transition">
                   Batal
                 </button>
-                <button onClick={confirmPayKenek} disabled={payKenekSubmitting || !payKenekAccountId || netAmount <= 0}
+                <button onClick={confirmPayKenek} disabled={payKenekSubmitting || (netAmount > 0 && !payKenekAccountId) || netAmount < 0}
                   className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                   {payKenekSubmitting ? 'Memproses...' : 'Konfirmasi Lunas'}
                 </button>
