@@ -9,6 +9,7 @@ import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, 
 import { chargeableLateMinutes } from '@/lib/lateTolerance'
 import { getUpcomingRosterPeriod, rosterPeriodLabel } from '@/lib/rosterPeriod'
 import { localDateStr } from '@/lib/date'
+import { calcDailyAccrual, type AccrualAttendanceDay } from '@/lib/salaryAccrualEstimate'
 import { fetchIncompleteCheckouts as fetchIncompleteCheckoutsShared, type IncompleteCheckoutItem } from '@/lib/checkoutClarification'
 import AlphaKlarifikasiPanel from '@/components/AlphaKlarifikasiPanel'
 import OvertimeKlaimPanel from '@/components/OvertimeKlaimPanel'
@@ -84,6 +85,7 @@ export default function PortalDashboardPage() {
   const router = useRouter()
   const today = new Date()
   const displayedPeriod = getDisplayedPayrollPeriod(today)
+  const currentPeriod = getCurrentPayrollPeriod(today)
 
   const [loading, setLoading] = useState(true)
   const [myEmployeeId, setMyEmployeeId] = useState('')
@@ -97,6 +99,14 @@ export default function PortalDashboardPage() {
   const [estPotongan, setEstPotongan] = useState({ keterlambatan: 0, kasbon: 0 })
   const [estPendapatan, setEstPendapatan] = useState({ base: 0, posAllow: 0, mealAllow: 0, specAllow: 0, lembur: 0 })
   const [estPeriodStatus, setEstPeriodStatus] = useState<'belum' | 'proses' | 'lunas'>('belum')
+  // Perkiraan pendapatan PERIODE BERJALAN (live, 26 bulan ini s/d sekarang) -- beda dari
+  // estPendapatan di atas yang selalu menampilkan periode yg BARU DITUTUP (lihat
+  // getDisplayedPayrollPeriod). Saldo mulai dari Rp0 tiap tanggal 26, bertambah per hari yg
+  // sudah "lewat pergantian hari" (lihat lib/salaryAccrualEstimate.ts).
+  const [estPendapatanBerjalan, setEstPendapatanBerjalan] = useState({
+    accruedGross: 0, accruedDeduction: 0, accruedNet: 0,
+    daysCounted: 0, daysElapsed: 0, alphaDays: 0, lembur: 0, flatSalary: false,
+  })
   const [quotaLibur, setQuotaLibur] = useState<{ submitted: number; draft: number; label: string; daysUntil: number } | null>(null)
 
   // Klarifikasi Alpha sekarang dikelola AlphaKlarifikasiPanel (components/AlphaKlarifikasiPanel.tsx)
@@ -124,14 +134,14 @@ export default function PortalDashboardPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
-    const { data: userData } = await supabase.from('users').select('role, employee_id, employees(full_name, join_date)').eq('id', user.id).single()
+    const { data: userData } = await supabase.from('users').select('role, employee_id, employees(full_name, join_date, flat_salary)').eq('id', user.id).single()
     if (!userData) { setLoading(false); return }
 
     // Preview Tampilan Karyawan: sama seperti halaman Portal Saya lain, tampilkan data contoh
     // nyata (bukan akun admin sendiri) supaya Owner/HR bisa cek tampilan karyawan biasa.
     const previewing = ['owner', 'hr', 'finance'].includes(userData.role) && isPreviewModeClient()
     const emp = previewing
-      ? (await supabase.from('employees').select('full_name, join_date').eq('id', PREVIEW_EMPLOYEE_ID).single()).data
+      ? (await supabase.from('employees').select('full_name, join_date, flat_salary').eq('id', PREVIEW_EMPLOYEE_ID).single()).data
       : (userData as any).employees
     const effectiveId = previewing ? PREVIEW_EMPLOYEE_ID : userData.employee_id
     if (!effectiveId) { setLoading(false); return }
@@ -146,6 +156,7 @@ export default function PortalDashboardPage() {
       fetchKasbonSaldo(effectiveId),
       fetchEstimasiPotongan(effectiveId),
       fetchEstimasiPendapatan(effectiveId),
+      fetchEstimasiPendapatanBerjalan(effectiveId, emp?.join_date ?? null, emp?.flat_salary === true),
       fetchStatusBayarPeriode(effectiveId),
       fetchQuotaLibur(effectiveId),
       fetchIncompleteCheckouts(effectiveId),
@@ -276,6 +287,51 @@ export default function PortalDashboardPage() {
       specAllow: Number(sc?.special_allowance ?? 0),
       lembur: jamLembur * rate,
     })
+  }
+
+  // Perkiraan pendapatan PERIODE BERJALAN -- saldo mulai Rp0 tiap tanggal 26, bertambah per hari
+  // yg SUDAH LEWAT (cutoffDate = kemarin, bukan hari ini -- "pergantian hari" baru menghitung
+  // hari sebelumnya). Sengaja TIDAK meniru kuota libur 4 hari/periode punya slip resmi (itu baru
+  // valid dihitung di akhir periode) -- jadi angka di sini perkiraan kasar, bisa sedikit lebih
+  // pesimis dari slip asli Finance kalau ada izin/sakit di awal periode. Karyawan flat_salary
+  // (gaji tetap apa adanya, tanpa potongan/absen) tidak diikutkan akumulasi, cukup tampil penuh.
+  async function fetchEstimasiPendapatanBerjalan(employeeId: string, joinDate: string | null, flatSalary: boolean) {
+    const period = getCurrentPayrollPeriod(today)
+    const firstDay = localDateStr(period.start)
+    const lastDay = localDateStr(period.end)
+    const yesterdayDate = new Date(today)
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1)
+    const yesterday = localDateStr(yesterdayDate)
+    const cutoffDate = yesterday > lastDay ? lastDay : yesterday
+
+    const [{ data: sc }, { data: atts }, { data: roster }, { data: claims }] = await Promise.all([
+      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
+        .eq('employee_id', employeeId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
+      cutoffDate < firstDay ? Promise.resolve({ data: [] }) :
+        supabase.from('attendances').select('date, status, admin_fee').eq('employee_id', employeeId).gte('date', firstDay).lte('date', cutoffDate),
+      cutoffDate < firstDay ? Promise.resolve({ data: [] }) :
+        supabase.from('employee_roster').select('date').eq('employee_id', employeeId).eq('is_day_off', true).gte('date', firstDay).lte('date', cutoffDate),
+      supabase.from('overtime_claims').select('overtime_hours_detected').eq('employee_id', employeeId).eq('status', 'approved').gte('date', firstDay).lte('date', lastDay),
+    ])
+
+    const base = Number(sc?.base_salary ?? 0)
+    const pos = Number(sc?.position_allowance ?? 0)
+    const meal = Number(sc?.meal_allowance ?? 0)
+    const special = Number(sc?.special_allowance ?? 0)
+    const otRate = Number(sc?.overtime_rate_per_hour ?? 0)
+    const jamLembur = (claims || []).reduce((s: number, c: any) => s + Number(c.overtime_hours_detected), 0)
+    const lembur = jamLembur * otRate
+
+    if (flatSalary) {
+      const full = base + pos + meal + special
+      setEstPendapatanBerjalan({ accruedGross: full, accruedDeduction: 0, accruedNet: full, daysCounted: 0, daysElapsed: 0, alphaDays: 0, lembur, flatSalary: true })
+      return
+    }
+
+    const dailyRate = Math.round((base + pos + meal + special) / 26)
+    const rosterOffDates = new Set((roster || []).map((r: any) => r.date as string))
+    const result = calcDailyAccrual(dailyRate, firstDay, cutoffDate, joinDate, (atts || []) as AccrualAttendanceDay[], rosterOffDates)
+    setEstPendapatanBerjalan({ ...result, lembur, flatSalary: false })
   }
 
   // Jatah libur 4 tanggal untuk periode roster BERIKUTNYA -- selalu diperingatkan sampai
@@ -578,6 +634,39 @@ export default function PortalDashboardPage() {
           <p className="text-xs text-slate-400 mt-0.5">Gaji utuh dikurangi potongan di atas</p>
           <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100">
             Perkiraan sementara, belum termasuk bonus apa pun (KPI, kondisional, promo, dll) dan belum termasuk kehilangan kasir/barang. Angka final baru muncul saat slip gaji diproses Finance.
+          </p>
+        </div>
+
+        {/* Perkiraan Pendapatan Periode Berjalan -- beda dari kartu "Perkiraan Pendapatan" di atas
+            (yg selalu periode SEBELUMNYA yg baru ditutup, lihat getDisplayedPayrollPeriod). Ini
+            periode yg SEDANG berjalan sekarang (26 bulan ini s/d 25 bulan depan): saldo mulai
+            Rp0 tiap tanggal 26, bertambah tiap hari yg sudah lewat pergantian hari. Dua kartu ini
+            TIDAK tumpang tindih datanya -- selalu beda periode, cuma bergeser bareng tiap tgl 26. */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <h2 className="text-sm font-bold text-slate-700 mb-1">📈 Perkiraan Pendapatan Periode Berjalan</h2>
+          <p className="text-xs text-slate-400 mb-2">Periode {MONTHS[currentPeriod.labelMonth]} {currentPeriod.labelYear} (berjalan)</p>
+          <p className="text-3xl font-bold text-emerald-600">
+            {fmtRp(Math.max(0, estPendapatanBerjalan.accruedNet) + estPendapatanBerjalan.lembur)}
+          </p>
+          {estPendapatanBerjalan.flatSalary ? (
+            <p className="text-xs text-slate-400 mt-0.5">Gaji tetap (flat), tidak dipengaruhi absensi.</p>
+          ) : (
+            <>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {estPendapatanBerjalan.daysElapsed === 0
+                  ? 'Periode baru saja dimulai, akan bertambah mulai besok.'
+                  : `Terhitung ${estPendapatanBerjalan.daysCounted} dari ${estPendapatanBerjalan.daysElapsed} hari berjalan`}
+              </p>
+              <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
+                <div className="flex justify-between"><span>Akumulasi Gaji Pokok + Tunjangan</span><span className="font-medium">{fmtRp(estPendapatanBerjalan.accruedGross)}</span></div>
+                {estPendapatanBerjalan.accruedDeduction > 0 && <div className="flex justify-between text-red-500"><span>Potongan Izin/Sakit/Alpha (akumulasi)</span><span>-{fmtRp(estPendapatanBerjalan.accruedDeduction)}</span></div>}
+                {estPendapatanBerjalan.lembur > 0 && <div className="flex justify-between text-emerald-600"><span>Upah Lembur (disetujui)</span><span>+{fmtRp(estPendapatanBerjalan.lembur)}</span></div>}
+                {estPendapatanBerjalan.alphaDays > 0 && <p className="text-amber-600 italic pt-1">{estPendapatanBerjalan.alphaDays} hari tanpa keterangan (alpha) belum ditambahkan ke saldo.</p>}
+              </div>
+            </>
+          )}
+          <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100">
+            Perkiraan kasar yg tumbuh harian, belum termasuk jatah libur 4 hari/periode & bonus apa pun -- bisa sedikit beda dari slip resmi. Angka final baru muncul saat slip gaji diproses Finance.
           </p>
         </div>
 
