@@ -4,6 +4,7 @@ import { useState, useEffect, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import RupiahInput from '@/components/RupiahInput'
+import { localDateStr } from '@/lib/date'
 
 type Employee = { id: string; full_name: string; branch_id: string | null }
 type DriverEmployee = { id: string; full_name: string; branch_id: string | null }
@@ -125,7 +126,7 @@ export default function PenggajianDriverPage() {
     helper_id: '',
     vehicle_id: '',
     route_id: '',
-    trip_date: new Date().toISOString().split('T')[0]
+    trip_date: localDateStr(new Date())
   })
 
   useEffect(() => {
@@ -141,8 +142,8 @@ export default function PenggajianDriverPage() {
       friday.setDate(currentFriday.getDate() - (i * 7))
       const thursday = new Date(friday)
       thursday.setDate(friday.getDate() + 6)
-      const startStr = friday.toISOString().split('T')[0]
-      const endStr = thursday.toISOString().split('T')[0]
+      const startStr = localDateStr(friday)
+      const endStr = localDateStr(thursday)
       const startUI = friday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
       const endUI = thursday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
       weeks.push({
@@ -254,7 +255,7 @@ export default function PenggajianDriverPage() {
     const diff = -((day - 5 + 7) % 7)
     const friday = new Date(d)
     friday.setDate(d.getDate() + diff)
-    return friday.toISOString().split('T')[0]
+    return localDateStr(friday)
   }
 
   async function handleSubmit(e: React.FormEvent) {

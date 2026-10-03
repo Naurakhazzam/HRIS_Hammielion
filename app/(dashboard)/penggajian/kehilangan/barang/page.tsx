@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
+import { localDateStr } from '@/lib/date'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Branch = { id: string; name: string }
@@ -30,7 +31,7 @@ export default function KehilanganBarangPage() {
 
   // Setup: % Kantor
   const [configs, setConfigs] = useState<BranchLossConfig[]>([])
-  const [kantorForm, setKantorForm] = useState({ percent: '', notes: '', effective_date: today.toISOString().split('T')[0] })
+  const [kantorForm, setKantorForm] = useState({ percent: '', notes: '', effective_date: localDateStr(today) })
   const [kantorSubmitting, setKantorSubmitting] = useState(false)
   const [showKantorHistory, setShowKantorHistory] = useState(false)
 
@@ -130,7 +131,7 @@ export default function KehilanganBarangPage() {
     setKantorSubmitting(true)
     const { error } = await supabase.from('branch_loss_configs').insert({ branch_id: selectedBranch, company_coverage_percent: pct, effective_date: kantorForm.effective_date, notes: kantorForm.notes || null })
     if (error) showMsg('error', 'Gagal: ' + error.message)
-    else { showMsg('success', 'Konfigurasi % kantor berhasil disimpan.'); setKantorForm({ percent: '', notes: '', effective_date: today.toISOString().split('T')[0] }); fetchBranchData() }
+    else { showMsg('success', 'Konfigurasi % kantor berhasil disimpan.'); setKantorForm({ percent: '', notes: '', effective_date: localDateStr(today) }); fetchBranchData() }
     setKantorSubmitting(false)
   }
 
@@ -138,7 +139,7 @@ export default function KehilanganBarangPage() {
   async function handleSaveShares(e: React.FormEvent) {
     e.preventDefault()
     setShareSubmitting(true)
-    const todayStr = today.toISOString().split('T')[0]
+    const todayStr = localDateStr(today)
     const inserts: any[] = []
     const empIdsToDeactivate: string[] = []
     let newTotal = 0

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr } from '@/lib/date'
 
 type Employee = {
   id: string
@@ -216,7 +217,7 @@ export default function RankingPage() {
     setCairSubmitting(true)
 
     const top3 = rankings.slice(0, 3)
-    const today = new Date().toISOString().split('T')[0]
+    const today = localDateStr(new Date())
 
     // Update cycle jadi paid
     const { error: cycleErr } = await supabase.from('discipline_cycles').update({

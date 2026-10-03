@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import { useRouter } from 'next/navigation'
+import { localDateStr } from '@/lib/date'
 import Link from 'next/link'
 
 import { use } from 'react'
@@ -35,7 +36,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
     meal_allowance: '0',
     special_allowance: '0',
     overtime_rate_per_hour: '0',
-    effective_date: new Date().toISOString().split('T')[0]
+    effective_date: localDateStr(new Date())
   })
 
   useEffect(() => {
@@ -84,7 +85,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
           meal_allowance: latest.meal_allowance.toString(),
           special_allowance: (latest.special_allowance ?? 0).toString(),
           overtime_rate_per_hour: latest.overtime_rate_per_hour.toString(),
-          effective_date: new Date().toISOString().split('T')[0] // default ke hari ini
+          effective_date: localDateStr(new Date()) // default ke hari ini
         })
       } else {
         // Belum ada riwayat sama sekali (karyawan baru) — bantu isi dari Gaji Standar supaya

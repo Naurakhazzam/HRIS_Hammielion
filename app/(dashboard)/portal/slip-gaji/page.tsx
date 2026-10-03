@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
+import { localDateStr } from '@/lib/date'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 type Payroll = {
@@ -95,8 +96,8 @@ export default function PortalSlipGajiPage() {
     setLateDetails([])
     const start = new Date(p.period_year, p.period_month - 2, 26)
     const end   = new Date(p.period_year, p.period_month - 1, 25)
-    const firstDay = start.toISOString().split('T')[0]
-    const lastDay  = end.toISOString().split('T')[0]
+    const firstDay = localDateStr(start)
+    const lastDay  = localDateStr(end)
 
     // Tarif keterlambatan sekarang universal (Gaji Standar), bukan per-karyawan lagi.
     const { data: lateDef } = await supabase

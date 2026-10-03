@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import { localDateStr } from '@/lib/date'
 
 type FreelanceWorker = { id: string; full_name: string }
 type EmployeeOption = { id: string; full_name: string; department: string | null }
@@ -61,7 +62,7 @@ export default function RekapBoronganPage() {
   const supabase = createClient()
 
   const [formData, setFormData] = useState({
-    entry_date: new Date().toISOString().split('T')[0],
+    entry_date: localDateStr(new Date()),
     total_kg: '',
     description: ''
   })
@@ -99,8 +100,8 @@ export default function RekapBoronganPage() {
       const thursday = new Date(friday)
       thursday.setDate(friday.getDate() + 6)
 
-      const startStr = friday.toISOString().split('T')[0]
-      const endStr = thursday.toISOString().split('T')[0]
+      const startStr = localDateStr(friday)
+      const endStr = localDateStr(thursday)
 
       const startUI = friday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
       const endUI = thursday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })

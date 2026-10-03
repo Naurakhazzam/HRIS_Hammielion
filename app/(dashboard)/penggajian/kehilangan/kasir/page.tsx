@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
+import { localDateStr } from '@/lib/date'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Branch = { id: string; name: string }
@@ -36,7 +37,7 @@ export default function KerugianKasirPage() {
 
   // Input entries periode ini
   const [entries, setEntries] = useState<CashierLossEntry[]>([])
-  const [entryForm, setEntryForm] = useState({ date: today.toISOString().split('T')[0], amount: '', notes: '', employee_id: '' })
+  const [entryForm, setEntryForm] = useState({ date: localDateStr(today), amount: '', notes: '', employee_id: '' })
   const [entrySaving, setEntrySaving] = useState(false)
   const [editEntry, setEditEntry] = useState<CashierLossEntry | null>(null)
   const [editForm, setEditForm] = useState({ date: '', amount: '', notes: '', employee_id: '' })
@@ -120,7 +121,7 @@ export default function KerugianKasirPage() {
       employee_id: entryForm.employee_id || null
     })
     if (error) showMsg('error', 'Gagal: ' + error.message)
-    else { showMsg('success', 'Entry minus kas berhasil ditambahkan.'); setEntryForm({ date: today.toISOString().split('T')[0], amount: '', notes: '', employee_id: '' }); fetchEntries(); fetchHistoryEntries() }
+    else { showMsg('success', 'Entry minus kas berhasil ditambahkan.'); setEntryForm({ date: localDateStr(today), amount: '', notes: '', employee_id: '' }); fetchEntries(); fetchHistoryEntries() }
     setEntrySaving(false)
   }
 

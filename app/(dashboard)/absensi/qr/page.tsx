@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import QRCode from 'qrcode'
 import { triggerDailyPhotoCleanup } from '@/lib/photoCleanup'
+import { localDateStr } from '@/lib/date'
 
 type BranchQr = { id: string; name: string; token: string | null; dataUrl: string | null }
 
@@ -67,7 +68,7 @@ export default function AbsenQrAdminPage() {
   async function fetchCleanupCount() {
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 60)
-    const cutoffStr = cutoff.toISOString().split('T')[0]
+    const cutoffStr = localDateStr(cutoff)
     const { count } = await supabase.from('attendances')
       .select('id', { count: 'exact', head: true })
       .lt('date', cutoffStr)

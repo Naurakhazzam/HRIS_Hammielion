@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr } from '@/lib/date'
 
 // Pemicu deteksi "tidak ada absen sama sekali" -> otomatis ditandai Alpha (menunggu klarifikasi
 // karyawan). Sama seperti triggerDailyPhotoCleanup: bukan cron sungguhan, cuma jalan maksimal 1x
@@ -8,7 +9,7 @@ const LAST_RUN_KEY = 'lastAlphaDetectionRun'
 export async function triggerDailyAlphaDetection() {
   try {
     const last = localStorage.getItem(LAST_RUN_KEY)
-    const today = new Date().toISOString().split('T')[0]
+    const today = localDateStr(new Date())
     if (last === today) return
     localStorage.setItem(LAST_RUN_KEY, today)
     const supabase = createClient()
@@ -45,7 +46,7 @@ const NO_DEADLINE_PERIOD_END = '2026-09-25'
 function addDaysStr(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00')
   d.setDate(d.getDate() + days)
-  return d.toISOString().split('T')[0]
+  return localDateStr(d)
 }
 
 // Dipakai bareng oleh Portal Saya (tampilkan daftar lengkap) dan AbsenSekarang (cuma perlu tahu
@@ -66,7 +67,7 @@ export async function fetchAlphaAlerts(supabase: ReturnType<typeof createClient>
   const latestByAtt = new Map<string, any>()
   ;(clars || []).forEach((c: any) => { if (!latestByAtt.has(c.attendance_id)) latestByAtt.set(c.attendance_id, c) })
 
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = localDateStr(new Date())
   return (flagged as any[]).map(f => {
     const deadline = addDaysStr(f.date, 2)
     const noDeadline = f.date >= NO_DEADLINE_PERIOD_START && f.date <= NO_DEADLINE_PERIOD_END

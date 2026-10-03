@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr } from '@/lib/date'
 
 type RateConfig = {
   id: string
@@ -22,7 +23,7 @@ export default function SetupTarifBoronganPage() {
 
   const [formData, setFormData] = useState({
     rate_per_kg: '',
-    effective_date: new Date().toISOString().split('T')[0]
+    effective_date: localDateStr(new Date())
   })
 
   useEffect(() => {

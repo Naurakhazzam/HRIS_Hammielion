@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { triggerDailyPhotoCleanup } from '@/lib/photoCleanup'
 import { triggerDailyAlphaDetection } from '@/lib/alphaDetection'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
+import { localDateStr } from '@/lib/date'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 
@@ -130,7 +131,7 @@ export default function RekapAbsensiPage() {
   const [bulkJamMasuk, setBulkJamMasuk]   = useState('')
   const [bulkJamPulang, setBulkJamPulang] = useState('')
   const [bulkCatatan, setBulkCatatan]     = useState('')
-  const [formData, setFormData] = useState({ employee_id:'', date:new Date().toISOString().split('T')[0], check_in:'', check_out:'', status:'present', notes:'' })
+  const [formData, setFormData] = useState({ employee_id:'', date:localDateStr(new Date()), check_in:'', check_out:'', status:'present', notes:'' })
 
   // Peringatan "lupa absen pulang" — sebelumnya tidak ada cara HR tahu ini kecuali cek manual
   // satu-satu. Cuma tampilkan hari-hari SEBELUM hari ini (bukan hari ini, karena karyawan
@@ -228,14 +229,14 @@ export default function RekapAbsensiPage() {
   }
 
   async function fetchIncompleteCheckouts() {
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = localDateStr(new Date())
     const from = new Date(); from.setDate(from.getDate() - 14)
     const { data } = await supabase.from('attendances')
       .select('id,date,check_in,employee_id,employees(full_name)')
       .not('check_in', 'is', null)
       .is('check_out', null)
       .lt('date', todayStr)
-      .gte('date', from.toISOString().split('T')[0])
+      .gte('date', localDateStr(from))
       .order('date', { ascending: false })
       .limit(30)
     setIncompleteCheckouts((data as unknown as IncompleteRow[]) || [])
@@ -576,7 +577,7 @@ export default function RekapAbsensiPage() {
     const co = formData.check_out ? new Date(formData.date+'T'+formData.check_out+':00+07:00').toISOString() : null
     const { error } = await supabase.from('attendances').insert([{ employee_id:formData.employee_id, date:formData.date, check_in:ci, check_out:co, late_minutes:0, overtime_hours:0, status:formData.status, notes:formData.notes||null, source:'manual' }])
     if (error) showMsg('error', error.code==='23505'?'Data tanggal ini sudah ada.':'Gagal: '+error.message)
-    else { showMsg('success','Absensi disimpan.'); setShowForm(false); setFormData({employee_id:'',date:new Date().toISOString().split('T')[0],check_in:'',check_out:'',status:'present',notes:''}); fetchAttendances() }
+    else { showMsg('success','Absensi disimpan.'); setShowForm(false); setFormData({employee_id:'',date:localDateStr(new Date()),check_in:'',check_out:'',status:'present',notes:''}); fetchAttendances() }
     setSubmitting(false)
   }
 
@@ -789,7 +790,7 @@ export default function RekapAbsensiPage() {
         <div className="flex gap-2">
           <button onClick={refreshAllClarificationPanels} title="Panel klarifikasi (Alpha/Lupa Absen/Lembur/Telat) cuma dimuat sekali saat halaman dibuka -- pencet ini untuk cek klarifikasi baru tanpa reload seluruh halaman."
             className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg text-sm font-medium transition shadow-sm">🔄 Refresh Klarifikasi</button>
-          <button onClick={()=>{setAbsenModal(true);setAbsenForm({employee_id:filterEmployee||'',date:new Date().toISOString().split('T')[0],status:'absent',notes:''})}} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">Keterangan Tidak Hadir</button>
+          <button onClick={()=>{setAbsenModal(true);setAbsenForm({employee_id:filterEmployee||'',date:localDateStr(new Date()),status:'absent',notes:''})}} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">Keterangan Tidak Hadir</button>
           <button onClick={()=>setShowForm(!showForm)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">{showForm?'Batal':'+ Input Hadir Manual'}</button>
         </div>
       </div>

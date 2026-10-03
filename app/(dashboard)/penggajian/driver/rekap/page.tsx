@@ -60,8 +60,8 @@ export default function RekapPerjalananPage() {
       friday.setDate(currentFriday.getDate() - (i * 7))
       const thursday = new Date(friday)
       thursday.setDate(friday.getDate() + 6)
-      const startStr = friday.toISOString().split('T')[0]
-      const endStr = thursday.toISOString().split('T')[0]
+      const startStr = localDateStr(friday)
+      const endStr = localDateStr(thursday)
       const startUI = friday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
       const endUI = thursday.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
       weeks.push({ value: `${startStr}|${endStr}`, label: i === 0 ? `Periode Ini (${startUI} - ${endUI})` : `${startUI} - ${endUI}` })

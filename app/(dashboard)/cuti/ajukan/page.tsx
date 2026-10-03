@@ -41,8 +41,8 @@ export default function AjukanCutiPage() {
   const [formData, setFormData] = useState({
     employee_id: '',
     leave_type: 'annual',
-    start_date: new Date().toISOString().split('T')[0],
-    end_date: new Date().toISOString().split('T')[0],
+    start_date: toDateStr(new Date()),
+    end_date: toDateStr(new Date()),
     reason: ''
   })
 
@@ -62,7 +62,7 @@ export default function AjukanCutiPage() {
   // Izin "pilihan" (annual/permission) minimal H-2 dari HARI INI (bukan tanggal mulai vs hari
   // ini saja, tapi memang selalu dibandingkan ke hari ini karena baru dicek saat form diisi).
   // Sakit & duka dikecualikan — sifatnya memang mendadak, tidak bisa direncanakan.
-  const minNoticeDate = (() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().split('T')[0] })()
+  const minNoticeDate = (() => { const d = new Date(); d.setDate(d.getDate() + 2); return toDateStr(d) })()
   const isLateNotice = (formData.leave_type === 'annual' || formData.leave_type === 'permission') && formData.start_date < minNoticeDate
 
   useEffect(() => {

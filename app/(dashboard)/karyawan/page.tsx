@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
+import { localDateStr } from '@/lib/date'
 
 type Branch = { id: string; name: string }
 type Department = { id: string; name: string }
@@ -55,7 +56,7 @@ type Employee = {
 const emptyForm = {
   full_name: '', employee_code: '', nik: '', phone: '',
   branch_id: '', department_id: '', position_id: '',
-  employee_type: 'permanent', can_drive: false, can_help: false, join_date: new Date().toISOString().split('T')[0],
+  employee_type: 'permanent', can_drive: false, can_help: false, join_date: localDateStr(new Date()),
   kpi_bonus_max: '0',
   birth_date: '', birth_place: '', gender: '', address: '',
   religion: '', marital_status: '', dependants: '0',
@@ -143,7 +144,7 @@ export default function KaryawanPage() {
     setFormData({
       ...emptyForm,
       employee_code: code,
-      join_date: new Date().toISOString().split('T')[0],
+      join_date: localDateStr(new Date()),
       full_name: applicant.full_name || '',
       phone: applicant.phone || '',
       birth_date: applicant.birth_date || '',
@@ -580,7 +581,7 @@ export default function KaryawanPage() {
           onClick={async () => {
             if (!showForm) {
               const code = await generateEmployeeCode()
-              setFormData({ ...emptyForm, employee_code: code, join_date: new Date().toISOString().split('T')[0] })
+              setFormData({ ...emptyForm, employee_code: code, join_date: localDateStr(new Date()) })
             }
             setShowForm(!showForm)
           }}

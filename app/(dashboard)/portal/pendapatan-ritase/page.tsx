@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { localDateStr } from '@/lib/date'
 
 type Trip = {
   id: string
@@ -34,10 +35,10 @@ const fmtDate = (s: string) => new Date(s).toLocaleDateString('id-ID', { day: '2
 
 function firstDayOfMonth() {
   const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]
+  return localDateStr(new Date(d.getFullYear(), d.getMonth(), 1))
 }
 function todayStr() {
-  return new Date().toISOString().split('T')[0]
+  return localDateStr(new Date())
 }
 
 export default function PendapatanRitasePage() {
@@ -112,7 +113,7 @@ export default function PendapatanRitasePage() {
     const diff = -((day - 5 + 7) % 7)
     const friday = new Date(d)
     friday.setDate(d.getDate() + diff)
-    applyPreset(friday.toISOString().split('T')[0], todayStr())
+    applyPreset(localDateStr(friday), todayStr())
   }
 
   const totalPendapatan = rows.reduce((acc, r) => acc + r.earning, 0)
