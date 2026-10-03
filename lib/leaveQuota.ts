@@ -1,3 +1,5 @@
+import { localDateStr } from './date'
+
 // Aturan Cuti Tahunan: sama rata untuk semua karyawan, dihitung dari tahun masa kerja
 // (ulang tahun `join_date`), BUKAN tahun kalender Januari-Desember.
 export const ANNUAL_LEAVE_QUOTA_DAYS = 12
@@ -30,6 +32,10 @@ export function getCurrentLeaveYear(joinDate: string | Date, today: Date = new D
   return { start, end }
 }
 
+// Jangan pakai d.toISOString().split('T')[0] di sini — itu mengonversi ke UTC dulu,
+// yang menggeser tanggal mundur 1 hari untuk WIB/WITA/WIT saat dini hari (00:00-06:59
+// WIB). Lihat lib/date.ts untuk detail. toDateStr dipakai di banyak halaman (dashboard,
+// cuti/ajukan, absensi/shift, portal/jadwal) jadi harus konsisten dengan localDateStr.
 export function toDateStr(d: Date): string {
-  return d.toISOString().split('T')[0]
+  return localDateStr(d)
 }
