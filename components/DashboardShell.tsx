@@ -105,7 +105,10 @@ export default function DashboardShell({ children, userEmail }: { children: Reac
       </nav>
 
       {/* Konten Utama dengan Sidebar */}
-      <div className="flex flex-1 overflow-hidden relative print:block print:h-auto print:overflow-visible">
+      {/* overflow-hidden dilepas: sidebar sticky butuh halaman (window) sebagai scroll
+          context-nya, bukan div flex ini — overflow-hidden di sini bikin sidebar
+          ter-scroll keluar bareng isi halaman karena div-nya cuma clip, bukan scroll sendiri. */}
+      <div className="flex flex-1 relative print:block print:h-auto print:overflow-visible">
         {forceOpen === true && (
           <div
             className="fixed inset-0 top-16 bg-slate-900/40 z-20 md:hidden"

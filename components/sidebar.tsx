@@ -443,11 +443,15 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     setOpenMenus(prev => ({ ...prev, [name]: !prev[name] }))
   }
 
+  // Sticky di layar besar: nempel di bawah navbar (top-16 = tinggi navbar 4rem) dan
+  // punya scroll sendiri (overflow-y-auto + tinggi dibatasi), supaya menu tetap kelihatan
+  // saat konten halaman di kanan di-scroll turun — sebelumnya cuma min-h jadi sidebar
+  // ikut ter-scroll keluar bareng isi halaman.
   const asideClass = forceOpen === false
     ? 'hidden'
     : forceOpen === true
-      ? 'block fixed left-0 top-16 bottom-0 z-40 w-64 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 md:static md:z-0 md:h-auto md:min-h-[calc(100vh-4rem)]'
-      : 'hidden md:block w-64 bg-white border-r border-slate-200 flex-shrink-0 min-h-[calc(100vh-4rem)]'
+      ? 'block fixed left-0 top-16 bottom-0 z-40 w-64 bg-white border-r border-slate-200 overflow-y-auto flex-shrink-0 md:sticky md:left-auto md:bottom-auto md:z-0 md:h-[calc(100vh-4rem)]'
+      : 'hidden md:block md:sticky md:top-16 w-64 bg-white border-r border-slate-200 flex-shrink-0 md:h-[calc(100vh-4rem)] md:overflow-y-auto'
 
   return (
     <aside className={asideClass}>
