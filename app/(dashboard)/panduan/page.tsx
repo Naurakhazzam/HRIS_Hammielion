@@ -257,8 +257,8 @@ export default function PanduanKaryawanPage() {
               <table className="w-full text-sm border-collapse">
                 <thead><tr className="bg-slate-50 text-slate-700"><th className="px-3 py-1.5 text-left">Jenis</th><th className="px-3 py-1.5 text-left">Kapan boleh mendadak?</th><th className="px-3 py-1.5 text-left">Syarat</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
-                  <tr><td className="px-3 py-1.5">Cuti Tahunan</td><td className="px-3 py-1.5 text-red-500">Tidak — wajib H-2</td><td className="px-3 py-1.5">Masa kerja ≥1 tahun, jatah 12 hari/tahun (dihitung dari tanggal masuk kerja Anda)</td></tr>
-                  <tr><td className="px-3 py-1.5">Izin Periksa/Keperluan</td><td className="px-3 py-1.5 text-red-500">Tidak — wajib H-2</td><td className="px-3 py-1.5">—</td></tr>
+                  <tr><td className="px-3 py-1.5">Cuti Tahunan</td><td className="px-3 py-1.5 text-red-500">Tidak — wajib H-7</td><td className="px-3 py-1.5">Masa kerja ≥1 tahun, jatah 10 hari/tahun (dihitung dari tanggal masuk kerja Anda)</td></tr>
+                  <tr><td className="px-3 py-1.5">Izin Periksa/Keperluan</td><td className="px-3 py-1.5 text-red-500">Tidak — wajib H-7</td><td className="px-3 py-1.5">—</td></tr>
                   <tr><td className="px-3 py-1.5">Sakit (tanpa surat)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Maks. 1 hari — lebih dari itu wajib surat dokter</td></tr>
                   <tr><td className="px-3 py-1.5">Sakit (dengan surat dokter)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Wajib lampirkan foto/scan surat dokter</td></tr>
                   <tr><td className="px-3 py-1.5">Izin Duka Keluarga</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">—</td></tr>
@@ -266,8 +266,9 @@ export default function PanduanKaryawanPage() {
               </table>
             </div>
             <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3">
-              <p className="font-bold text-red-800">⚠️ Penting: H-2 itu wajib, bukan sekadar saran</p>
-              <p className="text-red-700 mt-0.5">Cuti Tahunan atau Izin Periksa/Keperluan yang diajukan <strong>kurang dari 2 hari sebelum tanggal mulai</strong> tetap dihitung <strong>Alpha</strong> walaupun nanti disetujui HR/Owner. Kalau memang mendadak, ajukan sebagai Sakit atau Izin Duka Keluarga (tidak kena aturan H-2).</p>
+              <p className="font-bold text-red-800">⚠️ Penting: H-7 itu wajib, bukan sekadar saran</p>
+              <p className="text-red-700 mt-0.5">Cuti Tahunan atau Izin Periksa/Keperluan yang diajukan <strong>kurang dari 7 hari sebelum tanggal mulai</strong> tetap dihitung <strong>Alpha</strong> walaupun nanti disetujui HR/Owner. Kalau memang mendadak, ajukan sebagai Sakit atau Izin Duka Keluarga (tidak kena aturan H-7).</p>
+              <p className="text-red-700 mt-0.5">Khusus Cuti Tahunan: kalau diajukan mendadak (kurang dari H-7) dan tetap disetujui HR/Owner sebagai pengecualian, jatah yang dipotong <strong>2 hari</strong> untuk 1 hari cuti yang diambil — bukan 1 hari seperti pengajuan normal.</p>
             </div>
             <ul className="list-disc pl-5 space-y-1">
               <li>Semua pengajuan menunggu <strong>persetujuan HR/Owner</strong> dulu sebelum resmi tercatat.</li>
