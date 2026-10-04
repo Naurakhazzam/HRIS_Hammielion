@@ -41,6 +41,7 @@ const PORTAL_SAYA_SUBMENU_BASE: NavNode[] = [
   { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
   { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
   { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
+  { name: 'KPI Saya', href: '/portal/kpi-saya' },
 ]
 
 function buildPortalSayaSubmenu(isDriverOrKenek: boolean): NavNode[] {

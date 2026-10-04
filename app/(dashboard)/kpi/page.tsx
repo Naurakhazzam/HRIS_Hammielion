@@ -23,15 +23,15 @@ function formatRupiah(n: number) {
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 }
 
-// Rata-rata berbobot, hanya kriteria yang punya data (achievement_pct != null) yang dihitung --
-// bobotnya dinormalisasi ke total bobot yang PUNYA data, supaya kriteria manual yang belum
-// diisi HR tidak menjatuhkan skor sebelum sempat dinilai. Sama persis logika save_kpi_evaluation
-// di database, dihitung ulang di sini untuk pratinjau langsung (real-time) sebelum disimpan.
+// Rata-rata berbobot dari SEMUA kriteria aktif yang berlaku -- yang belum ada datanya
+// (achievement_pct null) dianggap 0, TETAP ikut jadi pembagi (tidak di-skip). Sama persis
+// logika save_kpi_evaluation di database, dihitung ulang di sini untuk pratinjau langsung
+// (real-time) sebelum disimpan.
 function blendPct(rows: BreakdownRow[]): number {
-  const usable = rows.filter(r => r.achievement_pct !== null && r.weight_percent > 0)
+  const usable = rows.filter(r => r.weight_percent > 0)
   const weightUsed = usable.reduce((s, r) => s + r.weight_percent, 0)
   if (weightUsed <= 0) return 0
-  const weighted = usable.reduce((s, r) => s + r.weight_percent * (r.achievement_pct as number), 0)
+  const weighted = usable.reduce((s, r) => s + r.weight_percent * (r.achievement_pct ?? 0), 0)
   return Math.max(0, Math.min(100, weighted / weightUsed))
 }
 
@@ -380,7 +380,7 @@ export default function KPIPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center text-xs text-slate-400">{r.achievement_pct === null ? 'diabaikan dari total' : ''}</td>
+                        <td className="px-4 py-3 text-center text-xs text-slate-400">{r.achievement_pct === null ? 'dihitung 0% di total' : ''}</td>
                       </tr>
                     ))}
                   </tbody>
