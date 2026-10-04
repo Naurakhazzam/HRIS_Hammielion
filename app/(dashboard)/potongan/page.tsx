@@ -103,6 +103,12 @@ function RateCard({ label, base, pos, meal, special, dailyRate, overtimeRate, ov
   )
 }
 
+// Pengali tiap hari dalam 1 blok, dirangkai jadi 1 teks ringkas -- tingkatannya bisa beda-beda per
+// hari karena naik per hari & berlanjut lintas kejadian (bukan cuma 1 pengali per blok).
+function fmtMultiplierSeq(days: { multiplier: number }[]): string {
+  return days.length === 1 ? `${days[0].multiplier}×` : days.map(d => `${d.multiplier}×`).join('→')
+}
+
 function EscalatingStatus({ title, result, colorClass }: { title: string; result: EscalatingResult; colorClass: string }) {
   if (result.blocks.length === 0) return <p className="text-sm text-slate-400">{title}: belum ada kejadian periode ini.</p>
   return (
@@ -111,7 +117,7 @@ function EscalatingStatus({ title, result, colorClass }: { title: string; result
       <div className="space-y-0.5 pl-3">
         {result.blocks.map((b, i) => (
           <p key={i} className="text-xs text-slate-500">
-            └ Ke-{b.occurrence} ({fmtDateShort(b.dates[0])}{b.dates.length > 1 ? `–${fmtDateShort(b.dates[b.dates.length - 1])}` : ''}, {b.dates.length} hari) × {b.multiplier}× = {fmtRp(b.subtotal)}
+            └ Ke-{b.occurrence} ({fmtDateShort(b.dates[0])}{b.dates.length > 1 ? `–${fmtDateShort(b.dates[b.dates.length - 1])}` : ''}, {b.dates.length} hari) × {fmtMultiplierSeq(b.days)} = {fmtRp(b.subtotal)}
           </p>
         ))}
       </div>

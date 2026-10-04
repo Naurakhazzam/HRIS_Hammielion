@@ -7,6 +7,12 @@
 // 2 pengajuan terpisah yang kebetulan tanggalnya bersambung, disederhanakan jadi 1 kejadian. Reset
 // tiap periode (26-25) karena hitungannya memang cuma dari tanggal-tanggal dalam 1 periode yang
 // dikirim ke fungsi ini.
+//
+// Tingkatan pengali NAIK PER HARI (bukan cuma per kejadian/blok) dan BERLANJUT antar kejadian dalam
+// periode yang sama -- tidak reset ke tingkat 1 tiap kejadian baru. Jadi 1 kejadian 2 hari
+// berturut sudah memakai tingkat 1 & 2, lalu kejadian berikutnya lanjut dari tingkat 3, dst.
+// (dikonfirmasi user lewat AskUserQuestion, Oktober 2026). Diimplementasikan dengan 1 "kursor hari"
+// yang jalan terus menerus lintas semua kejadian/blok dalam tanggal yang dikirim ke fungsi ini.
 export const IZIN_GROUP_MULTIPLIERS = [1, 1.25, 1.5, 1.75, 2]
 export const ALPHA_GROUP_MULTIPLIERS = [1.5, 2, 2.25, 2.5, 2.75, 3]
 
@@ -33,7 +39,10 @@ export const TRAINING_FLAT_MULTIPLIER = [1]
 // berakhir SEBELUM tanggal ini dianggap "periode lama".
 export const NEW_RULES_CUTOFF_DATE = '2026-09-26'
 
-export type EscalatingBlock = { dates: string[]; occurrence: number; multiplier: number; subtotal: number }
+export type EscalatingDay = { date: string; tier: number; multiplier: number; amount: number }
+// `multiplier` tetap pengali hari PERTAMA di blok ini (dipertahankan demi kompatibilitas tampilan
+// lama) -- lihat `days` untuk pengali per-hari yang sesungguhnya dipakai menghitung `subtotal`.
+export type EscalatingBlock = { dates: string[]; occurrence: number; multiplier: number; subtotal: number; days: EscalatingDay[] }
 export type EscalatingResult = { total: number; blocks: EscalatingBlock[] }
 
 function addDaysStr(dateStr: string, days: number): string {
@@ -55,12 +64,23 @@ export function groupContiguousDates(dates: string[]): string[][] {
   return blocks
 }
 
-/** Hitung potongan eskalasi per-kejadian (blok tanggal bersambung) dengan tabel pengali yang mentok di nilai terakhir. */
+/**
+ * Hitung potongan eskalasi per-hari (tabel pengali yang mentok di nilai terakhir), dikelompokkan
+ * jadi blok-blok kejadian (tanggal bersambung) untuk tampilan -- tingkatannya jalan terus lintas
+ * blok, tidak reset tiap kejadian baru.
+ */
 export function calcEscalatingDeduction(dates: string[], dailyRate: number, multipliers: number[]): EscalatingResult {
   const blocks = groupContiguousDates(dates)
+  let dayCursor = 0
   const result: EscalatingBlock[] = blocks.map((block, i) => {
-    const multiplier = multipliers[Math.min(i, multipliers.length - 1)]
-    return { dates: block, occurrence: i + 1, multiplier, subtotal: Math.round(block.length * dailyRate * multiplier) }
+    const days: EscalatingDay[] = block.map(date => {
+      const tier = dayCursor
+      const multiplier = multipliers[Math.min(tier, multipliers.length - 1)]
+      dayCursor += 1
+      return { date, tier: tier + 1, multiplier, amount: Math.round(dailyRate * multiplier) }
+    })
+    const subtotal = days.reduce((s, d) => s + d.amount, 0)
+    return { dates: block, occurrence: i + 1, multiplier: days[0].multiplier, subtotal, days }
   })
   return { total: result.reduce((s, b) => s + b.subtotal, 0), blocks: result }
 }

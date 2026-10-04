@@ -61,7 +61,11 @@ export default function AjukanCutiPage() {
   }
 
   const totalDays = calcTotalDays(formData.start_date, formData.end_date)
-  const isSickWarning = formData.leave_type === 'sick' && totalDays > 1
+  // Sakit tanpa surat maks. 2 hari berturut -- hari ke-3 wajib surat dokter (kalau tidak
+  // dilampirkan, nanti otomatis dianggap Alpha oleh trigger database begitu diapprove, lihat
+  // enforce_sick_doc_requirement). Dicek di sini juga supaya karyawan tidak perlu menunggu ditolak
+  // sistem baru tahu wajib surat.
+  const isSickWarning = formData.leave_type === 'sick' && totalDays > 2
 
   // Izin "pilihan" (annual/permission) minimal H-2 dari HARI INI (bukan tanggal mulai vs hari
   // ini saja, tapi memang selalu dibandingkan ke hari ini karena baru dicek saat form diisi).
@@ -217,7 +221,7 @@ export default function AjukanCutiPage() {
     // Auto-correct sick to sick_doc if > 1 day
     if (isSickWarning) {
       if (!documentFile) {
-        showMessage('error', 'Sakit lebih dari 1 hari WAJIB menyertakan Surat Dokter.')
+        showMessage('error', 'Sakit lebih dari 2 hari WAJIB menyertakan Surat Dokter.')
         setSubmitting(false)
         return
       }
@@ -437,8 +441,8 @@ export default function AjukanCutiPage() {
             <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm flex gap-2 items-start border border-red-100">
               <span>⚠️</span>
               <p>
-                <strong>Perhatian:</strong> Sakit lebih dari 1 hari berturut-turut 
-                otomatis akan diubah menjadi jenis <strong>Sakit dengan Surat Dokter</strong>. 
+                <strong>Perhatian:</strong> Sakit lebih dari 2 hari berturut-turut
+                otomatis akan diubah menjadi jenis <strong>Sakit dengan Surat Dokter</strong>.
                 Anda <strong>WAJIB</strong> melampirkan dokumen.
               </p>
             </div>

@@ -112,6 +112,12 @@ function formatRupiah(angka: number) {
   }).format(angka)
 }
 
+// Pengali tiap hari dalam 1 blok, dirangkai jadi 1 teks ringkas -- tingkatannya bisa beda-beda per
+// hari karena sekarang naik per hari & berlanjut lintas kejadian (bukan cuma 1 pengali per blok).
+function fmtMultiplierSeq(days: { multiplier: number }[]): string {
+  return days.length === 1 ? `${days[0].multiplier}×` : days.map(d => `${d.multiplier}×`).join('→')
+}
+
 // Rincian per-kejadian untuk kelompok Izin (Duka/Periksa/Sakit-tanpa-surat) atau Alpha — dipakai
 // di modal detail slip dan panel preview slip, supaya rumusnya konsisten di kedua tempat.
 function renderEscalatingBlocks(group: EscalatingResult, colorClass: string) {
@@ -122,7 +128,7 @@ function renderEscalatingBlocks(group: EscalatingResult, colorClass: string) {
       : `${new Date(b.dates[0] + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}–${new Date(b.dates[b.dates.length - 1] + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}`
     return (
       <div key={i} className={`text-xs ${colorClass}`}>
-        └ Kejadian ke-{i + 1} ({label}, {b.dates.length} hari) × {b.multiplier}× = {formatRupiah(b.subtotal)}
+        └ Kejadian ke-{i + 1} ({label}, {b.dates.length} hari) × {fmtMultiplierSeq(b.days)} = {formatRupiah(b.subtotal)}
       </div>
     )
   })
@@ -1907,7 +1913,7 @@ export default function PenggajianBulananPage() {
     // Detail Tidak Hadir -- rincian per jenis potongan (Izin/Alpha/Izin Mendadak/Sakit+Surat/
     // Denda Lupa Absen/Denda Disiplin Libur), supaya tidak jadi satu angka buta di slip cetak.
     const fmtEscalatingBlocksHtml = (result: EscalatingResult) => result.blocks.map(b =>
-      `<div class="detail-row"><span>Kejadian ${b.occurrence} (${b.dates.map(fmtDate).join(', ')})</span><span>${b.dates.length} hari × ${b.multiplier}× = <span class="ded-detail">${fmtR(b.subtotal)}</span></span></div>`
+      `<div class="detail-row"><span>Kejadian ${b.occurrence} (${b.dates.map(fmtDate).join(', ')})</span><span>${b.dates.length} hari × ${fmtMultiplierSeq(b.days)} = <span class="ded-detail">${fmtR(b.subtotal)}</span></span></div>`
     ).join('')
     const ab = absentBreakdownDetail
     const absentDetailHtml = ab

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { triggerDailyPhotoCleanup } from '@/lib/photoCleanup'
 import { triggerDailyAlphaDetection } from '@/lib/alphaDetection'
+import { triggerDailyLongAbsenceDeactivation } from '@/lib/longAbsenceDeactivation'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
 import { localDateStr } from '@/lib/date'
 
@@ -193,7 +194,7 @@ export default function RekapAbsensiPage() {
   const [lateRejectId, setLateRejectId] = useState<string | null>(null)
   const [lateRejectNote, setLateRejectNote] = useState('')
 
-  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); fetchCheckoutClarifications(); fetchOvertimeClaims(); fetchLateClarifications(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection() }, [])
+  useEffect(() => { fetchReferenceData(); fetchMyRole(); fetchIncompleteCheckouts(); fetchAlphaClarifications(); fetchCheckoutClarifications(); fetchOvertimeClaims(); fetchLateClarifications(); triggerDailyPhotoCleanup(); triggerDailyAlphaDetection(); triggerDailyLongAbsenceDeactivation() }, [])
   useEffect(() => { fetchAttendances(); setSelectedRows(new Map()) }, [filterMonth, filterBranch, filterDept, filterEmployee])
   // Kalau karyawan yang sedang dipilih jadi tidak termasuk lagi setelah Cabang/Departemen
   // diganti, kosongkan lagi pilihannya — supaya tidak nyangkut ke karyawan di luar cakupan filter.

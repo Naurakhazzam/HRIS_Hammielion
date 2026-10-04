@@ -21,6 +21,7 @@ type Employee = {
   can_help: boolean
   join_date: string | null
   is_active: boolean
+  deactivation_reason: string | null
   kpi_bonus_max: number
   // Data Pribadi
   birth_date: string | null
@@ -325,7 +326,10 @@ export default function KaryawanPage() {
 
   async function toggleStatus(id: string, cur: boolean) {
     const nextActive = !cur
-    const { error } = await supabase.from('employees').update({ is_active: nextActive }).eq('id', id)
+    // Kalau diaktifkan kembali secara manual, hapus catatan alasan nonaktif otomatis (kalau ada)
+    // supaya tidak menampilkan alasan basi setelah HR/Owner menilai ulang dan mengaktifkan lagi.
+    const { error } = await supabase.from('employees')
+      .update({ is_active: nextActive, ...(nextActive ? { deactivation_reason: null } : {}) }).eq('id', id)
     if (error) { showMessage('error', 'Gagal: ' + error.message); return }
 
     // Ikut nonaktifkan/aktifkan akun login terkait, jika karyawan ini punya akun
@@ -683,8 +687,9 @@ export default function KaryawanPage() {
                     <td className="px-4 py-3 text-sm text-slate-600">{emp.branches?.name}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{translateType(emp.employee_type)}</td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${emp.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                        {emp.is_active ? 'Aktif' : 'Nonaktif'}
+                      <span title={emp.deactivation_reason ?? undefined}
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${emp.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {emp.is_active ? 'Aktif' : (emp.deactivation_reason ? 'Nonaktif (otomatis)' : 'Nonaktif')}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -740,6 +745,9 @@ export default function KaryawanPage() {
                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${detailEmployee.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                       {detailEmployee.is_active ? 'Aktif' : 'Nonaktif'}
                     </span>
+                    {!detailEmployee.is_active && detailEmployee.deactivation_reason && (
+                      <span className="text-xs text-red-500 italic">{detailEmployee.deactivation_reason}</span>
+                    )}
                     {detailEmployee.can_drive && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">Merangkap Driver</span>
                     )}

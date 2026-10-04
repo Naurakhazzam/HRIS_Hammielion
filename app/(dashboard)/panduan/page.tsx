@@ -263,12 +263,16 @@ export default function PanduanKaryawanPage() {
                 <tbody className="divide-y divide-slate-100">
                   <tr><td className="px-3 py-1.5">Cuti Tahunan</td><td className="px-3 py-1.5 text-red-500">Tidak — wajib H-7</td><td className="px-3 py-1.5">Masa kerja ≥1 tahun, jatah 10 hari/tahun (dihitung dari tanggal masuk kerja Anda)</td></tr>
                   <tr><td className="px-3 py-1.5">Izin Periksa/Keperluan</td><td className="px-3 py-1.5 text-red-500">Tidak — wajib H-7</td><td className="px-3 py-1.5">—</td></tr>
-                  <tr><td className="px-3 py-1.5">Sakit (tanpa surat)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Maks. 1 hari — lebih dari itu wajib surat dokter</td></tr>
+                  <tr><td className="px-3 py-1.5">Sakit (tanpa surat)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Maks. 2 hari berturut — hari ke-3 <strong>wajib</strong> surat dokter, kalau tidak otomatis dianggap Alpha</td></tr>
                   <tr><td className="px-3 py-1.5">Sakit (dengan surat dokter)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Wajib lampirkan foto/scan surat dokter</td></tr>
                   <tr><td className="px-3 py-1.5">Izin Duka Keluarga</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">—</td></tr>
                   <tr><td className="px-3 py-1.5">Izin Mendadak</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga (atau tanggal mundur)</td><td className="px-3 py-1.5">Tidak dihitung Alpha, tapi kena potongan eskalasi tersendiri (1.25× naik ke 2× per kejadian dalam 1 periode) — lebih berat dari Izin biasa, lebih ringan dari Alpha</td></tr>
                 </tbody>
               </table>
+            </div>
+            <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3">
+              <p className="font-bold text-red-800">🩺 Sakit tanpa surat hari ke-3 = wajib surat dokter</p>
+              <p className="text-red-700 mt-0.5">Sakit tanpa surat cuma ditoleransi <strong>maksimal 2 hari berturut-turut</strong>. Begitu masuk <strong>hari ke-3 berturut-turut</strong> (baik diajukan sekali untuk beberapa hari, atau diajukan satu-satu per hari), sistem <strong>otomatis mewajibkan surat dokter</strong> — kalau tidak dilampirkan, hari itu (dan seterusnya selama belum ada surat) langsung dianggap <strong>Alpha</strong>, bukan Sakit biasa lagi. Begitu surat dokter disiapkan, klarifikasi lewat <strong>Portal Saya → Klarifikasi Alpha</strong>, pilih <em>Sakit (dengan surat dokter)</em>, supaya potongannya kembali ke aturan Sakit+Surat yang lebih ringan (bagian 11), bukan potongan Alpha yang berat (bagian 10).</p>
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
               <p className="font-medium text-amber-800">⚡ Kapan pakai "Izin Mendadak"?</p>
@@ -292,6 +296,15 @@ export default function PanduanKaryawanPage() {
           <h2 className="text-lg font-bold text-slate-800 mb-3">7. 🚨 Alpha &amp; Cara Klarifikasi</h2>
           <div className="space-y-3 text-sm text-slate-600">
             <p><strong>Alpha</strong> = tidak absen sama sekali di hari kerja, padahal hari itu bukan hari libur terjadwal Anda. Sistem mengecek ini <strong>otomatis setiap hari</strong> (bukan cuma kalau kebetulan ada yang buka halaman tertentu), tidak perlu dilaporkan HR. Ini adalah <strong>jalur darurat/susulan</strong> — kalau Anda sudah tahu dari awal tidak bisa masuk, seharusnya ajukan lewat <strong>Cuti &amp; Izin</strong> (bagian 6) SEBELUM terjadi, bukan menunggu dianggap Alpha dulu.</p>
+            <div className="bg-red-100 border-2 border-red-400 rounded-lg p-3">
+              <p className="font-bold text-red-900">🛑 Lebih dari 7 hari berturut-turut tidak jelas = akun Anda dinonaktifkan</p>
+              <p className="text-red-800 mt-0.5">
+                Kalau Sakit-tanpa-surat, Izin-tanpa-kejelasan, dan/atau Alpha yang belum/tidak diklarifikasi terjadi <strong>berturut-turut tanpa jeda masuk kerja selama lebih dari 7 hari (8 hari atau lebih)</strong> dalam rangkaian yang sama, sistem <strong>otomatis menonaktifkan status karyawan Anda</strong> (termasuk akun login) — HR/Owner tidak perlu menonaktifkan manual. Ini dicek otomatis setiap hari, sama seperti pengecekan Alpha di atas.
+              </p>
+              <p className="text-red-800 mt-0.5">
+                Satu-satunya cara menghindarinya: jangan biarkan rangkaian hari tidak jelas ini terus memanjang — segera klarifikasi Alpha (di bawah) atau lengkapi surat dokter begitu masuk hari ke-3 Sakit tanpa surat (lihat kotak di bagian 6). Kalau sudah terlanjur dinonaktifkan, hubungi HR/Owner langsung untuk diaktifkan kembali secara manual.
+              </p>
+            </div>
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
               <p className="font-medium text-emerald-800">📍 Ada tab khusus untuk ini!</p>
               <p className="text-emerald-700 mt-0.5">Jangan cuma andalkan pengingat yang muncul di dashboard — kalau kelewat/ter-skip, buka langsung menu <strong>Portal Saya → Klarifikasi Alpha</strong>. Semua Alpha yang masih perlu ditindaklanjuti selalu ada di sana, kapan pun Anda buka.</p>
@@ -346,18 +359,18 @@ export default function PanduanKaryawanPage() {
         <section id="potongan-izin" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
           <h2 className="text-lg font-bold text-slate-800 mb-3">9. 💸 Potongan Izin / Sakit Tanpa Surat</h2>
           <div className="space-y-3 text-sm text-slate-600">
-            <p>Izin (duka, keperluan pribadi, dll) dan Sakit <strong>tanpa</strong> surat dokter digabung jadi satu kelompok yang sama. Aturannya per <strong>"kejadian"</strong>: kalau izin 2-3 hari berturut-turut tanpa jeda masuk kerja, itu dihitung <strong>1 kejadian saja</strong> (bukan dihitung per hari). Begitu Anda masuk kerja lagi lalu izin lagi di lain waktu (dalam periode yang sama), itu jadi kejadian berikutnya — dan tarifnya naik. Setiap masuk periode baru (tanggal 26), hitungan kembali dari kejadian pertama lagi.</p>
+            <p>Izin (duka, keperluan pribadi, dll) dan Sakit <strong>tanpa</strong> surat dokter digabung jadi satu kelompok yang sama. Setiap <strong>hari</strong> izin/sakit-tanpa-surat dalam 1 periode gaji naik 1 tingkat pengali — tanggal-tanggal yang berturut-turut (tanpa jeda masuk kerja) disebut <strong>1 "kejadian"</strong>, tapi tingkatnya tetap naik <strong>per hari di dalam kejadian itu juga</strong>, bukan cuma 1 tarif flat untuk seluruh kejadian. Begitu Anda masuk kerja lagi lalu izin/sakit lagi di lain waktu (kejadian berikutnya, masih periode yang sama), tingkatnya <strong>lanjut</strong> dari hari terakhir kejadian sebelumnya — tidak kembali ke tingkat 1. Setiap masuk periode baru (tanggal 26), baru benar-benar reset ke tingkat 1 lagi.</p>
             <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3">
               <p className="font-bold text-amber-800">🔰 Kecuali karyawan Training</p>
-              <p className="text-amber-700 mt-0.5">Kalau status Anda masih <strong>Training</strong>, aturan di atas TIDAK berlaku — potongannya <strong>flat 1× gaji harian per hari</strong>, kejadian ke berapa pun, tidak pernah naik bertahap. Berlaku sama untuk Alpha di bagian 10.</p>
+              <p className="text-amber-700 mt-0.5">Kalau status Anda masih <strong>Training</strong>, aturan di atas TIDAK berlaku — potongannya <strong>flat 1× gaji harian per hari</strong>, hari/kejadian ke berapa pun, tidak pernah naik bertahap. Berlaku sama untuk Alpha di bagian 10.</p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
-              <p className="text-blue-700 mt-0.5">Ibarat kartu pelanggaran wasit sepak bola dalam satu musim pertandingan (1 periode gaji). Pelanggaran pertama masih kartu ringan. Begitu bikin pelanggaran <em>terpisah</em> lagi di hari lain, kartunya makin berat. Masuk musim baru (periode baru), papan kartu direset dari nol.</p>
+              <p className="text-blue-700 mt-0.5">Ibarat kartu pelanggaran wasit sepak bola dalam satu musim pertandingan (1 periode gaji) — tapi kartunya naik tingkat <em>setiap hari</em> pelanggaran berlangsung, tidak cuma sekali per insiden. Hari ke-2 dari pelanggaran yang sama sudah lebih berat dari hari ke-1, dan begitu bikin pelanggaran <em>terpisah</em> lagi di hari lain, tingkat kartunya terus lanjut dari posisi terakhir, tidak balik ke awal. Masuk musim baru (periode baru), papan kartu baru benar-benar direset dari nol.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
-                <thead><tr className="bg-orange-50 text-orange-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari</th></tr></thead>
+                <thead><tr className="bg-orange-50 text-orange-800"><th className="px-3 py-1.5 text-left">Hari ke- (akumulasi dalam periode, lintas kejadian)</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan hari itu</th></tr></thead>
                 <tbody className="divide-y divide-orange-100">
                   {IZIN_GROUP_MULTIPLIERS.map((m, i) => (
                     <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === IZIN_GROUP_MULTIPLIERS.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(contohGajiHarian * m))}</td></tr>
@@ -368,9 +381,9 @@ export default function PanduanKaryawanPage() {
             <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi lengkap (pakai gaji standar sistem {fmtRp(contohGajiBulanan)}/bulan → gaji harian {fmtRp(contohGajiHarian)}):</p>
             <p>Dalam satu periode: Izin 1 hari (tgl 3) — lalu masuk kerja normal — lalu Sakit tanpa surat 2 hari berturut (tgl 15-16).</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Kejadian ke-1 (tgl 3, 1 hari) × 1× = <strong>{fmtRp(contohGajiHarian)}</strong></li>
-              <li>Kejadian ke-2 (tgl 15-16, 2 hari, tetap 1 kejadian karena berturut) × 1.25× = 2 × {fmtRp(Math.round(contohGajiHarian * 1.25))} = <strong>{fmtRp(2 * Math.round(contohGajiHarian * 1.25))}</strong></li>
-              <li>Total potongan periode ini: <strong>{fmtRp(contohGajiHarian + 2 * Math.round(contohGajiHarian * 1.25))}</strong></li>
+              <li>Kejadian ke-1 (tgl 3, 1 hari) — hari ke-1 akumulasi × 1× = <strong>{fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[0]))}</strong></li>
+              <li>Kejadian ke-2 (tgl 15-16, 2 hari) — <strong>lanjut</strong> dari hari ke-2 &amp; ke-3 akumulasi (bukan balik ke tingkat 1): tgl 15 × {IZIN_GROUP_MULTIPLIERS[1]}× = {fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[1]))}, tgl 16 × {IZIN_GROUP_MULTIPLIERS[2]}× = {fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[2]))}</li>
+              <li>Total potongan periode ini: <strong>{fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[0]) + Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[1]) + Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[2]))}</strong></li>
             </ul>
             <p className="text-sm text-slate-500">Ini pakai gaji standar sistem sebagai contoh — gaji Anda sendiri kemungkinan beda. Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>
@@ -380,7 +393,7 @@ export default function PanduanKaryawanPage() {
         <section id="potongan-alpha" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
           <h2 className="text-lg font-bold text-slate-800 mb-3">10. 💸 Potongan Alpha</h2>
           <div className="space-y-3 text-sm text-slate-600">
-            <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (per kejadian, blok tanggal berturut dihitung 1 kejadian, reset tiap periode, <strong>kecuali karyawan Training</strong> yang flat 1× — lihat catatan di bagian 9) — bedanya tarifnya jauh lebih berat karena ini absen tanpa keterangan sama sekali. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama. Kalau sebenarnya Anda masuk kerja tapi cuma lupa scan, itu bukan Alpha biasa — lihat jalur "Lupa Absen" di bagian 8.</p>
+            <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (naik per hari, lanjut lintas kejadian dalam periode yang sama, reset tiap periode, <strong>kecuali karyawan Training</strong> yang flat 1× — lihat catatan di bagian 9) — bedanya tarifnya jauh lebih berat karena ini absen tanpa keterangan sama sekali. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama. Kalau sebenarnya Anda masuk kerja tapi cuma lupa scan, itu bukan Alpha biasa — lihat jalur "Lupa Absen" di bagian 8.</p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
                 <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari</th></tr></thead>
@@ -432,7 +445,8 @@ export default function PanduanKaryawanPage() {
             <li>✔️ Tahu dari awal Anda tidak bisa masuk (izin/sakit/cuti)? Ajukan lewat <strong>Cuti & Izin</strong> (bagian 6) — jangan cuma diam dan tidak absen.</li>
             <li>✔️ Selalu absen masuk & pulang — kalau benar-benar lupa, ajukan "Lupa Absen" (bagian 8, denda kecil Rp5.000–15.000) daripada dibiarkan jadi Alpha (potongan jauh lebih besar).</li>
             <li>✔️ Terlanjur tidak absen dan sudah kena Alpha? Segera klarifikasi dalam <strong>2 hari</strong> (bagian 7) — jangan didiamkan.</li>
-            <li>✔️ Simpan surat dokter kalau sakit lebih dari 1 hari — potongannya jauh lebih ringan dibanding tanpa surat.</li>
+            <li>✔️ Simpan surat dokter kalau sakit lebih dari 2 hari berturut — wajib mulai hari ke-3, dan potongannya jauh lebih ringan dibanding tanpa surat.</li>
+            <li>🛑 Jangan biarkan Sakit/Izin/Alpha tidak jelas memanjang lebih dari 7 hari berturut — akun Anda bisa <strong>otomatis dinonaktifkan</strong> (bagian 7).</li>
             <li>✔️ Manfaatkan jatah 4 hari libur tiap periode — kalau tidak dipakai penuh, sisanya tetap dibayar tunai, jadi tidak rugi.</li>
             <li>✔️ Weekend cuma boleh pilih 1 tanggal per periode — atur dari awal periode supaya kebagian tanggal yang diinginkan.</li>
             <li>✔️ Masih bingung soal gaji atau absen Anda sendiri? Klik <DiSiniLink /> untuk lihat angka asli Anda, atau tanya HR langsung.</li>
