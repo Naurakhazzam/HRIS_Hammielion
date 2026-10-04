@@ -5,6 +5,14 @@ import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { isPreviewModeClient, setPreviewMode, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
+import { fetchAlphaAlerts as fetchAlphaAlertsShared } from '@/lib/alphaDetection'
+import { fetchOvertimeClaimAlerts as fetchOvertimeClaimAlertsShared } from '@/lib/overtimeClaim'
+import { getUpcomingRosterPeriod } from '@/lib/rosterPeriod'
+import { localDateStr } from '@/lib/date'
+
+// Jatah libur per periode roster -- HARUS selalu sama persis dengan MAX_PICKS di
+// portal/ajukan-libur/page.tsx dan LEAVE_QUOTA_PER_PERIOD di AlphaKlarifikasiPanel.
+const DAYOFF_QUOTA_PER_PERIOD = 4
 
 type NavNode = {
   name: string
@@ -344,6 +352,11 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [isTokoPusat, setIsTokoPusat] = useState(false)
   const [meetingBadge, setMeetingBadge] = useState(0)
   const [dailyTaskBadge, setDailyTaskBadge] = useState(0)
+  // Angka merah di submenu Klarifikasi Alpha / Klaim Lembur / Ajukan Libur -- berapa banyak
+  // yang BELUM diajukan (atau ditolak & perlu diajukan ulang), bukan jumlah total.
+  const [alphaBadge, setAlphaBadge] = useState(0)
+  const [lemburBadge, setLemburBadge] = useState(0)
+  const [liburBadge, setLiburBadge] = useState(0)
 
   // Angka merah di menu Catatan Meeting: catatan belum dibaca + tugas yang belum dilaporkan
   // (karyawan), atau laporan yang menunggu review (Owner/HR). Dihitung di server.
@@ -390,6 +403,25 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
           const realIsAdminNow = !['employee', 'supervisor'].includes(data.role)
           const effectiveEmployeeId = (realIsAdminNow && previewOn) ? PREVIEW_EMPLOYEE_ID : data.employee_id
           if (effectiveEmployeeId) {
+            // Tiga angka badge submenu Portal Saya / Cuti & Izin -- dihitung terpisah dari
+            // query driver/kenek di bawah supaya satu query gagal/lambat tidak ikut menahan
+            // yang lain (independen, bukan chained).
+            Promise.all([
+              fetchAlphaAlertsShared(supabase, effectiveEmployeeId),
+              fetchOvertimeClaimAlertsShared(supabase, effectiveEmployeeId),
+              supabase.rpc('get_dayoff_quota_status', { p_period_start: localDateStr(getUpcomingRosterPeriod().start) }),
+            ]).then(([alphaAlerts, overtimeAlerts, quotaRes]) => {
+              setAlphaBadge(alphaAlerts.filter(a => a.actionable).length)
+              setLemburBadge(overtimeAlerts.filter(a => a.actionable).length)
+              const rows = (quotaRes.data || []) as { employee_id: string; approved_count: number; pending_count: number }[]
+              const mine = rows.find(r => r.employee_id === effectiveEmployeeId)
+              // Sama seperti app/(dashboard)/dashboard/page.tsx: kalau RPC tidak mengembalikan
+              // baris untuk karyawan ini (mis. belum punya roster periode ini), anggap sudah
+              // lengkap (bukan dianggap belum ajukan sama sekali) -- supaya tidak salah
+              // menakuti karyawan yang jatah liburnya belum relevan sama sekali.
+              const submitted = mine ? mine.approved_count + mine.pending_count : DAYOFF_QUOTA_PER_PERIOD
+              setLiburBadge(Math.max(0, DAYOFF_QUOTA_PER_PERIOD - submitted))
+            })
             supabase.from('employees').select('employee_type, can_drive, can_help, departments(name), positions(name), branches(name)').eq('id', effectiveEmployeeId).single().then(({ data: emp }) => {
               if (emp) {
                 // Driver "asli" (employee_type='driver') belum tentu punya can_drive=true —
@@ -421,6 +453,15 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
   const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
   const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isTokoPusat) : adminNavItems
+
+  // Angka merah di submenu (beda dari meetingBadge/dailyTaskBadge yang nempel di item
+  // top-level) -- dicocokkan lewat href, bukan nama, supaya tetap ketemu walau labelnya
+  // beda posisi (Klarifikasi Alpha, Klaim Lembur, Ajukan Libur, dst.).
+  const subBadgeByHref: Record<string, number> = {
+    '/portal/alpha': alphaBadge,
+    '/portal/lembur': lemburBadge,
+    '/portal/ajukan-libur': liburBadge,
+  }
 
   function togglePreview() {
     const next = !previewMode
@@ -545,17 +586,23 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                             : pathname === sub.href
 
                           if (!subIsGroup) {
+                            const subBadge = subBadgeByHref[sub.href] || 0
                             return (
                               <li key={sub.name}>
                                 <Link
                                   href={sub.href}
-                                  className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                                  className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
                                     subIsActive
                                       ? 'text-blue-700 font-medium bg-blue-50/50'
                                       : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
                                   }`}
                                 >
                                   {sub.name}
+                                  {subBadge > 0 && (
+                                    <span className="inline-flex items-center justify-center min-w-[20px] h-[20px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-bold">
+                                      {subBadge > 99 ? '99+' : subBadge}
+                                    </span>
+                                  )}
                                 </Link>
                               </li>
                             )

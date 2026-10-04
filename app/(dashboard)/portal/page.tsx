@@ -119,6 +119,9 @@ export default function PortalDashboardPage() {
   const [checkoutReason, setCheckoutReason] = useState('')
   const [checkoutError, setCheckoutError] = useState('')
   const [checkoutSubmitting, setCheckoutSubmitting] = useState(false)
+  // Daftar lengkapnya disembunyikan dulu di Dashboard (cukup 1 baris ringkasan) -- supaya tidak
+  // menumpuk banyak kartu sekaligus, baru dibuka kalau karyawan memang mau lihat/isi.
+  const [showCheckoutList, setShowCheckoutList] = useState(false)
 
   // Klarifikasi Telat >30 menit -- HR bisa beri kompensasi (potongan telat dihapuskan) kalau
   // ada kendala yang masuk akal (lihat lib/lateClarification.ts).
@@ -127,6 +130,7 @@ export default function PortalDashboardPage() {
   const [lateReason, setLateReason] = useState('')
   const [lateError, setLateError] = useState('')
   const [lateSubmitting, setLateSubmitting] = useState(false)
+  const [showLateList, setShowLateList] = useState(false)
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -451,11 +455,24 @@ export default function PortalDashboardPage() {
         <p className="text-sm text-slate-500">{today.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} — ringkasan singkat untuk Anda.</p>
       </div>
 
-      {myEmployeeId && <AlphaKlarifikasiPanel employeeId={myEmployeeId} hideWhenEmpty />}
+      {myEmployeeId && <AlphaKlarifikasiPanel employeeId={myEmployeeId} hideWhenEmpty compact />}
 
       {incompleteCheckouts.length > 0 && (
         <div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-4">
-          <p className="text-base font-bold text-amber-800">🟡 Ada {incompleteCheckouts.length} hari absen pulang belum lengkap</p>
+          {!showCheckoutList ? (
+            <button onClick={() => setShowCheckoutList(true)} className="w-full flex items-center justify-between gap-3 text-left">
+              <div>
+                <p className="text-sm font-bold text-amber-800">🟡 Ada {incompleteCheckouts.length} hari Anda lupa absen pulang</p>
+                <p className="text-xs text-amber-700 mt-0.5">Ketuk di sini untuk menjelaskan kenapa.</p>
+              </div>
+              <span className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded-lg font-semibold whitespace-nowrap shrink-0">Lihat & Jelaskan</span>
+            </button>
+          ) : (
+          <>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-base font-bold text-amber-800">🟡 Ada {incompleteCheckouts.length} hari absen pulang belum lengkap</p>
+            <button onClick={() => setShowCheckoutList(false)} className="text-xs text-amber-700 hover:text-amber-900 underline whitespace-nowrap shrink-0">Tutup</button>
+          </div>
           <p className="text-sm text-amber-700 mt-1">Sudah absen masuk, tapi belum absen pulang. Kalau memang lupa scan pulang, ajukan klarifikasi di bawah ini (kena denda administratif Rp5.000 per kejadian, maksimal 4x per periode).</p>
           <div className="mt-3 space-y-2">
             {incompleteCheckouts.map(c => {
@@ -482,14 +499,29 @@ export default function PortalDashboardPage() {
               )
             })}
           </div>
+          </>
+          )}
         </div>
       )}
 
-      {myEmployeeId && <OvertimeKlaimPanel employeeId={myEmployeeId} hideWhenEmpty />}
+      {myEmployeeId && <OvertimeKlaimPanel employeeId={myEmployeeId} hideWhenEmpty compact />}
 
       {lateAlerts.filter(a => a.actionable).length > 0 && (
         <div className="bg-orange-50 border-2 border-orange-400 rounded-xl p-4">
-          <p className="text-base font-bold text-orange-800">⏱️ Ada keterlambatan lebih dari {LATE_CLARIFICATION_THRESHOLD_MINUTES} menit yang belum dijelaskan</p>
+          {!showLateList ? (
+            <button onClick={() => setShowLateList(true)} className="w-full flex items-center justify-between gap-3 text-left">
+              <div>
+                <p className="text-sm font-bold text-orange-800">⏱️ Ada {lateAlerts.filter(a => a.actionable).length} hari Anda telat, belum dijelaskan</p>
+                <p className="text-xs text-orange-700 mt-0.5">Ketuk di sini untuk menjelaskan kenapa.</p>
+              </div>
+              <span className="text-xs px-3 py-1.5 bg-orange-600 text-white rounded-lg font-semibold whitespace-nowrap shrink-0">Lihat & Jelaskan</span>
+            </button>
+          ) : (
+          <>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-base font-bold text-orange-800">⏱️ Ada keterlambatan lebih dari {LATE_CLARIFICATION_THRESHOLD_MINUTES} menit yang belum dijelaskan</p>
+            <button onClick={() => setShowLateList(false)} className="text-xs text-orange-700 hover:text-orange-900 underline whitespace-nowrap shrink-0">Tutup</button>
+          </div>
           <p className="text-sm text-orange-700 mt-1">Jelaskan kendalanya di bawah ini — HR bisa memberi kompensasi (potongan telat dihapuskan) kalau alasannya masuk akal.</p>
           <div className="mt-3 space-y-2">
             {lateAlerts.filter(a => a.actionable).map(a => {
@@ -516,6 +548,8 @@ export default function PortalDashboardPage() {
               )
             })}
           </div>
+          </>
+          )}
         </div>
       )}
 

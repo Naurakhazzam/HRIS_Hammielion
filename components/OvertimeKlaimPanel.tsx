@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchOvertimeClaimAlerts as fetchOvertimeClaimAlertsShared, type OvertimeClaimAlertItem } from '@/lib/overtimeClaim'
@@ -8,7 +9,7 @@ import { fetchOvertimeClaimAlerts as fetchOvertimeClaimAlertsShared, type Overti
 // (portal/page.tsx) dan halaman khusus Klaim Lembur (portal/lembur/page.tsx) yang selalu bisa
 // diakses lewat menu, supaya karyawan yang skip/scroll lewat pengingat di dashboard tetap punya
 // tempat pasti untuk upload foto kertas lembur. Satu komponen, satu sumber logika.
-export default function OvertimeKlaimPanel({ employeeId, hideWhenEmpty }: { employeeId: string; hideWhenEmpty?: boolean }) {
+export default function OvertimeKlaimPanel({ employeeId, hideWhenEmpty, compact }: { employeeId: string; hideWhenEmpty?: boolean; compact?: boolean }) {
   const supabase = createClient()
   const [overtimeAlerts, setOvertimeAlerts] = useState<OvertimeClaimAlertItem[]>([])
   const [overtimeModal, setOvertimeModal] = useState<OvertimeClaimAlertItem | null>(null)
@@ -62,6 +63,21 @@ export default function OvertimeKlaimPanel({ employeeId, hideWhenEmpty }: { empl
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 text-center">
         <p className="text-sm text-slate-400">🎉 Tidak ada lembur yang perlu diklaim saat ini.</p>
       </div>
+    )
+  }
+
+  // Mode ringkas -- dipakai di Dashboard (portal/page.tsx) supaya tidak menumpuk satu kartu per
+  // hari lembur langsung di sana. Form upload lengkapnya tetap di halaman /portal/lembur, yang
+  // memakai komponen ini juga tapi tanpa prop compact.
+  if (compact) {
+    return (
+      <Link href="/portal/lembur" className="flex items-center justify-between gap-3 bg-purple-50 border-2 border-purple-400 rounded-xl p-4 hover:bg-purple-100 transition">
+        <div>
+          <p className="text-sm font-bold text-purple-800">🕗 Ada {relevant.length} lembur yang perlu diklaim</p>
+          <p className="text-xs text-purple-700 mt-0.5">Upload foto kertas lembur sebelum batas waktu, atau hangus.</p>
+        </div>
+        <span className="text-xs px-3 py-1.5 bg-purple-600 text-white rounded-lg font-semibold whitespace-nowrap shrink-0">Klaim →</span>
+      </Link>
     )
   }
 

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAlphaAlerts as fetchAlphaAlertsShared, type AlphaAlertItem } from '@/lib/alphaDetection'
@@ -17,7 +18,7 @@ const HADIR_ALLOWED_END = '2026-09-17'
 // bisa diakses lewat menu, supaya karyawan yang skip/scroll lewat pengingat di dashboard tetap
 // punya tempat pasti untuk klarifikasi. Satu komponen, satu sumber logika -- tidak ada rumus
 // dobel yang bisa diam-diam beda antara dashboard dan halaman khususnya.
-export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty }: { employeeId: string; hideWhenEmpty?: boolean }) {
+export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty, compact }: { employeeId: string; hideWhenEmpty?: boolean; compact?: boolean }) {
   const supabase = createClient()
   const [alphaAlerts, setAlphaAlerts] = useState<AlphaAlertItem[]>([])
   const [clarifyModal, setClarifyModal] = useState<AlphaAlertItem | null>(null)
@@ -99,6 +100,21 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty }: { e
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 text-center">
         <p className="text-sm text-slate-400">🎉 Tidak ada catatan Alpha yang perlu diklarifikasi saat ini.</p>
       </div>
+    )
+  }
+
+  // Mode ringkas -- dipakai di Dashboard (portal/page.tsx) supaya tidak menumpuk satu kartu per
+  // hari Alpha langsung di sana. Form klarifikasi lengkapnya tetap di halaman /portal/alpha,
+  // yang memakai komponen ini juga tapi tanpa prop compact.
+  if (compact) {
+    return (
+      <Link href="/portal/alpha" className="flex items-center justify-between gap-3 bg-red-50 border-2 border-red-400 rounded-xl p-4 hover:bg-red-100 transition">
+        <div>
+          <p className="text-sm font-bold text-red-800">🔴 Ada {alphaAlerts.length} hari Alpha yang perlu diklarifikasi</p>
+          <p className="text-xs text-red-700 mt-0.5">Klarifikasi sebelum batas waktu supaya gaji tidak salah potong.</p>
+        </div>
+        <span className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg font-semibold whitespace-nowrap shrink-0">Klarifikasi →</span>
+      </Link>
     )
   }
 
