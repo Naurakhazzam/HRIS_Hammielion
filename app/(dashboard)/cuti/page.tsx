@@ -175,7 +175,8 @@ export default function CutiIzinPage() {
       sick: 'Sakit (Tanpa Surat)',
       sick_doc: 'Sakit (Surat Dokter)',
       permission: 'Izin Periksa',
-      bereaved: 'Izin Duka'
+      bereaved: 'Izin Duka',
+      sudden_permission: 'Izin Mendadak'
     }
     return map[type] || type
   }

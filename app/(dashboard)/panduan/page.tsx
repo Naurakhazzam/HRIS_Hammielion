@@ -241,6 +241,10 @@ export default function PanduanKaryawanPage() {
               <li>Kalau hari kosong (tidak ada absen sama sekali) <strong>lebih dari 4 hari</strong>, kelebihannya bukan lagi dianggap libur — masuk hitungan Izin/Alpha (lihat bagian 9 &amp; 10).</li>
               <li>Kalau ternyata hari itu terjadwal libur tapi Anda tetap masuk kerja, sistem akan minta Anda memilih <strong>tanggal pengganti</strong> untuk libur Anda — pilih lewat kalender yang muncul saat absen masuk.</li>
             </ul>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="font-medium text-red-800">⚠️ Telat ajukan = denda disiplin Rp10.000/tanggal</p>
+              <p className="text-red-700 mt-0.5">Jatah 4 hari ini seharusnya diajukan <strong>sebelum</strong> periodenya mulai berjalan. Kalau Anda baru melengkapi/mengajukan setelah periodenya sudah berjalan, pengajuan tetap diterima — tapi kena denda disiplin <strong>Rp10.000 per tanggal</strong> (4 tanggal telat = Rp40.000), otomatis terpotong dari gaji periode itu. Sistem akan menampilkan peringatan ini sebelum Anda klik &quot;Ajukan ke HR&quot;.</p>
+            </div>
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
               <p className="font-medium text-emerald-800">✅ Hari libur otomatis tercatat sendiri</p>
               <p className="text-emerald-700 mt-0.5">Begitu HR/Owner menyetujui pengajuan libur Anda, sistem otomatis menandai tanggal itu sebagai Libur — Anda tidak perlu absen apa-apa di hari itu dan tidak akan dianggap Alpha. Beda dengan Izin/Sakit yang HARUS diajukan manual (lihat bagian 6).</p>
@@ -262,8 +266,13 @@ export default function PanduanKaryawanPage() {
                   <tr><td className="px-3 py-1.5">Sakit (tanpa surat)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Maks. 1 hari — lebih dari itu wajib surat dokter</td></tr>
                   <tr><td className="px-3 py-1.5">Sakit (dengan surat dokter)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Wajib lampirkan foto/scan surat dokter</td></tr>
                   <tr><td className="px-3 py-1.5">Izin Duka Keluarga</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">—</td></tr>
+                  <tr><td className="px-3 py-1.5">Izin Mendadak</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga (atau tanggal mundur)</td><td className="px-3 py-1.5">Tidak dihitung Alpha, tapi kena potongan eskalasi tersendiri (1.25× naik ke 2× per kejadian dalam 1 periode) — lebih berat dari Izin biasa, lebih ringan dari Alpha</td></tr>
                 </tbody>
               </table>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="font-medium text-amber-800">⚡ Kapan pakai "Izin Mendadak"?</p>
+              <p className="text-amber-700 mt-0.5">Kalau Anda tidak masuk tanpa sempat lapor dulu (bukan sakit), atau sudah ketahuan Alpha dan mau diperbaiki — pilih jenis ini, boleh untuk tanggal yang sudah lewat. Potongannya naik tiap kejadian dalam periode yang sama (1.25× → 1.5× → 1.6× → 1.7× → 1.8× → 1.9× → mentok 2× gaji harian), jadi makin sering dadakan, makin mahal.</p>
             </div>
             <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3">
               <p className="font-bold text-red-800">⚠️ Penting: H-7 itu wajib, bukan sekadar saran</p>
@@ -290,12 +299,12 @@ export default function PanduanKaryawanPage() {
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
               <p className="font-medium text-red-800">⏳ Anda punya waktu 2 hari untuk klarifikasi!</p>
               <p className="text-red-700 mt-0.5">
-                Buka <strong>Portal Saya → Klarifikasi Alpha</strong> dan klarifikasi sebenarnya kenapa: pilih <em>Sakit (tanpa surat)</em>, <em>Sakit (dengan surat dokter — wajib lampirkan foto/scan surat)</em>, <em>Izin</em>, <em>Libur</em> (lihat kotak di bawah), atau <em>Lupa Absen</em> (bagian 8). Batas waktunya <strong>2 hari</strong> dari tanggal Alpha itu terjadi.
+                Panel <strong>Portal Saya → Klarifikasi Alpha</strong> cuma bisa dipakai untuk <em>Sakit (tanpa surat)</em>, <em>Sakit (dengan surat dokter — wajib lampirkan foto/scan surat)</em>, atau <em>Lupa Absen</em> (bagian 8). Batas waktunya <strong>2 hari</strong> dari tanggal Alpha itu terjadi.
               </p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <p className="font-medium text-blue-800">🏖️ Opsi "Libur" — pakai jatah 4 hari/periode</p>
-              <p className="text-blue-700 mt-0.5">Kalau hari Alpha itu sebenarnya memang mau Anda jadikan libur (belum sempat diajukan di muka), pilih opsi <em>Libur</em> saat klarifikasi — <strong>gratis, tidak ada potongan sama sekali</strong>, selama jatah 4 hari libur periode ini belum habis (lihat bagian 5). Kalau jatahnya sudah habis, ajukan sebagai Izin biasa.</p>
+              <p className="font-medium text-blue-800">📝 Bukan sakit, bukan lupa absen?</p>
+              <p className="text-blue-700 mt-0.5">Jatah libur (4 hari/periode) <strong>tidak bisa lagi</strong> dipakai untuk menghapus Alpha yang sudah terjadi — jatah itu sekarang cuma bisa diajukan di muka lewat <strong>Ajukan Libur</strong> (bagian 5). Kalau Alpha-nya karena izin pribadi/keperluan mendadak, perbaiki lewat <strong>Cuti &amp; Izin → Ajukan</strong>, pilih jenis <em>Izin Mendadak</em> (boleh untuk tanggal mundur) — lihat bagian 6.</p>
             </div>
             <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3">
               <p className="font-bold text-emerald-800">✅ Opsi "Saya Hadir" — khusus periode 26 Agustus - 25 September 2026</p>

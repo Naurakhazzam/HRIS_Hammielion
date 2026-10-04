@@ -4,11 +4,9 @@ import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAlphaAlerts as fetchAlphaAlertsShared, type AlphaAlertItem } from '@/lib/alphaDetection'
-import { getCurrentPeriodRangeStr } from '@/lib/rosterPeriod'
 
-type ClarifyType = 'sick' | 'sick_doc' | 'permission' | 'lupa_absen' | 'leave' | 'hadir'
+type ClarifyType = 'sick' | 'sick_doc' | 'lupa_absen' | 'hadir'
 
-const LEAVE_QUOTA_PER_PERIOD = 4
 // "Saya Hadir" cuma untuk tanggal yang masih ditutupi import fingerprint lama -- HARUS selalu
 // sama persis dengan batas di RPC submit_alpha_clarification (v_hadir_allowed).
 const HADIR_ALLOWED_END = '2026-09-17'
@@ -27,28 +25,11 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty, compa
   const [clarifyFile, setClarifyFile] = useState<File | null>(null)
   const [clarifyError, setClarifyError] = useState('')
   const [clarifySubmitting, setClarifySubmitting] = useState(false)
-  // Jatah libur yang SUDAH terpakai periode ini (roster disetujui + attendance 'leave' +
-  // klarifikasi 'leave' pending/approved) -- cuma info bantu di UI, penegaknya tetap RPC.
-  const [leaveQuotaUsed, setLeaveQuotaUsed] = useState<number | null>(null)
 
   useEffect(() => { if (employeeId) fetchAlphaAlerts() }, [employeeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchAlphaAlerts() {
     setAlphaAlerts(await fetchAlphaAlertsShared(supabase, employeeId))
-  }
-
-  async function fetchLeaveQuotaUsed(forDate: string) {
-    const { start, end } = getCurrentPeriodRangeStr(new Date(forDate + 'T00:00:00'))
-    const [{ count: rosterCount }, { count: leaveCount }, { count: pendingCount }] = await Promise.all([
-      supabase.from('employee_roster').select('*', { count: 'exact', head: true })
-        .eq('employee_id', employeeId).eq('is_day_off', true).gte('date', start).lte('date', end),
-      supabase.from('attendances').select('*', { count: 'exact', head: true })
-        .eq('employee_id', employeeId).eq('status', 'leave').gte('date', start).lte('date', end),
-      supabase.from('alpha_clarifications').select('*', { count: 'exact', head: true })
-        .eq('employee_id', employeeId).eq('requested_type', 'leave').in('status', ['pending', 'approved'])
-        .gte('date', start).lte('date', end),
-    ])
-    setLeaveQuotaUsed((rosterCount ?? 0) + (leaveCount ?? 0) + (pendingCount ?? 0))
   }
 
   function openClarifyModal(alert: AlphaAlertItem) {
@@ -57,8 +38,6 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty, compa
     setClarifyReason('')
     setClarifyFile(null)
     setClarifyError('')
-    setLeaveQuotaUsed(null)
-    fetchLeaveQuotaUsed(alert.date)
   }
 
   async function submitClarification() {
@@ -177,8 +156,6 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty, compa
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none bg-white">
                   <option value="sick">Sakit (tanpa surat dokter)</option>
                   <option value="sick_doc">Sakit (dengan surat dokter)</option>
-                  <option value="permission">Izin</option>
-                  <option value="leave">Libur (pakai jatah 4 hari/periode)</option>
                   <option value="lupa_absen">Lupa Absen (sebenarnya masuk kerja)</option>
                   {clarifyModal.date <= HADIR_ALLOWED_END && <option value="hadir">Saya Hadir (periode transisi, gratis)</option>}
                 </select>
@@ -188,12 +165,9 @@ export default function AlphaKlarifikasiPanel({ employeeId, hideWhenEmpty, compa
                 {clarifyType === 'hadir' && (
                   <p className="text-xs text-emerald-600 mt-1">Khusus tanggal 26 Agustus - 17 September 2026 (periode masih ditutupi import fingerprint lama). Dianggap hadir penuh, GRATIS tanpa denda, tidak dibatasi berapa kali.</p>
                 )}
-                {clarifyType === 'leave' && (
-                  <p className="text-xs text-emerald-600 mt-1">
-                    Gratis, tidak ada potongan sama sekali — tapi cuma bisa kalau jatah libur periode ini masih ada.{' '}
-                    {leaveQuotaUsed === null ? 'Mengecek sisa jatah...' : `Sudah terpakai ${leaveQuotaUsed} dari ${LEAVE_QUOTA_PER_PERIOD} hari.`}
-                  </p>
-                )}
+                <p className="text-xs text-slate-400 mt-1">
+                  Bukan sakit, dan bukan lupa absen? Alpha ini cuma bisa diperbaiki lewat menu <strong>Cuti &amp; Izin → Ajukan</strong>, pilih jenis <strong>Izin Mendadak</strong> (boleh tanggal mundur) — tidak lagi lewat panel ini.
+                </p>
               </div>
               {clarifyType === 'hadir' ? (
                 <div>

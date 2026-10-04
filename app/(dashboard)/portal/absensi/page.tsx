@@ -30,6 +30,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   sick:       { label: 'Sakit',   color: 'bg-orange-100 text-orange-700' },
   sick_doc:   { label: 'Sakit+Surat', color: 'bg-orange-100 text-orange-700' },
   permission: { label: 'Izin',    color: 'bg-purple-100 text-purple-700' },
+  sudden_permission: { label: 'Izin Mendadak', color: 'bg-amber-100 text-amber-700' },
 }
 
 function fmtTime(ts: string | null) {
@@ -120,7 +121,7 @@ export default function PortalAbsensiPage() {
   const totalMenitLambat = attendances.reduce((s, a) => s + Number(a.late_minutes), 0)
   const totalLembur    = attendances.reduce((s, a) => s + Number(a.overtime_hours), 0)
   const totalAbsen     = attendances.filter(a => a.status === 'absent').length
-  const totalCutiIzin  = attendances.filter(a => ['leave', 'sick', 'sick_doc', 'permission'].includes(a.status)).length
+  const totalCutiIzin  = attendances.filter(a => ['leave', 'sick', 'sick_doc', 'permission', 'sudden_permission'].includes(a.status)).length
 
   // Sertakan tahun depan juga kalau periode default (lihat defaultPeriod di atas) sudah
   // menyeberang ke tahun depan (kasus akhir Desember) -- supaya dropdown Tahun tidak kehilangan

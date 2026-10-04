@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
-import { groupContiguousDates, IZIN_GROUP_MULTIPLIERS } from '@/lib/escalatingDeduction'
+import { groupContiguousDates, IZIN_GROUP_MULTIPLIERS, SUDDEN_PERMISSION_MULTIPLIERS } from '@/lib/escalatingDeduction'
 import { getCurrentPeriodRangeStr } from '@/lib/rosterPeriod'
 
 type Employee = { id: string; full_name: string }
@@ -32,6 +32,10 @@ export default function AjukanCutiPage() {
   // Sudah berapa kejadian Izin Duka/Periksa/Sakit-tanpa-surat karyawan ini di periode berjalan —
   // dipakai untuk memperingatkan pengali eskalasi yang akan berlaku kalau mereka ajukan lagi.
   const [izinOccurrenceCount, setIzinOccurrenceCount] = useState(0)
+
+  // Sama seperti di atas, tapi untuk Izin Mendadak -- eskalasinya sendiri (SUDDEN_PERMISSION_
+  // MULTIPLIERS), dihitung terpisah dari kelompok Izin/Sakit-tanpa-surat/Duka yang terencana.
+  const [suddenPermissionOccurrenceCount, setSuddenPermissionOccurrenceCount] = useState(0)
 
   // Rekan (cabang mana pun) yang juga libur/cuti/mengajukan di tanggal yang tumpang tindih
   // dengan pengajuan ini -- supaya karyawan sadar akan bentrok SEBELUM dikirim ke HR, sama
@@ -94,6 +98,7 @@ export default function AjukanCutiPage() {
     if (!formData.employee_id) { setAnnualEligibility({ loading: false, joinDate: null, usedDays: 0 }); return }
     fetchAnnualEligibility(formData.employee_id)
     fetchIzinOccurrenceCount(formData.employee_id)
+    fetchSuddenPermissionOccurrenceCount(formData.employee_id)
   }, [formData.employee_id])
 
   async function fetchIzinOccurrenceCount(employeeId: string) {
@@ -106,6 +111,18 @@ export default function AjukanCutiPage() {
       .gte('date', start).lte('date', end)
     const dates = (data || []).map(a => a.date as string)
     setIzinOccurrenceCount(groupContiguousDates(dates).length)
+  }
+
+  async function fetchSuddenPermissionOccurrenceCount(employeeId: string) {
+    const { start, end } = getCurrentPeriodRangeStr()
+    const { data } = await supabase
+      .from('attendances')
+      .select('date')
+      .eq('employee_id', employeeId)
+      .eq('status', 'sudden_permission')
+      .gte('date', start).lte('date', end)
+    const dates = (data || []).map(a => a.date as string)
+    setSuddenPermissionOccurrenceCount(groupContiguousDates(dates).length)
   }
 
   async function fetchAnnualEligibility(employeeId: string) {
@@ -318,6 +335,7 @@ export default function AjukanCutiPage() {
               <option value="sick_doc">Sakit (Dengan Surat Dokter)</option>
               <option value="permission">Izin Periksa / Keperluan</option>
               <option value="bereaved">Izin Duka Keluarga</option>
+              <option value="sudden_permission">Izin Mendadak</option>
             </select>
           </div>
 
@@ -390,6 +408,16 @@ export default function AjukanCutiPage() {
               <p>
                 Periode ini Anda sudah punya <strong>{izinOccurrenceCount} kejadian</strong> Izin Duka/Periksa/Sakit-tanpa-surat (dihitung gabungan, per kejadian terpisah).
                 Kalau pengajuan ini jadi kejadian baru, potongannya <strong>{IZIN_GROUP_MULTIPLIERS[Math.min(izinOccurrenceCount, IZIN_GROUP_MULTIPLIERS.length - 1)]}× gaji harian</strong> (naik dari kejadian sebelumnya, mentok di {IZIN_GROUP_MULTIPLIERS[IZIN_GROUP_MULTIPLIERS.length - 1]}×).
+              </p>
+            </div>
+          )}
+
+          {formData.leave_type === 'sudden_permission' && (
+            <div className="bg-orange-50 text-orange-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-orange-200">
+              <span>📊</span>
+              <p>
+                Izin Mendadak <strong>tidak dihitung Alpha</strong> dan tidak kena aturan H-2, tapi potongannya tersendiri (lebih berat dari Izin biasa): kejadian ke-{suddenPermissionOccurrenceCount + 1} periode ini dipotong{' '}
+                <strong>{SUDDEN_PERMISSION_MULTIPLIERS[Math.min(suddenPermissionOccurrenceCount, SUDDEN_PERMISSION_MULTIPLIERS.length - 1)]}× gaji harian</strong>{suddenPermissionOccurrenceCount > 0 ? ` (sudah ${suddenPermissionOccurrenceCount} kejadian sebelumnya periode ini, naik dari kejadian pertama 1.25×, mentok di ${SUDDEN_PERMISSION_MULTIPLIERS[SUDDEN_PERMISSION_MULTIPLIERS.length - 1]}×)` : '.'}
               </p>
             </div>
           )}

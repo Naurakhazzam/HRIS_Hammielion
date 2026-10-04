@@ -7,7 +7,7 @@ import { getUpcomingRosterPeriod, getCurrentRosterPeriod, rosterPeriodLabel, dat
 import { todayLocalStr, localDateStr } from '@/lib/date'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
-type OwnRequest = { id: string; requested_date: string; status: 'draft' | 'pending' | 'approved' | 'rejected'; rejection_reason: string | null }
+type OwnRequest = { id: string; requested_date: string; status: 'draft' | 'pending' | 'approved' | 'rejected'; rejection_reason: string | null; discipline_fee: number }
 
 const MAX_PICKS = 4
 
@@ -69,7 +69,7 @@ export default function AjukanLiburPage() {
   async function fetchData(empId: string, startStr: string = periodStartStr, endStr: string = periodEndStr) {
     const [{ data: reqs }, { data: calRows }] = await Promise.all([
       supabase.from('roster_pick_requests')
-        .select('id, requested_date, status, rejection_reason')
+        .select('id, requested_date, status, rejection_reason, discipline_fee')
         .eq('employee_id', empId)
         .eq('period_start', startStr)
         .neq('status', 'rejected')
@@ -148,11 +148,19 @@ export default function AjukanLiburPage() {
 
   async function submitAll() {
     if (!readyToSubmit || previewReadOnly) return
-    if (!confirm(`Ajukan ${MAX_PICKS} tanggal libur ini ke HR/Owner? Tidak bisa diubah lagi kecuali dibatalkan satu-satu.`)) return
+    // isCurrentPeriod = periode ini sudah berjalan (bukan diajukan di muka utk periode mendatang)
+    // -- sama persis dengan kondisi yang dipakai RPC submit_roster_picks utk kena denda disiplin,
+    // jadi warning di sini harus selalu sinkron dengan yang benar-benar dipotong di payroll.
+    const confirmMsg = isCurrentPeriod
+      ? `Periode ini sudah berjalan — mengajukan libur sekarang (bukan di muka untuk periode mendatang) akan dikenai denda disiplin Rp10.000/tanggal (total Rp${(MAX_PICKS * 10000).toLocaleString('id-ID')} untuk ${MAX_PICKS} tanggal), dipotong otomatis dari gaji periode ini. Tetap lanjutkan?`
+      : `Ajukan ${MAX_PICKS} tanggal libur ini ke HR/Owner? Tidak bisa diubah lagi kecuali dibatalkan satu-satu.`
+    if (!confirm(confirmMsg)) return
     setSubmitting(true)
     const { error } = await supabase.rpc('submit_roster_picks', { p_period_start: periodStartStr })
     if (error) showMessage('error', 'Gagal mengajukan: ' + error.message)
-    else showMessage('success', 'Berhasil diajukan ke HR/Owner, tinggal menunggu keputusan.')
+    else showMessage('success', isCurrentPeriod
+      ? `Berhasil diajukan ke HR/Owner — denda disiplin Rp${(MAX_PICKS * 10000).toLocaleString('id-ID')} akan terpotong otomatis di slip gaji periode ini.`
+      : 'Berhasil diajukan ke HR/Owner, tinggal menunggu keputusan.')
     await fetchData(employeeId)
     setSubmitting(false)
   }
@@ -169,10 +177,11 @@ export default function AjukanLiburPage() {
       </div>
 
       {isCurrentPeriod && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-          <p className="text-sm font-semibold text-blue-800">📌 Periode ini sedang berjalan sekarang</p>
-          <p className="text-sm text-blue-700 mt-0.5">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+          <p className="text-sm font-semibold text-red-800">📌 Periode ini sedang berjalan sekarang — kena denda disiplin</p>
+          <p className="text-sm text-red-700 mt-0.5">
             Jatah libur Anda untuk periode ini masih kurang dari {MAX_PICKS} (mungkin ada yang ditolak, atau belum sempat dilengkapi) — lengkapi dulu di sini sebelum bisa lanjut ke periode berikutnya. Tanggal yang sudah lewat otomatis terkunci.
+            Karena diajukan setelah periodenya berjalan (bukan di muka), begitu diajukan ke HR akan kena <strong>denda disiplin Rp10.000/tanggal</strong>, dipotong otomatis dari gaji periode ini.
           </p>
         </div>
       )}
@@ -244,6 +253,11 @@ export default function AjukanLiburPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {own && own.discipline_fee > 0 && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-700 font-medium" title="Diajukan setelah periode berjalan">
+                      Denda {own.discipline_fee.toLocaleString('id-ID')}
+                    </span>
+                  )}
                   {own?.status === 'approved' && (
                     <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium">Disetujui</span>
                   )}

@@ -10,6 +10,14 @@
 export const IZIN_GROUP_MULTIPLIERS = [1, 1.25, 1.5, 1.75, 2]
 export const ALPHA_GROUP_MULTIPLIERS = [1.5, 2, 2.25, 2.5, 2.75, 3]
 
+// Izin Mendadak -- izin TANPA pemberitahuan H-2 (dadakan, atau diajukan mundur setelah hari itu
+// lewat). Sengaja dipisah dari IZIN_GROUP_MULTIPLIERS (yang untuk Izin/Sakit-tanpa-surat/Duka
+// yang terencana) dan dari ALPHA_GROUP_MULTIPLIERS (Alpha tanpa keterangan sama sekali) -- lebih
+// berat dari Izin biasa (karena dadakan = kurang disiplin), tapi lebih ringan dari Alpha penuh
+// (karena tetap ada keterangan/pengajuan, bukan diam saja). Reset tiap periode, per kejadian
+// (blok tanggal bersambung).
+export const SUDDEN_PERMISSION_MULTIPLIERS = [1.25, 1.5, 1.6, 1.7, 1.8, 1.9, 2]
+
 // Karyawan TRAINING tidak kena eskalasi -- Izin/Sakit-tanpa-surat maupun Alpha dipotong FLAT
 // 1x gaji harian per hari, kejadian ke berapa pun, karena mereka belum permanent. Dipakai lewat
 // calcEscalatingDeduction() yang sama persis (cuma multiplier-nya selalu 1x, tidak pernah naik).

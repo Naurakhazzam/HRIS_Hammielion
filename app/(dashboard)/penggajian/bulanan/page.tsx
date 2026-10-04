@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import { todayLocalStr } from '@/lib/date'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
-import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, NEW_RULES_CUTOFF_DATE, type EscalatingResult } from '@/lib/escalatingDeduction'
+import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, SUDDEN_PERMISSION_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, NEW_RULES_CUTOFF_DATE, type EscalatingResult } from '@/lib/escalatingDeduction'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -228,6 +228,11 @@ export default function PenggajianBulananPage() {
     izinGroup: EscalatingResult; alphaGroup: EscalatingResult
     sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number; sickDed: number
     adminFeeTotal: number
+    // Izin Mendadak -- eskalasi sendiri (SUDDEN_PERMISSION_MULTIPLIERS), terpisah dari izinGroup.
+    suddenPermissionGroup: EscalatingResult
+    // Denda disiplin Ajukan Libur periode-berjalan (Rp10.000/tanggal) -- dari roster_pick_requests
+    // .discipline_fee, BUKAN dari attendances, jadi dijumlahkan terpisah (lihat migrasi 046).
+    liburDisciplineFeeTotal: number
     // true = periode ini berakhir sebelum NEW_RULES_CUTOFF_DATE -- semua potongan di atas flat
     // 1x gaji harian, eskalasi/denda baru belum berlaku (dikonfirmasi user).
     isPreNewRulesPeriod: boolean
@@ -739,13 +744,16 @@ export default function PenggajianBulananPage() {
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, empRes, loyBalRes, lateDefRes] = await Promise.all([
+    const [scRes, attRes, kpiRes, empRes, loyBalRes, lateDefRes, rosterFeeRes] = await Promise.all([
       supabase.from('salary_components').select('*').eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes, source, admin_fee').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, libur_compensation_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
       supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
+      // Denda disiplin Ajukan Libur periode-berjalan -- period_start roster SELALU persis sama
+      // dengan firstDay payroll (keduanya tanggal 26), bukan rentang.
+      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', empId).eq('period_start', firstDay),
     ])
 
     const sc   = scRes.data?.[0]
@@ -952,6 +960,13 @@ export default function PenggajianBulananPage() {
     const alphaGroupDates = [...explicitAlphaDates, ...excessEmptyDates]
     const alphaGroup = calcEscalatingDeduction(alphaGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
+    // Izin Mendadak -- leave_type baru utk izin TANPA H-2 (termasuk pengajuan mundur setelah
+    // Alpha sudah tercatat). TIDAK ikut mengisi kuota libur gratis (sama seperti Alpha, ini
+    // kasus disiplin, bukan jatah normal) -- eskalasi sendiri: 1.25x, 1.5x, 1.6x, 1.7x, 1.8x,
+    // 1.9x, mentok 2x per kejadian, reset tiap periode.
+    const suddenPermissionDates = validAtts.filter((a: any) => a.status === 'sudden_permission').map((a: any) => a.date as string)
+    const suddenPermissionGroup = calcEscalatingDeduction(suddenPermissionDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : SUDDEN_PERMISSION_MULTIPLIERS)
+
     // Sakit DENGAN surat dokter: hari ke-1 gratis, ke-2&3 = 0.5×, ke-4+ = 1× (dihitung kumulatif
     // per hari dalam periode, bukan per kejadian, dan cuma dari SISA hari yang tidak kepakai
     // mengisi jatah libur di atas). Aturan ini SUDAH lama berlaku (bukan bagian dari eskalasi
@@ -969,13 +984,21 @@ export default function PenggajianBulananPage() {
     // ada mulai periode ini, jadi tidak adil ditagih surut).
     const adminFeeTotal = (flatSalaryForEmp || isPreNewRulesPeriod) ? 0 : validAtts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
 
-    const absentDed        = flatSalaryForEmp ? 0 : izinGroup.total + alphaGroup.total + sickDed + adminFeeTotal
-    const absentDays       = flatSalaryForEmp ? 0 : izinGroupDates.length + alphaGroupDates.length + sickCount
+    // Denda disiplin Ajukan Libur periode-berjalan -- dari roster_pick_requests.discipline_fee
+    // (lihat migrasi 046), BUKAN dari attendances.admin_fee -- supaya tidak mengganggu hitungan
+    // "hari kosong" di Kompensasi Libur Tidak Diambil (tanggalnya belum tentu punya record
+    // attendances sampai harinya tiba).
+    const liburDisciplineFeeTotal = flatSalaryForEmp ? 0 : (rosterFeeRes.data || []).reduce((s: number, r: any) => s + Number(r.discipline_fee ?? 0), 0)
+
+    const absentDed        = flatSalaryForEmp ? 0 : izinGroup.total + alphaGroup.total + suddenPermissionGroup.total + sickDed + adminFeeTotal + liburDisciplineFeeTotal
+    const absentDays       = flatSalaryForEmp ? 0 : izinGroupDates.length + alphaGroupDates.length + suddenPermissionDates.length + sickCount
     const absentRatePerDay = dailyRate
     const absentBreakdown: AbsentBreakdownDetail = {
       dailyRate,
       izinGroup,
       alphaGroup,
+      suddenPermissionGroup,
+      liburDisciplineFeeTotal,
       sickDed,
       sickDays:       sickCount,
       sick1Free,
@@ -1600,10 +1623,11 @@ export default function PenggajianBulananPage() {
     const firstDay = `${sy}-${pad(sm)}-26`
     const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
 
-    const [scRes, attRes, empRes] = await Promise.all([
+    const [scRes, attRes, empRes, rosterFeeRes] = await Promise.all([
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status, admin_fee').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
       supabase.from('employees').select('join_date, employee_type').eq('id', p.employee_id).single(),
+      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', p.employee_id).eq('period_start', firstDay),
     ])
 
     const sc = scRes.data?.[0]
@@ -1664,6 +1688,10 @@ export default function PenggajianBulananPage() {
     const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
     const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
 
+    // Izin Mendadak -- eskalasi sendiri, sama seperti buildSlipPreview di atas.
+    const suddenPermissionDates = atts.filter((a: any) => a.status === 'sudden_permission').map((a: any) => a.date as string)
+    const suddenPermissionGroup = calcEscalatingDeduction(suddenPermissionDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : SUDDEN_PERMISSION_MULTIPLIERS)
+
     // Sakit dengan surat dokter: hari-1 gratis, dst -- aturan lama, TETAP sama untuk semua
     // periode (tidak ikut disederhanakan jadi flat), dikonfirmasi user. Cuma dihitung dari SISA
     // hari yang tidak kepakai mengisi jatah libur di atas.
@@ -1673,8 +1701,9 @@ export default function PenggajianBulananPage() {
     const sick4Full  = Math.max(0, sickDays - 3)
     const sickDed    = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
     const adminFeeTotal = isPreNewRulesPeriod ? 0 : atts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
+    const liburDisciplineFeeTotal = (rosterFeeRes.data || []).reduce((s: number, r: any) => s + Number(r.discipline_fee ?? 0), 0)
 
-    setAbsentBreakdownDetail({ dailyRate, izinGroup, alphaGroup, sickDays, sick1Free, sick23Half, sick4Full, sickDed, adminFeeTotal, isPreNewRulesPeriod })
+    setAbsentBreakdownDetail({ dailyRate, izinGroup, alphaGroup, suddenPermissionGroup, liburDisciplineFeeTotal, sickDays, sick1Free, sick23Half, sick4Full, sickDed, adminFeeTotal, isPreNewRulesPeriod })
   }
 
   // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
@@ -1875,6 +1904,22 @@ export default function PenggajianBulananPage() {
           <div class="detail-row"><span>Tanggungan Anda (${lossDetail.employeeSharePct}%)</span><span class="ded-detail">${fmtR(lossDetail.employeeDeduction)}</span></div>
          </div>` : ''
 
+    // Detail Tidak Hadir -- rincian per jenis potongan (Izin/Alpha/Izin Mendadak/Sakit+Surat/
+    // Denda Lupa Absen/Denda Disiplin Libur), supaya tidak jadi satu angka buta di slip cetak.
+    const fmtEscalatingBlocksHtml = (result: EscalatingResult) => result.blocks.map(b =>
+      `<div class="detail-row"><span>Kejadian ${b.occurrence} (${b.dates.map(fmtDate).join(', ')})</span><span>${b.dates.length} hari × ${b.multiplier}× = <span class="ded-detail">${fmtR(b.subtotal)}</span></span></div>`
+    ).join('')
+    const ab = absentBreakdownDetail
+    const absentDetailHtml = ab
+      ? `<div class="detail-block">
+          ${ab.izinGroup.blocks.length > 0 ? `<div class="detail-row" style="font-weight:700;">Izin Duka/Periksa/Sakit-tanpa-surat</div>${fmtEscalatingBlocksHtml(ab.izinGroup)}` : ''}
+          ${ab.alphaGroup.blocks.length > 0 ? `<div class="detail-row" style="font-weight:700;">Alpha (termasuk hari kosong di luar kuota)</div>${fmtEscalatingBlocksHtml(ab.alphaGroup)}` : ''}
+          ${ab.suddenPermissionGroup.blocks.length > 0 ? `<div class="detail-row" style="font-weight:700;">Izin Mendadak (tanpa H-2)</div>${fmtEscalatingBlocksHtml(ab.suddenPermissionGroup)}` : ''}
+          ${ab.sickDays > 0 ? `<div class="detail-row"><span>Sakit dengan surat dokter (${ab.sickDays} hari)</span><span class="ded-detail">${fmtR(ab.sickDed)}</span></div>` : ''}
+          ${ab.adminFeeTotal > 0 ? `<div class="detail-row"><span>Denda Lupa Absen Masuk/Pulang</span><span class="ded-detail">${fmtR(ab.adminFeeTotal)}</span></div>` : ''}
+          ${ab.liburDisciplineFeeTotal > 0 ? `<div class="detail-row"><span>Denda Disiplin Pengajuan Libur (telat)</span><span class="ded-detail">${fmtR(ab.liburDisciplineFeeTotal)}</span></div>` : ''}
+         </div>` : ''
+
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Slip Gaji_${p.employee?.full_name}_${MONTHS[p.period_month - 1]} ${p.period_year}</title>
 <style>
@@ -1959,7 +2004,7 @@ export default function PenggajianBulananPage() {
       <tr><td>Tabungan Loyalitas</td><td class="${Number(p.loyalitas_deduction??0)>0?'ded-val':'zero'}">${Number(p.loyalitas_deduction??0)>0?'-'+fmtR(Number(p.loyalitas_deduction??0)):'—'}</td></tr>
       <tr><td>Kerugian Kasir</td><td class="${Number(p.cashier_loss_deduction??0)>0?'ded-val':'zero'}">${Number(p.cashier_loss_deduction??0)>0?'-'+fmtR(Number(p.cashier_loss_deduction??0)):'—'}</td></tr>
       <tr><td>Kehilangan Barang${lossDetailHtml}</td><td>${invLoss>0?'-'+fmtR(invLoss):'<span class="zero">—</span>'}</td></tr>
-      <tr><td>Tidak Hadir (${p.absent_days??0} hari)</td><td class="${Number(p.absent_deduction??0)>0?'ded-val':'zero'}">${Number(p.absent_deduction??0)>0?'-'+fmtR(Number(p.absent_deduction??0)):'—'}</td></tr>
+      <tr><td>Tidak Hadir (${p.absent_days??0} hari)${absentDetailHtml}</td><td class="${Number(p.absent_deduction??0)>0?'ded-val':'zero'}">${Number(p.absent_deduction??0)>0?'-'+fmtR(Number(p.absent_deduction??0)):'—'}</td></tr>
       <tr class="bruto-row"><td>Total Bruto</td><td>${fmtR(Number(p.gross_total))}</td></tr>
     </tbody>
   </table>
@@ -2862,6 +2907,17 @@ export default function PenggajianBulananPage() {
                               └ Denda Lupa Absen Masuk/Pulang: {formatRupiah(absentBreakdownDetail.adminFeeTotal)}
                             </div>
                           )}
+                          {absentBreakdownDetail.suddenPermissionGroup.blocks.length > 0 && (
+                            <div>
+                              <div className="text-xs text-orange-600 font-medium">└ Izin Mendadak (per kejadian, tanpa H-2):</div>
+                              <div className="pl-3">{renderEscalatingBlocks(absentBreakdownDetail.suddenPermissionGroup, 'text-orange-600')}</div>
+                            </div>
+                          )}
+                          {absentBreakdownDetail.liburDisciplineFeeTotal > 0 && (
+                            <div className="text-xs text-amber-600">
+                              └ Denda Disiplin Pengajuan Libur (telat, periode sudah berjalan): {formatRupiah(absentBreakdownDetail.liburDisciplineFeeTotal)}
+                            </div>
+                          )}
                         </div>
                       )}
                     </td>
@@ -3287,7 +3343,7 @@ export default function PenggajianBulananPage() {
                       <span className="text-red-500 font-medium">-{formatRupiah(Number(v))}</span>
                     </div>
                   ))}
-                  {slipPreview.absentBreakdown && (slipPreview.absentBreakdown.izinGroup.blocks.length > 0 || slipPreview.absentBreakdown.alphaGroup.blocks.length > 0 || slipPreview.absentBreakdown.sickDays > 0 || slipPreview.absentBreakdown.adminFeeTotal > 0) && (
+                  {slipPreview.absentBreakdown && (slipPreview.absentBreakdown.izinGroup.blocks.length > 0 || slipPreview.absentBreakdown.alphaGroup.blocks.length > 0 || slipPreview.absentBreakdown.suddenPermissionGroup.blocks.length > 0 || slipPreview.absentBreakdown.sickDays > 0 || slipPreview.absentBreakdown.adminFeeTotal > 0 || slipPreview.absentBreakdown.liburDisciplineFeeTotal > 0) && (
                     <div className="px-4 py-2 border-t border-slate-100 text-xs text-slate-400 space-y-0.5">
                       {slipPreview.absentBreakdown.isPreNewRulesPeriod && (
                         <div className="text-amber-600 font-medium">⚠️ Periode ini sebelum 26 Sep 2026 — masih flat 1x gaji harian, belum eskalasi/denda baru.</div>
@@ -3314,6 +3370,15 @@ export default function PenggajianBulananPage() {
                       )}
                       {slipPreview.absentBreakdown.adminFeeTotal > 0 && (
                         <div className="text-amber-600">└ Denda Lupa Absen Masuk/Pulang: {formatRupiah(slipPreview.absentBreakdown.adminFeeTotal)}</div>
+                      )}
+                      {slipPreview.absentBreakdown.suddenPermissionGroup.blocks.length > 0 && (
+                        <div>
+                          <div className="text-orange-600 font-medium">└ Izin Mendadak (per kejadian, tanpa H-2):</div>
+                          <div className="pl-3">{renderEscalatingBlocks(slipPreview.absentBreakdown.suddenPermissionGroup, 'text-orange-600')}</div>
+                        </div>
+                      )}
+                      {slipPreview.absentBreakdown.liburDisciplineFeeTotal > 0 && (
+                        <div className="text-amber-600">└ Denda Disiplin Pengajuan Libur (telat, periode sudah berjalan): {formatRupiah(slipPreview.absentBreakdown.liburDisciplineFeeTotal)}</div>
                       )}
                     </div>
                   )}
@@ -3435,8 +3500,10 @@ export default function PenggajianBulananPage() {
                           return [
                             b.izinGroup.total > 0 ? `Izin ${formatRupiah(b.izinGroup.total)}` : '',
                             b.alphaGroup.total > 0 ? `Alpha ${formatRupiah(b.alphaGroup.total)}` : '',
+                            b.suddenPermissionGroup.total > 0 ? `Izin Mendadak ${formatRupiah(b.suddenPermissionGroup.total)}` : '',
                             b.sickDed > 0 ? `Sakit+Surat ${formatRupiah(b.sickDed)}` : '',
                             b.adminFeeTotal > 0 ? `Denda Lupa Absen ${formatRupiah(b.adminFeeTotal)}` : '',
+                            b.liburDisciplineFeeTotal > 0 ? `Denda Disiplin Libur ${formatRupiah(b.liburDisciplineFeeTotal)}` : '',
                           ].filter(Boolean).join(' + ') || undefined
                         })()
                       }>{row.preview.absentDed > 0 ? formatRupiah(row.preview.absentDed) : '—'}</td>
