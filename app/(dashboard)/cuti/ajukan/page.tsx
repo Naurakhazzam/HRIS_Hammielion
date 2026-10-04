@@ -62,8 +62,15 @@ export default function AjukanCutiPage() {
   // Izin "pilihan" (annual/permission) minimal H-2 dari HARI INI (bukan tanggal mulai vs hari
   // ini saja, tapi memang selalu dibandingkan ke hari ini karena baru dicek saat form diisi).
   // Sakit & duka dikecualikan — sifatnya memang mendadak, tidak bisa direncanakan.
+  // Cuma berlaku untuk tanggal mulai yang BELUM lewat (pengajuan di muka) — pengajuan mundur
+  // (tanggal mulai sudah di masa lalu) TIDAK ikut ditandai di sini, karena approve_leave_request
+  // di database juga sudah tidak memaksanya jadi Alpha lagi (lihat migrasi
+  // fix_approve_leave_request_retroactive_late_notice).
+  const todayStr = toDateStr(new Date())
   const minNoticeDate = (() => { const d = new Date(); d.setDate(d.getDate() + 2); return toDateStr(d) })()
-  const isLateNotice = (formData.leave_type === 'annual' || formData.leave_type === 'permission') && formData.start_date < minNoticeDate
+  const isLateNotice = (formData.leave_type === 'annual' || formData.leave_type === 'permission')
+    && formData.start_date >= todayStr
+    && formData.start_date < minNoticeDate
 
   useEffect(() => {
     fetchMyUserAndEmployees()

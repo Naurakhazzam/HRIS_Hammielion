@@ -24,11 +24,18 @@ type LeaveRequest = {
 // (dihitung dari kapan pengajuan dibuat) otomatis dicatat Alpha begitu disetujui — lihat RPC
 // approve_leave_request. Badge ini cuma pengingat visual di sini, logikanya sudah ditegakkan
 // di database supaya konsisten dari jalur mana pun approve-nya dipanggil.
+// PENTING: aturan H-2 cuma berlaku untuk pengajuan DI MUKA (tanggal mulai belum lewat saat
+// diajukan) — kalau tanggal mulai sudah di masa lalu (pengajuan mundur/retroaktif), jangan
+// ikut ditandai di sini, karena approve_leave_request juga sudah tidak memaksanya jadi Alpha
+// lagi (bug lama: dulu pengajuan mundur apa pun jaraknya selalu otomatis "kurang dari H-2").
 function isLateNotice(req: Pick<LeaveRequest, 'leave_type' | 'start_date' | 'created_at'>): boolean {
   if (req.leave_type !== 'annual' && req.leave_type !== 'permission') return false
   const created = new Date(req.created_at)
+  const createdDateOnly = new Date(created.getFullYear(), created.getMonth(), created.getDate())
+  const start = new Date(req.start_date + 'T00:00:00')
+  if (start < createdDateOnly) return false
   const minStart = new Date(created.getFullYear(), created.getMonth(), created.getDate() + 2)
-  return new Date(req.start_date + 'T00:00:00') < minStart
+  return start < minStart
 }
 
 export default function CutiIzinPage() {
