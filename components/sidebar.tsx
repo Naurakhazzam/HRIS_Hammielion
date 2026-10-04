@@ -43,13 +43,38 @@ const PORTAL_SAYA_SUBMENU_BASE: NavNode[] = [
   { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
 ]
 
+// Item "tentang saya" tambahan — CUMA dipakai untuk karyawan lewat buildPortalSayaSubmenu,
+// supaya Portal Saya milik admin (adminNavItems, pakai PORTAL_SAYA_SUBMENU_BASE langsung,
+// tanpa lewat sini) tidak ikut berubah.
+const EMPLOYEE_PORTAL_EXTRA: NavNode[] = [
+  { name: 'KPI Saya', href: '/portal/kpi-saya' },
+  { name: 'Kasbon', href: '/kasbon' },
+  { name: 'Aturan Potongan Gaji', href: '/potongan' },
+]
+
+// Untuk karyawan, submenu Portal Saya dibangun ulang dari base: "Dashboard Saya" dibuang
+// (sudah naik jadi item top-level sendiri), "Ajukan Libur"/"Ganti Hari Libur"/"Kalender Libur"
+// dibuang (dipindah ke grup Cuti & Izin / top-level sendiri) — Portal Saya employee jadi
+// khusus menampung info & tindakan personal harian, bukan lagi campur dengan urusan libur.
 function buildPortalSayaSubmenu(isDriverOrKenek: boolean): NavNode[] {
-  if (!isDriverOrKenek) return PORTAL_SAYA_SUBMENU_BASE
-  // Disisip persis setelah "Slip Gaji" — sama-sama halaman penghasilan, biar ketemu berdekatan.
-  const withEarnings = [...PORTAL_SAYA_SUBMENU_BASE]
-  withEarnings.splice(5, 0, { name: 'Pendapatan Ritase', href: '/portal/pendapatan-ritase' })
-  return withEarnings
+  const EXCLUDED = new Set(['Dashboard Saya', 'Ajukan Libur', 'Ganti Hari Libur', 'Kalender Libur'])
+  const base = PORTAL_SAYA_SUBMENU_BASE.filter(item => !EXCLUDED.has(item.name))
+  if (isDriverOrKenek) {
+    // Disisip persis setelah "Slip Gaji" — sama-sama halaman penghasilan, biar ketemu berdekatan.
+    base.splice(4, 0, { name: 'Pendapatan Ritase', href: '/portal/pendapatan-ritase' })
+  }
+  return [...base, ...EMPLOYEE_PORTAL_EXTRA]
 }
+
+// Semua yang berhubungan dengan "tidak masuk kerja" (selain Kalender Libur, yang naik jadi
+// top-level sendiri) digabung di sini — sebelumnya pengajuannya tersebar di Portal Saya
+// sementara tab "Cuti & Izin" sendiri cuma berisi riwayat, tanpa cara mengajukan dari situ.
+const CUTI_IZIN_SUBMENU: NavNode[] = [
+  { name: 'Ajukan Cuti / Izin', href: '/cuti/ajukan' },
+  { name: 'Riwayat Cuti & Izin', href: '/cuti' },
+  { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
+  { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
+]
 
 // Dipakai bareng oleh adminNavItems DAN getEmployeeNavItems (untuk Kepala Gudang, yang
 // role sistemnya tetap 'employee' biasa) — supaya menunya selalu identik, tidak ada risiko
@@ -239,21 +264,24 @@ const adminNavItems: NavNode[] = [
 // boleh muncul untuk karyawan yang Driver/Kenek (employees.can_drive/can_help) — bukan
 // berdasarkan role, karena Driver/Kenek di tabel users tetap ber-role 'employee' biasa.
 const employeeNavItems: NavNode[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
+  { name: 'Dashboard Saya', href: '/portal', icon: '🏠' },
   { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
   {
     name: 'Portal Saya',
     href: '/portal',
     icon: '👤',
-    submenu: PORTAL_SAYA_SUBMENU_BASE
+    submenu: PORTAL_SAYA_SUBMENU_BASE // diganti isinya lewat buildPortalSayaSubmenu di bawah
   },
-  { name: 'KPI Saya', href: '/portal/kpi-saya', icon: '📊' },
+  { name: 'Kalender Libur', href: '/absensi/kalender-libur', icon: '📅' },
+  {
+    name: 'Cuti & Izin',
+    href: '/cuti',
+    icon: '🗓️',
+    submenu: CUTI_IZIN_SUBMENU
+  },
   { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
   { name: 'Tugas & Laporan', href: '/tugas-harian', icon: '📋' },
   { name: 'Target Penjualan Promo', href: '/penjualan-promo', icon: '🎯' },
-  { name: 'Cuti & Izin', href: '/cuti', icon: '🗓️' },
-  { name: 'Aturan Potongan Gaji', href: '/potongan', icon: '📉' },
-  { name: 'Kasbon', href: '/kasbon', icon: '🏦' },
 ]
 
 function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isTokoPusat: boolean): NavNode[] {
@@ -437,6 +465,9 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
       || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
 
     'Portal Saya': pathname.startsWith('/portal') || inKalenderLibur,
+    // Hanya relevan untuk menu karyawan (grup ini tidak ada di adminNavItems) — Ajukan
+    // Libur & Ganti Hari Libur kini tampil di sini, bukan lagi di dalam Portal Saya.
+    'Cuti & Izin': pathname.startsWith('/cuti') || pathname.startsWith('/portal/ajukan-libur') || pathname.startsWith('/portal/ganti-libur'),
   }
 
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(defaultOpen)
@@ -473,9 +504,14 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
             // Grup dicek lewat leaf href-nya sendiri (rekursif), bukan prefix item.href —
             // beberapa grup (Keuangan vs Laporan Keuangan) sekarang berbagi prefix /keuangan/*
             // yang sama, jadi prefix-match saja bikin dua grup ke-highlight sekaligus.
+            // "/portal" dipakai sebagai exact-match khusus di sini karena item leaf "Dashboard
+            // Saya" berbagi persis href yang sama dengan root grup Portal Saya (lihat
+            // employeeNavItems) — kalau pakai prefix-match biasa, item ini akan ikut ter-highlight
+            // di SEMUA halaman /portal/* (Profil, Slip Gaji, dst.), bukan cuma saat benar-benar
+            // di /portal.
             const isActive = ('submenu' in item && item.submenu)
               ? hasActiveDescendant(item, pathname)
-              : pathname.startsWith(item.href)
+              : item.href === '/portal' ? pathname === '/portal' : pathname.startsWith(item.href)
 
             return (
               <li key={item.name}>
