@@ -83,19 +83,31 @@ export function lateInfo(dueDate: string | null, firstFinalAt: string | null): {
   return wibDate(new Date()) > dueDate ? { late: true, label: 'Telat' } : { late: false, label: '' }
 }
 
+// HEIC/HEIF (format default kamera iPhone) tidak bisa ditampilkan <img> di browser
+// selain Safari. Kalau resize gagal dan filenya format ini, upload HARUS ditolak --
+// jangan diam-diam nyimpen file mentah yang nanti muncul sebagai foto rusak di laporan.
+const BROWSER_SAFE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+
 async function resizeImage(file: File, maxSide = 1600): Promise<Blob> {
   if (!file.type.startsWith('image/')) return file
+  let bmp: ImageBitmap | null = null
   try {
-    const bmp = await createImageBitmap(file)
+    bmp = await createImageBitmap(file)
     const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height))
     const canvas = document.createElement('canvas')
     canvas.width = Math.round(bmp.width * scale)
     canvas.height = Math.round(bmp.height * scale)
     canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height)
     const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', 0.8))
-    return blob ?? file
-  } catch {
+    if (!blob) throw new Error('Gagal memproses gambar')
+    return blob
+  } catch (e) {
+    if (!BROWSER_SAFE_TYPES.includes(file.type)) {
+      throw new Error(`Format foto "${file.type || 'tidak dikenal'}" tidak didukung. Di iPhone, ubah ke Pengaturan > Kamera > Format > "Kompatibel Paling Tinggi", lalu coba lagi.`)
+    }
     return file
+  } finally {
+    bmp?.close()
   }
 }
 
