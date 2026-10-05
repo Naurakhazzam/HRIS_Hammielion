@@ -27,7 +27,7 @@ type MyProgress = {
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const emptyForm = {
-  id: null as string | null, branch_id: '', product_name: '', target_qty: '', period_month: 1, period_year: 2026, is_active: true,
+  id: null as string | null, branch_id: '', branch_ids: [] as string[], product_name: '', target_qty: '', period_month: 1, period_year: 2026, is_active: true,
   bonus_rate_reached: '', bonus_rate_below: '', restrict_employees: false, target_employee_ids: [] as string[],
   bonus_mode_percent: false, bonus_percent: '', price_options: [] as number[], max_late_days: '',
 }
@@ -159,14 +159,14 @@ export default function PenjualanPromoPage() {
   }, [ready, canReview, fetchAdmin])
 
   function openNew() {
-    setForm({ ...emptyForm, period_month: filterMonth, period_year: filterYear, branch_id: filterBranch })
+    setForm({ ...emptyForm, period_month: filterMonth, period_year: filterYear, branch_ids: filterBranch ? [filterBranch] : [] })
     setFormError('')
     setShowForm(true)
   }
 
   async function openEditProduct(row: AdminRow) {
     setForm({
-      id: row.product_id, branch_id: row.branch_id, product_name: row.product_name, target_qty: row.target_qty === null ? '' : String(row.target_qty),
+      id: row.product_id, branch_id: row.branch_id, branch_ids: [row.branch_id], product_name: row.product_name, target_qty: row.target_qty === null ? '' : String(row.target_qty),
       period_month: filterMonth, period_year: filterYear, is_active: row.is_active,
       bonus_rate_reached: row.bonus_rate_reached === null ? '' : String(row.bonus_rate_reached),
       bonus_rate_below: row.bonus_rate_below === null ? '' : String(row.bonus_rate_below),
@@ -179,6 +179,21 @@ export default function PenjualanPromoPage() {
     })
     setFormError('')
     setShowForm(true)
+  }
+
+  function toggleBranch(id: string) {
+    setForm(f => {
+      const branch_ids = f.branch_ids.includes(id) ? f.branch_ids.filter(x => x !== id) : [...f.branch_ids, id]
+      // Karyawan khusus cuma masuk akal kalau persis 1 cabang dipilih (daftar nama beda-beda
+      // per cabang) -- reset begitu jadi lebih dari 1, supaya tidak kebawa salah ke cabang lain.
+      const singleBranch = branch_ids.length === 1
+      return {
+        ...f,
+        branch_ids,
+        restrict_employees: singleBranch ? f.restrict_employees : false,
+        target_employee_ids: singleBranch ? f.target_employee_ids : [],
+      }
+    })
   }
 
   function toggleTargetEmployee(id: string) {
@@ -200,9 +215,12 @@ export default function PenjualanPromoPage() {
   async function saveProduct(e: React.FormEvent) {
     e.preventDefault()
     setFormError('')
-    if (!form.branch_id) { setFormError('Pilih cabang.'); return }
+    // Edit = selalu 1 cabang (baris yang sudah ada). Buat baru = bisa banyak cabang sekaligus,
+    // masing-masing jadi baris/produk terpisah dengan pengaturan yang sama.
+    const branchIds = form.id ? (form.branch_id ? [form.branch_id] : []) : form.branch_ids
+    if (branchIds.length === 0) { setFormError('Pilih minimal satu cabang.'); return }
     if (!form.product_name.trim()) { setFormError('Nama produk wajib diisi.'); return }
-    if (form.restrict_employees && form.target_employee_ids.length === 0) { setFormError('Pilih minimal satu karyawan, atau matikan opsi "khusus karyawan tertentu".'); return }
+    if (form.restrict_employees && branchIds.length === 1 && form.target_employee_ids.length === 0) { setFormError('Pilih minimal satu karyawan, atau matikan opsi "khusus karyawan tertentu".'); return }
 
     let qty: number | null = null
     let bonusPercent: number | null = null
@@ -215,22 +233,32 @@ export default function PenjualanPromoPage() {
       if (!qty || qty <= 0) { setFormError('Target qty harus lebih dari 0.'); return }
     }
     const maxLateDays = form.max_late_days.trim() ? parseInt(form.max_late_days, 10) : null
+    // Karyawan khusus cuma dikirim kalau persis 1 cabang -- untuk bikin banyak cabang sekaligus,
+    // tiap baris dibuat tanpa pembatasan karyawan dulu (berlaku seluruh cabang), diatur belakangan
+    // satu-satu lewat Edit kalau perlu.
+    const targetEmployeeIds = (form.restrict_employees && branchIds.length === 1) ? form.target_employee_ids : null
 
     setSaving(true)
-    const { error } = await supabase.rpc('save_promo_product', {
-      p_id: form.id, p_branch_id: form.branch_id, p_product_name: form.product_name.trim(), p_target_qty: qty,
+    const results = await Promise.all(branchIds.map(branchId => supabase.rpc('save_promo_product', {
+      p_id: form.id, p_branch_id: branchId, p_product_name: form.product_name.trim(), p_target_qty: qty,
       p_period_month: form.period_month, p_period_year: form.period_year, p_is_active: form.is_active,
       p_bonus_rate_reached: form.bonus_mode_percent ? null : (form.bonus_rate_reached.trim() ? parseFloat(form.bonus_rate_reached) : null),
       p_bonus_rate_below: form.bonus_mode_percent ? null : (form.bonus_rate_below.trim() ? parseFloat(form.bonus_rate_below) : null),
-      p_target_employee_ids: form.restrict_employees ? form.target_employee_ids : null,
+      p_target_employee_ids: targetEmployeeIds,
       p_bonus_percent: bonusPercent,
       p_price_options: form.bonus_mode_percent ? form.price_options : null,
       p_max_late_days: maxLateDays,
-    })
+    })))
     setSaving(false)
-    if (error) { setFormError('Gagal menyimpan: ' + error.message); return }
+
+    const failed = results.filter(r => r.error)
+    if (failed.length > 0) {
+      setFormError(`Gagal menyimpan ${failed.length} dari ${branchIds.length} cabang: ` + failed.map(r => r.error!.message).join('; '))
+      if (failed.length < branchIds.length) fetchAdmin() // sebagian berhasil -- tetap refresh daftar
+      return
+    }
     setShowForm(false)
-    showMessage('success', form.id ? 'Produk diperbarui.' : 'Produk promo ditambahkan.')
+    showMessage('success', form.id ? 'Produk diperbarui.' : branchIds.length > 1 ? `Produk promo ditambahkan ke ${branchIds.length} cabang.` : 'Produk promo ditambahkan.')
     fetchAdmin()
   }
 
@@ -363,6 +391,11 @@ export default function PenjualanPromoPage() {
     }
     setRSaving(false)
   }
+
+  // Cabang yang dipakai utk filter daftar karyawan di opsi "Khusus karyawan tertentu" -- saat edit
+  // selalu form.branch_id (1 baris = 1 cabang), saat buat baru cuma valid kalau persis 1 cabang
+  // dicentang (restrict_employees otomatis dimatikan kalau lebih dari 1, lihat toggleBranch).
+  const effectiveBranchId = form.id ? form.branch_id : (form.branch_ids.length === 1 ? form.branch_ids[0] : '')
 
   const STATUS_BADGE: Record<ReportStatus, string> = {
     pending: 'bg-amber-100 text-amber-700', approved: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-600',
@@ -604,13 +637,31 @@ export default function PenjualanPromoPage() {
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md max-h-[92vh] overflow-y-auto">
             <form onSubmit={saveProduct} className="p-6 space-y-4">
               <h2 className="text-lg font-semibold text-slate-800 pb-2 border-b border-slate-100">{form.id ? 'Edit Produk Promo' : 'Produk Promo Baru'}</h2>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
-                <select value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded text-sm bg-white">
-                  <option value="">-- Pilih cabang --</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              </div>
+              {form.id ? (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
+                  <select value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded text-sm bg-white">
+                    <option value="">-- Pilih cabang --</option>
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Cabang <span className="text-red-500">*</span></label>
+                  <p className="text-[11px] text-slate-400 mb-1">Bisa pilih lebih dari satu — akan dibuat produk terpisah per cabang dengan pengaturan yang sama.</p>
+                  <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1">
+                    {branches.map(b => (
+                      <label key={b.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer px-1 py-0.5 hover:bg-slate-50 rounded">
+                        <input type="checkbox" checked={form.branch_ids.includes(b.id)} onChange={() => toggleBranch(b.id)} className="rounded" />
+                        {b.name}
+                      </label>
+                    ))}
+                  </div>
+                  {form.branch_ids.length > 1 && (
+                    <p className="text-[11px] text-indigo-600 mt-1">Akan membuat {form.branch_ids.length} produk promo terpisah (1 per cabang).</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Nama Produk <span className="text-red-500">*</span></label>
                 <input value={form.product_name} onChange={e => setForm({ ...form, product_name: e.target.value })} placeholder="Contoh: Royal Canin 1kg"
@@ -665,27 +716,33 @@ export default function PenjualanPromoPage() {
                 </div>
               </div>
               <div className="border-t border-slate-100 pt-3">
-                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
-                  <input type="checkbox" checked={form.restrict_employees}
-                    onChange={e => setForm({ ...form, restrict_employees: e.target.checked, target_employee_ids: e.target.checked ? form.target_employee_ids : [] })}
-                    className="rounded" />
-                  Khusus karyawan tertentu (bukan seluruh cabang)
-                </label>
-                {form.restrict_employees && (
-                  !form.branch_id ? (
-                    <p className="text-xs text-slate-400">Pilih cabang dulu untuk memilih karyawan.</p>
-                  ) : (
-                    <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1">
-                      {employees.filter(e => e.branch_id === form.branch_id).length === 0 ? (
-                        <p className="text-xs text-slate-400 px-1">Tidak ada karyawan aktif di cabang ini.</p>
-                      ) : employees.filter(e => e.branch_id === form.branch_id).map(e => (
-                        <label key={e.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer px-1 py-0.5 hover:bg-slate-50 rounded">
-                          <input type="checkbox" checked={form.target_employee_ids.includes(e.id)} onChange={() => toggleTargetEmployee(e.id)} className="rounded" />
-                          {e.full_name}
-                        </label>
-                      ))}
-                    </div>
-                  )
+                {(!form.id && form.branch_ids.length > 1) ? (
+                  <p className="text-xs text-slate-400">Opsi &quot;khusus karyawan tertentu&quot; tidak tersedia saat membuat untuk beberapa cabang sekaligus — atur per cabang nanti lewat tombol Edit.</p>
+                ) : (
+                  <>
+                    <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
+                      <input type="checkbox" checked={form.restrict_employees}
+                        onChange={e => setForm({ ...form, restrict_employees: e.target.checked, target_employee_ids: e.target.checked ? form.target_employee_ids : [] })}
+                        className="rounded" />
+                      Khusus karyawan tertentu (bukan seluruh cabang)
+                    </label>
+                    {form.restrict_employees && (
+                      !effectiveBranchId ? (
+                        <p className="text-xs text-slate-400">Pilih cabang dulu untuk memilih karyawan.</p>
+                      ) : (
+                        <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1">
+                          {employees.filter(e => e.branch_id === effectiveBranchId).length === 0 ? (
+                            <p className="text-xs text-slate-400 px-1">Tidak ada karyawan aktif di cabang ini.</p>
+                          ) : employees.filter(e => e.branch_id === effectiveBranchId).map(e => (
+                            <label key={e.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer px-1 py-0.5 hover:bg-slate-50 rounded">
+                              <input type="checkbox" checked={form.target_employee_ids.includes(e.id)} onChange={() => toggleTargetEmployee(e.id)} className="rounded" />
+                              {e.full_name}
+                            </label>
+                          ))}
+                        </div>
+                      )
+                    )}
+                  </>
                 )}
               </div>
               {!form.bonus_mode_percent && (
