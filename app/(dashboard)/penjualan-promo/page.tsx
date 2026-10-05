@@ -228,6 +228,12 @@ export default function PenjualanPromoPage() {
       bonusPercent = parseFloat(form.bonus_percent)
       if (!bonusPercent || bonusPercent <= 0 || bonusPercent > 100) { setFormError('Persentase bonus harus antara 0-100.'); return }
       if (form.price_options.length === 0) { setFormError('Pilih minimal satu opsi harga.'); return }
+      // Target qty opsional di mode ini -- bonusnya tetap flat qty×harga×persen, tidak berubah
+      // kalau target tercapai/tidak. Dipakai cuma utk progres & kriteria KPI Penjualan Promo.
+      if (form.target_qty.trim()) {
+        qty = parseFloat(form.target_qty)
+        if (!qty || qty <= 0) { setFormError('Target qty harus lebih dari 0 kalau diisi.'); return }
+      }
     } else {
       qty = parseFloat(form.target_qty)
       if (!qty || qty <= 0) { setFormError('Target qty harus lebih dari 0.'); return }
@@ -497,7 +503,7 @@ export default function PenjualanPromoPage() {
                             {targetNames && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700">👤 KHUSUS KARYAWAN</span>}
                           </div>
                           <p className="text-xs text-slate-500">
-                            {isPercentMode ? <>Qty terlapor (disetujui): {row.total_qty} · tanpa target</> : <>Target: {row.target_qty} · Terlapor (disetujui): {row.total_qty}</>}
+                            {row.target_qty !== null ? <>Target: {row.target_qty} · Terlapor (disetujui): {row.total_qty}</> : <>Qty terlapor (disetujui): {row.total_qty} · tanpa target</>}
                           </p>
                           {targetNames && <p className="text-xs text-indigo-600 mt-0.5">Khusus untuk: {targetNames}</p>}
                           {hasBonus && (
@@ -609,9 +615,13 @@ export default function PenjualanPromoPage() {
                   Laporan Anda (disetujui): <strong>{p.my_qty}</strong> qty
                   {p.my_pending_qty > 0 && <span className="text-amber-600"> · {p.my_pending_qty} qty menunggu verifikasi</span>}
                 </p>
-                {p.bonus_percent !== null ? (
-                  <p className="text-xs text-purple-700 mt-1">Bonus: {p.bonus_percent}% dari harga layanan yang dipilih saat lapor.</p>
-                ) : p.target_qty !== null ? (
+                {p.bonus_percent !== null && (
+                  <p className="text-xs text-purple-700 mt-1">
+                    Bonus: {p.bonus_percent}% dari harga layanan yang dipilih saat lapor
+                    {p.target_qty !== null && ' (flat per transaksi, tidak dipengaruhi target di bawah)'}.
+                  </p>
+                )}
+                {p.target_qty !== null && (
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-sm mb-1">
                       <span className="font-semibold text-slate-700">Progres cabang (semua karyawan, disetujui)</span>
@@ -621,7 +631,7 @@ export default function PenjualanPromoPage() {
                       <div className="h-full bg-blue-500" style={{ width: `${p.target_qty > 0 ? Math.min(100, (p.total_qty / p.target_qty) * 100) : 0}%` }} />
                     </div>
                   </div>
-                ) : null}
+                )}
                 <button onClick={() => openReport(p)}
                   className="mt-4 px-5 py-3 rounded-xl text-base font-bold bg-green-600 hover:bg-green-700 text-white shadow-sm transition">
                   🧾 Lapor Penjualan
@@ -670,9 +680,9 @@ export default function PenjualanPromoPage() {
               <div className="border-t border-slate-100 pt-3">
                 <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
                   <input type="checkbox" checked={form.bonus_mode_percent} onChange={e => setForm({ ...form, bonus_mode_percent: e.target.checked })} className="rounded" />
-                  Bonus % dari harga layanan (tanpa target qty, cuma pencatatan bonus)
+                  Bonus % dari harga layanan (flat per transaksi, bukan dari pencapaian target)
                 </label>
-                <p className="text-[11px] text-slate-400 mb-2">Untuk jasa seperti grooming: karyawan pilih harga layanan saat lapor, bonus = qty × harga × persentase.</p>
+                <p className="text-[11px] text-slate-400 mb-2">Untuk jasa seperti grooming: karyawan pilih harga layanan saat lapor, bonus = qty × harga × persentase -- besarnya bonus ini SELALU sama, tidak naik/turun walau target qty di bawah tercapai atau tidak. Target qty tetap bisa diisi, cuma dipakai untuk progres & kriteria KPI.</p>
               </div>
               {form.bonus_mode_percent ? (
                 <div className="border-t border-slate-100 pt-3 space-y-3">
@@ -691,6 +701,12 @@ export default function PenjualanPromoPage() {
                         </label>
                       ))}
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Target Qty (opsional)</label>
+                    <input type="number" min="1" value={form.target_qty} onChange={e => setForm({ ...form, target_qty: e.target.value })} placeholder="Kosongkan kalau tidak ada quota"
+                      className="w-32 px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                    <p className="text-[11px] text-slate-400 mt-1">Bonus tidak dipengaruhi target ini -- cuma dipakai untuk progres bar &amp; kriteria KPI &quot;Penjualan Promo&quot;.</p>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">Maks Hari Sejak Tanggal Nota (opsional)</label>
