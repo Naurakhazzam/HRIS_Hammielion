@@ -19,6 +19,7 @@ type ReportRow = {
   id: string; employee_id: string; full_name: string; qty: number; receipt_photo_paths: string[]
   report_date: string; notes: string | null; status: ReportStatus; rejection_reason: string | null; created_at: string; is_late: boolean
   unit_price: number | null; original_qty: number | null; original_unit_price: number | null; edited_by_name: string | null; edited_at: string | null
+  late_penalty_pct: number
 }
 type MyProgress = {
   product_id: string; product_name: string; target_qty: number | null; total_qty: number; my_qty: number; my_pending_qty: number
@@ -386,13 +387,9 @@ export default function PenjualanPromoPage() {
     if (reportModal.price_options?.length) {
       if (!rUnitPrice) { setRError('Pilih harga layanan dulu.'); return }
     }
-    if (reportModal.max_late_days !== null) {
-      const diffDays = Math.round((new Date(toISODate(new Date())).getTime() - new Date(rDate).getTime()) / 86400000)
-      if (diffDays > reportModal.max_late_days) {
-        setRError(`Tanggal struk tidak valid -- sudah ${diffDays} hari sejak tanggal nota (maks H+${reportModal.max_late_days}).`)
-        return
-      }
-    }
+    // Lewat max_late_days TIDAK lagi memblokir kirim -- cuma memotong bonus laporan ini 50%
+    // (dihitung & dikunci di server saat insert, lihat migrasi 056). Peringatannya ditampilkan
+    // reaktif di bawah input tanggal (lihat rLateDiffDays di render), bukan di sini.
     setRSaving(true)
     try {
       const paths = await uploadReportPhotos(supabase, 'promo-' + reportModal.product_id, rFiles)
@@ -414,6 +411,11 @@ export default function PenjualanPromoPage() {
   // selalu form.branch_id (1 baris = 1 cabang), saat buat baru cuma valid kalau persis 1 cabang
   // dicentang (restrict_employees otomatis dimatikan kalau lebih dari 1, lihat toggleBranch).
   const effectiveBranchId = form.id ? form.branch_id : (form.branch_ids.length === 1 ? form.branch_ids[0] : '')
+
+  // Dipakai utk peringatan non-blok di modal Lapor Penjualan -- lewat max_late_days TIDAK
+  // menghalangi kirim, cuma memotong bonus laporan ini 50% (dihitung ulang & dikunci di server).
+  const rLateDiffDays = rDate ? Math.round((new Date(toISODate(new Date())).getTime() - new Date(rDate).getTime()) / 86400000) : 0
+  const rLatePenalty = !!(reportModal?.max_late_days !== null && reportModal?.max_late_days !== undefined && rLateDiffDays > reportModal.max_late_days)
 
   const STATUS_BADGE: Record<ReportStatus, string> = {
     pending: 'bg-amber-100 text-amber-700', approved: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-600',
@@ -563,6 +565,7 @@ export default function PenjualanPromoPage() {
                                       Nota: {fmtDate(r.report_date)} · dikirim {fmtDateTime(r.created_at)}
                                       <span className={`ml-1.5 font-semibold px-1.5 py-0.5 rounded ${STATUS_BADGE[r.status]}`}>{STATUS_LABEL[r.status]}</span>
                                       {r.is_late && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">⏰ TERLAMBAT (&gt;H+3)</span>}
+                                      {r.late_penalty_pct > 0 && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700">⚠️ Bonus -{r.late_penalty_pct}% (lewat batas)</span>}
                                     </p>
                                     {r.notes && <p className="text-xs text-slate-600 mt-1">{r.notes}</p>}
                                     {r.status === 'rejected' && r.rejection_reason && <p className="text-xs text-red-600 mt-1">Alasan: {r.rejection_reason}</p>}
@@ -731,7 +734,7 @@ export default function PenjualanPromoPage() {
                     <label className="block text-xs font-medium text-slate-700 mb-1">Maks Hari Sejak Tanggal Nota (opsional)</label>
                     <input type="number" min="0" value={form.max_late_days} onChange={e => setForm({ ...form, max_late_days: e.target.value })} placeholder="Contoh: 2 (kosongkan = tidak dibatasi)"
                       className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                    <p className="text-[11px] text-slate-400 mt-1">Lewat batas ini, laporan ditolak otomatis saat dikirim (bukan cuma ditandai).</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Lewat batas ini, laporan tetap bisa dikirim & diproses, tapi bonus laporan itu dipotong 50% (qty tetap dihitung penuh ke progres/KPI).</p>
                   </div>
                 </div>
               ) : (
@@ -847,7 +850,11 @@ export default function PenjualanPromoPage() {
                 <input type="date" value={rDate} max={toISODate(new Date())} onChange={e => setRDate(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 outline-none" />
                 {reportModal.max_late_days !== null && (
-                  <p className="text-[11px] text-slate-400 mt-1">Maks {reportModal.max_late_days} hari sejak tanggal nota, lewat itu laporan tidak valid.</p>
+                  rLatePenalty ? (
+                    <p className="text-[11px] text-red-600 font-medium mt-1">⚠️ Sudah {rLateDiffDays} hari sejak tanggal nota (maks H+{reportModal.max_late_days}) — laporan tetap bisa dikirim, tapi bonusnya dipotong 50%.</p>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 mt-1">Maks H+{reportModal.max_late_days} dari tanggal nota, lewat itu bonus dipotong 50%.</p>
+                  )
                 )}
               </div>
               <div>
