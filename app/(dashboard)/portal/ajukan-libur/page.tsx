@@ -54,10 +54,17 @@ export default function AjukanLiburPage() {
 
     const currentPeriod = getCurrentRosterPeriod()
     const currentStartStr = localDateStr(currentPeriod.start)
-    const { count: currentActiveCount } = await supabase.from('roster_pick_requests')
-      .select('id', { count: 'exact', head: true })
+    const { data: currentRows } = await supabase.from('roster_pick_requests')
+      .select('status')
       .eq('employee_id', effectiveId).eq('period_start', currentStartStr).neq('status', 'rejected')
-    const useCurrentPeriod = (currentActiveCount ?? 0) < MAX_PICKS
+    const currentActiveCount = currentRows?.length ?? 0
+    // Hitungan SAJA tidak cukup -- kalau salah satu dari 4 pick itu masih 'draft' (misal pengganti
+    // tanggal yang baru ditolak), totalnya sudah 4 tapi draft itu belum pernah terkirim ke HR.
+    // Tanpa cek ini, karyawan yang kebetulan SUDAH mengisi 4/4 periode depan juga akan langsung
+    // dilempar ke periode depan itu (dianggap "selesai"), dan draft yang masih nyangkut di
+    // periode sekarang jadi tidak pernah kelihatan lagi di halaman ini.
+    const currentHasDraft = (currentRows ?? []).some(r => r.status === 'draft')
+    const useCurrentPeriod = currentActiveCount < MAX_PICKS || currentHasDraft
     const activePeriod = useCurrentPeriod ? currentPeriod : getUpcomingRosterPeriod()
     setPeriod(activePeriod)
     setIsCurrentPeriod(useCurrentPeriod)
@@ -96,6 +103,13 @@ export default function AjukanLiburPage() {
   }
 
   const activeCount = ownRequests.filter(r => r.status !== 'rejected').length
+  // Dipakai buat bedain "sudah terkirim ke HR" (pending/approved) dari "baru dipilih, belum
+  // dikirim" (draft) -- activeCount sendiri sengaja menggabung keduanya (dipakai utk batas 4
+  // pick & cek weekend), tapi gabungan itu bikin counter "4/4" terlihat sama antara kasus
+  // normal (4 draft siap kirim) dan kasus campuran (misal 3 approved + 1 draft baru pengganti
+  // yang ditolak) -- padahal yang kedua masih butuh klik "Ajukan ke HR" sebelum HR bisa lihat.
+  const sentToHrCount = ownRequests.filter(r => r.status === 'pending' || r.status === 'approved').length
+  const draftCount = ownRequests.filter(r => r.status === 'draft').length
   // Weekend (Sabtu/Minggu) jadi primadona karena toko buka tiap hari — SEMUA karyawan di SEMUA
   // cabang dibatasi cuma boleh 1 pilihan weekend per periode (aturan global, bukan cuma cabang
   // ramai), supaya tidak ada yang "menguasai" weekend terus-menerus tiap bulan.
@@ -208,9 +222,17 @@ export default function AjukanLiburPage() {
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <span className="text-sm text-slate-600">Terpilih: <strong className={activeCount >= MAX_PICKS ? 'text-green-600' : 'text-blue-600'}>{activeCount}</strong> / {MAX_PICKS}
+          <span className="text-sm text-slate-600">Terpilih: <strong className={activeCount >= MAX_PICKS ? (draftCount > 0 ? 'text-amber-600' : 'text-green-600') : 'text-blue-600'}>{activeCount}</strong> / {MAX_PICKS}
             {weekendCapActive && <span className="ml-3 text-slate-400">· Weekend: <strong className={weekendPicksUsed >= 1 ? 'text-red-600' : 'text-blue-600'}>{weekendPicksUsed}</strong> / 1</span>}
           </span>
+          {/* Status campuran (sebagian sudah diputuskan HR, sisanya baru dipilih lagi -- misal
+              pengganti tanggal yang ditolak) -- tanpa ini, "Terpilih: 4/4" kelihatan sama persis
+              dengan kondisi siap-kirim normal, padahal masih ada draft yang belum terkirim ke HR. */}
+          {activeCount >= MAX_PICKS && draftCount > 0 && (
+            <p className="text-xs font-medium text-amber-600 mt-0.5">
+              ⚠️ {sentToHrCount} tanggal sudah diproses HR, {draftCount} tanggal lagi masih <strong>draft</strong> (belum terkirim) — klik tombol di samping untuk mengirimnya.
+            </p>
+          )}
           <p className="text-xs text-slate-400 mt-0.5">Tanda kuning = ada rekan lain (cabang mana pun) yang juga libur/mengajukan di tanggal itu</p>
         </div>
         {alreadySubmitted ? (
@@ -218,7 +240,7 @@ export default function AjukanLiburPage() {
         ) : (
           <button onClick={submitAll} disabled={!readyToSubmit || submitting || previewReadOnly}
             className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
-            {submitting ? 'Mengajukan...' : `Ajukan ke HR (${activeCount}/${MAX_PICKS})`}
+            {submitting ? 'Mengajukan...' : draftCount > 0 && draftCount < MAX_PICKS ? `Ajukan ke HR (${draftCount} tanggal baru)` : `Ajukan ke HR (${activeCount}/${MAX_PICKS})`}
           </button>
         )}
       </div>
