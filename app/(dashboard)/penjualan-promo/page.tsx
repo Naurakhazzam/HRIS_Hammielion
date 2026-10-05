@@ -150,7 +150,13 @@ export default function PenjualanPromoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => { if (ready && canReview) fetchAdmin() }, [ready, canReview, fetchAdmin])
+  useEffect(() => {
+    // Refetch tiap kali filter periode/cabang berubah (fetchAdmin identitasnya ikut berubah
+    // karena bergantung ke filterMonth/filterYear/filterBranch) -- pola sinkron-ke-server standar,
+    // bukan state lokal, jadi aman dipanggil langsung di sini.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (ready && canReview) fetchAdmin()
+  }, [ready, canReview, fetchAdmin])
 
   function openNew() {
     setForm({ ...emptyForm, period_month: filterMonth, period_year: filterYear, branch_id: filterBranch })
