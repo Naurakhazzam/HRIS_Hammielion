@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { isPreviewModeClient } from '@/lib/previewMode'
+import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
 import { uploadReportPhotos, signedPhotoUrls, fmtDate, fmtDateTime } from '@/lib/meeting'
 
@@ -42,6 +42,7 @@ export default function PenjualanPromoPage() {
   const [ready, setReady] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [canReview, setCanReview] = useState(false) // owner/hr/finance -- boleh approve/reject laporan
+  const [previewReadOnly, setPreviewReadOnly] = useState(false)
   const [branches, setBranches] = useState<Branch[]>([])
   const [employees, setEmployees] = useState<Emp[]>([])
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -92,10 +93,15 @@ export default function PenjualanPromoPage() {
     setTimeout(() => setMessage(null), 4000)
   }
 
-  const fetchMine = useCallback(async () => {
+  const fetchMine = useCallback(async (previewing: boolean = false) => {
     setLoadingMine(true)
+    // Mode Preview: tampilkan data employee contoh (PREVIEW_EMPLOYEE_ID), BUKAN employee_id akun
+    // admin yang sedang login -- get_my_promo_sales_progress & get_employee_promo_bonus keduanya
+    // sudah bisa dipanggil atas nama employee lain kalau pemanggilnya owner/hr/finance (lihat
+    // migrasi 055). Tanpa ini, preview selalu menampilkan data akun admin sendiri (biasanya kosong),
+    // bukan punya employee yang di-preview.
     const [{ data, error }, { data: periodData }] = await Promise.all([
-      supabase.rpc('get_my_promo_sales_progress'),
+      supabase.rpc('get_my_promo_sales_progress', { p_employee_id: previewing ? PREVIEW_EMPLOYEE_ID : null }),
       supabase.rpc('current_payroll_period'),
     ])
     if (error) console.error('get_my_promo_sales_progress:', error.message)
@@ -103,10 +109,14 @@ export default function PenjualanPromoPage() {
     const period = Array.isArray(periodData) ? periodData[0] : periodData
     if (period?.period_end) {
       const end = new Date(period.period_end)
-      const { data: myEmp } = await supabase.from('users').select('employee_id').eq('id', (await supabase.auth.getUser()).data.user?.id ?? '').single()
-      if (myEmp?.employee_id) {
+      let myEmpId: string | null = previewing ? PREVIEW_EMPLOYEE_ID : null
+      if (!previewing) {
+        const { data: myEmp } = await supabase.from('users').select('employee_id').eq('id', (await supabase.auth.getUser()).data.user?.id ?? '').single()
+        myEmpId = myEmp?.employee_id ?? null
+      }
+      if (myEmpId) {
         const { data: bonus } = await supabase.rpc('get_employee_promo_bonus', {
-          p_employee_id: myEmp.employee_id, p_period_month: end.getMonth() + 1, p_period_year: end.getFullYear(),
+          p_employee_id: myEmpId, p_period_month: end.getMonth() + 1, p_period_year: end.getFullYear(),
         })
         setMyBonus(bonus == null ? null : Number(bonus))
       }
@@ -135,6 +145,7 @@ export default function PenjualanPromoPage() {
       const review = ['owner', 'hr', 'finance'].includes(role) && !preview
       setIsAdmin(admin)
       setCanReview(review)
+      setPreviewReadOnly(preview)
       const { data: bData } = await supabase.from('branches').select('id,name').order('name')
       setBranches((bData as Branch[]) || [])
       if (review) {
@@ -142,7 +153,7 @@ export default function PenjualanPromoPage() {
         setEmployees((eData as Emp[]) || [])
         await fetchAdmin()
       } else {
-        await fetchMine()
+        await fetchMine(preview)
       }
       setReady(true)
     }
@@ -365,6 +376,7 @@ export default function PenjualanPromoPage() {
 
   async function submitReport(e: React.FormEvent) {
     e.preventDefault()
+    if (previewReadOnly) return
     setRError('')
     if (!reportModal) return
     const qty = parseFloat(rQty)
@@ -596,7 +608,13 @@ export default function PenjualanPromoPage() {
           )}
         </>
       ) : (
-        loadingMine ? (
+        <>
+        {previewReadOnly && (
+          <div className="bg-slate-100 border border-slate-200 text-slate-600 text-sm rounded-lg px-4 py-2.5 mb-4">
+            🔒 Mode Preview — data & tombol di bawah ini milik karyawan contoh, baca-saja (tombol Lapor Penjualan dinonaktifkan).
+          </div>
+        )}
+        {loadingMine ? (
           <div className="py-10 text-center text-slate-500">Memuat...</div>
         ) : myProgress.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada target penjualan promo untuk cabang Anda periode ini.</div>
@@ -632,14 +650,15 @@ export default function PenjualanPromoPage() {
                     </div>
                   </div>
                 )}
-                <button onClick={() => openReport(p)}
-                  className="mt-4 px-5 py-3 rounded-xl text-base font-bold bg-green-600 hover:bg-green-700 text-white shadow-sm transition">
+                <button onClick={() => openReport(p)} disabled={previewReadOnly}
+                  className="mt-4 px-5 py-3 rounded-xl text-base font-bold bg-green-600 hover:bg-green-700 text-white shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed">
                   🧾 Lapor Penjualan
                 </button>
               </div>
             ))}
           </div>
-        )
+        )}
+        </>
       )}
 
       {showForm && (
