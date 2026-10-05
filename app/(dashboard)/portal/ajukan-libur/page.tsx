@@ -22,7 +22,6 @@ export default function AjukanLiburPage() {
   const [colleagueNames, setColleagueNames] = useState<Record<string, string>>({})
   const [rejectedByDate, setRejectedByDate] = useState<Record<string, string>>({})
   const [busyDate, setBusyDate] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // Periode yang ditampilkan BUKAN selalu "periode berikutnya" -- kalau periode yang SEDANG
@@ -103,13 +102,10 @@ export default function AjukanLiburPage() {
   }
 
   const activeCount = ownRequests.filter(r => r.status !== 'rejected').length
-  // Dipakai buat bedain "sudah terkirim ke HR" (pending/approved) dari "baru dipilih, belum
-  // dikirim" (draft) -- activeCount sendiri sengaja menggabung keduanya (dipakai utk batas 4
-  // pick & cek weekend), tapi gabungan itu bikin counter "4/4" terlihat sama antara kasus
-  // normal (4 draft siap kirim) dan kasus campuran (misal 3 approved + 1 draft baru pengganti
-  // yang ditolak) -- padahal yang kedua masih butuh klik "Ajukan ke HR" sebelum HR bisa lihat.
-  const sentToHrCount = ownRequests.filter(r => r.status === 'pending' || r.status === 'approved').length
-  const draftCount = ownRequests.filter(r => r.status === 'draft').length
+  // Peninggalan dari alur draft lama (sebelum pembaruan ini) -- sekarang pilih tanggal langsung
+  // jadi 'pending', tidak ada draft baru yang dibuat lagi. Baris 'draft' yang masih tersisa cuma
+  // dari pilihan sebelum pembaruan, dan cuma bisa dibereskan dengan dibatalkan lalu dipilih ulang.
+  const legacyDraftCount = ownRequests.filter(r => r.status === 'draft').length
   // Weekend (Sabtu/Minggu) jadi primadona karena toko buka tiap hari — SEMUA karyawan di SEMUA
   // cabang dibatasi cuma boleh 1 pilihan weekend per periode (aturan global, bukan cuma cabang
   // ramai), supaya tidak ada yang "menguasai" weekend terus-menerus tiap bulan.
@@ -119,64 +115,54 @@ export default function AjukanLiburPage() {
 
   async function toggleDate(dateStr: string, own: OwnRequest | undefined) {
     if (previewReadOnly) return
+
+    // Batalkan pilihan yang sudah ada (pending, atau sisa 'draft' lama) -- approved terkunci,
+    // tidak bisa dibatalkan di sini.
     if (own) {
-      if (own.status !== 'draft' && own.status !== 'pending') return // approved tidak bisa dibatalkan di sini
+      if (own.status === 'approved') return
       const dateLabel = new Date(dateStr + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long' })
       if (!confirm(`Batalkan pilihan libur tanggal ${dateLabel}?`)) return
-    }
-    setBusyDate(dateStr)
-    if (own) {
+      setBusyDate(dateStr)
       const { error } = await supabase.from('roster_pick_requests').delete().eq('id', own.id)
       if (error) showMessage('error', 'Gagal membatalkan: ' + error.message)
       else showMessage('success', 'Pilihan dibatalkan.')
-    } else {
-      if (activeCount >= MAX_PICKS) {
-        showMessage('error', `Sudah mencapai maksimal ${MAX_PICKS} tanggal untuk periode ini.`)
-        setBusyDate(null)
-        return
-      }
-      if (weekendCapActive && isWeekend(dateStr) && weekendPicksUsed >= 1) {
-        showMessage('error', 'Maksimal 1 tanggal weekend (Sabtu/Minggu) per periode — supaya weekend bisa bergantian dengan rekan sekantor.')
-        setBusyDate(null)
-        return
-      }
-      const { error } = await supabase.from('roster_pick_requests').insert({
-        employee_id: employeeId,
-        period_start: periodStartStr,
-        period_end: periodEndStr,
-        requested_date: dateStr,
-        status: 'draft',
-      })
-      if (error) showMessage('error', 'Gagal memilih tanggal: ' + error.message)
-      else showMessage('success', `Tanggal ${new Date(dateStr + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long' })} dipilih. Belum terkirim ke HR sampai keempat tanggal terisi dan Anda klik "Ajukan ke HR".`)
+      await fetchData(employeeId)
+      setBusyDate(null)
+      return
     }
+
+    // Pilih tanggal baru -- langsung terkirim ke HR (status 'pending'), tidak ada lagi tahap
+    // draft terpisah yang harus di-"Ajukan ke HR" manual.
+    if (activeCount >= MAX_PICKS) {
+      showMessage('error', `Sudah mencapai maksimal ${MAX_PICKS} tanggal untuk periode ini.`)
+      return
+    }
+    if (weekendCapActive && isWeekend(dateStr) && weekendPicksUsed >= 1) {
+      showMessage('error', 'Maksimal 1 tanggal weekend (Sabtu/Minggu) per periode — supaya weekend bisa bergantian dengan rekan sekantor.')
+      return
+    }
+
+    const dateLabel = new Date(dateStr + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long' })
+    // isCurrentPeriod = periode ini sudah berjalan (bukan diajukan di muka) -- begitu dipilih,
+    // langsung kena denda disiplin Rp10.000 (dihitung otomatis oleh trigger DB saat insert).
+    // Dikonfirmasi dulu karena sekarang tidak ada lagi jeda draft untuk batal diam-diam sebelum
+    // benar-benar terkirim & kena potongan.
+    if (isCurrentPeriod) {
+      if (!confirm(`Periode ini sudah berjalan. Tanggal ${dateLabel} akan langsung terkirim ke HR dan kena denda disiplin Rp10.000 (dipotong otomatis dari gaji periode ini). Lanjutkan?`)) return
+    }
+
+    setBusyDate(dateStr)
+    const { error } = await supabase.from('roster_pick_requests').insert({
+      employee_id: employeeId,
+      period_start: periodStartStr,
+      period_end: periodEndStr,
+      requested_date: dateStr,
+      status: 'pending',
+    })
+    if (error) showMessage('error', 'Gagal mengajukan tanggal: ' + error.message)
+    else showMessage('success', `Tanggal ${dateLabel} langsung diajukan ke HR.`)
     await fetchData(employeeId)
     setBusyDate(null)
-  }
-
-  // Wajib genap 4/4 dulu baru bisa dikirim ke HR sekaligus — sebelum itu semua pilihan
-  // berstatus 'draft' dan tidak kelihatan sama sekali oleh HR.
-  const hasDraft = ownRequests.some(r => r.status === 'draft')
-  const readyToSubmit = activeCount === MAX_PICKS && hasDraft
-  const alreadySubmitted = activeCount === MAX_PICKS && !hasDraft
-
-  async function submitAll() {
-    if (!readyToSubmit || previewReadOnly) return
-    // isCurrentPeriod = periode ini sudah berjalan (bukan diajukan di muka utk periode mendatang)
-    // -- sama persis dengan kondisi yang dipakai RPC submit_roster_picks utk kena denda disiplin,
-    // jadi warning di sini harus selalu sinkron dengan yang benar-benar dipotong di payroll.
-    const confirmMsg = isCurrentPeriod
-      ? `Periode ini sudah berjalan — mengajukan libur sekarang (bukan di muka untuk periode mendatang) akan dikenai denda disiplin Rp10.000/tanggal (total Rp${(MAX_PICKS * 10000).toLocaleString('id-ID')} untuk ${MAX_PICKS} tanggal), dipotong otomatis dari gaji periode ini. Tetap lanjutkan?`
-      : `Ajukan ${MAX_PICKS} tanggal libur ini ke HR/Owner? Tidak bisa diubah lagi kecuali dibatalkan satu-satu.`
-    if (!confirm(confirmMsg)) return
-    setSubmitting(true)
-    const { error } = await supabase.rpc('submit_roster_picks', { p_period_start: periodStartStr })
-    if (error) showMessage('error', 'Gagal mengajukan: ' + error.message)
-    else showMessage('success', isCurrentPeriod
-      ? `Berhasil diajukan ke HR/Owner — denda disiplin Rp${(MAX_PICKS * 10000).toLocaleString('id-ID')} akan terpotong otomatis di slip gaji periode ini.`
-      : 'Berhasil diajukan ke HR/Owner, tinggal menunggu keputusan.')
-    await fetchData(employeeId)
-    setSubmitting(false)
   }
 
   if (loading) return <div className="text-center py-12 text-slate-500">Memuat...</div>
@@ -187,7 +173,7 @@ export default function AjukanLiburPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Ajukan Jadwal Libur</h1>
-        <p className="text-sm text-slate-500">Wajib pilih tepat {MAX_PICKS} tanggal libur untuk periode <strong>{rosterPeriodLabel(period.start, period.end)}</strong> sebelum bisa diajukan ke HR/Owner — belum bisa diproses kalau belum genap {MAX_PICKS}/{MAX_PICKS}.</p>
+        <p className="text-sm text-slate-500">Pilih maksimal {MAX_PICKS} tanggal libur untuk periode <strong>{rosterPeriodLabel(period.start, period.end)}</strong> — setiap tanggal yang Anda pilih <strong>langsung terkirim ke HR/Owner</strong>, tidak perlu tombol kirim terpisah. Masih bisa dibatalkan sendiri selama belum diputuskan (disetujui/ditolak).</p>
       </div>
 
       {isCurrentPeriod && (
@@ -195,14 +181,20 @@ export default function AjukanLiburPage() {
           <p className="text-sm font-semibold text-red-800">📌 Periode ini sedang berjalan sekarang — kena denda disiplin</p>
           <p className="text-sm text-red-700 mt-0.5">
             Jatah libur Anda untuk periode ini masih kurang dari {MAX_PICKS} (mungkin ada yang ditolak, atau belum sempat dilengkapi) — lengkapi dulu di sini sebelum bisa lanjut ke periode berikutnya. Tanggal yang sudah lewat otomatis terkunci.
-            Karena diajukan setelah periodenya berjalan (bukan di muka), begitu diajukan ke HR akan kena <strong>denda disiplin Rp10.000/tanggal</strong>, dipotong otomatis dari gaji periode ini.
+            Karena dipilih setelah periodenya berjalan (bukan di muka), setiap tanggal yang Anda pilih sekarang akan langsung terkirim ke HR dan kena <strong>denda disiplin Rp10.000/tanggal</strong>, dipotong otomatis dari gaji periode ini.
           </p>
+        </div>
+      )}
+
+      {legacyDraftCount > 0 && (
+        <div className="bg-slate-100 border border-slate-200 text-slate-600 text-sm rounded-lg px-4 py-2.5 mb-6">
+          ℹ️ Ada {legacyDraftCount} pilihan format lama yang belum sempat terkirim ke HR (dari sebelum pembaruan sistem ini) — batalkan tanggalnya lalu pilih ulang supaya otomatis terkirim ke HR.
         </div>
       )}
 
       {previewReadOnly && (
         <div className="bg-slate-100 border border-slate-200 text-slate-600 text-sm rounded-lg px-4 py-2.5 mb-6">
-          🔒 Mode Preview — halaman ini baca-saja, tombol Pilih/Batalkan/Ajukan dinonaktifkan.
+          🔒 Mode Preview — halaman ini baca-saja, tombol Pilih/Batalkan dinonaktifkan.
         </div>
       )}
 
@@ -222,26 +214,13 @@ export default function AjukanLiburPage() {
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <span className="text-sm text-slate-600">Terpilih: <strong className={activeCount >= MAX_PICKS ? (draftCount > 0 ? 'text-amber-600' : 'text-green-600') : 'text-blue-600'}>{activeCount}</strong> / {MAX_PICKS}
+          <span className="text-sm text-slate-600">Terpilih: <strong className={activeCount >= MAX_PICKS ? 'text-green-600' : 'text-blue-600'}>{activeCount}</strong> / {MAX_PICKS}
             {weekendCapActive && <span className="ml-3 text-slate-400">· Weekend: <strong className={weekendPicksUsed >= 1 ? 'text-red-600' : 'text-blue-600'}>{weekendPicksUsed}</strong> / 1</span>}
           </span>
-          {/* Status campuran (sebagian sudah diputuskan HR, sisanya baru dipilih lagi -- misal
-              pengganti tanggal yang ditolak) -- tanpa ini, "Terpilih: 4/4" kelihatan sama persis
-              dengan kondisi siap-kirim normal, padahal masih ada draft yang belum terkirim ke HR. */}
-          {activeCount >= MAX_PICKS && draftCount > 0 && (
-            <p className="text-xs font-medium text-amber-600 mt-0.5">
-              ⚠️ {sentToHrCount} tanggal sudah diproses HR, {draftCount} tanggal lagi masih <strong>draft</strong> (belum terkirim) — klik tombol di samping untuk mengirimnya.
-            </p>
-          )}
           <p className="text-xs text-slate-400 mt-0.5">Tanda kuning = ada rekan lain (cabang mana pun) yang juga libur/mengajukan di tanggal itu</p>
         </div>
-        {alreadySubmitted ? (
-          <span className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-medium whitespace-nowrap">✓ Sudah diajukan, menunggu HR/Owner</span>
-        ) : (
-          <button onClick={submitAll} disabled={!readyToSubmit || submitting || previewReadOnly}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
-            {submitting ? 'Mengajukan...' : draftCount > 0 && draftCount < MAX_PICKS ? `Ajukan ke HR (${draftCount} tanggal baru)` : `Ajukan ke HR (${activeCount}/${MAX_PICKS})`}
-          </button>
+        {activeCount >= MAX_PICKS && (
+          <span className="text-xs px-3 py-1.5 rounded-lg bg-green-50 text-green-700 font-medium whitespace-nowrap">✓ Jatah {MAX_PICKS} tanggal periode ini penuh</span>
         )}
       </div>
 
@@ -287,7 +266,7 @@ export default function AjukanLiburPage() {
                     <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 font-medium">Menunggu HR</span>
                   )}
                   {own?.status === 'draft' && (
-                    <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-500 font-medium">Draf</span>
+                    <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-500 font-medium" title="Peninggalan format lama sebelum pembaruan sistem — batalkan lalu pilih ulang supaya otomatis terkirim ke HR">Belum Terkirim (lama)</span>
                   )}
                   <button
                     onClick={() => toggleDate(dateStr, own)}

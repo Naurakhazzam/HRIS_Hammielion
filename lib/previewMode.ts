@@ -6,10 +6,10 @@
 //
 // Data yang ditampilkan selama preview memakai employee sungguhan (PREVIEW_EMPLOYEE_ID), BUKAN
 // employee_id akun admin yang sedang login — permintaan Owner supaya preview lebih representatif
-// (data admin sendiri biasanya kosong/tidak lengkap). Karena RPC tulis (mis. update_own_employee_profile,
-// submit_roster_picks) tetap menyasar employee_id akun login sungguhan (bukan employee ini), semua
-// halaman Portal WAJIB menonaktifkan tombol submit/aksi saat mode ini aktif — lihat pemakaian
-// isPreviewModeClient() di tiap halaman portal/*.
+// (data admin sendiri biasanya kosong/tidak lengkap). Karena RPC/insert tulis (mis.
+// update_own_employee_profile, insert roster_pick_requests) tetap menyasar employee_id akun login
+// sungguhan (bukan employee ini), semua halaman Portal WAJIB menonaktifkan tombol submit/aksi saat
+// mode ini aktif — lihat pemakaian isPreviewModeClient() di tiap halaman portal/*.
 const COOKIE_NAME = 'previewAsEmployee'
 
 // Rahmat Saleh (EMP-013) — dipilih Owner sebagai contoh nyata karena datanya paling lengkap.
