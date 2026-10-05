@@ -33,6 +33,11 @@ const emptyForm = {
   bonus_mode_percent: false, bonus_percent: '', price_options: [] as number[], max_late_days: '',
 }
 const PRICE_OPTION_CHOICES = [40000, 50000, 55000, 75000, 100000]
+// Kelonggaran 1 hari utk potongan bonus telat lapor -- cuma berlaku tanggal ini (lihat migrasi
+// 057), supaya karyawan bisa susulkan laporan yang tertunda tanpa kena potongan sebelum aturan
+// H+max_late_days benar-benar tegak mulai besoknya. Server (WIB) yang jadi acuan sebenarnya;
+// ini cuma dipakai di sini biar peringatan di layar tidak salah menakuti padahal tidak dipotong.
+const PROMO_LATE_PENALTY_GRACE_DAY = '2026-10-06'
 const toISODate = (d: Date) => d.toISOString().slice(0, 10)
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
 
@@ -414,8 +419,9 @@ export default function PenjualanPromoPage() {
 
   // Dipakai utk peringatan non-blok di modal Lapor Penjualan -- lewat max_late_days TIDAK
   // menghalangi kirim, cuma memotong bonus laporan ini 50% (dihitung ulang & dikunci di server).
+  const rIsGraceDay = toISODate(new Date()) === PROMO_LATE_PENALTY_GRACE_DAY
   const rLateDiffDays = rDate ? Math.round((new Date(toISODate(new Date())).getTime() - new Date(rDate).getTime()) / 86400000) : 0
-  const rLatePenalty = !!(reportModal?.max_late_days !== null && reportModal?.max_late_days !== undefined && rLateDiffDays > reportModal.max_late_days)
+  const rLatePenalty = !rIsGraceDay && !!(reportModal?.max_late_days !== null && reportModal?.max_late_days !== undefined && rLateDiffDays > reportModal.max_late_days)
 
   const STATUS_BADGE: Record<ReportStatus, string> = {
     pending: 'bg-amber-100 text-amber-700', approved: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-600',
@@ -850,7 +856,9 @@ export default function PenjualanPromoPage() {
                 <input type="date" value={rDate} max={toISODate(new Date())} onChange={e => setRDate(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 outline-none" />
                 {reportModal.max_late_days !== null && (
-                  rLatePenalty ? (
+                  rIsGraceDay ? (
+                    <p className="text-[11px] text-emerald-600 font-medium mt-1">✅ Hari ini khusus bebas batas waktu — laporan mundur berapa hari pun tetap dapat bonus 100%. Mulai besok, aturan maks H+{reportModal.max_late_days} berlaku normal lagi.</p>
+                  ) : rLatePenalty ? (
                     <p className="text-[11px] text-red-600 font-medium mt-1">⚠️ Sudah {rLateDiffDays} hari sejak tanggal nota (maks H+{reportModal.max_late_days}) — laporan tetap bisa dikirim, tapi bonusnya dipotong 50%.</p>
                   ) : (
                     <p className="text-[11px] text-slate-400 mt-1">Maks H+{reportModal.max_late_days} dari tanggal nota, lewat itu bonus dipotong 50%.</p>
