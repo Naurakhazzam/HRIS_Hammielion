@@ -148,7 +148,7 @@ export default function JemputTokoPusatPage() {
     setClaimingReturnId(null)
     if (error) { showMessage('error', 'Gagal mengambil tugas retur: ' + error.message); return }
     const storeName = ret.logistics_stores?.name ?? 'toko tujuan'
-    showMessage('success', `Tugas ambil retur ${storeName} berhasil diklaim — toko ini otomatis masuk ke rencana Anda, proses di Jalankan Pengiriman saat sampai di sana.`)
+    showMessage('success', `Tugas ambil retur ${storeName} berhasil diklaim — muncul di kartu "Tugas Retur" di Jalankan Pengiriman (bukan daftar toko kirim). Catat barangnya di sana saat sampai di toko.`)
     await refresh()
   }
 

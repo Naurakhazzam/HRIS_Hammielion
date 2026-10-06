@@ -205,7 +205,10 @@ export default function JalanPengirimanPage() {
   // tahap penutupan trip, bareng foto amper bensin).
   const activeReturns = planReturns.filter(r => r.status === 'diambil')
   const selectedReturn = activeReturns.find(r => r.id === selectedReturnId) || null
-  const allResolved = (planStores.length > 0 || supplierTasks.length > 0) && pendingStores.length === 0 && pendingSupplierTasks.length === 0
+  // planReturns ikut dihitung sbg "ada tugas" -- trip yang isinya cuma ambil retur (tanpa toko
+  // kirim/belanja) tetap harus bisa lanjut ke foto box & Lapor Sampai Garasi.
+  const allResolved = (planStores.length > 0 || supplierTasks.length > 0 || planReturns.length > 0) && pendingStores.length === 0 && pendingSupplierTasks.length === 0
+  const returnsWithoutItems = activeReturns.filter(r => (returnItemsByReturn[r.id]?.length || 0) === 0)
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -751,7 +754,9 @@ export default function JalanPengirimanPage() {
             </div>
           )}
 
-          {selectedPlan?.status === 'departed' && selectedReturn && (
+          {/* Juga dibuka di tahap 'closing' -- driver yang lupa mencatat barang sebelum foto box
+              harus tetap bisa mencatatnya, karena finish_store_return menolak retur tanpa barang. */}
+          {(selectedPlan?.status === 'departed' || selectedPlan?.status === 'closing') && selectedReturn && (
             <div className="bg-white rounded-xl border-2 border-purple-300 p-5 mt-4">
               <button onClick={clearReturnSelection} className="text-xs text-blue-600 hover:underline mb-2">← Pilih Tugas Lain</button>
               <h2 className="text-lg font-bold text-slate-800 mb-1">↩️ Ambil Retur — {selectedReturn.logistics_stores?.name}</h2>
@@ -1104,6 +1109,11 @@ export default function JalanPengirimanPage() {
             <div className="bg-white rounded-xl border-2 border-blue-200 p-5">
               <h2 className="text-lg font-bold text-slate-800 mb-1">✓ Semua Toko Sudah Diproses</h2>
               <p className="text-sm text-slate-500 mb-4">Sebelum kembali ke garasi, foto dulu kondisi box/bak yang sudah kosong.</p>
+              {returnsWithoutItems.length > 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                  ⚠ Retur di {returnsWithoutItems.map(r => r.logistics_stores?.name).join(', ')} belum ada barang yang dicatat. Catat dulu lewat Tugas Retur di bawah.
+                </p>
+              )}
               {boxPhotoUrl ? (
                 <div className="space-y-3">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1121,7 +1131,7 @@ export default function JalanPengirimanPage() {
             </div>
           )}
 
-          {selectedPlan?.status === 'closing' && (() => {
+          {selectedPlan?.status === 'closing' && !selectedReturn && (() => {
             const boxConfirmedAt = selectedPlan.box_confirmed_at ? new Date(selectedPlan.box_confirmed_at).getTime() : null
             const msRemaining = boxConfirmedAt ? (boxConfirmedAt + garageGapMinutes * 60000) - nowTick : 0
             const canReportGarage = boxConfirmedAt !== null && msRemaining <= 0
@@ -1140,7 +1150,14 @@ export default function JalanPengirimanPage() {
                         {activeReturns.map(r => (
                           <div key={r.id} className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-2">
                             <p className="text-sm font-semibold text-slate-800">{r.logistics_stores?.name}</p>
-                            <p className="text-xs text-slate-500">{returnItemsByReturn[r.id]?.length || 0} barang tercatat</p>
+                            <div className="flex items-center justify-between gap-2">
+                              <p className={`text-xs ${(returnItemsByReturn[r.id]?.length || 0) === 0 ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
+                                {returnItemsByReturn[r.id]?.length || 0} barang tercatat{(returnItemsByReturn[r.id]?.length || 0) === 0 ? ' — wajib catat minimal 1 barang' : ''}
+                              </p>
+                              <button onClick={() => openReturnTask(r.id)} className="text-xs font-medium text-purple-700 hover:underline shrink-0">
+                                + Catat Barang Retur
+                              </button>
+                            </div>
                             {closingReturnPhotos[r.id] ? (
                               <div className="space-y-2">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1159,7 +1176,7 @@ export default function JalanPengirimanPage() {
                               placeholder="Barang disimpan di mana? (misal: gudang rak retur)"
                               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none" />
                             <button onClick={() => submitFinishReturn(r)}
-                              disabled={!closingReturnPhotos[r.id] || !closingReturnNotes[r.id]?.trim() || finishingReturnId === r.id}
+                              disabled={!closingReturnPhotos[r.id] || !closingReturnNotes[r.id]?.trim() || finishingReturnId === r.id || (returnItemsByReturn[r.id]?.length || 0) === 0}
                               className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                               {finishingReturnId === r.id ? 'Menyimpan...' : 'Tandai Selesai'}
                             </button>
