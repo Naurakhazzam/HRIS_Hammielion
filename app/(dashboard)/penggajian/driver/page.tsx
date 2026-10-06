@@ -491,7 +491,7 @@ export default function PenggajianDriverPage() {
       : ''
     const { data: cashOutRow, error: coErr } = await supabase.from('fin_cash_out').insert({
       branch_id: driverBranchId,
-      category: 'driver_wage',
+      category: 'driver_payout',
       amount: netAmount,
       description: `Gaji driver ${detailDriver.driverName} minggu ${detailDriver.weekStart}${potonganNote}`,
       transaction_date: payDriverDate,
@@ -567,7 +567,7 @@ export default function PenggajianDriverPage() {
       : ''
     const { data: cashOutRow, error: coErr } = await supabase.from('fin_cash_out').insert({
       branch_id: helperBranchId,
-      category: 'helper_wage',
+      category: 'helper_payout',
       amount: netAmount,
       description: `Gaji kenek ${detailKenek.helperName} minggu ${detailKenek.weekStart}${potonganNote}`,
       transaction_date: payKenekDate,

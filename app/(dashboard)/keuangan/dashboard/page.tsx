@@ -61,10 +61,10 @@ export default function DashboardKeuanganPage() {
     init()
   }, [supabase])
 
-  const computeTotals = useCallback(async (startDate: string, endDate: string, month: number, year: number): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
-    const [groupsRes, cashInRes, hppRes, cashOutRes, kasbonRes] = await Promise.all([
+  const computeTotals = useCallback(async (startDate: string, endDate: string): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
+    const [groupsRes, cashInRes, hppRes, cashOutRes, payrollCashRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
-      supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
+      supabase.from('fin_cash_in').select('branch_id, amount, expense_amount, cash_adjustment').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       // entry_type='hpp' wajib — tabel ini juga menyimpan baris entry_type='omset' (item #22),
       // tanpa filter ini "hpp" di sini kehitung dobel dengan omset dan Laba Kotor/Bersih jadi salah.
       supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'hpp').gte('entry_date', startDate).lte('entry_date', endDate),
@@ -72,8 +72,13 @@ export default function DashboardKeuanganPage() {
       // Kasbon yang terpotong dari gaji (dilunasi) periode ini — bukan kas keluar baru
       // (kasbon-nya sudah tercatat kas keluar saat dicairkan), tapi baru DI SINI beban
       // gajinya benar-benar diakui penuh. Tidak menyentuh fin_cash_out sama sekali.
-      supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').eq('status', 'paid').eq('period_month', month).eq('period_year', year).gt('kasbon_deduction', 0),
+      supabase.from('fin_cash_out').select('source_id').eq('status', 'approved').eq('source_table', 'payrolls').gte('transaction_date', startDate).lte('transaction_date', endDate),
     ])
+    // Kasbon dihitung di bulan saat gaji benar-benar dibayar (sama dengan kas keluar payroll), bukan periode gajinya.
+    const payrollIds = [...new Set(((payrollCashRes.data as { source_id: string }[]) || []).map(r => r.source_id))]
+    const kasbonRes = payrollIds.length === 0
+      ? { data: [], error: null }
+      : await supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').in('id', payrollIds).gt('kasbon_deduction', 0)
 
     if (groupsRes.error) console.error('Detail error report_groups:', JSON.stringify(groupsRes.error, null, 2))
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
@@ -90,10 +95,11 @@ export default function DashboardKeuanganPage() {
       return totalsByGroup.get(label)!
     }
 
-    for (const row of (cashInRes.data as { branch_id: string; amount: number }[]) || []) {
+    // Kas masuk bersih: omzet − pengeluaran dari omzet + selisih kas (sama dengan perhitungan Cash Flow)
+    for (const row of (cashInRes.data as { branch_id: string; amount: number; expense_amount: number; cash_adjustment: number }[]) || []) {
       const label = branchToGroup.get(row.branch_id)
       if (!label) continue
-      ensure(label).kasMasuk += Number(row.amount)
+      ensure(label).kasMasuk += Number(row.amount) - Number(row.expense_amount || 0) + Number(row.cash_adjustment || 0)
     }
     for (const row of (hppRes.data as { branch_id: string; hpp_amount: number }[]) || []) {
       const label = branchToGroup.get(row.branch_id)
@@ -159,8 +165,8 @@ export default function DashboardKeuanganPage() {
     const prevEndDate = localDateStr(new Date(prevYear, prevMonth, 0))
 
     const [cur, prev] = await Promise.all([
-      computeTotals(startDate, endDate, month, year),
-      computeTotals(prevStartDate, prevEndDate, prevMonth, prevYear),
+      computeTotals(startDate, endDate),
+      computeTotals(prevStartDate, prevEndDate),
     ])
 
     setGroups(cur.groups)

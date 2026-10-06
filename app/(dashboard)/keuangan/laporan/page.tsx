@@ -78,19 +78,25 @@ export default function LaporanResmiPage() {
     init()
   }, [supabase])
 
-  const computeTotals = useCallback(async (startDate: string, endDate: string, periodMonth: number, periodYear: number): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
-    const [groupsRes, cashInRes, hppRes, omsetSistemRes, cashOutRes, supplierRes, kasbonRes, belanjaSupplierRes] = await Promise.all([
+  const computeTotals = useCallback(async (startDate: string, endDate: string): Promise<{ groups: GroupTotals[]; consolidated: GroupTotals }> => {
+    const [groupsRes, cashInRes, hppRes, omsetSistemRes, cashOutRes, supplierRes, payrollCashRes, belanjaSupplierRes] = await Promise.all([
       supabase.from('fin_branch_report_groups').select('branch_id, report_group_label'),
-      supabase.from('fin_cash_in').select('branch_id, amount').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
+      supabase.from('fin_cash_in').select('branch_id, amount, expense_amount, cash_adjustment').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'hpp').gte('entry_date', startDate).lte('entry_date', endDate),
       supabase.from('fin_hpp_entries').select('branch_id, hpp_amount').eq('status', 'approved').eq('entry_type', 'omset').gte('entry_date', startDate).lte('entry_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount, fin_cash_out_categories(affects_net_profit)').eq('status', 'approved').gte('transaction_date', startDate).lte('transaction_date', endDate),
       supabase.from('fin_cash_out').select('branch_id, amount').eq('status', 'approved').eq('category', 'pembayaran_supplier').gte('transaction_date', startDate).lte('transaction_date', endDate),
-      supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').eq('status', 'paid').eq('period_month', periodMonth).eq('period_year', periodYear).gt('kasbon_deduction', 0),
+      supabase.from('fin_cash_out').select('source_id').eq('status', 'approved').eq('source_table', 'payrolls').gte('transaction_date', startDate).lte('transaction_date', endDate),
       // Belanja ke Supplier (Nota) — dari nota pembelian bulan ini, BEDA dari pembayaran (supplierRes
       // di atas), yang basisnya kapan uangnya benar-benar dibayar, bisa beda bulan dari nota-nya.
       supabase.from('supplier_purchases').select('branch_id, total_amount').gte('purchase_date', startDate).lte('purchase_date', endDate),
     ])
+    // Kasbon dihitung di bulan saat gaji benar-benar dibayar (sama dengan kas keluar payroll), bukan periode gajinya.
+    const payrollIds = [...new Set(((payrollCashRes.data as { source_id: string }[]) || []).map(r => r.source_id))]
+    const kasbonRes = payrollIds.length === 0
+      ? { data: [], error: null }
+      : await supabase.from('payrolls').select('kasbon_deduction, employees(branch_id)').in('id', payrollIds).gt('kasbon_deduction', 0)
+
     if (groupsRes.error) console.error('Detail error report_groups:', JSON.stringify(groupsRes.error, null, 2))
     if (cashInRes.error) console.error('Detail error cash_in:', JSON.stringify(cashInRes.error, null, 2))
     if (hppRes.error) console.error('Detail error hpp:', JSON.stringify(hppRes.error, null, 2))
@@ -108,9 +114,10 @@ export default function LaporanResmiPage() {
       if (!totalsByGroup.has(label)) totalsByGroup.set(label, { kasMasuk: 0, hpp: 0, biayaOperasional: 0, kasbonRealisasi: 0, omsetSistem: 0, pembayaranSupplierReal: 0, belanjaSupplier: 0, totalKasKeluar: 0 })
       return totalsByGroup.get(label)!
     }
-    for (const row of (cashInRes.data as { branch_id: string; amount: number }[]) || []) {
+    // Kas masuk bersih: omzet − pengeluaran dari omzet + selisih kas (sama dengan perhitungan Cash Flow)
+    for (const row of (cashInRes.data as { branch_id: string; amount: number; expense_amount: number; cash_adjustment: number }[]) || []) {
       const label = branchToGroup.get(row.branch_id)
-      if (label) ensure(label).kasMasuk += Number(row.amount)
+      if (label) ensure(label).kasMasuk += Number(row.amount) - Number(row.expense_amount || 0) + Number(row.cash_adjustment || 0)
     }
     for (const row of (hppRes.data as { branch_id: string; hpp_amount: number }[]) || []) {
       const label = branchToGroup.get(row.branch_id)
@@ -179,8 +186,8 @@ export default function LaporanResmiPage() {
     const prevEnd = localDateStr(new Date(py, pm, 0))
 
     const [cur, prev, saldoAwalRes, groupsRes, catCashOutRes] = await Promise.all([
-      computeTotals(curStart, curEnd, m, y),
-      computeTotals(prevStart, prevEnd, pm, py),
+      computeTotals(curStart, curEnd),
+      computeTotals(prevStart, prevEnd),
       // Saldo Awal (Real) cuma valid kalau ada rekening yang opening_balance_date-nya PERSIS di tanggal 1 periode ini —
       // artinya periode ini punya anchor saldo fisik yang benar-benar dihitung, bukan diperkirakan.
       supabase.from('fin_bank_accounts').select('opening_balance').eq('is_active', true).eq('opening_balance_date', curStart),
