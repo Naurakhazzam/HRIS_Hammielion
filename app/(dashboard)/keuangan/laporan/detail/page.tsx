@@ -32,6 +32,8 @@ type CashOutRow = {
   description: string | null
   status: string
   branch_id: string
+  source_table?: string | null
+  source_id?: string | null
   branches?: { name: string } | null
 }
 type CashOutCategory = { code: string; label: string; affects_net_profit: boolean }
@@ -93,6 +95,7 @@ export default function LaporanDetailPage() {
   // tidak perlu detail baris, jadi query-nya sengaja ringan (category, amount, status saja).
   const [prevMonthCashOutRows, setPrevMonthCashOutRows] = useState<{ category: string; amount: number; status: string }[]>([])
   // Sama, buat pembanding Rincian Pemasukan (Kas Masuk).
+  const [kasbonDikembalikan, setKasbonDikembalikan] = useState(0)
   const [prevMonthCashInRows, setPrevMonthCashInRows] = useState<{ amount: number; expense_amount: number; cash_adjustment: number; status: string }[]>([])
   // Bulan lalu, buat Ringkasan Eksekutif (Laba Bersih Sistem vs bulan lalu).
   const [prevMonthHppRows, setPrevMonthHppRows] = useState<{ hpp_amount: number; entry_type: 'hpp' | 'omset' }[]>([])
@@ -180,7 +183,7 @@ export default function LaporanDetailPage() {
         .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
         .order('transaction_date', { ascending: true }),
       supabase.from('fin_cash_out')
-        .select('id, transaction_date, amount, category, description, status, branch_id, branches(name)')
+        .select('id, transaction_date, amount, category, description, status, branch_id, source_table, source_id, branches(name)')
         .in('branch_id', branchIds).gte('transaction_date', startDate).lte('transaction_date', endDate)
         .order('transaction_date', { ascending: true }),
       supabase.from('fin_hpp_entries')
@@ -215,7 +218,18 @@ export default function LaporanDetailPage() {
     if (prevCashInRes.error) console.error('Detail error prev cash_in:', JSON.stringify(prevCashInRes.error, null, 2))
 
     setCashInRows((cashInRes.data as unknown as CashInRow[]) || [])
-    setCashOutRows((cashOutRes.data as unknown as CashOutRow[]) || [])
+    const cashOutData = (cashOutRes.data as unknown as CashOutRow[]) || []
+    setCashOutRows(cashOutData)
+    // Kasbon yang dikembalikan dari gaji periode ini dihitung dari kas keluar payroll yang disetujui
+    // (sama dengan Dashboard & Laporan), supaya Laba di halaman ini konsisten.
+    const payrollIds = [...new Set(cashOutData.filter(r => r.status === 'approved' && r.source_table === 'payrolls' && r.source_id).map(r => r.source_id as string))]
+    let kasbonTotal = 0
+    if (payrollIds.length > 0) {
+      const { data: kasbonData, error: kasbonErr } = await supabase.from('payrolls').select('kasbon_deduction').in('id', payrollIds).gt('kasbon_deduction', 0)
+      if (kasbonErr) console.error('Detail error kasbon:', JSON.stringify(kasbonErr, null, 2))
+      kasbonTotal = ((kasbonData as { kasbon_deduction: number }[]) || []).reduce((s, r) => s + Number(r.kasbon_deduction), 0)
+    }
+    setKasbonDikembalikan(kasbonTotal)
     setHppRows((hppRes.data as HppRow[]) || [])
     setCashierLossRows((cashierLossRes.data as unknown as CashierLossRow[]) || [])
     setPrevMonthCashOutRows(prevCashOutRes.data || [])
@@ -457,9 +471,15 @@ export default function LaporanDetailPage() {
   const biayaOperasional = cashOutApproved.filter(r => catMap.get(r.category)?.affects_net_profit !== false).reduce((s, r) => s + Number(r.amount), 0)
   const omsetSistem = hppRows.filter(r => r.entry_type === 'omset').reduce((s, r) => s + Number(r.hpp_amount), 0)
   const hppSistem = hppRows.filter(r => r.entry_type === 'hpp').reduce((s, r) => s + Number(r.hpp_amount), 0)
-  const hasSistemData = omsetSistem > 0 || hppSistem > 0
+  // Kartu Sistem hanya tampil kalau omzet sistem sudah diisi; tanpa omzet, Laba Sistem menyesatkan (HPP tanpa pendapatan).
+  const hasSistemData = omsetSistem > 0
   const labaKotorSistem = omsetSistem - hppSistem
-  const labaBersihSistem = labaKotorSistem - biayaOperasional
+  const labaBersihSistem = labaKotorSistem - biayaOperasional - kasbonDikembalikan
+  const totalPengeluaranOmzet = cashInApproved.reduce((s, r) => s + Number(r.expense_amount || 0), 0)
+  const totalSelisihKas = cashInApproved.reduce((s, r) => s + Number(r.cash_adjustment || 0), 0)
+  // Sama dengan Dashboard & Laporan: Kas Masuk bersih − HPP − Biaya Operasional − Kasbon dikembalikan
+  const labaKotorKas = totalUangDiterima - hppSistem
+  const labaBersihKas = labaKotorKas - biayaOperasional - kasbonDikembalikan
   // Uang Masuk (Real) dikurangi Total Kas Keluar (SEMUA kategori) — Biaya Operasional TIDAK dikurangkan lagi
   // di sini karena sudah termasuk di dalam Total Kas Keluar (kalau dikurangi dua kali, hasilnya jadi salah).
   const perkiraanKasSeharusnya = totalUangDiterima - totalKasKeluar
@@ -494,7 +514,7 @@ export default function LaporanDetailPage() {
   // Bulan lalu (Sistem) & Perkiraan Kas — dipakai Ringkasan Eksekutif di atas laporan.
   const prevOmsetSistem = prevMonthHppRows.filter(r => r.entry_type === 'omset').reduce((s, r) => s + Number(r.hpp_amount), 0)
   const prevHppSistem = prevMonthHppRows.filter(r => r.entry_type === 'hpp').reduce((s, r) => s + Number(r.hpp_amount), 0)
-  const prevHasSistemData = prevOmsetSistem > 0 || prevHppSistem > 0
+  const prevHasSistemData = prevOmsetSistem > 0
   const prevBiayaOperasional = prevMonthCashOutRows.filter(r => r.status === 'approved' && catMap.get(r.category)?.affects_net_profit !== false).reduce((s, r) => s + Number(r.amount), 0)
   const prevLabaBersihSistem = (prevOmsetSistem - prevHppSistem) - prevBiayaOperasional
   const prevTotalKasKeluarAll = prevMonthCashOutRows.filter(r => r.status === 'approved').reduce((s, r) => s + Number(r.amount), 0)
@@ -633,6 +653,7 @@ export default function LaporanDetailPage() {
               <div>
                 <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Uang Diterima (Real)</p>
                 <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(totalUangDiterima)}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Omzet − pengeluaran {formatRupiah(totalPengeluaranOmzet)} ± selisih kas {formatRupiah(totalSelisihKas)}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Total Kas Keluar (Semua Kategori)</p>
@@ -646,6 +667,22 @@ export default function LaporanDetailPage() {
                 <p className="text-xs text-slate-500 uppercase mb-1 min-h-[2rem]">Perkiraan Uang Kas yang Harus Ada</p>
                 <p className={`text-lg font-bold whitespace-nowrap ${perkiraanKasSeharusnya >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(perkiraanKasSeharusnya)}</p>
                 <p className="text-[11px] text-slate-400 mt-0.5">Uang Diterima − Total Kas Keluar (Biaya Operasional sudah termasuk di dalamnya, tidak dikurangi dua kali)</p>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div>
+                <p className="text-xs text-blue-700 uppercase mb-1 min-h-[2rem]">HPP (Input Bulanan)</p>
+                <p className="text-lg font-semibold text-slate-800 whitespace-nowrap">{formatRupiah(hppSistem)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-blue-700 uppercase mb-1 min-h-[2rem]">Laba Kotor (Kas)</p>
+                <p className={`text-lg font-bold whitespace-nowrap ${labaKotorKas >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaKotorKas)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-blue-700 uppercase mb-1 min-h-[2rem]">Laba Bersih (Kas)</p>
+                <p className={`text-lg font-bold whitespace-nowrap ${labaBersihKas >= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatRupiah(labaBersihKas)}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Kas masuk bersih − HPP − Biaya Operasional − Kasbon dikembalikan (sama dengan Dashboard)</p>
               </div>
             </div>
 
