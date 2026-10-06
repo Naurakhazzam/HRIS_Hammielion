@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { isPreviewModeClient } from '@/lib/previewMode'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
 import {
-  Branch, Dept, Emp, audienceLabels, fmtDate, fmtDateTime, signedPhotoUrls,
+  Branch, Dept, Emp, audienceLabels, fmtDate, fmtDateTime, signedPhotoUrls, wibDate,
 } from '@/lib/meeting'
 import TaskFormModal, { EditableDailyTask } from '@/components/dailyTasks/TaskFormModal'
 import ReportModal from '@/components/dailyTasks/ReportModal'
@@ -13,7 +13,7 @@ import TemplateManagerModal from '@/components/dailyTasks/TemplateManagerModal'
 import { Cadence, CADENCE_LABEL, DailyTaskTemplate, LogRow, PhotoMode, PHOTO_MODE_LABEL, AssignmentMode } from '@/components/dailyTasks/types'
 
 type AudRow = { branch_id: string | null; department_id: string | null; employee_id: string | null }
-type PicJoinRow = { branch_id: string; employees: { full_name: string } | { full_name: string }[] | null; branches: { name: string } | { name: string }[] | null }
+type PicJoinRow = { branch_id: string; employee_id: string; employees: { full_name: string } | { full_name: string }[] | null; branches: { name: string } | { name: string }[] | null }
 type Task = {
   id: string; cadence: Cadence; assignment_mode: AssignmentMode
   due_date: string | null; is_active: boolean; audience_all: boolean
@@ -30,18 +30,44 @@ type MyProgress = {
   total_buckets: number | null; done_buckets: number | null
   current_phase: Phase; current_done_count: number | null
   has_logged_once: boolean; once_phase: Phase; once_done_count: number | null; last_log_date: string | null
+  open_before_date: string | null; is_workday_today: boolean; once_late: boolean
 }
 type AdminProgressRow = {
   employee_id: string; full_name: string; branch_name: string | null; is_pic: boolean
   total_buckets: number | null; done_buckets: number | null
   current_phase: Phase; current_done_count: number | null
   has_logged_once: boolean; once_phase: Phase; once_done_count: number | null; last_log_date: string | null
+  open_before_date: string | null; once_late: boolean
 }
 
 function oneOrFirst<T>(v: T | T[] | null): T | null {
   if (!v) return null
   return Array.isArray(v) ? (v[0] ?? null) : v
 }
+
+// Periode gaji 26 s/d 25. Mengembalikan tanggal 26 awal periode, terbaru dulu.
+function recentPeriodStarts(count: number): string[] {
+  const [y, m, d] = wibDate(new Date()).split('-').map(Number)
+  let year = y, month = d >= 26 ? m : m - 1
+  const out: string[] = []
+  for (let i = 0; i < count; i++) {
+    if (month < 1) { month += 12; year -= 1 }
+    out.push(`${year}-${String(month).padStart(2, '0')}-26`)
+    month -= 1
+  }
+  return out
+}
+
+function periodEnd(start: string): string {
+  const [y, m] = start.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01-25` : `${y}-${String(m + 1).padStart(2, '0')}-25`
+}
+
+function periodLabel(start: string): string {
+  return `${fmtDate(start, false)} – ${fmtDate(periodEnd(start))}`
+}
+
+const PERIOD_OPTIONS = recentPeriodStarts(6)
 
 export default function TugasHarianPage() {
   const supabase = createClient()
@@ -61,12 +87,14 @@ export default function TugasHarianPage() {
   const [editTask, setEditTask] = useState<EditableDailyTask | null>(null)
   const [showTemplates, setShowTemplates] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [periodStart, setPeriodStart] = useState(PERIOD_OPTIONS[0])
   const [progressRows, setProgressRows] = useState<AdminProgressRow[]>([])
   const [loadingProgress, setLoadingProgress] = useState(false)
   const [logsByEmployee, setLogsByEmployee] = useState<Record<string, LogRow[]>>({})
   const [expandedEmp, setExpandedEmp] = useState<string | null>(null)
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
   const [invalidateFor, setInvalidateFor] = useState<LogRow | null>(null)
+  const [detail, setDetail] = useState<{ task: Task; row: AdminProgressRow } | null>(null)
   const [invalidateReason, setInvalidateReason] = useState('')
 
   // Employee state
@@ -94,7 +122,7 @@ export default function TugasHarianPage() {
   const fetchTasks = useCallback(async () => {
     setLoadingTasks(true)
     const { data, error } = await supabase.from('daily_tasks')
-      .select('id,cadence,assignment_mode,due_date,is_active,audience_all,created_at,daily_task_templates(title,description,photo_mode),daily_task_audiences(branch_id,department_id,employee_id),daily_task_pics(branch_id,employees(full_name),branches(name))')
+      .select('id,cadence,assignment_mode,due_date,is_active,audience_all,created_at,daily_task_templates(title,description,photo_mode),daily_task_audiences(branch_id,department_id,employee_id),daily_task_pics(branch_id,employee_id,employees(full_name),branches(name))')
       .order('created_at', { ascending: false })
     if (error) console.error('daily_tasks:', error.message)
     setTasks((data as unknown as Task[]) || [])
@@ -136,38 +164,70 @@ export default function TugasHarianPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function refreshExpanded() {
-    if (!expanded) return
-    const { data } = await supabase.rpc('get_daily_task_progress_admin', { p_task_id: expanded })
-    setProgressRows((data as AdminProgressRow[]) || [])
-    const { data: logs } = await supabase.from('daily_task_logs')
-      .select('id,employee_id,log_date,before_content,before_photo_paths,before_submitted_at,after_content,after_photo_paths,after_submitted_at,phase,is_invalid,invalid_reason')
-      .eq('task_id', expanded).order('log_date', { ascending: false })
+  // Tugas berulang: progres + riwayat dibatasi ke periode gaji yang dipilih.
+  // Tugas Tim: laporan PIC dikelompokkan per cabang (team_branch_id), lalu ditampilkan di tiap anggota.
+  async function loadProgress(task: Task, period: string) {
+    const isRecurring = task.cadence !== 'once'
+    const { data, error } = await supabase.rpc('get_daily_task_progress_admin', { p_task_id: task.id, p_period_start: isRecurring ? period : null })
+    if (error) { showMessage('error', 'Gagal memuat progres: ' + error.message); return }
+    const rows = (data as AdminProgressRow[]) || []
+    setProgressRows(rows)
+    let q = supabase.from('daily_task_logs')
+      .select('id,employee_id,team_branch_id,log_date,before_content,before_photo_paths,before_submitted_at,after_content,after_photo_paths,after_submitted_at,phase,is_invalid,invalid_reason')
+      .eq('task_id', task.id)
+    if (isRecurring) q = q.gte('log_date', period).lte('log_date', periodEnd(period))
+    const { data: logs } = await q.order('log_date', { ascending: false })
+    const list = (logs as (LogRow & { team_branch_id: string | null })[]) || []
     const grouped: Record<string, LogRow[]> = {}
-    ;(logs as LogRow[] || []).forEach(l => { grouped[l.employee_id] = [...(grouped[l.employee_id] ?? []), l] })
+    if (task.assignment_mode === 'team') {
+      const branchOf = Object.fromEntries(employees.map(e => [e.id, e.branch_id]))
+      rows.forEach(r => { grouped[r.employee_id] = list.filter(l => l.team_branch_id && l.team_branch_id === branchOf[r.employee_id]) })
+    } else {
+      list.forEach(l => { grouped[l.employee_id] = [...(grouped[l.employee_id] ?? []), l] })
+    }
     setLogsByEmployee(grouped)
-    if (logs && logs.length > 0) {
-      const urls = await signedPhotoUrls(supabase, (logs as LogRow[]).flatMap(l => [...l.before_photo_paths, ...l.after_photo_paths]))
+    if (list.length > 0) {
+      const urls = await signedPhotoUrls(supabase, list.flatMap(l => [...l.before_photo_paths, ...l.after_photo_paths]))
       setPhotoUrls(prev => ({ ...prev, ...urls }))
     }
+  }
+
+  useEffect(() => {
+    if (!detail) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !invalidateFor) setDetail(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [detail, invalidateFor])
+
+  async function refreshExpanded() {
+    const task = tasks.find(t => t.id === expanded)
+    if (task) await loadProgress(task, periodStart)
   }
 
   async function toggleExpand(task: Task) {
     if (expanded === task.id) { setExpanded(null); return }
     setExpanded(task.id)
     setExpandedEmp(null)
+    setPeriodStart(PERIOD_OPTIONS[0])
     setLoadingProgress(true)
-    const { data, error } = await supabase.rpc('get_daily_task_progress_admin', { p_task_id: task.id })
-    if (error) { showMessage('error', 'Gagal memuat progres: ' + error.message); setLoadingProgress(false); return }
-    setProgressRows((data as AdminProgressRow[]) || [])
-    const { data: logs } = await supabase.from('daily_task_logs')
-      .select('id,employee_id,log_date,before_content,before_photo_paths,before_submitted_at,after_content,after_photo_paths,after_submitted_at,phase,is_invalid,invalid_reason')
-      .eq('task_id', task.id).order('log_date', { ascending: false })
-    const grouped: Record<string, LogRow[]> = {}
-    ;(logs as LogRow[] || []).forEach(l => { grouped[l.employee_id] = [...(grouped[l.employee_id] ?? []), l] })
-    setLogsByEmployee(grouped)
-    setPhotoUrls(await signedPhotoUrls(supabase, (logs as LogRow[] || []).flatMap(l => [...l.before_photo_paths, ...l.after_photo_paths])))
+    await loadProgress(task, PERIOD_OPTIONS[0])
     setLoadingProgress(false)
+  }
+
+  async function changePeriod(task: Task, period: string) {
+    setPeriodStart(period)
+    setExpandedEmp(null)
+    setLoadingProgress(true)
+    await loadProgress(task, period)
+    setLoadingProgress(false)
+  }
+
+  async function cancelBefore(taskId: string) {
+    if (!window.confirm('Batalkan foto Sebelum yang belum diselesaikan? Foto itu akan dihapus dari laporan dan Anda bisa mulai rangkaian baru.')) return
+    const { error } = await supabase.rpc('cancel_daily_task_before', { p_task_id: taskId })
+    if (error) { showMessage('error', 'Gagal: ' + error.message); return }
+    showMessage('success', 'Foto Sebelum dibatalkan.')
+    fetchMine(); refreshBadge()
   }
 
   async function confirmInvalidate() {
@@ -211,58 +271,105 @@ export default function TugasHarianPage() {
     setReportModal({ taskId, title, photoMode, step })
   }
 
-  function PhotoThumb({ path, label }: { path: string; label: string }) {
-    if (!photoUrls[path]) return null
+  // md = di daftar (sedang, dipotong rapi), lg = di pop-up detail (besar, foto utuh tanpa dipotong).
+  function PairPhoto({ path, label, size }: { path: string | undefined; label: string; size: 'md' | 'lg' }) {
+    const box = size === 'lg' ? 'w-full h-64 sm:h-96' : 'w-full h-36 sm:h-44'
+    if (!path) {
+      return <div className={`${box} rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-xs text-slate-400`}>Tidak ada foto</div>
+    }
+    if (!photoUrls[path]) return <div className={`${box} rounded-lg bg-slate-100 animate-pulse`} />
     return (
-      <button type="button" onClick={() => openLightbox(photoUrls[path], label)} className="flex flex-col items-center gap-0.5">
+      <button type="button" onClick={() => openLightbox(photoUrls[path], label)} className={`${box} block rounded-lg overflow-hidden border border-slate-200 ${size === 'lg' ? 'bg-slate-900' : 'bg-slate-100'}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={photoUrls[path]} alt={label} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+        <img src={photoUrls[path]} alt={label} className={`w-full h-full ${size === 'lg' ? 'object-contain' : 'object-cover'}`} />
       </button>
     )
   }
 
-  function LogCard({ log }: { log: LogRow }) {
+  function LogCard({ log, dueDate, size = 'md' }: { log: LogRow; dueDate?: string | null; size?: 'md' | 'lg' }) {
     const isBeforeAfter = log.after_content != null || log.phase === 'before_only'
+    const late = !!dueDate && log.phase === 'done' && wibDate(log.after_submitted_at ?? log.before_submitted_at) > dueDate
+    // Foto dipasangkan sesuai urutan upload: Sebelum ke-1 dengan Sesudah ke-1, dst.
+    const pairCount = Math.max(log.before_photo_paths.length, log.after_photo_paths.length)
+    const textCls = size === 'lg' ? 'text-base' : 'text-sm'
     return (
-      <div className={`rounded-lg border px-3 py-2 ${log.is_invalid ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
-        <p className="text-[11px] text-slate-400 mb-1">
+      <div className={`rounded-lg border ${size === 'lg' ? 'p-4' : 'px-3 py-2'} ${log.is_invalid ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+        <p className={`${size === 'lg' ? 'text-sm font-semibold text-slate-600' : 'text-[11px] text-slate-400'} mb-1`}>
           {fmtDate(log.log_date)}
           {log.is_invalid && <span className="ml-1.5 font-semibold text-red-600">TIDAK VALID</span>}
+          {late && <span className="ml-1.5 font-semibold text-orange-600">TERLAMBAT</span>}
           {log.phase === 'before_only' && <span className="ml-1.5 font-semibold text-amber-600">MENUNGGU SESUDAH</span>}
         </p>
         {!isBeforeAfter ? (
           <>
-            <p className="text-sm text-slate-700 whitespace-pre-wrap">{log.before_content}</p>
+            <p className={`${textCls} text-slate-700 whitespace-pre-wrap`}>{log.before_content}</p>
             {log.before_photo_paths.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-1.5">{log.before_photo_paths.map(p => <PhotoThumb key={p} path={p} label="Foto bukti" />)}</div>
+              <div className={`grid gap-2 mt-2 ${size === 'lg' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
+                {log.before_photo_paths.map(p => <PairPhoto key={p} path={p} label="Foto bukti" size={size} />)}
+              </div>
             )}
           </>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <p className="text-[10px] font-semibold text-slate-500 uppercase mb-0.5">Sebelum · {fmtDateTime(log.before_submitted_at)}</p>
-              <p className="text-sm text-slate-700 whitespace-pre-wrap">{log.before_content}</p>
-              <div className="flex flex-wrap gap-2 mt-1.5">{log.before_photo_paths.map(p => <PhotoThumb key={p} path={p} label="Foto sebelum" />)}</div>
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase mb-0.5">Sebelum · {fmtDateTime(log.before_submitted_at)}</p>
+                <p className={`${textCls} text-slate-700 whitespace-pre-wrap`}>{log.before_content}</p>
+              </div>
+              <div>
+                {log.after_content != null ? (
+                  <>
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase mb-0.5">Sesudah · {log.after_submitted_at ? fmtDateTime(log.after_submitted_at) : ''}</p>
+                    <p className={`${textCls} text-slate-700 whitespace-pre-wrap`}>{log.after_content}</p>
+                  </>
+                ) : (
+                  <p className="text-xs text-amber-600 italic">Belum kirim foto sesudah.</p>
+                )}
+              </div>
             </div>
-            <div>
-              {log.after_content != null ? (
-                <>
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase mb-0.5">Sesudah · {log.after_submitted_at ? fmtDateTime(log.after_submitted_at) : ''}</p>
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap">{log.after_content}</p>
-                  <div className="flex flex-wrap gap-2 mt-1.5">{log.after_photo_paths.map(p => <PhotoThumb key={p} path={p} label="Foto sesudah" />)}</div>
-                </>
-              ) : (
-                <p className="text-xs text-amber-600 italic">Belum kirim foto sesudah.</p>
-              )}
-            </div>
-          </div>
+            {pairCount > 0 && (
+              <div className="mt-3 space-y-2">
+                {Array.from({ length: pairCount }, (_, i) => (
+                  <div key={i} className={`grid items-center gap-2 ${size === 'lg' ? 'grid-cols-[1fr_auto_1fr]' : 'grid-cols-[minmax(0,240px)_auto_minmax(0,240px)]'}`}>
+                    <PairPhoto path={log.before_photo_paths[i]} label={`Foto sebelum ${i + 1}`} size={size} />
+                    <span className="text-slate-400 text-lg">→</span>
+                    {log.after_content != null
+                      ? <PairPhoto path={log.after_photo_paths[i]} label={`Foto sesudah ${i + 1}`} size={size} />
+                      : <div />}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
         {log.is_invalid && log.invalid_reason && <p className="text-xs text-red-600 mt-1">Alasan: {log.invalid_reason}</p>}
       </div>
     )
   }
 
+  function AdminLogList({ logs, dueDate, size }: { logs: LogRow[]; dueDate: string | null; size: 'md' | 'lg' }) {
+    if (logs.length === 0) return <p className="text-xs text-slate-400">Belum ada laporan.</p>
+    return (
+      <>
+        {logs.map(log => (
+          <div key={log.id}>
+            <LogCard log={log} dueDate={dueDate} size={size} />
+            <div className="mt-1 ml-1">
+              {log.is_invalid ? (
+                <button onClick={() => unmarkInvalid(log)} className="text-xs text-blue-600 hover:underline">Tandai valid lagi</button>
+              ) : (
+                <button onClick={() => setInvalidateFor(log)} className="text-xs text-red-600 hover:underline">Tandai tidak valid</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </>
+    )
+  }
+
   if (!ready) return <div className="py-10 text-center text-slate-500">Memuat...</div>
+
+  const today = wibDate(new Date())
 
   return (
     <div>
@@ -329,7 +436,19 @@ export default function TugasHarianPage() {
                         {picLabels.length > 0 && <p className="text-xs text-purple-700 mt-1">PIC: {picLabels.join(', ')}</p>}
                       </div>
                       <div className="flex gap-2 shrink-0">
-                        <button onClick={() => { setEditTask({ id: t.id, due_date: t.due_date, is_active: t.is_active }); setShowForm(true) }} className="text-xs px-2.5 py-1 rounded border font-medium text-blue-600 border-blue-200 hover:bg-blue-50">Edit</button>
+                        <button onClick={() => {
+                          setEditTask({
+                            id: t.id, cadence: t.cadence, due_date: t.due_date, is_active: t.is_active, assignment_mode: t.assignment_mode,
+                            audience: {
+                              all: t.audience_all,
+                              branchIds: t.daily_task_audiences.flatMap(a => a.branch_id ? [a.branch_id] : []),
+                              departmentIds: t.daily_task_audiences.flatMap(a => a.department_id ? [a.department_id] : []),
+                              employeeIds: t.daily_task_audiences.flatMap(a => a.employee_id ? [a.employee_id] : []),
+                            },
+                            pics: Object.fromEntries((t.daily_task_pics || []).map(p => [p.branch_id, p.employee_id])),
+                          })
+                          setShowForm(true)
+                        }} className="text-xs px-2.5 py-1 rounded border font-medium text-blue-600 border-blue-200 hover:bg-blue-50">Edit</button>
                         <button onClick={() => handleDelete(t)} className="text-xs px-2.5 py-1 rounded border font-medium text-red-600 border-red-200 hover:bg-red-50">Hapus</button>
                       </div>
                     </div>
@@ -340,6 +459,15 @@ export default function TugasHarianPage() {
 
                   {expanded === t.id && (
                     <div className="border-t border-slate-100 p-4 bg-slate-50/50">
+                      {isRecurring && (
+                        <div className="flex items-center gap-2 mb-3">
+                          <label className="text-xs font-medium text-slate-600">Periode gaji</label>
+                          <select value={periodStart} onChange={e => changePeriod(t, e.target.value)} disabled={loadingProgress}
+                            className="px-2.5 py-1.5 border border-slate-300 rounded text-sm bg-white">
+                            {PERIOD_OPTIONS.map((p, i) => <option key={p} value={p}>{periodLabel(p)}{i === 0 ? ' (berjalan)' : ''}</option>)}
+                          </select>
+                        </div>
+                      )}
                       {loadingProgress ? (
                         <div className="py-6 text-center text-slate-400 text-sm">Memuat progres...</div>
                       ) : progressRows.length === 0 ? (
@@ -352,43 +480,35 @@ export default function TugasHarianPage() {
                             const behind = isRecurring && r.total_buckets !== null && r.done_buckets !== null && r.done_buckets < r.total_buckets
                             return (
                               <div key={r.employee_id} className="bg-white border border-slate-200 rounded-lg">
-                                <button onClick={() => setExpandedEmp(isOpen ? null : r.employee_id)} className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-slate-50 transition">
+                                <div className="flex items-center justify-between gap-2 px-3 py-2.5 hover:bg-slate-50 transition">
                                   <div>
                                     <p className="text-sm font-semibold text-slate-800">
-                                      {r.full_name} <span className="font-normal text-slate-400 text-xs">{r.branch_name}</span>
+                                      <button type="button" onClick={() => setDetail({ task: t, row: r })} title="Lihat laporan layar penuh"
+                                        className="text-blue-700 hover:underline font-semibold text-left">{r.full_name}</button>{' '}
+                                      <span className="font-normal text-slate-400 text-xs">{r.branch_name}</span>
                                       {t.assignment_mode === 'team' && (r.is_pic
                                         ? <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">PIC</span>
                                         : <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-500">anggota tim</span>)}
                                     </p>
-                                    <p className="text-[11px] text-slate-400">{r.last_log_date ? `Terakhir selesai ${fmtDate(r.last_log_date)}` : 'Belum pernah selesai lapor'}</p>
+                                    <p className="text-[11px] text-slate-400">
+                                      {r.last_log_date ? `Terakhir selesai ${fmtDate(r.last_log_date)}` : 'Belum pernah selesai lapor'}
+                                      {r.open_before_date && <span className="ml-1.5 text-amber-600 font-medium">· Foto Sebelum {fmtDate(r.open_before_date, false)} belum diselesaikan</span>}
+                                    </p>
                                   </div>
-                                  <div className="flex items-center gap-2 shrink-0">
+                                  <button type="button" onClick={() => setExpandedEmp(isOpen ? null : r.employee_id)} className="flex flex-1 items-center justify-end gap-2 shrink-0 self-stretch">
                                     {isRecurring ? (
                                       <span className={`text-sm font-bold px-2 py-0.5 rounded ${behind ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{r.done_buckets}/{r.total_buckets}</span>
                                     ) : (
-                                      <span className={`text-xs font-semibold px-2 py-0.5 rounded ${r.once_phase === 'done' ? 'bg-green-100 text-green-700' : r.once_phase === 'before_only' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
-                                        {r.once_phase === 'done' ? '✓ Selesai' : r.once_phase === 'before_only' ? 'Menunggu Sesudah' : 'Belum lapor'}
+                                      <span className={`text-xs font-semibold px-2 py-0.5 rounded ${r.once_phase === 'done' ? (r.once_late ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700') : r.once_phase === 'before_only' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                                        {r.once_phase === 'done' ? (r.once_late ? '✓ Selesai (telat)' : '✓ Selesai') : r.once_phase === 'before_only' ? 'Menunggu Sesudah' : (t.due_date && wibDate(new Date()) > t.due_date ? 'Lewat tenggat' : 'Belum lapor')}
                                       </span>
                                     )}
                                     <span className="text-slate-400 text-xs">{isOpen ? '▲' : '▼'}</span>
-                                  </div>
-                                </button>
+                                  </button>
+                                </div>
                                 {isOpen && (
                                   <div className="border-t border-slate-100 p-3 space-y-2">
-                                    {logs.length === 0 ? (
-                                      <p className="text-xs text-slate-400">Belum ada laporan.</p>
-                                    ) : logs.map(log => (
-                                      <div key={log.id}>
-                                        <LogCard log={log} />
-                                        <div className="mt-1 ml-1">
-                                          {log.is_invalid ? (
-                                            <button onClick={() => unmarkInvalid(log)} className="text-xs text-blue-600 hover:underline">Tandai valid lagi</button>
-                                          ) : (
-                                            <button onClick={() => setInvalidateFor(log)} className="text-xs text-red-600 hover:underline">Tandai tidak valid</button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ))}
+                                    <AdminLogList logs={logs} dueDate={t.due_date} size="md" />
                                   </div>
                                 )}
                               </div>
@@ -436,6 +556,18 @@ export default function TugasHarianPage() {
                   {isTeamNonPic && (
                     <p className="text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mt-2">Tugas tim -- PIC cabang Anda yang mengirim laporan, nilainya otomatis berlaku untuk Anda juga.</p>
                   )}
+                  {!isTeamNonPic && p.open_before_date && p.open_before_date < today && (
+                    <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                      Foto Sebelum tanggal {fmtDate(p.open_before_date)} belum diselesaikan. Kirim foto Sesudah untuk menyelesaikannya
+                      (dihitung untuk tanggal {fmtDate(p.open_before_date, false)}), atau batalkan untuk mulai rangkaian baru.
+                    </div>
+                  )}
+                  {p.cadence === 'daily' && !p.is_workday_today && (
+                    <p className="text-xs text-slate-500 mt-2">Hari ini hari libur/cuti Anda -- laporan hari ini tidak dihitung.</p>
+                  )}
+                  {p.cadence === 'once' && p.due_date && p.once_phase !== 'done' && today > p.due_date && (
+                    <p className="text-xs text-orange-700 font-medium mt-2">Sudah lewat tenggat -- tetap kirim laporan, akan ditandai terlambat.</p>
+                  )}
 
                   {isRecurring && p.total_buckets !== null && p.done_buckets !== null && (
                     <div className="mt-3">
@@ -457,8 +589,11 @@ export default function TugasHarianPage() {
                     <div className="mt-4 flex flex-wrap gap-2 items-center">
                       {p.photo_mode === 'before_after' ? (
                         phase === 'before_only' ? (
-                          <button onClick={() => openReport(p.task_id, p.title, p.photo_mode, 'after')}
-                            className="px-5 py-3 rounded-xl text-base font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition">✅ Kirim Foto Sesudah</button>
+                          <>
+                            <button onClick={() => openReport(p.task_id, p.title, p.photo_mode, 'after')}
+                              className="px-5 py-3 rounded-xl text-base font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition">✅ Kirim Foto Sesudah</button>
+                            <button onClick={() => cancelBefore(p.task_id)} className="text-xs text-red-600 hover:underline">Batalkan foto Sebelum</button>
+                          </>
                         ) : (
                           <button onClick={() => openReport(p.task_id, p.title, p.photo_mode, 'before')}
                             className="px-5 py-3 rounded-xl text-base font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition">
@@ -466,7 +601,7 @@ export default function TugasHarianPage() {
                           </button>
                         )
                       ) : phase === 'done' ? (
-                        <span className="text-sm text-green-700 font-medium">✓ {p.cadence === 'daily' ? 'Sudah lapor hari ini' : p.cadence === 'weekly' ? 'Sudah lapor minggu ini' : p.cadence === 'monthly' ? 'Sudah lapor periode ini' : 'Sudah dilaporkan'}</span>
+                        <span className="text-sm text-green-700 font-medium">✓ {p.cadence === 'daily' ? 'Sudah lapor hari ini' : p.cadence === 'weekly' ? 'Sudah lapor minggu ini' : p.cadence === 'monthly' ? 'Sudah lapor periode ini' : p.once_late ? 'Sudah dilaporkan (terlambat)' : 'Sudah dilaporkan'}</span>
                       ) : (
                         <button onClick={() => openReport(p.task_id, p.title, p.photo_mode, 'single')}
                           className="px-5 py-3 rounded-xl text-base font-bold bg-green-600 hover:bg-green-700 text-white shadow-sm transition">
@@ -488,7 +623,7 @@ export default function TugasHarianPage() {
 
                   {isOpen && (
                     <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-                      {logs.length === 0 ? <p className="text-xs text-slate-400">Belum ada laporan.</p> : logs.map(log => <LogCard key={log.id} log={log} />)}
+                      {logs.length === 0 ? <p className="text-xs text-slate-400">Belum ada laporan.</p> : logs.map(log => <LogCard key={log.id} log={log} dueDate={p.due_date} />)}
                     </div>
                   )}
                 </div>
@@ -518,8 +653,36 @@ export default function TugasHarianPage() {
         />
       )}
 
+      {detail && (() => {
+        // Ambil baris terbaru supaya status ikut berubah setelah tandai (tidak) valid.
+        const row = progressRows.find(r => r.employee_id === detail.row.employee_id) ?? detail.row
+        const t = detail.task
+        const isRecurring = t.cadence !== 'once'
+        return (
+          <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-stretch justify-center sm:p-4" onClick={() => setDetail(null)}>
+            <div className="bg-white sm:rounded-xl shadow-xl w-full max-w-5xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-200">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-bold text-slate-800">
+                    {row.full_name} <span className="font-normal text-slate-400 text-sm">{row.branch_name}</span>
+                  </h2>
+                  <p className="text-sm text-slate-500">
+                    {t.daily_task_templates.title}
+                    {isRecurring && <> · Periode {periodLabel(periodStart)} · <span className="font-semibold text-slate-700">{row.done_buckets}/{row.total_buckets}</span></>}
+                  </p>
+                </div>
+                <button onClick={() => setDetail(null)} className="w-9 h-9 shrink-0 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-lg" aria-label="Tutup">✕</button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 bg-slate-50/50">
+                <AdminLogList logs={logsByEmployee[row.employee_id] ?? []} dueDate={t.due_date} size="lg" />
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {invalidateFor && (
-        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/50 z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6">
             <h2 className="text-base font-semibold text-slate-800">Tandai laporan tidak valid</h2>
             <p className="text-sm text-slate-500 mb-3">{fmtDate(invalidateFor.log_date)}</p>

@@ -7,7 +7,8 @@ import AudiencePicker from '@/components/meeting/AudiencePicker'
 import { Cadence, CADENCE_HINT, CADENCE_LABEL, DailyTaskTemplate, PHOTO_MODE_LABEL, AssignmentMode } from './types'
 
 export type EditableDailyTask = {
-  id: string; due_date: string | null; is_active: boolean
+  id: string; cadence: Cadence; due_date: string | null; is_active: boolean
+  assignment_mode: AssignmentMode; audience: AudienceValue; pics: Record<string, string>
 }
 
 type Props = {
@@ -35,12 +36,12 @@ function resolveTargetEmployees(audience: AudienceValue, employees: Emp[]): Emp[
 export default function TaskFormModal({ editing, templates, branches, departments, employees, onClose, onSaved, onManageTemplates }: Props) {
   const supabase = createClient()
   const [templateId, setTemplateId] = useState('')
-  const [cadence, setCadence] = useState<Cadence>('daily')
-  const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>('individual')
+  const [cadence, setCadence] = useState<Cadence>(editing?.cadence ?? 'daily')
+  const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>(editing?.assignment_mode ?? 'individual')
   const [dueDate, setDueDate] = useState(editing?.due_date ?? '')
   const [isActive, setIsActive] = useState(editing?.is_active ?? true)
-  const [audience, setAudience] = useState<AudienceValue>(emptyAudience)
-  const [pics, setPics] = useState<Record<string, string>>({})
+  const [audience, setAudience] = useState<AudienceValue>(editing?.audience ?? emptyAudience)
+  const [pics, setPics] = useState<Record<string, string>>(editing?.pics ?? {})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -64,8 +65,13 @@ export default function TaskFormModal({ editing, templates, branches, department
 
     setSaving(true)
     if (editing) {
+      if (assignmentMode === 'team') {
+        const missing = branchesNeedingPic.filter(b => !pics[b.id])
+        if (missing.length > 0) { setSaving(false); setError(`Pilih dulu PIC untuk cabang: ${missing.map(b => b.name).join(', ')}.`); return }
+      }
       const { error: err } = await supabase.rpc('update_daily_task', {
         p_task_id: editing.id, p_due_date: dueDate || null, p_is_active: isActive,
+        p_pics: assignmentMode === 'team' ? Object.fromEntries(branchesNeedingPic.map(b => [b.id, pics[b.id]])) : null,
       })
       setSaving(false)
       if (err) { setError('Gagal menyimpan: ' + err.message); return }
@@ -160,7 +166,7 @@ export default function TaskFormModal({ editing, templates, branches, department
             </div>
           )}
 
-          {(cadence === 'once' || editing) && (
+          {cadence === 'once' && (
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Tenggat {cadence === 'once' && !editing && <span className="text-red-500">*</span>}</label>
               <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
@@ -183,9 +189,10 @@ export default function TaskFormModal({ editing, templates, branches, department
             </div>
           )}
 
-          {!editing && assignmentMode === 'team' && !audienceIsEmpty(audience) && (
+          {assignmentMode === 'team' && !audienceIsEmpty(audience) && (
             <div>
               <p className="block text-xs font-medium text-slate-700 mb-1">PIC per Cabang <span className="text-red-500">*</span></p>
+              {editing && <p className="text-xs text-slate-400 mb-2">Riwayat laporan tetap tersimpan per cabang saat PIC diganti.</p>}
               {noBranchInTarget && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">Ada karyawan target yang belum punya cabang -- mode Tim butuh cabang.</p>
               )}

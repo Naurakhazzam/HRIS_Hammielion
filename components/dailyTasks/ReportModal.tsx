@@ -72,6 +72,7 @@ export default function ReportModal({ taskId, taskTitle, photoMode, step, onClos
             <input type="file" accept="image/*" multiple
               onChange={e => setFiles(Array.from(e.target.files ?? []).slice(0, 5))}
               className="block w-full text-sm text-slate-600 file:mr-3 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:font-medium" />
+            {step === 'after' && <p className="text-xs text-slate-500 mt-1">Pilih foto dengan urutan yang sama seperti foto Sebelum (rak 1, rak 2, ...) supaya tampil berpasangan.</p>}
             {files.length > 0 && <p className="text-xs text-slate-500 mt-1">{files.length} foto dipilih (maksimal 5)</p>}
           </div>
           {error && <div className="p-3 rounded-lg border text-sm bg-red-50 border-red-200 text-red-700">{error}</div>}
