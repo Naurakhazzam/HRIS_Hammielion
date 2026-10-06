@@ -56,6 +56,27 @@ type PlanSupplierTask = {
   delivery_routes: { name: string } | null
 }
 
+// Beda dari PlanStore: barangnya BELUM di tangan driver sama sekali begitu diklaim (masih di
+// toko konsumen) -- baru dipegang fisik pas driver sampai di toko itu, dicatat satu-per-satu
+// lewat logistics_store_return_items (lihat migration 058).
+type PlanReturn = {
+  id: string
+  store_id: string
+  status: 'diambil' | 'selesai'
+  note: string | null
+  final_photo_url: string | null
+  final_location_note: string | null
+  logistics_stores: { name: string; address: string | null } | null
+}
+
+type ReturnItem = {
+  id: string
+  return_id: string
+  photo_url: string
+  item_name: string
+  reason: string
+}
+
 type ActionMode = null | 'kirim' | 'gagal'
 type PaymentMethod = '' | 'cash' | 'transfer' | 'deposit' | 'tempo'
 
@@ -82,6 +103,22 @@ export default function JalanPengirimanPage() {
   const [supplierTasks, setSupplierTasks] = useState<PlanSupplierTask[]>([])
   const [selectedSupplierTaskId, setSelectedSupplierTaskId] = useState<string | null>(null)
   const [supplierTaskSubmitting, setSupplierTaskSubmitting] = useState(false)
+
+  // Tugas Retur -- status 'diambil' = masih boleh ditambah barang (satu-per-satu) di layar
+  // Jalankan Pengiriman; baru 'selesai' setelah driver lapor posisi akhir di Lapor Sampai Garasi.
+  const [planReturns, setPlanReturns] = useState<PlanReturn[]>([])
+  const [returnItemsByReturn, setReturnItemsByReturn] = useState<Record<string, ReturnItem[]>>({})
+  const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null)
+  const [addingNewReturnItem, setAddingNewReturnItem] = useState(false)
+  const [newItemPhotoUrl, setNewItemPhotoUrl] = useState('')
+  const [newItemName, setNewItemName] = useState('')
+  const [newItemReason, setNewItemReason] = useState('')
+  const [returnItemSubmitting, setReturnItemSubmitting] = useState(false)
+  // Lapor posisi akhir barang (Lapor Sampai Garasi) -- per-retur karena 1 plan bisa punya lebih
+  // dari 1 tugas retur aktif sekaligus (toko berbeda-beda).
+  const [closingReturnPhotos, setClosingReturnPhotos] = useState<Record<string, string>>({})
+  const [closingReturnNotes, setClosingReturnNotes] = useState<Record<string, string>>({})
+  const [finishingReturnId, setFinishingReturnId] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [actionMode, setActionMode] = useState<ActionMode>(null)
@@ -162,12 +199,18 @@ export default function JalanPengirimanPage() {
   const selectedStore = pendingStores.find(ps => ps.id === selectedStoreId) || null
   const pendingSupplierTasks = supplierTasks.filter(t => t.status === 'pending')
   const selectedSupplierTask = pendingSupplierTasks.find(t => t.id === selectedSupplierTaskId) || null
+  // Belum 'selesai' = masih boleh ditambah barang & masih wajib dilaporkan posisi akhirnya di
+  // Lapor Sampai Garasi -- sengaja TIDAK ikut hitungan allResolved (lihat catatan di migration
+  // 058: proses ambil retur jalan independen dari toko/belanja, baru jadi syarat wajib di
+  // tahap penutupan trip, bareng foto amper bensin).
+  const activeReturns = planReturns.filter(r => r.status === 'diambil')
+  const selectedReturn = activeReturns.find(r => r.id === selectedReturnId) || null
   const allResolved = (planStores.length > 0 || supplierTasks.length > 0) && pendingStores.length === 0 && pendingSupplierTasks.length === 0
 
   useEffect(() => { init() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (selectedPlanId) { fetchPlanStores(selectedPlanId); fetchSupplierTasks(selectedPlanId) }
+    if (selectedPlanId) { fetchPlanStores(selectedPlanId); fetchSupplierTasks(selectedPlanId); fetchPlanReturns(selectedPlanId) }
   }, [selectedPlanId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -227,9 +270,27 @@ export default function JalanPengirimanPage() {
     setSupplierTasks((data as unknown as PlanSupplierTask[]) || [])
   }
 
+  async function fetchPlanReturns(planId: string) {
+    const { data } = await supabase.from('logistics_store_returns')
+      .select('id, store_id, status, note, final_photo_url, final_location_note, logistics_stores(name, address)')
+      .eq('plan_id', planId).order('claimed_at')
+    const returns = (data as unknown as PlanReturn[]) || []
+    setPlanReturns(returns)
+    if (returns.length === 0) { setReturnItemsByReturn({}); return }
+    const { data: items } = await supabase.from('logistics_store_return_items')
+      .select('id, return_id, photo_url, item_name, reason')
+      .in('return_id', returns.map(r => r.id)).order('captured_at')
+    const grouped: Record<string, ReturnItem[]> = {}
+    ;(items as ReturnItem[] || []).forEach(it => {
+      if (!grouped[it.return_id]) grouped[it.return_id] = []
+      grouped[it.return_id].push(it)
+    })
+    setReturnItemsByReturn(grouped)
+  }
+
   async function refresh() {
     if (myEmployeeId) await fetchPlans(myEmployeeId)
-    if (selectedPlanId) { await fetchPlanStores(selectedPlanId); await fetchSupplierTasks(selectedPlanId) }
+    if (selectedPlanId) { await fetchPlanStores(selectedPlanId); await fetchSupplierTasks(selectedPlanId); await fetchPlanReturns(selectedPlanId) }
   }
 
   // Simpan toko yang sedang DITUJU ke rencana (bukan cuma state lokal) -- supaya kantor bisa
@@ -359,6 +420,51 @@ export default function JalanPengirimanPage() {
     setSupplierTaskSubmitting(false)
   }
 
+  function openReturnTask(id: string) {
+    setSelectedStoreId(null)
+    setSelectedSupplierTaskId(null)
+    setSelectedReturnId(id)
+    setAddingNewReturnItem(false)
+    setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('')
+  }
+
+  function clearReturnSelection() {
+    setSelectedReturnId(null)
+    setAddingNewReturnItem(false)
+    setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('')
+  }
+
+  async function submitNewReturnItem() {
+    if (!selectedReturn || !newItemPhotoUrl || !newItemName.trim() || !newItemReason.trim()) return
+    setReturnItemSubmitting(true)
+    const { error } = await supabase.rpc('add_store_return_item', {
+      p_return_id: selectedReturn.id, p_photo_url: newItemPhotoUrl, p_item_name: newItemName.trim(), p_reason: newItemReason.trim(),
+    })
+    if (error) { showMessage('error', 'Gagal menyimpan barang: ' + error.message); setReturnItemSubmitting(false); return }
+    showMessage('success', `Barang "${newItemName.trim()}" berhasil dicatat.`)
+    setAddingNewReturnItem(false)
+    setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('')
+    if (selectedPlanId) await fetchPlanReturns(selectedPlanId)
+    setReturnItemSubmitting(false)
+  }
+
+  // Dipanggil dari layar Lapor Sampai Garasi -- wajib sebelum "Selesai Kirim" bisa ditekan
+  // (lihat canSubmitSelesaiKirim). RPC sendiri menolak kalau belum ada barang yang dicatat sama
+  // sekali untuk retur ini.
+  async function submitFinishReturn(ret: PlanReturn) {
+    const photo = closingReturnPhotos[ret.id]
+    const note = closingReturnNotes[ret.id]
+    if (!photo || !note?.trim()) return
+    setFinishingReturnId(ret.id)
+    const { error } = await supabase.rpc('finish_store_return', {
+      p_return_id: ret.id, p_final_photo_url: photo, p_final_location_note: note.trim(),
+    })
+    if (error) { showMessage('error', 'Gagal melaporkan retur: ' + error.message); setFinishingReturnId(null); return }
+    showMessage('success', `Retur "${ret.logistics_stores?.name}" berhasil dilaporkan selesai.`)
+    if (selectedPlanId) await fetchPlanReturns(selectedPlanId)
+    setFinishingReturnId(null)
+  }
+
   async function confirmBoxPhoto() {
     if (!selectedPlan || !boxPhotoUrl) return
     setSubmitting(true)
@@ -372,7 +478,7 @@ export default function JalanPengirimanPage() {
     setSubmitting(false)
   }
 
-  const canSubmitSelesaiKirim = !!garagePhotoUrl && needsRefuel !== null && (!needsRefuel || (!!refuelAmount && Number(refuelAmount) > 0))
+  const canSubmitSelesaiKirim = !!garagePhotoUrl && needsRefuel !== null && (!needsRefuel || (!!refuelAmount && Number(refuelAmount) > 0)) && activeReturns.length === 0
 
   async function submitSelesaiKirim() {
     if (!selectedPlan || !canSubmitSelesaiKirim) return
@@ -618,6 +724,94 @@ export default function JalanPengirimanPage() {
                   if (url) await submitSupplierTaskDone(selectedSupplierTask, url)
                 }} />
               {supplierTaskSubmitting && <p className="text-xs text-slate-400 mt-2">Menyimpan...</p>}
+            </div>
+          )}
+
+          {/* Tugas Retur sengaja TIDAK dibatasi !allResolved -- proses ambil barangnya jalan
+              independen dari toko/belanja (lihat catatan activeReturns di atas), jadi tetap
+              harus terlihat & bisa dikerjakan meski semua toko/belanja sudah kelar. */}
+          {selectedPlan?.status === 'departed' && !selectedStore && !selectedSupplierTask && !selectedReturn && activeReturns.length > 0 && (
+            <div className="bg-white rounded-xl border border-purple-200 overflow-hidden mt-4">
+              <div className="px-4 py-3 bg-purple-50 border-b border-purple-100">
+                <p className="text-sm font-bold text-purple-800">↩️ Tugas Retur ({activeReturns.length})</p>
+                <p className="text-xs text-purple-600 mt-0.5">Ambil barang retur pas Anda di toko ini, catat satu-per-satu.</p>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {activeReturns.map(r => (
+                  <button key={r.id} onClick={() => openReturnTask(r.id)}
+                    className="w-full text-left px-4 py-3 hover:bg-purple-50/50 transition flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{r.logistics_stores?.name}</p>
+                      <p className="text-xs text-slate-400 truncate">{returnItemsByReturn[r.id]?.length || 0} barang sudah dicatat</p>
+                    </div>
+                    <span className="text-slate-300">›</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedPlan?.status === 'departed' && selectedReturn && (
+            <div className="bg-white rounded-xl border-2 border-purple-300 p-5 mt-4">
+              <button onClick={clearReturnSelection} className="text-xs text-blue-600 hover:underline mb-2">← Pilih Tugas Lain</button>
+              <h2 className="text-lg font-bold text-slate-800 mb-1">↩️ Ambil Retur — {selectedReturn.logistics_stores?.name}</h2>
+              {selectedReturn.logistics_stores?.address && <p className="text-sm text-slate-500 mb-2">{selectedReturn.logistics_stores.address}</p>}
+              {selectedReturn.note && (
+                <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-3">Catatan kantor: {selectedReturn.note}</p>
+              )}
+
+              <p className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                Barang Retur ({returnItemsByReturn[selectedReturn.id]?.length || 0})
+              </p>
+              {(returnItemsByReturn[selectedReturn.id]?.length || 0) > 0 && (
+                <div className="space-y-2 mb-3">
+                  {returnItemsByReturn[selectedReturn.id].map(it => (
+                    <div key={it.id} className="flex items-center gap-3 border border-slate-200 rounded-lg p-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={it.photo_url} alt={it.item_name} onClick={() => openLightbox(it.photo_url, it.item_name)}
+                        className="w-14 h-14 object-cover rounded-lg border border-slate-200 shrink-0 cursor-zoom-in" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">{it.item_name}</p>
+                        <p className="text-xs text-slate-500 truncate">{it.reason}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!addingNewReturnItem ? (
+                <button onClick={() => setAddingNewReturnItem(true)}
+                  className="w-full py-2 border border-dashed border-purple-300 text-purple-600 text-sm font-medium rounded-lg hover:bg-purple-50 transition">
+                  + Tambah Barang Retur
+                </button>
+              ) : (
+                <div className="space-y-3 border-t border-slate-100 pt-3 mt-1">
+                  <p className="text-xs font-semibold text-slate-500 uppercase">Barang Baru</p>
+                  {newItemPhotoUrl ? (
+                    <div className="space-y-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={newItemPhotoUrl} alt="Foto barang retur" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                      <button onClick={() => setNewItemPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                      <input type="text" value={newItemName} onChange={e => setNewItemName(e.target.value)} placeholder="Nama barang"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" />
+                      <input type="text" value={newItemReason} onChange={e => setNewItemReason(e.target.value)} placeholder="Alasan retur"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" />
+                      <div className="flex gap-2">
+                        <button onClick={() => { setAddingNewReturnItem(false); setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('') }}
+                          className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                        <button onClick={submitNewReturnItem} disabled={!newItemName.trim() || !newItemReason.trim() || returnItemSubmitting}
+                          className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                          {returnItemSubmitting ? 'Menyimpan...' : 'Simpan Barang'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <LogisticsCameraCapture label="Foto Barang Retur" employeeName={myName}
+                      onCaptured={async blob => { const url = await uploadPlanPhoto(blob, `retur-${selectedReturn.id}-item`); if (url) setNewItemPhotoUrl(url) }}
+                      onCancel={() => setAddingNewReturnItem(false)} />
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -940,6 +1134,39 @@ export default function JalanPengirimanPage() {
                   </p>
                 ) : (
                   <div className="space-y-4">
+                    {activeReturns.length > 0 && (
+                      <div className="space-y-3">
+                        <p className="text-xs font-semibold text-amber-700 uppercase">⚠ Wajib Lapor Posisi Akhir Barang Retur Dulu</p>
+                        {activeReturns.map(r => (
+                          <div key={r.id} className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-2">
+                            <p className="text-sm font-semibold text-slate-800">{r.logistics_stores?.name}</p>
+                            <p className="text-xs text-slate-500">{returnItemsByReturn[r.id]?.length || 0} barang tercatat</p>
+                            {closingReturnPhotos[r.id] ? (
+                              <div className="space-y-2">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={closingReturnPhotos[r.id]} alt="Posisi akhir barang" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                                <button onClick={() => setClosingReturnPhotos(prev => ({ ...prev, [r.id]: '' }))} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                              </div>
+                            ) : (
+                              <LogisticsCameraCapture label="Foto Posisi Akhir Barang" employeeName={myName}
+                                onCaptured={async blob => {
+                                  const url = await uploadPlanPhoto(blob, `retur-final-${r.id}`)
+                                  if (url) setClosingReturnPhotos(prev => ({ ...prev, [r.id]: url }))
+                                }} />
+                            )}
+                            <input type="text" value={closingReturnNotes[r.id] || ''}
+                              onChange={e => setClosingReturnNotes(prev => ({ ...prev, [r.id]: e.target.value }))}
+                              placeholder="Barang disimpan di mana? (misal: gudang rak retur)"
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none" />
+                            <button onClick={() => submitFinishReturn(r)}
+                              disabled={!closingReturnPhotos[r.id] || !closingReturnNotes[r.id]?.trim() || finishingReturnId === r.id}
+                              className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                              {finishingReturnId === r.id ? 'Menyimpan...' : 'Tandai Selesai'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Foto Amper Bensin</p>
                       {garagePhotoUrl ? (
@@ -1045,6 +1272,41 @@ export default function JalanPengirimanPage() {
                         )}
                       </div>
                     )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {planReturns.some(r => r.status === 'selesai') && (
+            <div className="mt-6 bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 text-sm font-bold text-slate-700">Riwayat Retur</div>
+              <div className="divide-y divide-slate-100">
+                {planReturns.filter(r => r.status === 'selesai').map(r => (
+                  <div key={r.id} className="px-4 py-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-700 font-medium">{r.logistics_stores?.name}</span>
+                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Selesai</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {returnItemsByReturn[r.id]?.length || 0} barang{r.final_location_note ? ` — disimpan di: ${r.final_location_note}` : ''}
+                    </p>
+                    <div className="flex gap-3 mt-2 flex-wrap">
+                      {returnItemsByReturn[r.id]?.map(it => (
+                        <button key={it.id} type="button" onClick={() => openLightbox(it.photo_url, it.item_name)} title={it.item_name} className="flex flex-col items-center gap-1">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={it.photo_url} alt={it.item_name} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          <span className="text-[10px] text-slate-500 font-medium truncate max-w-[56px]">{it.item_name}</span>
+                        </button>
+                      ))}
+                      {r.final_photo_url && (
+                        <button type="button" onClick={() => openLightbox(r.final_photo_url!, 'Posisi akhir barang')} title="Posisi Akhir" className="flex flex-col items-center gap-1">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={r.final_photo_url} alt="Posisi akhir barang" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          <span className="text-[10px] text-slate-500 font-medium">Posisi Akhir</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

@@ -94,6 +94,7 @@ const LOGISTIK_SUBMENU: NavNode[] = [
   { name: 'Laporan Pengiriman', href: '/logistik/laporan' },
   { name: 'Master Toko', href: '/logistik/toko' },
   { name: 'Laporan Muat (Toko Pusat)', href: '/logistik/laporan-muat' },
+  { name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur' },
 ]
 
 // Menu untuk HR, Owner, Finance, Supervisor — dikelompokkan jadi 4 kelompok besar (SDM/HR,
@@ -324,6 +325,7 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, 
   }
   if (isTokoPusat) {
     extraLinks.push({ name: 'Laporan Muat', href: '/logistik/laporan-muat', icon: '📦' })
+    extraLinks.push({ name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur', icon: '↩️' })
   }
   if (extraLinks.length === 0) return baseItems
   return [

@@ -28,6 +28,16 @@ type TakenPackage = {
   logistics_central_loadings: { logistics_stores: { name: string } | null } | null
 }
 
+// Beda dari PendingPackage: ini bukan paket fisik yang sudah ada di Toko Pusat, tapi sekadar
+// PENANDA "toko X ada retur menunggu diambil" -- barangnya sendiri masih di toko konsumen,
+// baru akan dipegang driver nanti pas mampir ke toko itu (lihat migration 058).
+type PendingReturn = {
+  id: string
+  store_id: string
+  note: string | null
+  logistics_stores: { name: string } | null
+}
+
 const fmtDateTime = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 export default function JemputTokoPusatPage() {
@@ -41,6 +51,8 @@ export default function JemputTokoPusatPage() {
   const [pending, setPending] = useState<PendingPackage[]>([])
   const [taken, setTaken] = useState<TakenPackage[]>([])
   const [claimingId, setClaimingId] = useState<string | null>(null)
+  const [pendingReturns, setPendingReturns] = useState<PendingReturn[]>([])
+  const [claimingReturnId, setClaimingReturnId] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -70,6 +82,15 @@ export default function JemputTokoPusatPage() {
     setPending((data as unknown as PendingPackage[]) || [])
   }, [supabase])
 
+  const fetchPendingReturns = useCallback(async () => {
+    const { data } = await supabase
+      .from('logistics_store_returns')
+      .select('id, store_id, note, logistics_stores(name)')
+      .eq('status', 'menunggu')
+      .order('flagged_at')
+    setPendingReturns((data as unknown as PendingReturn[]) || [])
+  }, [supabase])
+
   const fetchTaken = useCallback(async (empId: string, planId: string) => {
     const { data } = await supabase
       .from('logistics_central_loading_packages')
@@ -81,7 +102,7 @@ export default function JemputTokoPusatPage() {
   }, [supabase])
 
   async function refresh() {
-    await fetchPending()
+    await Promise.all([fetchPending(), fetchPendingReturns()])
     if (myEmployeeId) await fetchPlans(myEmployeeId)
     if (myEmployeeId && selectedPlanId) await fetchTaken(myEmployeeId, selectedPlanId)
   }
@@ -95,7 +116,7 @@ export default function JemputTokoPusatPage() {
       const empId = userData?.employee_id || ''
       setMyEmployeeId(empId)
       if (empId) await fetchPlans(empId)
-      await fetchPending()
+      await Promise.all([fetchPending(), fetchPendingReturns()])
       setLoading(false)
     }
     init()
@@ -114,6 +135,20 @@ export default function JemputTokoPusatPage() {
     if (error) { showMessage('error', 'Gagal mengambil: ' + error.message); return }
     const storeName = pkg.logistics_central_loadings?.logistics_stores?.name ?? 'toko tujuan'
     showMessage('success', `"${pkg.caption}" untuk ${storeName} berhasil diklaim — toko ini otomatis masuk ke rencana Anda.`)
+    await refresh()
+  }
+
+  // Ambil barang retur beda dari klaim paket biasa -- barangnya belum di tangan driver sama
+  // sekali, baru akan diambil nanti pas sampai di toko (prosesnya satu-per-satu di Jalankan
+  // Pengiriman, lihat section "Tugas Retur" di sana).
+  async function handleClaimReturn(ret: PendingReturn) {
+    if (!selectedPlanId) { showMessage('error', 'Pilih rencana/trip Anda dulu.'); return }
+    setClaimingReturnId(ret.id)
+    const { error } = await supabase.rpc('claim_store_return', { p_return_id: ret.id, p_plan_id: selectedPlanId })
+    setClaimingReturnId(null)
+    if (error) { showMessage('error', 'Gagal mengambil tugas retur: ' + error.message); return }
+    const storeName = ret.logistics_stores?.name ?? 'toko tujuan'
+    showMessage('success', `Tugas ambil retur ${storeName} berhasil diklaim — toko ini otomatis masuk ke rencana Anda, proses di Jalankan Pengiriman saat sampai di sana.`)
     await refresh()
   }
 
@@ -178,6 +213,29 @@ export default function JemputTokoPusatPage() {
           </div>
         )}
       </div>
+
+      {pendingReturns.length > 0 && (
+        <div className="bg-white rounded-xl border border-amber-200 overflow-hidden mb-6">
+          <div className="px-4 py-3 bg-amber-50 border-b border-amber-100">
+            <p className="text-sm font-bold text-amber-800">↩️ Ada Retur Menunggu Diambil ({pendingReturns.length})</p>
+            <p className="text-xs text-amber-600 mt-0.5">Barangnya masih di toko tujuan — nanti diambil & difoto satu-per-satu pas sampai di sana (lihat Jalankan Pengiriman).</p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {pendingReturns.map(r => (
+              <div key={r.id} className="flex items-center gap-3 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate">{r.logistics_stores?.name ?? '-'}</p>
+                  {r.note && <p className="text-xs text-slate-500 truncate">{r.note}</p>}
+                </div>
+                <button onClick={() => handleClaimReturn(r)} disabled={!selectedPlanId || claimingReturnId === r.id}
+                  className="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50">
+                  {claimingReturnId === r.id ? 'Menyimpan...' : '✓ Saya Ambil'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {selectedPlanId && taken.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

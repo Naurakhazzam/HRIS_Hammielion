@@ -59,6 +59,25 @@ type PlanSupplierTask = {
   delivery_routes: { name: string } | null
 }
 
+type PlanReturn = {
+  id: string
+  plan_id: string
+  status: 'diambil' | 'selesai'
+  note: string | null
+  final_photo_url: string | null
+  final_location_note: string | null
+  finished_at: string | null
+  logistics_stores: { name: string } | null
+}
+
+type ReturnItem = {
+  id: string
+  return_id: string
+  photo_url: string
+  item_name: string
+  reason: string
+}
+
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
 const INCIDENT_LABEL: Record<string, string> = { tidak_ada: 'Tidak Ada', salah_muat: 'Salah Muat', retur: 'Retur', barang_lebih: 'Barang Lebih' }
 
@@ -81,6 +100,8 @@ export default function LaporanPengirimanPage() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [storesByPlan, setStoresByPlan] = useState<Record<string, PlanStore[]>>({})
   const [supplierTasksByPlan, setSupplierTasksByPlan] = useState<Record<string, PlanSupplierTask[]>>({})
+  const [returnsByPlan, setReturnsByPlan] = useState<Record<string, PlanReturn[]>>({})
+  const [returnItemsByReturn, setReturnItemsByReturn] = useState<Record<string, ReturnItem[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [verifyingId, setVerifyingId] = useState<string | null>(null)
   const [verifyAmount, setVerifyAmount] = useState('')
@@ -138,9 +159,36 @@ export default function LaporanPengirimanPage() {
         groupedTasks[t.plan_id].push(t)
       })
       setSupplierTasksByPlan(groupedTasks)
+
+      const { data: returnData } = await supabase.from('logistics_store_returns')
+        .select('id, plan_id, status, note, final_photo_url, final_location_note, finished_at, logistics_stores(name)')
+        .in('plan_id', list.map(p => p.id)).order('claimed_at')
+      const returns = (returnData as unknown as PlanReturn[]) || []
+      const groupedReturns: Record<string, PlanReturn[]> = {}
+      returns.forEach(r => {
+        if (!groupedReturns[r.plan_id]) groupedReturns[r.plan_id] = []
+        groupedReturns[r.plan_id].push(r)
+      })
+      setReturnsByPlan(groupedReturns)
+
+      if (returns.length > 0) {
+        const { data: itemData } = await supabase.from('logistics_store_return_items')
+          .select('id, return_id, photo_url, item_name, reason')
+          .in('return_id', returns.map(r => r.id)).order('captured_at')
+        const groupedItems: Record<string, ReturnItem[]> = {}
+        ;(itemData as ReturnItem[] || []).forEach(it => {
+          if (!groupedItems[it.return_id]) groupedItems[it.return_id] = []
+          groupedItems[it.return_id].push(it)
+        })
+        setReturnItemsByReturn(groupedItems)
+      } else {
+        setReturnItemsByReturn({})
+      }
     } else {
       setStoresByPlan({})
       setSupplierTasksByPlan({})
+      setReturnsByPlan({})
+      setReturnItemsByReturn({})
     }
     setLoading(false)
   }, [filterMonth, supabase])
@@ -349,6 +397,7 @@ export default function LaporanPengirimanPage() {
                 const planUnverified = planCash.filter(s => s.office_verified_amount == null)
                 const planVerified = planCash.filter(s => s.office_verified_amount != null)
                 const tasks = supplierTasksByPlan[p.id] || []
+                const returns = returnsByPlan[p.id] || []
                 const isOpen = expanded.has(p.id)
                 return (
                   <div key={p.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -428,6 +477,53 @@ export default function LaporanPengirimanPage() {
                                   )}
                                 </div>
                               ))}
+                            </div>
+                          </div>
+                        )}
+                        {returns.length > 0 && (
+                          <div className="px-4 py-2.5">
+                            <p className="text-xs font-semibold text-purple-600 uppercase mb-2">↩️ Retur Toko</p>
+                            <div className="space-y-3">
+                              {returns.map(r => {
+                                const items = returnItemsByReturn[r.id] || []
+                                return (
+                                  <div key={r.id} className="text-sm">
+                                    <div className="flex items-center gap-3">
+                                      <span className="flex-1 text-slate-700">
+                                        {r.logistics_stores?.name}
+                                        {r.note && <span className="text-slate-400"> — {r.note}</span>}
+                                      </span>
+                                      {r.finished_at && (
+                                        <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">🕐 {fmtJam(r.finished_at)}</span>
+                                      )}
+                                      <span className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${r.status === 'selesai' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {r.status === 'selesai' ? 'Selesai' : 'Sedang Diambil'}
+                                      </span>
+                                    </div>
+                                    {r.final_location_note && (
+                                      <p className="text-xs text-slate-500 mt-1 ml-0">Disimpan di: {r.final_location_note}</p>
+                                    )}
+                                    {(items.length > 0 || r.final_photo_url) && (
+                                      <div className="flex gap-3 mt-2 flex-wrap">
+                                        {items.map(it => (
+                                          <button key={it.id} type="button" onClick={() => openLightbox(it.photo_url, it.item_name)} title={`${it.item_name} — ${it.reason}`} className="flex flex-col items-center gap-1">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img src={it.photo_url} alt={it.item_name} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                            <span className="text-[10px] text-slate-500 font-medium truncate max-w-[56px]">{it.item_name}</span>
+                                          </button>
+                                        ))}
+                                        {r.final_photo_url && (
+                                          <button type="button" onClick={() => openLightbox(r.final_photo_url!, 'Posisi akhir barang')} title="Posisi Akhir Barang" className="flex flex-col items-center gap-1">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img src={r.final_photo_url} alt="Posisi akhir barang" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                            <span className="text-[10px] text-slate-500 font-medium">Posisi Akhir</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
                             </div>
                           </div>
                         )}

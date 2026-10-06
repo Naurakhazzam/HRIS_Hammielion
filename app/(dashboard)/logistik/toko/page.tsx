@@ -6,11 +6,21 @@ import { toWaLink } from '@/lib/whatsapp'
 
 type Store = { id: string; name: string; address: string | null; phone: string | null; is_active: boolean }
 
+type StoreReturn = {
+  id: string; store_id: string; status: 'menunggu' | 'diambil'; note: string | null
+  branches: { name: string } | null
+}
+
+type Branch = { id: string; name: string }
+
 export default function MasterTokoPage() {
   const supabase = createClient()
   const [stores, setStores] = useState<Store[]>([])
   const [loading, setLoading] = useState(true)
   const [canManage, setCanManage] = useState(false)
+  // Tandai Ada Retur -- beda dari canManage (CRUD toko, khusus Kepala Gudang/Owner): ini juga
+  // boleh Finance, karena mereka yang sering terima info retur dari toko lewat urusan keuangan.
+  const [canFlagReturn, setCanFlagReturn] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   const [showForm, setShowForm] = useState(false)
@@ -21,6 +31,14 @@ export default function MasterTokoPage() {
   const [submitting, setSubmitting] = useState(false)
   const [search, setSearch] = useState('')
 
+  const [returnsByStore, setReturnsByStore] = useState<Record<string, StoreReturn>>({})
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [flagStoreId, setFlagStoreId] = useState<string | null>(null)
+  const [flagBranchId, setFlagBranchId] = useState('')
+  const [flagNote, setFlagNote] = useState('')
+  const [flagSubmitting, setFlagSubmitting] = useState(false)
+  const [cancellingReturnId, setCancellingReturnId] = useState<string | null>(null)
+
   const filteredStores = stores.filter(s => {
     const q = search.trim().toLowerCase()
     if (!q) return true
@@ -28,6 +46,8 @@ export default function MasterTokoPage() {
       || (s.address ?? '').toLowerCase().includes(q)
       || (s.phone ?? '').toLowerCase().includes(q)
   })
+
+  const columnCount = 4 + (canFlagReturn ? 1 : 0) + (canManage ? 1 : 0)
 
   useEffect(() => { init() }, [])
 
@@ -41,14 +61,18 @@ export default function MasterTokoPage() {
         // sembunyikan tombol di UI, proteksi utama tetap di RLS.
         if (userData.role === 'owner') {
           setCanManage(true)
+          setCanFlagReturn(true)
+        } else if (userData.role === 'finance') {
+          setCanFlagReturn(true)
         } else if (userData.employee_id) {
           const { data: emp } = await supabase.from('employees').select('positions(name)').eq('id', userData.employee_id).single()
           const posName = (emp as any)?.positions?.name
           setCanManage(posName === 'Kepala Gudang')
+          setCanFlagReturn(posName === 'Kepala Gudang')
         }
       }
     }
-    await fetchStores()
+    await Promise.all([fetchStores(), fetchReturns(), fetchBranches()])
     setLoading(false)
   }
 
@@ -56,6 +80,49 @@ export default function MasterTokoPage() {
     const { data, error } = await supabase.from('logistics_stores').select('*').order('name')
     if (error) showMessage('error', 'Gagal memuat data toko: ' + error.message)
     else setStores(data || [])
+  }
+
+  async function fetchReturns() {
+    const { data } = await supabase.from('logistics_store_returns')
+      .select('id, store_id, status, note, branches(name)').in('status', ['menunggu', 'diambil'])
+    const map: Record<string, StoreReturn> = {}
+    ;(data as unknown as StoreReturn[] || []).forEach(r => { map[r.store_id] = r })
+    setReturnsByStore(map)
+  }
+
+  async function fetchBranches() {
+    const { data } = await supabase.from('branches').select('id, name').order('name')
+    setBranches(data || [])
+  }
+
+  function openFlagReturn(storeId: string) {
+    setFlagStoreId(storeId)
+    setFlagBranchId('')
+    setFlagNote('')
+  }
+
+  async function submitFlagReturn() {
+    if (!flagStoreId || !flagBranchId) return
+    setFlagSubmitting(true)
+    const { error } = await supabase.rpc('flag_store_return', {
+      p_store_id: flagStoreId, p_recipient_branch_id: flagBranchId, p_note: flagNote.trim() || null,
+    })
+    if (error) showMessage('error', 'Gagal menandai retur: ' + error.message)
+    else showMessage('success', 'Toko berhasil ditandai ada retur menunggu diambil.')
+    setFlagStoreId(null)
+    await fetchReturns()
+    setFlagSubmitting(false)
+  }
+
+  // Cuma bisa batalkan selagi status masih 'menunggu' (belum diklaim driver manapun) -- sesuai
+  // RLS store_returns_delete. Kalau sudah 'diambil', biarkan driver yang menyelesaikannya.
+  async function cancelReturn(r: StoreReturn) {
+    if (!confirm('Batalkan penandaan retur untuk toko ini?')) return
+    setCancellingReturnId(r.id)
+    const { error } = await supabase.from('logistics_store_returns').delete().eq('id', r.id)
+    if (error) showMessage('error', 'Gagal membatalkan: ' + error.message)
+    else { showMessage('success', 'Penandaan retur dibatalkan.'); await fetchReturns() }
+    setCancellingReturnId(null)
   }
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -208,17 +275,20 @@ export default function MasterTokoPage() {
               <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Alamat</th>
               <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">WhatsApp</th>
               <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
+              {canFlagReturn && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Retur</th>}
               {canManage && <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {loading && stores.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">Memuat data...</td></tr>
+              <tr><td colSpan={columnCount} className="px-4 py-8 text-center text-slate-400 text-sm">Memuat data...</td></tr>
             ) : stores.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada toko.</td></tr>
+              <tr><td colSpan={columnCount} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada toko.</td></tr>
             ) : filteredStores.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada toko yang cocok dengan pencarian "{search}".</td></tr>
-            ) : filteredStores.map(s => (
+              <tr><td colSpan={columnCount} className="px-4 py-8 text-center text-slate-500 text-sm">Tidak ada toko yang cocok dengan pencarian "{search}".</td></tr>
+            ) : filteredStores.map(s => {
+              const ret = returnsByStore[s.id]
+              return (
               <tr key={s.id} className="hover:bg-slate-50 transition">
                 <td className="px-4 py-3 text-sm font-medium text-slate-800">{s.name}</td>
                 <td className="px-4 py-3 text-sm text-slate-600">{s.address || '—'}</td>
@@ -235,6 +305,29 @@ export default function MasterTokoPage() {
                     {s.is_active ? 'Aktif' : 'Nonaktif'}
                   </span>
                 </td>
+                {canFlagReturn && (
+                  <td className="px-4 py-3 text-center">
+                    {ret ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${ret.status === 'menunggu' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {ret.status === 'menunggu' ? 'Menunggu Diambil' : 'Sedang Diambil'}
+                        </span>
+                        {ret.branches?.name && <span className="text-[11px] text-slate-400">untuk {ret.branches.name}</span>}
+                        {ret.status === 'menunggu' && (
+                          <button onClick={() => cancelReturn(ret)} disabled={cancellingReturnId === ret.id}
+                            className="text-xs text-red-500 hover:underline disabled:opacity-50">
+                            {cancellingReturnId === ret.id ? 'Membatalkan...' : 'Batalkan'}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <button onClick={() => openFlagReturn(s.id)}
+                        className="px-2.5 py-1 text-xs font-medium bg-white border border-amber-200 text-amber-600 hover:bg-amber-50 rounded transition">
+                        + Tandai Ada Retur
+                      </button>
+                    )}
+                  </td>
+                )}
                 {canManage && (
                   <td className="px-4 py-3 text-center">
                     <div className="flex gap-2 justify-center">
@@ -247,10 +340,38 @@ export default function MasterTokoPage() {
                   </td>
                 )}
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </div>
+
+      {flagStoreId && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="font-semibold text-slate-800 mb-1">Tandai Ada Retur</h3>
+            <p className="text-xs text-slate-500 mb-4">{stores.find(s => s.id === flagStoreId)?.name}</p>
+            <label className="text-xs font-medium text-slate-600 block mb-1">Barang Milik Cabang <span className="text-red-500">*</span></label>
+            <select required value={flagBranchId} onChange={e => setFlagBranchId(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none mb-1">
+              <option value="">-- Pilih Cabang --</option>
+              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <p className="text-[11px] text-slate-400 mb-3">Cuma karyawan di cabang ini (atau Owner) yang nanti bisa konfirmasi terima barangnya di Penerimaan Retur.</p>
+            <label className="text-xs font-medium text-slate-600 block mb-1">Catatan (opsional)</label>
+            <textarea value={flagNote} onChange={e => setFlagNote(e.target.value)} rows={3}
+              placeholder="Misal: toko telepon, ada barang rusak mau diretur"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none mb-4" />
+            <p className="text-[11px] text-slate-400 mb-4">Detail barang (nama, foto, alasan) akan diisi driver sendiri saat mengambil di lapangan.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setFlagStoreId(null)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+              <button onClick={submitFlagReturn} disabled={!flagBranchId || flagSubmitting}
+                className="flex-1 py-2 text-sm text-white bg-amber-600 hover:bg-amber-700 rounded-lg disabled:opacity-50">
+                {flagSubmitting ? 'Menyimpan...' : 'Tandai'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
