@@ -66,6 +66,7 @@ type PlanReturn = {
   note: string | null
   final_photo_url: string | null
   final_location_note: string | null
+  no_items_reason: string | null
   logistics_stores: { name: string; address: string | null } | null
 }
 
@@ -114,6 +115,12 @@ export default function JalanPengirimanPage() {
   const [newItemName, setNewItemName] = useState('')
   const [newItemReason, setNewItemReason] = useState('')
   const [returnItemSubmitting, setReturnItemSubmitting] = useState(false)
+  const [deletingReturnItemId, setDeletingReturnItemId] = useState<string | null>(null)
+  // "Toko tidak ada barang retur" -- foto toko + keterangan, retur langsung ditutup tanpa barang.
+  const [reportingEmptyReturn, setReportingEmptyReturn] = useState(false)
+  const [emptyReturnPhotoUrl, setEmptyReturnPhotoUrl] = useState('')
+  const [emptyReturnReason, setEmptyReturnReason] = useState('')
+  const [emptyReturnSubmitting, setEmptyReturnSubmitting] = useState(false)
   // Lapor posisi akhir barang (Lapor Sampai Garasi) -- per-retur karena 1 plan bisa punya lebih
   // dari 1 tugas retur aktif sekaligus (toko berbeda-beda).
   const [closingReturnPhotos, setClosingReturnPhotos] = useState<Record<string, string>>({})
@@ -275,7 +282,7 @@ export default function JalanPengirimanPage() {
 
   async function fetchPlanReturns(planId: string) {
     const { data } = await supabase.from('logistics_store_returns')
-      .select('id, store_id, status, note, final_photo_url, final_location_note, logistics_stores(name, address)')
+      .select('id, store_id, status, note, final_photo_url, final_location_note, no_items_reason, logistics_stores(name, address)')
       .eq('plan_id', planId).order('claimed_at')
     const returns = (data as unknown as PlanReturn[]) || []
     setPlanReturns(returns)
@@ -423,18 +430,46 @@ export default function JalanPengirimanPage() {
     setSupplierTaskSubmitting(false)
   }
 
+  function resetReturnForms() {
+    setAddingNewReturnItem(false)
+    setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('')
+    setReportingEmptyReturn(false)
+    setEmptyReturnPhotoUrl(''); setEmptyReturnReason('')
+  }
+
   function openReturnTask(id: string) {
     setSelectedStoreId(null)
     setSelectedSupplierTaskId(null)
     setSelectedReturnId(id)
-    setAddingNewReturnItem(false)
-    setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('')
+    resetReturnForms()
   }
 
   function clearReturnSelection() {
     setSelectedReturnId(null)
-    setAddingNewReturnItem(false)
-    setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('')
+    resetReturnForms()
+  }
+
+  async function deleteReturnItem(it: ReturnItem) {
+    if (!confirm(`Hapus barang "${it.item_name}"?`)) return
+    setDeletingReturnItemId(it.id)
+    const { error } = await supabase.rpc('delete_store_return_item', { p_item_id: it.id })
+    setDeletingReturnItemId(null)
+    if (error) { showMessage('error', 'Gagal menghapus barang: ' + error.message); return }
+    showMessage('success', `Barang "${it.item_name}" dihapus.`)
+    if (selectedPlanId) await fetchPlanReturns(selectedPlanId)
+  }
+
+  async function submitEmptyReturn() {
+    if (!selectedReturn || !emptyReturnPhotoUrl || !emptyReturnReason.trim()) return
+    setEmptyReturnSubmitting(true)
+    const { error } = await supabase.rpc('finish_store_return_empty', {
+      p_return_id: selectedReturn.id, p_photo_url: emptyReturnPhotoUrl, p_reason: emptyReturnReason.trim(),
+    })
+    setEmptyReturnSubmitting(false)
+    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); return }
+    showMessage('success', `Retur "${selectedReturn.logistics_stores?.name}" selesai — toko tidak ada barang retur.`)
+    clearReturnSelection()
+    if (selectedPlanId) await fetchPlanReturns(selectedPlanId)
   }
 
   async function submitNewReturnItem() {
@@ -765,6 +800,10 @@ export default function JalanPengirimanPage() {
                 <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-3">Catatan kantor: {selectedReturn.note}</p>
               )}
 
+              <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mb-3">
+                Foto <strong>setiap barang retur satu-satu</strong>. Toko ini <strong>bukan kiriman</strong> — tidak perlu tekan Kirim.
+              </p>
+
               <p className="text-xs font-semibold text-slate-500 uppercase mb-2">
                 Barang Retur ({returnItemsByReturn[selectedReturn.id]?.length || 0})
               </p>
@@ -779,16 +818,63 @@ export default function JalanPengirimanPage() {
                         <p className="text-sm font-medium text-slate-800 truncate">{it.item_name}</p>
                         <p className="text-xs text-slate-500 truncate">{it.reason}</p>
                       </div>
+                      <button onClick={() => deleteReturnItem(it)} disabled={deletingReturnItemId === it.id}
+                        className="px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 shrink-0 disabled:opacity-50">
+                        {deletingReturnItemId === it.id ? '...' : 'Hapus'}
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
 
-              {!addingNewReturnItem ? (
-                <button onClick={() => setAddingNewReturnItem(true)}
-                  className="w-full py-2 border border-dashed border-purple-300 text-purple-600 text-sm font-medium rounded-lg hover:bg-purple-50 transition">
-                  + Tambah Barang Retur
-                </button>
+              {reportingEmptyReturn ? (
+                <div className="space-y-3 border-t border-slate-100 pt-3 mt-1">
+                  <p className="text-sm font-semibold text-slate-700">Toko Tidak Ada Barang Retur</p>
+                  <p className="text-xs text-slate-500">Foto tokonya, lalu tulis kata pemilik/penjaga toko.</p>
+                  {emptyReturnPhotoUrl ? (
+                    <div className="space-y-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={emptyReturnPhotoUrl} alt="Foto toko" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                      <button onClick={() => setEmptyReturnPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                    </div>
+                  ) : (
+                    <LogisticsCameraCapture label="Foto Toko" employeeName={myName}
+                      onCaptured={async blob => { const url = await uploadPlanPhoto(blob, `retur-${selectedReturn.id}-kosong`); if (url) setEmptyReturnPhotoUrl(url) }}
+                      onCancel={() => setReportingEmptyReturn(false)} />
+                  )}
+                  <input type="text" value={emptyReturnReason} onChange={e => setEmptyReturnReason(e.target.value)}
+                    placeholder="Contoh: kata pemilik toko barang retur tidak ada"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" />
+                  <div className="flex gap-2">
+                    <button onClick={() => { setReportingEmptyReturn(false); setEmptyReturnPhotoUrl(''); setEmptyReturnReason('') }}
+                      className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                    <button onClick={submitEmptyReturn} disabled={!emptyReturnPhotoUrl || !emptyReturnReason.trim() || emptyReturnSubmitting}
+                      className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                      {emptyReturnSubmitting ? 'Menyimpan...' : 'Simpan'}
+                    </button>
+                  </div>
+                </div>
+              ) : !addingNewReturnItem ? (
+                <div className="space-y-2">
+                  <button onClick={() => setAddingNewReturnItem(true)}
+                    className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg transition">
+                    📷 + Tambah Barang Retur
+                  </button>
+                  {(returnItemsByReturn[selectedReturn.id]?.length || 0) === 0 ? (
+                    <button onClick={() => setReportingEmptyReturn(true)}
+                      className="w-full py-2 border border-slate-300 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50 transition">
+                      Toko tidak ada barang retur
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={clearReturnSelection}
+                        className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition">
+                        ✓ Sudah Semua, Kembali
+                      </button>
+                      <p className="text-xs text-slate-400 text-center">Barang retur dibawa ke mobil. Posisi akhirnya dilaporkan nanti di Lapor Sampai Garasi.</p>
+                    </>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-3 border-t border-slate-100 pt-3 mt-1">
                   <p className="text-xs font-semibold text-slate-500 uppercase">Barang Baru</p>
@@ -1044,6 +1130,11 @@ export default function JalanPengirimanPage() {
                           </button>
                         ))}
                       </div>
+                      {incidentType === 'retur' && activeReturns.some(r => r.store_id === selectedStore.store_id) && (
+                        <p className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mb-3">
+                          Toko ini punya <strong>Tugas Retur</strong> dari kantor. Barang returnya dicatat di kartu <strong>↩️ Tugas Retur</strong> (satu-satu), bukan di sini.
+                        </p>
+                      )}
                       {incidentType !== 'tidak_ada' && (
                         <div className="space-y-2">
                           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -1111,7 +1202,7 @@ export default function JalanPengirimanPage() {
               <p className="text-sm text-slate-500 mb-4">Sebelum kembali ke garasi, foto dulu kondisi box/bak yang sudah kosong.</p>
               {returnsWithoutItems.length > 0 && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-                  ⚠ Retur di {returnsWithoutItems.map(r => r.logistics_stores?.name).join(', ')} belum ada barang yang dicatat. Catat dulu lewat Tugas Retur di bawah.
+                  ⚠ Retur di {returnsWithoutItems.map(r => r.logistics_stores?.name).join(', ')} belum ada barang yang dicatat. Buka Tugas Retur di bawah: catat barangnya, atau pilih &quot;Toko tidak ada barang retur&quot;.
                 </p>
               )}
               {boxPhotoUrl ? (
@@ -1146,18 +1237,26 @@ export default function JalanPengirimanPage() {
                   <div className="space-y-4">
                     {activeReturns.length > 0 && (
                       <div className="space-y-3">
-                        <p className="text-xs font-semibold text-amber-700 uppercase">⚠ Wajib Lapor Posisi Akhir Barang Retur Dulu</p>
-                        {activeReturns.map(r => (
+                        <p className="text-xs font-semibold text-amber-700 uppercase">⚠ Selesaikan Barang Retur Dulu</p>
+                        {activeReturns.map(r => (returnItemsByReturn[r.id]?.length || 0) === 0 ? (
+                          <div key={r.id} className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
+                            <p className="text-sm font-semibold text-slate-800">{r.logistics_stores?.name}</p>
+                            <p className="text-xs text-red-700">Belum ada barang retur yang dicatat. Catat barangnya, atau pilih &quot;Toko tidak ada barang retur&quot;.</p>
+                            <button onClick={() => openReturnTask(r.id)}
+                              className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg transition">
+                              Buka Tugas Retur
+                            </button>
+                          </div>
+                        ) : (
                           <div key={r.id} className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-2">
                             <p className="text-sm font-semibold text-slate-800">{r.logistics_stores?.name}</p>
                             <div className="flex items-center justify-between gap-2">
-                              <p className={`text-xs ${(returnItemsByReturn[r.id]?.length || 0) === 0 ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
-                                {returnItemsByReturn[r.id]?.length || 0} barang tercatat{(returnItemsByReturn[r.id]?.length || 0) === 0 ? ' — wajib catat minimal 1 barang' : ''}
-                              </p>
+                              <p className="text-xs text-slate-500">{returnItemsByReturn[r.id]?.length || 0} barang tercatat</p>
                               <button onClick={() => openReturnTask(r.id)} className="text-xs font-medium text-purple-700 hover:underline shrink-0">
-                                + Catat Barang Retur
+                                Lihat / Ubah Barang
                               </button>
                             </div>
+                            <p className="text-xs text-slate-600">Foto barang retur di tempat Anda menaruhnya, lalu tulis tempatnya.</p>
                             {closingReturnPhotos[r.id] ? (
                               <div className="space-y-2">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1173,10 +1272,10 @@ export default function JalanPengirimanPage() {
                             )}
                             <input type="text" value={closingReturnNotes[r.id] || ''}
                               onChange={e => setClosingReturnNotes(prev => ({ ...prev, [r.id]: e.target.value }))}
-                              placeholder="Barang disimpan di mana? (misal: gudang rak retur)"
+                              placeholder="Barang ditaruh di mana? (misal: di dalam mobil / rak retur gudang)"
                               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none" />
                             <button onClick={() => submitFinishReturn(r)}
-                              disabled={!closingReturnPhotos[r.id] || !closingReturnNotes[r.id]?.trim() || finishingReturnId === r.id || (returnItemsByReturn[r.id]?.length || 0) === 0}
+                              disabled={!closingReturnPhotos[r.id] || !closingReturnNotes[r.id]?.trim() || finishingReturnId === r.id}
                               className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                               {finishingReturnId === r.id ? 'Menyimpan...' : 'Tandai Selesai'}
                             </button>
@@ -1306,7 +1405,9 @@ export default function JalanPengirimanPage() {
                       <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Selesai</span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      {returnItemsByReturn[r.id]?.length || 0} barang{r.final_location_note ? ` — disimpan di: ${r.final_location_note}` : ''}
+                      {r.no_items_reason
+                        ? `Tidak ada barang retur — ${r.no_items_reason}`
+                        : `${returnItemsByReturn[r.id]?.length || 0} barang${r.final_location_note ? ` — disimpan di: ${r.final_location_note}` : ''}`}
                     </p>
                     <div className="flex gap-3 mt-2 flex-wrap">
                       {returnItemsByReturn[r.id]?.map(it => (
@@ -1317,10 +1418,10 @@ export default function JalanPengirimanPage() {
                         </button>
                       ))}
                       {r.final_photo_url && (
-                        <button type="button" onClick={() => openLightbox(r.final_photo_url!, 'Posisi akhir barang')} title="Posisi Akhir" className="flex flex-col items-center gap-1">
+                        <button type="button" onClick={() => openLightbox(r.final_photo_url!, r.no_items_reason ? 'Foto toko' : 'Posisi akhir barang')} title={r.no_items_reason ? 'Foto Toko' : 'Posisi Akhir'} className="flex flex-col items-center gap-1">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={r.final_photo_url} alt="Posisi akhir barang" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                          <span className="text-[10px] text-slate-500 font-medium">Posisi Akhir</span>
+                          <img src={r.final_photo_url} alt={r.no_items_reason ? 'Foto toko' : 'Posisi akhir barang'} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          <span className="text-[10px] text-slate-500 font-medium">{r.no_items_reason ? 'Foto Toko' : 'Posisi Akhir'}</span>
                         </button>
                       )}
                     </div>

@@ -9,6 +9,7 @@ type Store = { id: string; name: string; address: string | null; phone: string |
 type StoreReturn = {
   id: string; store_id: string; status: 'menunggu' | 'diambil'; note: string | null
   branches: { name: string } | null
+  claimer: { full_name: string } | null
 }
 
 type Branch = { id: string; name: string }
@@ -84,7 +85,8 @@ export default function MasterTokoPage() {
 
   async function fetchReturns() {
     const { data } = await supabase.from('logistics_store_returns')
-      .select('id, store_id, status, note, branches(name)').in('status', ['menunggu', 'diambil'])
+      .select('id, store_id, status, note, branches(name), claimer:employees!logistics_store_returns_claimed_by_fkey(full_name)')
+      .in('status', ['menunggu', 'diambil'])
     const map: Record<string, StoreReturn> = {}
     ;(data as unknown as StoreReturn[] || []).forEach(r => { map[r.store_id] = r })
     setReturnsByStore(map)
@@ -114,8 +116,19 @@ export default function MasterTokoPage() {
     setFlagSubmitting(false)
   }
 
+  // Lepas klaim: retur 'diambil' kembali 'menunggu' supaya bisa diklaim trip lain (mis. driver
+  // tidak jadi ke toko itu). Barang yang sudah tercatat tetap tersimpan.
+  async function releaseReturn(r: StoreReturn) {
+    if (!confirm(`Lepas klaim retur ini dari ${r.claimer?.full_name ?? 'driver'}? Retur akan kembali "Menunggu Diambil" dan bisa diklaim driver lain.`)) return
+    setCancellingReturnId(r.id)
+    const { error } = await supabase.rpc('release_store_return', { p_return_id: r.id })
+    if (error) showMessage('error', 'Gagal melepas klaim: ' + error.message)
+    else { showMessage('success', 'Klaim retur dilepas. Retur kembali menunggu diambil.'); await fetchReturns() }
+    setCancellingReturnId(null)
+  }
+
   // Cuma bisa batalkan selagi status masih 'menunggu' (belum diklaim driver manapun) -- sesuai
-  // RLS store_returns_delete. Kalau sudah 'diambil', biarkan driver yang menyelesaikannya.
+  // RLS store_returns_delete. Kalau sudah 'diambil', lepas klaim dulu (releaseReturn).
   async function cancelReturn(r: StoreReturn) {
     if (!confirm('Batalkan penandaan retur untuk toko ini?')) return
     setCancellingReturnId(r.id)
@@ -313,10 +326,16 @@ export default function MasterTokoPage() {
                           {ret.status === 'menunggu' ? 'Menunggu Diambil' : 'Sedang Diambil'}
                         </span>
                         {ret.branches?.name && <span className="text-[11px] text-slate-400">untuk {ret.branches.name}</span>}
-                        {ret.status === 'menunggu' && (
+                        {ret.status === 'diambil' && ret.claimer?.full_name && <span className="text-[11px] text-slate-400">oleh {ret.claimer.full_name}</span>}
+                        {ret.status === 'menunggu' ? (
                           <button onClick={() => cancelReturn(ret)} disabled={cancellingReturnId === ret.id}
                             className="text-xs text-red-500 hover:underline disabled:opacity-50">
                             {cancellingReturnId === ret.id ? 'Membatalkan...' : 'Batalkan'}
+                          </button>
+                        ) : (
+                          <button onClick={() => releaseReturn(ret)} disabled={cancellingReturnId === ret.id}
+                            className="text-xs text-blue-600 hover:underline disabled:opacity-50">
+                            {cancellingReturnId === ret.id ? 'Memproses...' : 'Lepas Klaim'}
                           </button>
                         )}
                       </div>

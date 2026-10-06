@@ -66,6 +66,7 @@ type PlanReturn = {
   note: string | null
   final_photo_url: string | null
   final_location_note: string | null
+  no_items_reason: string | null
   finished_at: string | null
   logistics_stores: { name: string } | null
 }
@@ -161,7 +162,7 @@ export default function LaporanPengirimanPage() {
       setSupplierTasksByPlan(groupedTasks)
 
       const { data: returnData } = await supabase.from('logistics_store_returns')
-        .select('id, plan_id, status, note, final_photo_url, final_location_note, finished_at, logistics_stores(name)')
+        .select('id, plan_id, status, note, final_photo_url, final_location_note, no_items_reason, finished_at, logistics_stores(name)')
         .in('plan_id', list.map(p => p.id)).order('claimed_at')
       const returns = (returnData as unknown as PlanReturn[]) || []
       const groupedReturns: Record<string, PlanReturn[]> = {}
@@ -497,9 +498,12 @@ export default function LaporanPengirimanPage() {
                                         <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">🕐 {fmtJam(r.finished_at)}</span>
                                       )}
                                       <span className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${r.status === 'selesai' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                                        {r.status === 'selesai' ? 'Selesai' : 'Sedang Diambil'}
+                                        {r.status === 'selesai' ? (r.no_items_reason ? 'Tidak Ada Barang' : 'Selesai') : 'Sedang Diambil'}
                                       </span>
                                     </div>
+                                    {r.no_items_reason && (
+                                      <p className="text-xs text-slate-500 mt-1 ml-0">Kata driver: {r.no_items_reason}</p>
+                                    )}
                                     {r.final_location_note && (
                                       <p className="text-xs text-slate-500 mt-1 ml-0">Disimpan di: {r.final_location_note}</p>
                                     )}
@@ -513,10 +517,10 @@ export default function LaporanPengirimanPage() {
                                           </button>
                                         ))}
                                         {r.final_photo_url && (
-                                          <button type="button" onClick={() => openLightbox(r.final_photo_url!, 'Posisi akhir barang')} title="Posisi Akhir Barang" className="flex flex-col items-center gap-1">
+                                          <button type="button" onClick={() => openLightbox(r.final_photo_url!, r.no_items_reason ? 'Foto toko' : 'Posisi akhir barang')} title={r.no_items_reason ? 'Foto Toko' : 'Posisi Akhir Barang'} className="flex flex-col items-center gap-1">
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            <img src={r.final_photo_url} alt="Posisi akhir barang" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                                            <span className="text-[10px] text-slate-500 font-medium">Posisi Akhir</span>
+                                            <img src={r.final_photo_url} alt={r.no_items_reason ? 'Foto toko' : 'Posisi akhir barang'} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                                            <span className="text-[10px] text-slate-500 font-medium">{r.no_items_reason ? 'Foto Toko' : 'Posisi Akhir'}</span>
                                           </button>
                                         )}
                                       </div>

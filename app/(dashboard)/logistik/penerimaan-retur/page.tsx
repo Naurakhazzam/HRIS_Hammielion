@@ -14,6 +14,7 @@ type ReturnRow = {
   received_at: string | null
   received_photo_url: string | null
   recipient_branch_id: string | null
+  no_items_reason: string | null
   logistics_stores: { name: string } | null
   branches: { name: string } | null
   finisher: { full_name: string } | null
@@ -50,7 +51,7 @@ export default function PenerimaanReturPage() {
   const fetchReturns = useCallback(async () => {
     const { data } = await supabase.from('logistics_store_returns')
       .select(`
-        id, note, final_photo_url, final_location_note, received_by, received_at, received_photo_url, recipient_branch_id,
+        id, note, final_photo_url, final_location_note, received_by, received_at, received_photo_url, recipient_branch_id, no_items_reason,
         logistics_stores(name), branches(name),
         finisher:employees!logistics_store_returns_finished_by_fkey(full_name),
         receiver:employees!logistics_store_returns_received_by_fkey(full_name)
@@ -58,8 +59,9 @@ export default function PenerimaanReturPage() {
       .eq('status', 'selesai')
       .order('finished_at', { ascending: false })
     const rows = (data as unknown as ReturnRow[]) || []
-    setPending(rows.filter(r => !r.received_at))
-    setHistory(rows.filter(r => r.received_at))
+    // Retur "toko tidak ada barang" tidak ada yang diserahterimakan -- langsung masuk riwayat.
+    setPending(rows.filter(r => !r.received_at && !r.no_items_reason))
+    setHistory(rows.filter(r => r.received_at || r.no_items_reason))
 
     if (rows.length > 0) {
       const { data: items } = await supabase.from('logistics_store_return_items')
@@ -201,18 +203,34 @@ export default function PenerimaanReturPage() {
           {history.length > 0 && (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-                <p className="text-sm font-bold text-slate-700">✓ Riwayat Diterima ({history.length})</p>
+                <p className="text-sm font-bold text-slate-700">✓ Riwayat ({history.length})</p>
               </div>
               <div className="divide-y divide-slate-100">
                 {history.map(r => (
                   <div key={r.id} className="px-4 py-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <p className="text-sm font-medium text-slate-700">{r.logistics_stores?.name}</p>
-                      <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 font-medium">untuk {r.branches?.name ?? '-'}</span>
+                      {r.no_items_reason ? (
+                        <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">Tidak ada barang</span>
+                      ) : (
+                        <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 font-medium">untuk {r.branches?.name ?? '-'}</span>
+                      )}
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Diterima {r.receiver?.full_name ?? '-'}{r.received_at ? ` · ${fmtDateTime(r.received_at)}` : ''}
-                    </p>
+                    {r.no_items_reason ? (
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Kata driver ({r.finisher?.full_name ?? '-'}): {r.no_items_reason}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Diterima {r.receiver?.full_name ?? '-'}{r.received_at ? ` · ${fmtDateTime(r.received_at)}` : ''}
+                      </p>
+                    )}
+                    {r.no_items_reason && r.final_photo_url && (
+                      <button type="button" onClick={() => openLightbox(r.final_photo_url!, 'Foto toko')} className="mt-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={r.final_photo_url} alt="Foto toko" className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                      </button>
+                    )}
                     {r.received_photo_url && (
                       <button type="button" onClick={() => openLightbox(r.received_photo_url!, 'Foto terima barang')} className="mt-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
