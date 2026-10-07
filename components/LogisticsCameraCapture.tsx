@@ -13,9 +13,13 @@ type Props = {
   employeeName: string
   onCaptured: (blob: Blob) => void
   onCancel?: () => void
+  // Jalur cadangan "Kamera Bawaan HP" (<input capture>) di sebagian HP (mis. MIUI) masih bisa
+  // membuka galeri. Kalau diisi, file yang dibuat lebih lama dari ini ditolak -- foto galeri
+  // hampir selalu jauh lebih tua dari foto yang barusan diambil.
+  maxFileAgeMs?: number
 }
 
-export default function LogisticsCameraCapture({ label, employeeName, onCaptured, onCancel }: Props) {
+export default function LogisticsCameraCapture({ label, employeeName, onCaptured, onCancel, maxFileAgeMs }: Props) {
   const [step, setStep] = useState<'idle' | 'camera' | 'preview'>('idle')
   const [cameraReady, setCameraReady] = useState(false)
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null)
@@ -116,6 +120,10 @@ export default function LogisticsCameraCapture({ label, employeeName, onCaptured
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    if (maxFileAgeMs && file.lastModified > 0 && Date.now() - file.lastModified > maxFileAgeMs) {
+      setError('Foto harus diambil langsung dari kamera saat ini, bukan dari galeri. Coba ambil foto lagi.')
+      return
+    }
     stopCamera()
     const objUrl = URL.createObjectURL(file)
     const img = new Image()

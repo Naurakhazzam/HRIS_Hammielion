@@ -4,11 +4,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import LogisticsCameraCapture from '@/components/LogisticsCameraCapture'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
+import RupiahInput from '@/components/RupiahInput'
 
 type Loading = {
   id: string
   store_id: string
   status: 'proses' | 'selesai' | 'dibatalkan'
+  delivery_method: 'driver' | 'toko_pusat'
+  ongkir: number
   created_at: string
   completed_at: string | null
   cancelled_at: string | null
@@ -39,6 +42,11 @@ type LoadingPackage = {
 type Store = { id: string; name: string }
 
 type PackageSummary = { total: number; diambil: number; takers: string[]; lastTakenAt: string | null }
+
+// Status kiriman jalur "Diantar Toko Pusat Sendiri" (dari stop trip yang masih hidup).
+type TpInfo = { pjName: string; pickupAt: string; arrivedAt: string | null; tripStatus: string; returnAt: string | null }
+
+const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
 
 type PickupFilter = 'semua' | 'belum' | 'sudah' | 'proses'
 
@@ -76,7 +84,22 @@ export default function LaporanMuatPage() {
   const [loadings, setLoadings] = useState<Loading[]>([])
   const [itemCounts, setItemCounts] = useState<Record<string, number>>({})
   const [packageCounts, setPackageCounts] = useState<Record<string, PackageSummary>>({})
+  const [tpInfo, setTpInfo] = useState<Record<string, TpInfo>>({})
+  const [isOwner, setIsOwner] = useState(false)
   const [pickupFilter, setPickupFilter] = useState<PickupFilter>('semua')
+
+  // Form "Tandai Selesai": pilih jalur antar + ongkir.
+  const [finishMethod, setFinishMethod] = useState<'driver' | 'toko_pusat' | null>(null)
+  const [ongkirMode, setOngkirMode] = useState<'tidak' | 'ada' | null>(null)
+  const [ongkirDraft, setOngkirDraft] = useState('')
+  // Pindah jalur / ubah ongkir setelah selesai.
+  const [editMode, setEditMode] = useState<'method' | 'ongkir' | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  // Tambah toko baru ke Master Toko (kalau belum terdaftar).
+  const [showNewStore, setShowNewStore] = useState(false)
+  const [newStoreAddress, setNewStoreAddress] = useState('')
+  const [newStorePhone, setNewStorePhone] = useState('')
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -106,7 +129,7 @@ export default function LaporanMuatPage() {
     const { data, error } = await supabase
       .from('logistics_central_loadings')
       .select(`
-        id, store_id, status, created_at, completed_at, cancelled_at,
+        id, store_id, status, delivery_method, ongkir, created_at, completed_at, cancelled_at,
         logistics_stores(name, address),
         creator:employees!logistics_central_loadings_created_by_fkey(full_name),
         completer:employees!logistics_central_loadings_completed_by_fkey(full_name),
@@ -140,9 +163,25 @@ export default function LaporanMuatPage() {
         }
       })
       setPackageCounts(pCounts)
+
+      const tpIds = rows.filter(r => r.delivery_method === 'toko_pusat').map(r => r.id)
+      const tMap: Record<string, TpInfo> = {}
+      if (tpIds.length > 0) {
+        const { data: stopRows } = await supabase.from('logistics_tp_trip_stops')
+          .select('loading_id, arrived_at, logistics_tp_trips(status, pickup_at, return_at, pj:employees!logistics_tp_trips_pj_id_fkey(full_name))')
+          .in('loading_id', tpIds).is('cancelled_at', null)
+        type StopRow = { loading_id: string; arrived_at: string | null; logistics_tp_trips: { status: string; pickup_at: string; return_at: string | null; pj: { full_name: string } | null } | null }
+        ;(stopRows as unknown as StopRow[] || []).forEach(s => {
+          const t = s.logistics_tp_trips
+          if (!t) return
+          tMap[s.loading_id] = { pjName: t.pj?.full_name ?? '-', pickupAt: t.pickup_at, arrivedAt: s.arrived_at, tripStatus: t.status, returnAt: t.return_at }
+        })
+      }
+      setTpInfo(tMap)
     } else {
       setItemCounts({})
       setPackageCounts({})
+      setTpInfo({})
     }
   }, [supabase])
 
@@ -156,7 +195,7 @@ export default function LaporanMuatPage() {
           setMyEmployeeId(userData.employee_id || '')
           const me = userData.employees as unknown as { full_name: string } | { full_name: string }[] | null
           setMyName((Array.isArray(me) ? me[0]?.full_name : me?.full_name) || '')
-          if (userData.role === 'owner') { setCanEdit(true); setCanView(true) }
+          if (userData.role === 'owner') { setCanEdit(true); setCanView(true); setIsOwner(true) }
           else if (userData.employee_id) {
             const { data: emp } = await supabase.from('employees').select('positions(name), branches(name)').eq('id', userData.employee_id).single()
             type NameRel = { name: string } | { name: string }[] | null
@@ -198,7 +237,25 @@ export default function LaporanMuatPage() {
     setSelectedLoadingId(id)
     setItemCaptionDraft('')
     setPackageCaptionDraft('')
+    resetFinishForm()
     fetchDetail(id)
+  }
+
+  function resetFinishForm() {
+    setFinishMethod(null)
+    setOngkirMode(null)
+    setOngkirDraft('')
+    setEditMode(null)
+  }
+
+  // Ongkir dari form: null = belum valid (belum pilih / "ada" tapi nominal kosong).
+  function ongkirFromForm(): number | null {
+    if (ongkirMode === 'tidak') return 0
+    if (ongkirMode === 'ada') {
+      const n = parseInt(ongkirDraft || '0', 10)
+      return n > 0 ? n : null
+    }
+    return null
   }
 
   const availableStores = allStores
@@ -206,15 +263,32 @@ export default function LaporanMuatPage() {
 
   async function handleCreateLoading(e: React.FormEvent) {
     e.preventDefault()
-    if (!matchedStore) { showMessage('error', 'Toko tidak ditemukan. Ketik nama toko lalu pilih dari saran yang muncul.'); return }
+    let storeId = matchedStore?.id
+    if (!storeId) {
+      if (!showNewStore) { showMessage('error', 'Toko tidak ditemukan. Pilih dari saran yang muncul, atau tambahkan sebagai toko baru.'); return }
+      setCreating(true)
+      const { data: newId, error: storeErr } = await supabase.rpc('quick_create_logistics_store', {
+        p_name: storeSearchText, p_address: newStoreAddress, p_phone: newStorePhone,
+      })
+      if (storeErr || !newId) { setCreating(false); showMessage('error', 'Gagal menambah toko: ' + storeErr?.message); return }
+      storeId = newId as string
+    }
     setCreating(true)
     const { data, error } = await supabase.from('logistics_central_loadings').insert({
-      store_id: matchedStore.id, created_by: myEmployeeId,
+      store_id: storeId, created_by: myEmployeeId,
     }).select('id').single()
     setCreating(false)
     if (error || !data) { showMessage('error', 'Gagal membuat laporan muat: ' + error?.message); return }
+    if (showNewStore) {
+      const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).order('name')
+      setAllStores(storeData || [])
+    }
     setStoreSearchText('')
+    setShowNewStore(false)
+    setNewStoreAddress('')
+    setNewStorePhone('')
     setShowCreateForm(false)
+    resetFinishForm()
     await fetchLoadings()
     setSelectedLoadingId(data.id)
     setItemCaptionDraft('')
@@ -287,22 +361,54 @@ export default function LaporanMuatPage() {
   }
 
   async function handleTandaiSelesai() {
-    if (!selectedLoadingId || detailPackages.length === 0) return
-    if (!confirm('Tandai laporan muat ini selesai? Foto tidak bisa ditambah/dihapus lagi setelah ini.')) return
+    if (!selectedLoadingId || detailPackages.length === 0 || !finishMethod) return
+    const ongkir = finishMethod === 'toko_pusat' ? ongkirFromForm() : 0
+    if (ongkir === null) { showMessage('error', 'Pilih "Tidak ada ongkir" atau isi nominal ongkirnya.'); return }
+    const jalur = finishMethod === 'driver'
+      ? 'DIANTAR DRIVER (muncul di Jemput Toko Pusat)'
+      : `DIANTAR TOKO PUSAT SENDIRI (ongkir ${ongkir > 0 ? fmtRp(ongkir) : 'tidak ada'})`
+    if (!confirm(`Tandai laporan muat ini selesai — ${jalur}?\nFoto tidak bisa ditambah/dihapus lagi setelah ini.`)) return
     setFinishing(true)
-    const { error } = await supabase.from('logistics_central_loadings').update({
-      status: 'selesai', completed_by: myEmployeeId, completed_at: new Date().toISOString(),
-    }).eq('id', selectedLoadingId).eq('status', 'proses')
+    const { error } = await supabase.rpc('finish_central_loading', {
+      p_loading_id: selectedLoadingId, p_method: finishMethod, p_ongkir: ongkir,
+    })
     setFinishing(false)
     if (error) { showMessage('error', 'Gagal menandai selesai: ' + error.message); return }
-    showMessage('success', 'Laporan muat ditandai selesai. Toko tujuan sudah bisa dijemput driver.')
+    showMessage('success', finishMethod === 'driver'
+      ? 'Laporan muat ditandai selesai. Toko tujuan sudah bisa dijemput driver.'
+      : 'Laporan muat ditandai selesai. Kiriman muncul di menu Kirim Barang untuk diantar orang Toko Pusat.')
+    resetFinishForm()
+    window.dispatchEvent(new Event('kirim-barang-badge-refresh'))
     await fetchLoadings()
     await fetchDetail(selectedLoadingId)
+  }
+
+  async function handleSaveEdit(l: Loading) {
+    if (!editMode) return
+    setSavingEdit(true)
+    let error
+    if (editMode === 'method') {
+      const target = l.delivery_method === 'driver' ? 'toko_pusat' : 'driver'
+      const ongkir = target === 'toko_pusat' ? ongkirFromForm() : 0
+      if (ongkir === null) { setSavingEdit(false); showMessage('error', 'Pilih "Tidak ada ongkir" atau isi nominal ongkirnya.'); return }
+      ;({ error } = await supabase.rpc('set_central_loading_method', { p_loading_id: l.id, p_method: target, p_ongkir: ongkir }))
+    } else {
+      const ongkir = ongkirFromForm()
+      if (ongkir === null) { setSavingEdit(false); showMessage('error', 'Pilih "Tidak ada ongkir" atau isi nominal ongkirnya.'); return }
+      ;({ error } = await supabase.rpc('set_central_loading_ongkir', { p_loading_id: l.id, p_ongkir: ongkir }))
+    }
+    setSavingEdit(false)
+    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); return }
+    showMessage('success', editMode === 'method' ? 'Jalur pengantaran berhasil dipindah.' : 'Ongkir berhasil diubah.')
+    resetFinishForm()
+    window.dispatchEvent(new Event('kirim-barang-badge-refresh'))
+    await fetchLoadings()
   }
 
   function pickupGroup(l: Loading): 'belum' | 'sudah' | 'proses' | 'batal' {
     if (l.status === 'dibatalkan') return 'batal'
     if (l.status === 'proses') return 'proses'
+    if (l.delivery_method === 'toko_pusat') return tpInfo[l.id] ? 'sudah' : 'belum'
     const pkg = packageCounts[l.id]
     return pkg && pkg.diambil < pkg.total ? 'belum' : 'sudah'
   }
@@ -317,6 +423,35 @@ export default function LaporanMuatPage() {
       if (aw === 0) return (a.completed_at ?? '').localeCompare(b.completed_at ?? '')
       return b.created_at.localeCompare(a.created_at)
     })
+
+  function renderOngkirPicker() {
+    const n = parseInt(ongkirDraft || '0', 10)
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-600">Ongkir (sesuai nota):</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => { setOngkirMode('tidak'); setOngkirDraft('') }}
+            className={`px-3 py-1.5 rounded-lg border text-sm ${ongkirMode === 'tidak' ? 'border-blue-500 bg-blue-50 font-semibold' : 'border-slate-300 bg-white'}`}>
+            Tidak ada ongkir
+          </button>
+          <button type="button" onClick={() => setOngkirMode('ada')}
+            className={`px-3 py-1.5 rounded-lg border text-sm ${ongkirMode === 'ada' ? 'border-blue-500 bg-blue-50 font-semibold' : 'border-slate-300 bg-white'}`}>
+            Ada ongkir
+          </button>
+        </div>
+        {ongkirMode === 'ada' && (
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500">Rp</span>
+              <RupiahInput value={ongkirDraft} onChange={setOngkirDraft} placeholder="Nominal ongkir"
+                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+            {n > 0 && <p className="text-xs text-green-700 mt-1">Bonus PJ (50%): {fmtRp(Math.floor(n * 0.5))} — hanya kalau tugas antar diselesaikan lengkap.</p>}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   if (loading) return <div className="text-center py-12 text-slate-500">Memuat...</div>
 
@@ -337,7 +472,7 @@ export default function LaporanMuatPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Laporan Muat</h1>
           <p className="text-sm text-slate-500">
-            {canEdit ? 'Laporkan barang toko tujuan yang harus diambil driver dari Toko Pusat.' : 'Pantau laporan muat dari Toko Pusat.'}
+            {canEdit ? 'Laporkan barang toko tujuan — diantar driver atau oleh Toko Pusat sendiri.' : 'Pantau laporan muat dari Toko Pusat.'}
           </p>
         </div>
         {canEdit && (
@@ -356,18 +491,41 @@ export default function LaporanMuatPage() {
 
       {showCreateForm && canEdit && (
         <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-6">
-          <form onSubmit={handleCreateLoading} className="flex gap-2">
-            <input type="text" list="laporan-muat-stores-datalist" value={storeSearchText}
-              onChange={e => setStoreSearchText(e.target.value)}
-              placeholder="Ketik nama toko tujuan..."
-              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-            <datalist id="laporan-muat-stores-datalist">
-              {availableStores.map(s => <option key={s.id} value={s.name} />)}
-            </datalist>
-            <button type="submit" disabled={!matchedStore || creating}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
-              {creating ? 'Membuat...' : '+ Buat'}
-            </button>
+          <form onSubmit={handleCreateLoading} className="space-y-3">
+            <div className="flex gap-2">
+              <input type="text" list="laporan-muat-stores-datalist" value={storeSearchText}
+                onChange={e => setStoreSearchText(e.target.value)}
+                placeholder="Ketik nama toko tujuan..."
+                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+              <datalist id="laporan-muat-stores-datalist">
+                {availableStores.map(s => <option key={s.id} value={s.name} />)}
+              </datalist>
+              <button type="submit"
+                disabled={creating || (!matchedStore && (!showNewStore || storeSearchText.trim().length < 3 || newStoreAddress.trim().length < 5))}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                {creating ? 'Membuat...' : '+ Buat'}
+              </button>
+            </div>
+            {!matchedStore && storeSearchText.trim().length >= 3 && !showNewStore && (
+              <div className="text-xs text-slate-500 flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                <span>Toko &quot;{storeSearchText.trim()}&quot; belum ada di Master Toko.</span>
+                <button type="button" onClick={() => setShowNewStore(true)} className="shrink-0 text-blue-600 font-semibold hover:underline">
+                  + Tambah Toko Baru
+                </button>
+              </div>
+            )}
+            {!matchedStore && showNewStore && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-blue-800">Toko baru: &quot;{storeSearchText.trim()}&quot; — akan ditambahkan ke Master Toko</p>
+                <input type="text" value={newStoreAddress} onChange={e => setNewStoreAddress(e.target.value)}
+                  placeholder="Alamat toko (wajib)"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                <input type="tel" value={newStorePhone} onChange={e => setNewStorePhone(e.target.value)}
+                  placeholder="No. telepon (opsional)"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                <button type="button" onClick={() => setShowNewStore(false)} className="text-xs text-slate-500 hover:underline">Batal tambah toko</button>
+              </div>
+            )}
           </form>
         </div>
       )}
@@ -406,6 +564,8 @@ export default function LaporanMuatPage() {
           const isOpen = selectedLoadingId === l.id
           const group = pickupGroup(l)
           const waitingMs = group === 'belum' && l.completed_at ? now - new Date(l.completed_at).getTime() : 0
+          const isTp = l.status === 'selesai' && l.delivery_method === 'toko_pusat'
+          const tp = tpInfo[l.id]
           return (
             <div key={l.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               <button onClick={() => toggleSelect(l.id)} className="w-full text-left px-5 py-4 hover:bg-slate-50 transition flex items-center justify-between gap-3">
@@ -420,10 +580,22 @@ export default function LaporanMuatPage() {
                   {group === 'belum' && l.completed_at && (
                     <p className={`inline-block mt-1.5 text-xs font-semibold px-2 py-1 rounded-md border ${waitingTone(waitingMs)}`}>
                       ⏱ Sudah {fmtDuration(waitingMs)} belum diambil
-                      {pkg.diambil > 0 ? ` · sisa ${pkg.total - pkg.diambil} dari ${pkg.total} paket` : ''}
+                      {!isTp && pkg.diambil > 0 ? ` · sisa ${pkg.total - pkg.diambil} dari ${pkg.total} paket` : ''}
                     </p>
                   )}
-                  {pkg.takers.length > 0 && (
+                  {isTp && (
+                    <p className="text-xs text-purple-700 mt-1">
+                      🏪 Diantar Toko Pusat sendiri · Ongkir {l.ongkir > 0 ? fmtRp(l.ongkir) : 'tidak ada'}
+                    </p>
+                  )}
+                  {isTp && tp && (
+                    <p className="text-xs text-blue-700 mt-1">
+                      {tp.arrivedAt
+                        ? `✓ Sampai di toko oleh ${tp.pjName} · ${fmtDateTime(tp.arrivedAt)} (${fmtDuration(new Date(tp.arrivedAt).getTime() - new Date(tp.pickupAt).getTime())} sejak diambil)`
+                        : `🛵 Dibawa ${tp.pjName} · sudah ${fmtDuration(now - new Date(tp.pickupAt).getTime())} di jalan`}
+                    </p>
+                  )}
+                  {!isTp && pkg.takers.length > 0 && (
                     <p className="text-xs text-blue-700 mt-1">
                       🚚 Diambil oleh {pkg.takers.join(', ')}{group === 'sudah' && pkg.lastTakenAt ? ` · ${fmtDateTime(pkg.lastTakenAt)}` : ''}
                     </p>
@@ -435,7 +607,15 @@ export default function LaporanMuatPage() {
                   }`}>
                     {l.status === 'selesai' ? 'Selesai' : l.status === 'dibatalkan' ? 'Dibatalkan' : 'Proses'}
                   </span>
-                  {l.status === 'selesai' && pkg.total > 0 && (
+                  {isTp ? (
+                    !tp ? (
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-orange-100 text-orange-700">Belum Diambil</span>
+                    ) : tp.arrivedAt ? (
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-blue-100 text-blue-700">Terkirim</span>
+                    ) : (
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-purple-100 text-purple-700">Sedang Diantar</span>
+                    )
+                  ) : l.status === 'selesai' && pkg.total > 0 && (
                     pkg.diambil < pkg.total ? (
                       <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-orange-100 text-orange-700">
                         Belum Diambil{pkg.diambil > 0 ? ` (${pkg.diambil}/${pkg.total})` : ''}
@@ -500,7 +680,11 @@ export default function LaporanMuatPage() {
                             <img src={pk.photo_url} alt={pk.caption} onClick={() => openLightbox(pk.photo_url, pk.caption)}
                               className="w-full aspect-square object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
                             <p className="text-xs text-slate-600 mt-1 truncate" title={pk.caption}>{pk.caption}</p>
-                            {pk.status === 'diambil' ? (
+                            {isTp ? (
+                              <span className="inline-block mt-0.5 text-[11px] px-1.5 py-0.5 rounded font-medium bg-purple-50 text-purple-700">
+                                {!tp ? 'Menunggu diambil orang Toko Pusat' : tp.arrivedAt ? `✓ Sampai · ${tp.pjName}` : `🛵 Dibawa ${tp.pjName}`}
+                              </span>
+                            ) : pk.status === 'diambil' ? (
                               <span className="inline-block mt-0.5 text-[11px] px-1.5 py-0.5 rounded font-medium bg-green-100 text-green-700">
                                 ✓ Diambil {pk.taken?.full_name ?? ''} · {pk.taken_at ? fmtDateTime(pk.taken_at) : ''}
                               </span>
@@ -534,17 +718,88 @@ export default function LaporanMuatPage() {
                   </div>
 
                   {canEdit && l.status === 'proses' && (
-                    <div className="flex gap-2">
-                      <button onClick={handleBatalkan} disabled={cancelling}
-                        className="px-4 py-2.5 border border-red-200 text-red-600 hover:bg-red-50 text-sm font-medium rounded-lg transition disabled:opacity-50">
-                        {cancelling ? 'Membatalkan...' : 'Batalkan Laporan'}
-                      </button>
-                      <button onClick={handleTandaiSelesai} disabled={detailPackages.length === 0 || finishing}
-                        className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50">
-                        {finishing ? 'Menyimpan...' : detailPackages.length === 0 ? 'Tambah minimal 1 foto packing dulu' : '✓ Tandai Selesai — Bisa Dijemput Driver'}
-                      </button>
+                    <div className="space-y-3">
+                      {detailPackages.length > 0 && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                          <p className="text-sm font-bold text-slate-700">Siapa yang mengantar?</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button type="button" onClick={() => setFinishMethod('driver')}
+                              className={`text-left px-3 py-2.5 rounded-lg border text-sm transition ${finishMethod === 'driver' ? 'border-green-500 bg-green-50 ring-2 ring-green-300' : 'border-slate-300 bg-white hover:bg-slate-50'}`}>
+                              <span className="font-semibold">🚚 Diantar Driver</span>
+                              <span className="block text-xs text-slate-500">Muncul di Jemput Toko Pusat</span>
+                            </button>
+                            <button type="button" onClick={() => setFinishMethod('toko_pusat')}
+                              className={`text-left px-3 py-2.5 rounded-lg border text-sm transition ${finishMethod === 'toko_pusat' ? 'border-purple-500 bg-purple-50 ring-2 ring-purple-300' : 'border-slate-300 bg-white hover:bg-slate-50'}`}>
+                              <span className="font-semibold">🏪 Diantar Toko Pusat Sendiri</span>
+                              <span className="block text-xs text-slate-500">Tidak muncul ke driver — masuk menu Kirim Barang</span>
+                            </button>
+                          </div>
+                          {finishMethod === 'toko_pusat' && renderOngkirPicker()}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <button onClick={handleBatalkan} disabled={cancelling}
+                          className="px-4 py-2.5 border border-red-200 text-red-600 hover:bg-red-50 text-sm font-medium rounded-lg transition disabled:opacity-50">
+                          {cancelling ? 'Membatalkan...' : 'Batalkan Laporan'}
+                        </button>
+                        <button onClick={handleTandaiSelesai}
+                          disabled={detailPackages.length === 0 || finishing || !finishMethod || (finishMethod === 'toko_pusat' && ongkirFromForm() === null)}
+                          className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50">
+                          {finishing ? 'Menyimpan...'
+                            : detailPackages.length === 0 ? 'Tambah minimal 1 foto packing dulu'
+                            : !finishMethod ? 'Pilih siapa yang mengantar dulu'
+                            : finishMethod === 'toko_pusat' && ongkirFromForm() === null ? 'Isi ongkir dulu'
+                            : finishMethod === 'driver' ? '✓ Tandai Selesai — Dijemput Driver' : '✓ Tandai Selesai — Diantar Toko Pusat'}
+                        </button>
+                      </div>
                     </div>
                   )}
+
+                  {canEdit && l.status === 'selesai' && (() => {
+                    const methodLocked = l.delivery_method === 'driver' ? pkg.diambil > 0 : !!tp
+                    const ongkirLocked = !!tp && !isOwner
+                    return (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                          <span className="text-slate-600">Jalur: <b>{l.delivery_method === 'driver' ? '🚚 Diantar Driver' : '🏪 Diantar Toko Pusat'}</b></span>
+                          {l.delivery_method === 'toko_pusat' && <span className="text-slate-600">· Ongkir: <b>{l.ongkir > 0 ? fmtRp(l.ongkir) : 'tidak ada'}</b></span>}
+                        </div>
+                        {editMode === null && (
+                          <div className="flex flex-wrap gap-2">
+                            {!methodLocked && (
+                              <button type="button" onClick={() => { setEditMode('method'); setOngkirMode(null); setOngkirDraft('') }}
+                                className="px-3 py-1.5 text-xs font-medium border border-slate-300 bg-white rounded-lg hover:bg-slate-100">
+                                ⇄ Pindah ke {l.delivery_method === 'driver' ? 'Diantar Toko Pusat' : 'Diantar Driver'}
+                              </button>
+                            )}
+                            {l.delivery_method === 'toko_pusat' && !ongkirLocked && (
+                              <button type="button" onClick={() => { setEditMode('ongkir'); setOngkirMode(l.ongkir > 0 ? 'ada' : 'tidak'); setOngkirDraft(l.ongkir > 0 ? String(l.ongkir) : '') }}
+                                className="px-3 py-1.5 text-xs font-medium border border-slate-300 bg-white rounded-lg hover:bg-slate-100">
+                                ✎ Ubah Ongkir
+                              </button>
+                            )}
+                            {methodLocked && <span className="text-xs text-slate-400">Jalur terkunci — kiriman sudah diambil.</span>}
+                            {l.delivery_method === 'toko_pusat' && ongkirLocked && <span className="text-xs text-slate-400">Ongkir terkunci — hanya Owner yang bisa mengubah.</span>}
+                          </div>
+                        )}
+                        {editMode !== null && (
+                          <div className="space-y-2">
+                            {(editMode === 'ongkir' || l.delivery_method === 'driver') && renderOngkirPicker()}
+                            {editMode === 'method' && l.delivery_method === 'toko_pusat' && (
+                              <p className="text-xs text-slate-600">Kiriman akan dipindah ke driver dan muncul di Jemput Toko Pusat.</p>
+                            )}
+                            <div className="flex gap-2">
+                              <button type="button" onClick={resetFinishForm} className="px-3 py-1.5 text-xs border border-slate-300 bg-white rounded-lg">Batal</button>
+                              <button type="button" onClick={() => handleSaveEdit(l)} disabled={savingEdit}
+                                className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg disabled:opacity-50">
+                                {savingEdit ? 'Menyimpan...' : 'Simpan'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
             </div>

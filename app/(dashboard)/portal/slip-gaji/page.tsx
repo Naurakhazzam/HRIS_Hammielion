@@ -19,6 +19,7 @@ type Payroll = {
   kpi_bonus: number
   conditional_bonus: number
   promo_bonus: number
+  ongkir_bonus: number
   late_deduction: number
   kasbon_deduction: number
   loyalitas_deduction: number
@@ -169,7 +170,7 @@ export default function PortalSlipGajiPage() {
       .select(`
         id, period_month, period_year,
         base_salary, position_allowance, meal_allowance, special_allowance,
-        overtime_total, kpi_bonus, conditional_bonus, promo_bonus,
+        overtime_total, kpi_bonus, conditional_bonus, promo_bonus, ongkir_bonus,
         late_deduction, kasbon_deduction, loyalitas_deduction,
         inventory_loss_deduction, cashier_loss_deduction,
         gross_total, net_total, status, created_at,
@@ -314,6 +315,7 @@ export default function PortalSlipGajiPage() {
                       ['Bonus KPI',          selectedPayroll.kpi_bonus],
                       ['Bonus Kondisional',  selectedPayroll.conditional_bonus ?? 0],
                       ['Bonus Promo',        selectedPayroll.promo_bonus ?? 0],
+                      ['Bonus Ongkir',       selectedPayroll.ongkir_bonus ?? 0],
                     ].map(([label, val]) => (
                       <tr key={String(label)}>
                         <td className="px-4 py-2.5 text-slate-700">{label}</td>

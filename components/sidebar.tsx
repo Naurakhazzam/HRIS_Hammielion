@@ -94,6 +94,7 @@ const LOGISTIK_SUBMENU: NavNode[] = [
   { name: 'Laporan Pengiriman', href: '/logistik/laporan' },
   { name: 'Master Toko', href: '/logistik/toko' },
   { name: 'Laporan Muat (Toko Pusat)', href: '/logistik/laporan-muat' },
+  { name: 'Kirim Barang (Toko Pusat)', href: '/logistik/kirim-barang' },
   { name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur' },
 ]
 
@@ -325,6 +326,7 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, 
   }
   if (isTokoPusat) {
     extraLinks.push({ name: 'Laporan Muat', href: '/logistik/laporan-muat', icon: '📦' })
+    extraLinks.push({ name: 'Kirim Barang', href: '/logistik/kirim-barang', icon: '🛵' })
     extraLinks.push({ name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur', icon: '↩️' })
   }
   if (extraLinks.length === 0) return baseItems
@@ -359,6 +361,27 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [alphaBadge, setAlphaBadge] = useState(0)
   const [lemburBadge, setLemburBadge] = useState(0)
   const [liburBadge, setLiburBadge] = useState(0)
+  // Kirim Barang (Toko Pusat): kiriman menunggu diambil + tugas antar saya yang belum foto
+  // kembali (+ trip macet >6 jam utk Owner). Jemput Toko Pusat (driver): paket menunggu.
+  const [kirimBarangBadge, setKirimBarangBadge] = useState(0)
+  const [jemputBadge, setJemputBadge] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      const [kirim, jemput] = await Promise.all([
+        supabase.rpc('get_tp_delivery_badge_count'),
+        supabase.rpc('get_central_pickup_badge_count'),
+      ])
+      if (cancelled) return
+      setKirimBarangBadge(Number(kirim.data) || 0)
+      setJemputBadge(Number(jemput.data) || 0)
+    }
+    load()
+    const timer = setInterval(load, 60000)
+    window.addEventListener('kirim-barang-badge-refresh', load)
+    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('kirim-barang-badge-refresh', load) }
+  }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Angka merah di menu Catatan Meeting: catatan belum dibaca + tugas yang belum dilaporkan
   // (karyawan), atau laporan yang menunggu review (Owner/HR). Dihitung di server.
@@ -463,6 +486,12 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     '/portal/alpha': alphaBadge,
     '/portal/lembur': lemburBadge,
     '/portal/ajukan-libur': liburBadge,
+    '/logistik/kirim-barang': kirimBarangBadge,
+  }
+  // Badge di item top-level (link tunggal driver/Toko Pusat).
+  const topBadgeByHref: Record<string, number> = {
+    '/logistik/kirim-barang': kirimBarangBadge,
+    '/logistik/jemput-toko-pusat': jemputBadge,
   }
 
   function togglePreview() {
@@ -671,6 +700,11 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                     {item.href === '/tugas-harian' && dailyTaskBadge > 0 && (
                       <span className="ml-auto inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
                         {dailyTaskBadge > 99 ? '99+' : dailyTaskBadge}
+                      </span>
+                    )}
+                    {(topBadgeByHref[item.href] || 0) > 0 && (
+                      <span className="ml-auto inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
+                        {topBadgeByHref[item.href] > 99 ? '99+' : topBadgeByHref[item.href]}
                       </span>
                     )}
                   </Link>

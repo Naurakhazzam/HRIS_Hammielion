@@ -78,6 +78,8 @@ export default function JemputTokoPusatPage() {
       .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, logistics_stores(name))')
       .eq('status', 'pending')
       .eq('logistics_central_loadings.status', 'selesai')
+      // Kiriman jalur "Diantar Toko Pusat Sendiri" tidak boleh terlihat/diklaim driver.
+      .eq('logistics_central_loadings.delivery_method', 'driver')
       .order('created_at')
     setPending((data as unknown as PendingPackage[]) || [])
   }, [supabase])
