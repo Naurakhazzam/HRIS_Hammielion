@@ -130,7 +130,7 @@ async function uploadGroomingPhoto(supabase: SupabaseClient, folder: string, blo
   return supabase.storage.from('logistics-photos').getPublicUrl(path).data.publicUrl
 }
 
-type Me = { empId: string; name: string; isOwner: boolean; branchId: string; isStoreStaff: boolean; seeAll: boolean; isApprover: boolean }
+type Me = { empId: string; name: string; isOwner: boolean; branchId: string; isStoreStaff: boolean; seeAll: boolean; isApprover: boolean; isGroomer: boolean }
 type Pending = { key: string; blob: Blob; run: (blob: Blob) => Promise<void> }
 
 export default function OrderGroomingPage() {
@@ -138,7 +138,7 @@ export default function OrderGroomingPage() {
   const { openLightbox } = usePhotoLightbox()
 
   const [loading, setLoading] = useState(true)
-  const [me, setMe] = useState<Me>({ empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false, isApprover: false })
+  const [me, setMe] = useState<Me>({ empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false, isApprover: false, isGroomer: false })
   const [tab, setTab] = useState<'aktif' | 'buat' | 'riwayat' | 'bonus'>('aktif')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -183,7 +183,7 @@ export default function OrderGroomingPage() {
     async function init() {
       setLoading(true)
       const { data: { user } } = await supabase.auth.getUser()
-      const next: Me = { empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false, isApprover: false }
+      const next: Me = { empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false, isApprover: false, isGroomer: false }
       if (user) {
         const { data: u } = await supabase.from('users').select('role, employee_id, employees(full_name, branch_id, positions(name))').eq('id', user.id).single()
         if (u) {
@@ -196,6 +196,8 @@ export default function OrderGroomingPage() {
           next.isOwner = u.role === 'owner'
           next.seeAll = ['owner', 'hr', 'finance'].includes(u.role) || pos?.name === 'Kepala Gudang'
           next.isApprover = ['owner', 'hr', 'finance'].includes(u.role)
+          // Groomer tidak boleh membuat order (migrasi 073) -- order dibuat kasir/staf cabang.
+          next.isGroomer = /^groomer/i.test(pos?.name ?? '')
         }
       }
       const { data: sb } = await supabase.from('logistics_store_branches')
@@ -636,7 +638,7 @@ export default function OrderGroomingPage() {
   const { start: pStart, end: pEnd } = periodRange(period.month, period.year)
   const pEndShown = new Date(pEnd.getTime() - 86400000)
   const receivingBranches = storeBranches.filter(b => b.groom_branch_id)
-  const canCreate = me.isStoreStaff && (me.isOwner || receivingBranches.some(b => b.branch_id === me.branchId))
+  const canCreate = me.isStoreStaff && (me.isOwner || (!me.isGroomer && receivingBranches.some(b => b.branch_id === me.branchId)))
 
   return (
     <div className="max-w-3xl space-y-6">
