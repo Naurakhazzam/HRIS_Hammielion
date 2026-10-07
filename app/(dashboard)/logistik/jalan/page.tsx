@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
@@ -28,6 +28,9 @@ type PlanSummary = {
 // complete_logistics_delivery membaca setting yang sama di database jadi keduanya selalu sinkron.
 const GARAGE_GAP_MINUTES_DEFAULT = 30
 
+// Jeda klik setelah tampilan tombol berganti -- lihat clickGuardKey.
+const CLICK_GUARD_MS = 1000
+
 const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
 type PlanStore = {
@@ -37,6 +40,7 @@ type PlanStore = {
   status: string
   delivery_photo_urls: string[] | null
   payment_method: PaymentMethod | null
+  invoice_amount: number | null
   payment_amount: number | null
   payment_photo_url: string | null
   payment_due_date: string | null
@@ -81,8 +85,36 @@ type ReturnItem = {
 type ActionMode = null | 'kirim' | 'gagal'
 type PaymentMethod = '' | 'cash' | 'transfer' | 'deposit' | 'tempo'
 
-const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' }
+const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit (DP)', tempo: 'Tempo' }
 const INCIDENT_LABEL: Record<string, string> = { tidak_ada: 'Tidak Ada', salah_muat: 'Salah Muat', retur: 'Retur', barang_lebih: 'Barang Lebih' }
+// Label input "uang diterima" per metode -- tempo tidak punya (seluruh nota jadi piutang).
+// Deposit = DP (bayar sebagian), sisanya otomatis jadi piutang lewat BalanceNote.
+const RECEIVED_LABEL: Record<string, string> = { cash: 'Cash yang diterima', deposit: 'Uang DP / deposit yang diterima', transfer: 'Nominal yang ditransfer' }
+const INCIDENT_TYPES = ['tidak_ada', 'salah_muat', 'retur', 'barang_lebih'] as const
+type IncidentType = typeof INCIDENT_TYPES[number]
+
+// Nominal nota wajib untuk semua metode; uang diterima wajib untuk cash/deposit/transfer.
+// Tempo selalu diterima 0 -- seluruh nota jadi piutang konsumen (lihat migration 075).
+function isPaymentValid(method: PaymentMethod, invoice: string, received: string) {
+  if (!method || !(Number(invoice) > 0)) return false
+  return method === 'tempo' || Number(received) > 0
+}
+
+function receivedFor(method: PaymentMethod, received: string): number | null {
+  if (!method) return null
+  return method === 'tempo' ? 0 : Number(received)
+}
+
+// Selisih nota vs uang diterima -- dasar pencatatan hutang-piutang konsumen.
+function BalanceNote({ invoice, received }: { invoice: number; received: number }) {
+  if (!(invoice > 0)) return null
+  const diff = invoice - received
+  return (
+    <p className={`text-xs rounded-lg px-3 py-2 border ${diff > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : diff < 0 ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-green-50 border-green-200 text-green-700'}`}>
+      {diff > 0 ? `Sisa piutang konsumen: ${fmtRp(diff)}` : diff < 0 ? `Lebih bayar (jadi saldo konsumen): ${fmtRp(-diff)}` : 'Lunas sesuai nota.'}
+    </p>
+  )
+}
 
 const STATUS_LABEL: Record<string, string> = {
   ready: 'Siap Berangkat', departed: 'Sedang Jalan', closing: 'Menuju Garasi',
@@ -145,6 +177,7 @@ export default function JalanPengirimanPage() {
   const [deliveryPhotoUrls, setDeliveryPhotoUrls] = useState<string[]>([])
   const [addingDeliveryPhoto, setAddingDeliveryPhoto] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('')
+  const [invoiceAmount, setInvoiceAmount] = useState('')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentPhotoUrl, setPaymentPhotoUrl] = useState('')
   const [paymentDueDate, setPaymentDueDate] = useState('')
@@ -166,9 +199,22 @@ export default function JalanPengirimanPage() {
   const [addPhotoStore, setAddPhotoStore] = useState<PlanStore | null>(null)
   const [addPhotoSaving, setAddPhotoSaving] = useState(false)
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>('')
+  const [editInvoiceAmount, setEditInvoiceAmount] = useState('')
   const [editPaymentAmount, setEditPaymentAmount] = useState('')
   const [editPaymentDueDate, setEditPaymentDueDate] = useState('')
+  // Kejadian juga bisa dikoreksi dari Riwayat Toko -- kasus nyata: driver lupa isi kejadian
+  // (atau kepencet "Pengiriman Selesai" karena double-tap) padahal ada retur/salah muat.
+  const [editIncidentType, setEditIncidentType] = useState<IncidentType>('tidak_ada')
+  const [editIncidentPhotoUrl, setEditIncidentPhotoUrl] = useState('')
+  const [editIncidentDescription, setEditIncidentDescription] = useState('')
   const [editSaving, setEditSaving] = useState(false)
+
+  // Jeda klik: tiap kali layar/langkah berganti, tombol dikunci sebentar. Laporan driver:
+  // double-tap di "Ya, Lanjut" ikut menekan "Pengiriman Selesai" di langkah berikutnya (posisi
+  // tombolnya sejajar), jadi toko langsung selesai tanpa sempat isi kejadian.
+  const [unlockedGuardKey, setUnlockedGuardKey] = useState('')
+  // Ref (bukan state) supaya tap kedua yang datang sebelum re-render tetap tertahan.
+  const submitLockRef = useRef(false)
 
   // Selesai Tugas lebih awal — kalau masih ada toko pending pas driver mau akhiri trip (mis.
   // kehabisan waktu), sisa toko yang belum diproses WAJIB dikonfirmasi dulu baru ditandai Gagal
@@ -267,7 +313,7 @@ export default function JalanPengirimanPage() {
   async function fetchPlanStores(planId: string) {
     const { data } = await supabase.from('logistics_plan_stores')
       .select(`id, store_id, sequence_order, status, delivery_photo_urls,
-        payment_method, payment_amount, payment_photo_url, payment_due_date,
+        payment_method, invoice_amount, payment_amount, payment_photo_url, payment_due_date,
         incident_type, incident_photo_url, incident_description, failed_reason,
         logistics_stores(name, address, phone)`)
       .eq('plan_id', planId).order('sequence_order')
@@ -335,6 +381,7 @@ export default function JalanPengirimanPage() {
     setKirimStep(1); setShowUnloadConfirm(false)
     setDeliveryPhotoUrls(store?.delivery_photo_urls || []); setAddingDeliveryPhoto(false)
     setPaymentMethod(store?.payment_method || '')
+    setInvoiceAmount(store?.invoice_amount != null ? String(store.invoice_amount) : '')
     setPaymentAmount(store?.payment_amount != null ? String(store.payment_amount) : '')
     setPaymentPhotoUrl(store?.payment_photo_url || ''); setPaymentDueDate(store?.payment_due_date || '')
     setIncidentType(store?.incident_type || 'tidak_ada')
@@ -551,23 +598,33 @@ export default function JalanPengirimanPage() {
   // Gerbang per-langkah wizard -- dipisah dari canSubmitKirim (gerbang akhir) supaya tiap
   // langkah bisa divalidasi & dikonfirmasi sendiri sebelum lanjut ke langkah berikutnya.
   const canProceedStep1 = deliveryPhotoUrls.length > 0
-  const canProceedStep2 = !!paymentMethod && (
-    paymentMethod === 'cash' ? (!!paymentAmount && Number(paymentAmount) > 0) :
+  const canProceedStep2 = isPaymentValid(paymentMethod, invoiceAmount, paymentAmount) && (
     paymentMethod === 'transfer' ? !!paymentPhotoUrl :
-    paymentMethod === 'deposit' ? (!!paymentAmount && Number(paymentAmount) > 0) :
-    paymentMethod === 'tempo' ? !!paymentDueDate : false
+    paymentMethod === 'tempo' ? !!paymentDueDate : true
   )
   const canSubmitKirim = canProceedStep1 && canProceedStep2 &&
     (incidentType === 'tidak_ada' || (!!incidentPhotoUrl && incidentDescription.trim().length > 0))
 
+  // Kunci tombol 1 detik setiap kali tampilan tombol berganti (pindah langkah, kotak konfirmasi
+  // muncul/hilang, pilih toko, buka modal) -- tap kedua dari double-tap jadi tidak "tembus".
+  // Terkunci begitu kuncinya berubah (di render yang sama, tanpa jeda), baru dibuka timer.
+  const clickGuardKey = [kirimStep, showUnloadConfirm, actionMode, selectedStoreId, canProceedStep2, editHistoryStore?.id, showFinishConfirm].join('|')
+  const clickLocked = clickGuardKey !== unlockedGuardKey
+  useEffect(() => {
+    const t = setTimeout(() => setUnlockedGuardKey(clickGuardKey), CLICK_GUARD_MS)
+    return () => clearTimeout(t)
+  }, [clickGuardKey])
+
   async function submitKirim() {
-    if (!selectedStore || !canSubmitKirim) return
+    if (!selectedStore || !canSubmitKirim || clickLocked || submitLockRef.current) return
+    submitLockRef.current = true
     setSubmitting(true)
     const { data, error } = await supabase.from('logistics_plan_stores').update({
       status: 'delivered',
       delivery_photo_urls: deliveryPhotoUrls,
       payment_method: paymentMethod || null,
-      payment_amount: (paymentMethod === 'cash' || paymentMethod === 'deposit') ? Number(paymentAmount) : null,
+      invoice_amount: Number(invoiceAmount),
+      payment_amount: receivedFor(paymentMethod, paymentAmount),
       payment_photo_url: paymentMethod === 'transfer' ? paymentPhotoUrl : null,
       payment_due_date: paymentMethod === 'tempo' ? paymentDueDate : null,
       incident_type: incidentType,
@@ -577,28 +634,31 @@ export default function JalanPengirimanPage() {
       resolved_at: new Date().toISOString(),
     }).eq('id', selectedStore.id).eq('status', 'pending').select('id')
 
-    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); return }
+    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); submitLockRef.current = false; return }
     if (!data || data.length === 0) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
     else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" selesai dikirim.`)
     await clearTargetStore()
     resetKirimForm()
     await refresh()
     setSubmitting(false)
+    submitLockRef.current = false
   }
 
   async function submitGagal() {
-    if (!selectedStore || !failedReason.trim()) return
+    if (!selectedStore || !failedReason.trim() || clickLocked || submitLockRef.current) return
+    submitLockRef.current = true
     setSubmitting(true)
     const { data, error } = await supabase.from('logistics_plan_stores').update({
       status: 'failed', failed_reason: failedReason.trim(), resolved_by: myEmployeeId, resolved_at: new Date().toISOString(),
     }).eq('id', selectedStore.id).eq('status', 'pending').select('id')
-    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); return }
+    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); submitLockRef.current = false; return }
     if (!data || data.length === 0) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
     else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" ditandai gagal kirim.`)
     await clearTargetStore()
     setFailedReason('')
     await refresh()
     setSubmitting(false)
+    submitLockRef.current = false
   }
 
   async function submitFinishEarly() {
@@ -618,31 +678,38 @@ export default function JalanPengirimanPage() {
   function openEditHistory(ps: PlanStore) {
     setEditHistoryStore(ps)
     setEditPaymentMethod(ps.payment_method || '')
+    setEditInvoiceAmount(ps.invoice_amount != null ? String(ps.invoice_amount) : '')
     setEditPaymentAmount(ps.payment_amount ? String(ps.payment_amount) : '')
     setEditPaymentDueDate(ps.payment_due_date || '')
+    setEditIncidentType(ps.incident_type || 'tidak_ada')
+    setEditIncidentPhotoUrl(ps.incident_photo_url || '')
+    setEditIncidentDescription(ps.incident_description || '')
   }
 
-  const canSubmitEditHistory = !!editPaymentMethod && (
-    editPaymentMethod === 'cash' || editPaymentMethod === 'deposit' ? (!!editPaymentAmount && Number(editPaymentAmount) > 0) :
-    editPaymentMethod === 'tempo' ? !!editPaymentDueDate :
-    editPaymentMethod === 'transfer' ? true : false
-  )
+  const canSubmitEditHistory = isPaymentValid(editPaymentMethod, editInvoiceAmount, editPaymentAmount) &&
+    (editPaymentMethod !== 'tempo' || !!editPaymentDueDate) &&
+    (editIncidentType === 'tidak_ada' || (!!editIncidentPhotoUrl && editIncidentDescription.trim().length > 0))
 
   // Foto bukti transfer TIDAK diminta ulang di sini (fitur ini cuma untuk betulkan salah
   // ketik nominal/metode/tanggal, bukan mengulang seluruh alur foto) — kalau metode diubah
   // KE transfer padahal fotonya belum ada, tetap disimpan tanpa foto; kalau diubah DARI
   // transfer, foto lama dibiarkan tersimpan di baris (tidak ditampilkan lagi karena metode
   // sudah bukan transfer, tapi datanya tidak hilang kalau mau dikembalikan ke transfer lagi).
+  // Kejadian yang diubah KE "Tidak Ada" mengosongkan foto & keterangannya (sama seperti submitKirim).
   async function submitEditHistory() {
-    if (!editHistoryStore || !canSubmitEditHistory) return
+    if (!editHistoryStore || !canSubmitEditHistory || clickLocked) return
     setEditSaving(true)
     const { error } = await supabase.from('logistics_plan_stores').update({
       payment_method: editPaymentMethod || null,
-      payment_amount: (editPaymentMethod === 'cash' || editPaymentMethod === 'deposit') ? Number(editPaymentAmount) : null,
+      invoice_amount: Number(editInvoiceAmount),
+      payment_amount: receivedFor(editPaymentMethod, editPaymentAmount),
       payment_due_date: editPaymentMethod === 'tempo' ? editPaymentDueDate : null,
+      incident_type: editIncidentType,
+      incident_photo_url: editIncidentType !== 'tidak_ada' ? editIncidentPhotoUrl : null,
+      incident_description: editIncidentType !== 'tidak_ada' ? editIncidentDescription.trim() : null,
     }).eq('id', editHistoryStore.id).eq('status', 'delivered')
     if (error) showMessage('error', 'Gagal menyimpan perubahan: ' + error.message)
-    else showMessage('success', 'Data pembayaran berhasil diperbarui.')
+    else showMessage('success', 'Data toko berhasil diperbarui.')
     setEditHistoryStore(null)
     await refresh()
     setEditSaving(false)
@@ -946,7 +1013,7 @@ export default function JalanPengirimanPage() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none mb-3" />
                 <div className="flex gap-3">
                   <button onClick={() => setShowFinishConfirm(false)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
-                  <button onClick={submitFinishEarly} disabled={!finishReason.trim() || finishSaving}
+                  <button onClick={submitFinishEarly} disabled={!finishReason.trim() || finishSaving || clickLocked}
                     className="flex-1 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50">
                     {finishSaving ? 'Menyimpan...' : 'Ya, Lanjutkan'}
                   </button>
@@ -974,8 +1041,8 @@ export default function JalanPengirimanPage() {
 
               {!actionMode && (
                 <div className="grid grid-cols-2 gap-2 mt-4">
-                  <button onClick={() => openAction('kirim')} className="py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition">Kirim</button>
-                  <button onClick={() => openAction('gagal')} className="py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition">Gagal Kirim</button>
+                  <button onClick={() => openAction('kirim')} disabled={clickLocked} className="py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">Kirim</button>
+                  <button onClick={() => openAction('gagal')} disabled={clickLocked} className="py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">Gagal Kirim</button>
                 </div>
               )}
 
@@ -1038,8 +1105,8 @@ export default function JalanPengirimanPage() {
                               className="py-2 border border-slate-300 bg-white text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50">
                               Belum
                             </button>
-                            <button type="button" onClick={() => { setKirimStep(2); setShowUnloadConfirm(false) }}
-                              className="py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition">
+                            <button type="button" onClick={() => { setKirimStep(2); setShowUnloadConfirm(false) }} disabled={clickLocked}
+                              className="py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                               Sudah, Lanjut →
                             </button>
                           </div>
@@ -1047,7 +1114,7 @@ export default function JalanPengirimanPage() {
                       ) : (
                         <div className="flex gap-2 pt-3">
                           <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                          <button onClick={() => setShowUnloadConfirm(true)} disabled={!canProceedStep1}
+                          <button onClick={() => setShowUnloadConfirm(true)} disabled={!canProceedStep1 || clickLocked}
                             className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                             Lanjut ke Langkah 2 →
                           </button>
@@ -1058,26 +1125,35 @@ export default function JalanPengirimanPage() {
 
                   {kirimStep === 2 && (
                     <div>
-                      <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Langkah 2 — Metode Pembayaran</p>
+                      <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Langkah 2 — Pembayaran</p>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Sesuai Nota (Rp) *</label>
+                      <RupiahInput value={invoiceAmount} onChange={setInvoiceAmount} placeholder="Total di nota"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none mb-3" />
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Metode Pembayaran *</label>
                       <div className="grid grid-cols-2 gap-2 mb-3">
                         {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
                           <button key={m} type="button" onClick={() => setPaymentMethod(m)}
                             className={`py-2 rounded-lg text-sm font-medium border transition ${paymentMethod === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
-                            {m === 'cash' ? 'Cash' : m === 'transfer' ? 'Transfer' : m === 'deposit' ? 'Deposit' : 'Tempo'}
+                            {PAYMENT_LABEL[m]}
                           </button>
                         ))}
                       </div>
-                      {paymentMethod === 'cash' && (
-                        <RupiahInput value={paymentAmount} onChange={setPaymentAmount} placeholder="Nominal cash diterima"
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                      )}
-                      {paymentMethod === 'deposit' && (
-                        <RupiahInput value={paymentAmount} onChange={setPaymentAmount} placeholder="Nominal deposit"
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      {paymentMethod && paymentMethod !== 'tempo' && (
+                        <div className="mb-3">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">{RECEIVED_LABEL[paymentMethod]} (Rp) *</label>
+                          <RupiahInput value={paymentAmount} onChange={setPaymentAmount} placeholder={RECEIVED_LABEL[paymentMethod]}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
                       )}
                       {paymentMethod === 'tempo' && (
-                        <input type="date" value={paymentDueDate} onChange={e => setPaymentDueDate(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        <div className="mb-3">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Tanggal Jatuh Tempo *</label>
+                          <input type="date" value={paymentDueDate} onChange={e => setPaymentDueDate(e.target.value)}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                      )}
+                      {paymentMethod && (
+                        <div className="mb-3"><BalanceNote invoice={Number(invoiceAmount)} received={receivedFor(paymentMethod, paymentAmount) || 0} /></div>
                       )}
                       {paymentMethod === 'transfer' && (
                         paymentPhotoUrl ? (
@@ -1105,8 +1181,8 @@ export default function JalanPengirimanPage() {
                               className="py-2 border border-slate-300 bg-white text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50">
                               Belum
                             </button>
-                            <button type="button" onClick={() => setKirimStep(3)}
-                              className="py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition">
+                            <button type="button" onClick={() => setKirimStep(3)} disabled={clickLocked}
+                              className="py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                               Ya, Lanjut →
                             </button>
                           </div>
@@ -1162,7 +1238,7 @@ export default function JalanPengirimanPage() {
 
                       <div className="flex gap-2 pt-3">
                         <button onClick={() => setKirimStep(2)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">← Kembali</button>
-                        <button onClick={submitKirim} disabled={!canSubmitKirim || submitting}
+                        <button onClick={submitKirim} disabled={!canSubmitKirim || submitting || clickLocked}
                           className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                           {submitting ? 'Menyimpan...' : incidentType === 'tidak_ada' ? 'Pengiriman Selesai' : 'Kirim & Selesaikan'}
                         </button>
@@ -1186,7 +1262,7 @@ export default function JalanPengirimanPage() {
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                   <div className="flex gap-2 pt-2">
                     <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                    <button onClick={submitGagal} disabled={!failedReason.trim() || submitting}
+                    <button onClick={submitGagal} disabled={!failedReason.trim() || submitting || clickLocked}
                       className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
                       {submitting ? 'Menyimpan...' : 'Konfirmasi Gagal Kirim'}
                     </button>
@@ -1354,8 +1430,10 @@ export default function JalanPengirimanPage() {
                     {ps.status === 'delivered' && ps.payment_method && (
                       <p className="text-xs text-slate-500 mt-1">
                         {PAYMENT_LABEL[ps.payment_method]}
-                        {ps.payment_amount ? ` — ${fmtRp(Number(ps.payment_amount))}` : ''}
+                        {ps.invoice_amount != null ? ` — nota ${fmtRp(Number(ps.invoice_amount))}` : ''}
+                        {ps.payment_amount ? ` — diterima ${fmtRp(Number(ps.payment_amount))}` : ''}
                         {ps.payment_due_date ? ` — jatuh tempo ${new Date(ps.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
+                        {ps.invoice_amount == null && <span className="text-amber-600"> — nominal nota belum diisi</span>}
                       </p>
                     )}
                     {ps.incident_type !== 'tidak_ada' && (
@@ -1465,10 +1543,16 @@ export default function JalanPengirimanPage() {
 
       {editHistoryStore && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="font-semibold text-slate-800 mb-1">Edit Pembayaran</h3>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
+            <h3 className="font-semibold text-slate-800 mb-1">Edit Data Toko</h3>
             <p className="text-xs text-slate-500 mb-4">{editHistoryStore.logistics_stores?.name}</p>
             <div className="space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase">Pembayaran</p>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Sesuai Nota (Rp) *</label>
+                <RupiahInput value={editInvoiceAmount} onChange={setEditInvoiceAmount} placeholder="Total di nota"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
                   <button key={m} type="button" onClick={() => setEditPaymentMethod(m)}
@@ -1477,22 +1561,59 @@ export default function JalanPengirimanPage() {
                   </button>
                 ))}
               </div>
-              {(editPaymentMethod === 'cash' || editPaymentMethod === 'deposit') && (
-                <RupiahInput value={editPaymentAmount} onChange={setEditPaymentAmount}
-                  placeholder={editPaymentMethod === 'cash' ? 'Nominal cash diterima' : 'Nominal deposit'}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              {editPaymentMethod && editPaymentMethod !== 'tempo' && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{RECEIVED_LABEL[editPaymentMethod]} (Rp) *</label>
+                  <RupiahInput value={editPaymentAmount} onChange={setEditPaymentAmount} placeholder={RECEIVED_LABEL[editPaymentMethod]}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
               )}
               {editPaymentMethod === 'tempo' && (
-                <input type="date" value={editPaymentDueDate} onChange={e => setEditPaymentDueDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Tanggal Jatuh Tempo *</label>
+                  <input type="date" value={editPaymentDueDate} onChange={e => setEditPaymentDueDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
               )}
+              {editPaymentMethod && <BalanceNote invoice={Number(editInvoiceAmount)} received={receivedFor(editPaymentMethod, editPaymentAmount) || 0} />}
               {editPaymentMethod === 'transfer' && (
                 <p className="text-xs text-slate-400">Foto bukti transfer yang sudah diunggah tidak berubah — cuma metode/nominal/tanggalnya yang bisa dikoreksi di sini.</p>
+              )}
+
+              <p className="text-xs font-semibold text-slate-500 uppercase pt-2 border-t border-slate-100">Kejadian</p>
+              <div className="grid grid-cols-2 gap-2">
+                {INCIDENT_TYPES.map(k => (
+                  <button key={k} type="button" onClick={() => setEditIncidentType(k)}
+                    className={`py-2 rounded-lg text-xs font-medium border transition ${editIncidentType === k ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                    {INCIDENT_LABEL[k]}
+                  </button>
+                ))}
+              </div>
+              {editIncidentType !== 'tidak_ada' && (
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Wajib foto dan tulis keterangan.</p>
+                  {editIncidentPhotoUrl ? (
+                    <div className="space-y-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={editIncidentPhotoUrl} alt="Foto kejadian" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                      <button type="button" onClick={() => setEditIncidentPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                    </div>
+                  ) : (
+                    <LogisticsCameraCapture label="Foto Kejadian" employeeName={myName}
+                      onCaptured={async blob => {
+                        const url = await uploadHistoryPhoto(editHistoryStore.id, blob)
+                        if (url) setEditIncidentPhotoUrl(url)
+                      }} />
+                  )}
+                  <textarea value={editIncidentDescription} onChange={e => setEditIncidentDescription(e.target.value)}
+                    placeholder="Keterangan kejadian..." rows={3}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
+                </div>
               )}
             </div>
             <div className="flex gap-3 pt-4">
               <button type="button" onClick={() => setEditHistoryStore(null)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
-              <button type="button" onClick={submitEditHistory} disabled={!canSubmitEditHistory || editSaving}
+              <button type="button" onClick={submitEditHistory} disabled={!canSubmitEditHistory || editSaving || clickLocked}
                 className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
                 {editSaving ? 'Menyimpan...' : 'Simpan'}
               </button>

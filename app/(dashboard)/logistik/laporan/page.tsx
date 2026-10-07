@@ -35,6 +35,7 @@ type PlanStore = {
   status: string
   delivery_photo_urls: string[] | null
   payment_method: string | null
+  invoice_amount: number | null
   payment_amount: number | null
   payment_photo_url: string | null
   payment_due_date: string | null
@@ -85,6 +86,10 @@ const INCIDENT_LABEL: Record<string, string> = { tidak_ada: 'Tidak Ada', salah_m
 const fmtJam = (ts: string) => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
 
 const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
+
+// > 0 = sisa piutang konsumen, < 0 = lebih bayar (jadi saldo konsumen).
+const storeBalance = (s: { invoice_amount: number | null; payment_amount: number | null }) =>
+  Number(s.invoice_amount || 0) - Number(s.payment_amount || 0)
 
 export default function LaporanPengirimanPage() {
   const supabase = createClient()
@@ -139,7 +144,7 @@ export default function LaporanPengirimanPage() {
     if (list.length > 0) {
       const { data: storeData } = await supabase.from('logistics_plan_stores')
         .select(`id, plan_id, sequence_order, status, delivery_photo_urls,
-          payment_method, payment_amount, payment_photo_url, payment_due_date,
+          payment_method, invoice_amount, payment_amount, payment_photo_url, payment_due_date,
           incident_type, incident_photo_url, incident_description, failed_reason, resolved_at,
           office_verified_amount, office_verified_by, office_verified_at,
           logistics_stores(name)`)
@@ -247,6 +252,14 @@ export default function LaporanPengirimanPage() {
   const totalTransfer = allStores.filter(s => s.payment_method === 'transfer').length
   const totalDeposit = allStores.filter(s => s.payment_method === 'deposit').reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
   const totalTempo = allStores.filter(s => s.payment_method === 'tempo').length
+  // Piutang konsumen = nota - uang diterima (migration 075). Toko lama tanpa nominal nota
+  // tidak ikut dihitung -- dihitung terpisah supaya kelihatan masih ada yang belum lengkap.
+  const storesWithInvoice = allStores.filter(s => s.status === 'delivered' && s.invoice_amount != null)
+  const totalInvoice = storesWithInvoice.reduce((sum, s) => sum + Number(s.invoice_amount), 0)
+  const totalPiutang = storesWithInvoice.reduce((sum, s) => sum + Math.max(0, storeBalance(s)), 0)
+  const totalLebihBayar = storesWithInvoice.reduce((sum, s) => sum + Math.max(0, -storeBalance(s)), 0)
+  const piutangStoreCount = storesWithInvoice.filter(s => storeBalance(s) > 0).length
+  const missingInvoiceCount = allStores.filter(s => s.status === 'delivered' && s.invoice_amount == null).length
   const totalIncident = allStores.filter(s => s.incident_type !== 'tidak_ada').length
   const totalFailed = allStores.filter(s => s.status === 'failed').length
   // Deposit juga uang tunai fisik yang diterima driver (beda dari transfer yang cuma bukti foto),
@@ -348,6 +361,27 @@ export default function LaporanPengirimanPage() {
               </div>
             </div>
           )}
+
+          <div className="mb-6">
+            <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Nota &amp; Piutang Konsumen</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-slate-500 uppercase">Total Nota</p>
+                <p className="text-2xl font-bold text-slate-700 mt-1">{fmtRp(totalInvoice)}</p>
+                <p className="text-xs text-slate-500 mt-1">{storesWithInvoice.length} toko terkirim</p>
+              </div>
+              <div className={`rounded-xl p-4 border ${totalPiutang > 0 ? 'bg-orange-50 border-orange-200' : 'bg-slate-50 border-slate-200'}`}>
+                <p className="text-xs font-semibold text-orange-700 uppercase">Sisa Piutang Konsumen</p>
+                <p className="text-2xl font-bold text-orange-700 mt-1">{fmtRp(totalPiutang)}</p>
+                <p className="text-xs text-orange-700 mt-1">{piutangStoreCount} toko · nota dikurangi uang diterima</p>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-slate-500 uppercase">Lebih Bayar (Saldo Konsumen)</p>
+                <p className="text-2xl font-bold text-sky-700 mt-1">{fmtRp(totalLebihBayar)}</p>
+                {missingInvoiceCount > 0 && <p className="text-xs text-amber-600 mt-1">{missingInvoiceCount} toko belum ada nominal nota (data lama) — tidak dihitung.</p>}
+              </div>
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             {!canVerify && (
@@ -553,7 +587,12 @@ export default function LaporanPengirimanPage() {
                                 <>
                                   {s.payment_method && (
                                     <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
-                                      {PAYMENT_LABEL[s.payment_method]}{s.payment_amount ? ` — ${fmtRp(Number(s.payment_amount))}` : ''}{s.payment_due_date ? ` — jatuh tempo ${new Date(s.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
+                                      {PAYMENT_LABEL[s.payment_method]}{s.invoice_amount != null ? ` — nota ${fmtRp(Number(s.invoice_amount))}` : ''}{s.payment_amount ? ` — diterima ${fmtRp(Number(s.payment_amount))}` : ''}{s.payment_due_date ? ` — jatuh tempo ${new Date(s.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
+                                    </span>
+                                  )}
+                                  {s.invoice_amount != null && storeBalance(s) !== 0 && (
+                                    <span className={`text-xs px-2 py-0.5 rounded font-medium ${storeBalance(s) > 0 ? 'bg-orange-100 text-orange-700' : 'bg-sky-100 text-sky-700'}`}>
+                                      {storeBalance(s) > 0 ? `Piutang ${fmtRp(storeBalance(s))}` : `Lebih bayar ${fmtRp(-storeBalance(s))}`}
                                     </span>
                                   )}
                                   {s.incident_type !== 'tidak_ada' && (
