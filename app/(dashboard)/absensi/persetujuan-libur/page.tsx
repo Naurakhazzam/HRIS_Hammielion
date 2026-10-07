@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import PersetujuanLiburKalender from '@/components/PersetujuanLiburKalender'
 
 type RequestRow = {
   id: string
@@ -29,6 +30,8 @@ type ChangeRequestRow = {
 }
 
 type WorkSchedule = { id: string; name: string; applies_to_dept: string }
+// Aturan lunak Ajukan Libur (migration 066) -- tetap boleh diajukan, tapi yang menyetujui wajib tahu.
+type PickWarning = { request_id: string; same_branch_names: string | null; near_dates: string | null }
 
 const CHANGE_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pending_counterpart: { label: 'Menunggu Rekan', color: 'bg-blue-100 text-blue-700' },
@@ -41,11 +44,15 @@ const CHANGE_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 export default function PersetujuanLiburPage() {
   const supabase = createClient()
   const [view, setView] = useState<'awal' | 'ganti'>('awal')
+  // Jadwal Libur Awal: kalender per periode (default) atau daftar lama -- daftar tetap ada untuk
+  // melihat riwayat yang sudah ditolak ("Tampilkan yang sudah diproses").
+  const [awalMode, setAwalMode] = useState<'kalender' | 'daftar'>('kalender')
 
   const [requests, setRequests] = useState<RequestRow[]>([])
   const [loading, setLoading] = useState(true)
   const [showDecided, setShowDecided] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [warningsById, setWarningsById] = useState<Record<string, PickWarning>>({})
 
   const [changeRequests, setChangeRequests] = useState<ChangeRequestRow[]>([])
   const [loadingChange, setLoadingChange] = useState(true)
@@ -68,12 +75,20 @@ export default function PersetujuanLiburPage() {
     let query = supabase.from('roster_pick_requests')
       .select('id, requested_date, period_start, period_end, status, rejection_reason, created_at, employees!roster_pick_requests_employee_id_fkey(full_name, employee_code, branches(name))')
       .order('requested_date')
-    // 'draft' = belum diajukan karyawan ke HR (belum genap 4 tanggal) — jangan pernah ikut
+    // 'draft' = peninggalan alur lama (belum pernah terkirim ke HR) — jangan pernah ikut
     // tampil di sini, bukan cuma disaring lewat toggle "sudah diproses".
     query = showDecided ? query.neq('status', 'draft') : query.eq('status', 'pending')
     const { data, error } = await query
     if (error) console.error('Gagal memuat pengajuan jadwal libur awal:', JSON.stringify(error, null, 2))
-    setRequests((data as unknown as RequestRow[]) || [])
+    const rows = (data as unknown as RequestRow[]) || []
+    setRequests(rows)
+    const pendingIds = rows.filter(r => r.status === 'pending').map(r => r.id)
+    if (pendingIds.length) {
+      const { data: warns } = await supabase.rpc('get_dayoff_pick_warnings', { p_request_ids: pendingIds })
+      setWarningsById(Object.fromEntries(((warns || []) as PickWarning[]).map(w => [w.request_id, w])))
+    } else {
+      setWarningsById({})
+    }
     setLoading(false)
   }
 
@@ -99,7 +114,18 @@ export default function PersetujuanLiburPage() {
     setTimeout(() => setMessage(null), 5000)
   }
 
+  function warningLines(id: string): string[] {
+    const w = warningsById[id]
+    if (!w) return []
+    const lines: string[] = []
+    if (w.same_branch_names) lines.push(`Libur barengan rekan satu cabang: ${w.same_branch_names}`)
+    if (w.near_dates) lines.push(`Kurang dari 5 hari dari libur dia yang lain: ${w.near_dates}`)
+    return lines
+  }
+
   async function decide(id: string, approve: boolean) {
+    const warnings = approve ? warningLines(id) : []
+    if (warnings.length && !confirm(`⚠️ Pengajuan ini melanggar aturan libur:\n- ${warnings.join('\n- ')}\n\nTetap setujui?`)) return
     let reason: string | null = null
     if (!approve) {
       reason = window.prompt('Alasan menolak pengajuan ini:') || ''
@@ -185,7 +211,16 @@ export default function PersetujuanLiburPage() {
         </div>
       )}
 
-      {view === 'awal' ? (
+      {view === 'awal' && (
+        <div className="inline-flex bg-slate-100 rounded-lg p-1 mb-4">
+          <button onClick={() => setAwalMode('kalender')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${awalMode === 'kalender' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>📅 Kalender</button>
+          <button onClick={() => setAwalMode('daftar')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${awalMode === 'daftar' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>☰ Daftar</button>
+        </div>
+      )}
+
+      {view === 'awal' && awalMode === 'kalender' ? (
+        <PersetujuanLiburKalender onChanged={fetchRequests} />
+      ) : view === 'awal' ? (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-200 flex justify-end">
             <label className="flex items-center gap-2 text-sm text-slate-600">
@@ -226,6 +261,9 @@ export default function PersetujuanLiburPage() {
                           {r.status === 'rejected' && r.rejection_reason && (
                             <p className="text-xs text-red-500 mt-0.5 italic">Alasan tolak: {r.rejection_reason}</p>
                           )}
+                          {r.status === 'pending' && warningLines(r.id).map(line => (
+                            <p key={line} className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 mt-1 w-fit">⚠️ {line}</p>
+                          ))}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}>{cfg.label}</span>

@@ -235,15 +235,17 @@ export default function PanduanKaryawanPage() {
           <div className="space-y-3 text-sm text-slate-600">
             <p>Satu periode gaji berjalan dari tanggal <strong>26 sampai tanggal 25 bulan berikutnya</strong> (periode berjalan sekarang: <strong>{rosterPeriodLabel(new Date(period.start), new Date(period.end))}</strong>).</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Setiap periode, Anda punya jatah <strong>4 hari libur gratis</strong>. Ajukan tanggalnya sendiri lewat menu <em>Ajukan Libur</em> di Portal.</li>
+              <li>Setiap periode, Anda punya jatah <strong>4 hari libur gratis</strong>. Pilih tanggalnya sendiri di kalender menu <em>Ajukan Libur</em> di Portal.</li>
               <li>Maksimal <strong>1 tanggal Sabtu/Minggu</strong> per periode boleh dipilih jadi hari libur — supaya weekend bisa bergantian dengan rekan kerja, tidak dikuasai orang yang sama terus.</li>
+              <li>Satu tanggal maksimal <strong>3 orang</strong> libur (semua cabang digabung). Tanggal yang sudah penuh tampil abu-abu di kalender — siapa cepat dia dapat.</li>
+              <li>Usahakan <strong>tidak libur barengan</strong> rekan satu cabang, dan beri jarak minimal <strong>5 hari</strong> antar libur (misal libur Senin, paling cepat libur lagi Sabtu). Kalau terpaksa tetap boleh diajukan, tapi ditandai ⚠️ untuk Owner/HR dan bisa ditolak.</li>
               <li>Kalau libur yang Anda ambil <strong>kurang dari 4 hari</strong> dalam satu periode, sisanya <strong>dibayar tunai</strong> sebagai kompensasi (dianggap Anda "menabung" hari libur jadi uang).</li>
               <li>Kalau hari kosong (tidak ada absen sama sekali) <strong>lebih dari 4 hari</strong>, kelebihannya bukan lagi dianggap libur — masuk hitungan Izin/Alpha (lihat bagian 9 &amp; 10).</li>
               <li>Kalau ternyata hari itu terjadwal libur tapi Anda tetap masuk kerja, sistem akan minta Anda memilih <strong>tanggal pengganti</strong> untuk libur Anda — pilih lewat kalender yang muncul saat absen masuk.</li>
             </ul>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
               <p className="font-medium text-red-800">⚠️ Telat ajukan = denda disiplin Rp10.000/tanggal</p>
-              <p className="text-red-700 mt-0.5">Jatah 4 hari ini seharusnya diajukan <strong>sebelum</strong> periodenya mulai berjalan. Kalau Anda baru melengkapi/mengajukan setelah periodenya sudah berjalan, pengajuan tetap diterima — tapi kena denda disiplin <strong>Rp10.000 per tanggal</strong> (4 tanggal telat = Rp40.000), otomatis terpotong dari gaji periode itu. Sistem akan menampilkan peringatan ini sebelum Anda klik &quot;Ajukan ke HR&quot;.</p>
+              <p className="text-red-700 mt-0.5">Tanggal libur seharusnya diajukan <strong>sebelum</strong> periodenya mulai berjalan. Kalau Anda baru melengkapi/mengajukan setelah periodenya sudah berjalan, pengajuan tetap diterima — tapi kena denda disiplin <strong>Rp10.000 per tanggal</strong> (4 tanggal telat = Rp40.000), otomatis terpotong dari gaji periode itu. Sistem akan menampilkan peringatan ini sebelum tanggal terkirim.</p>
             </div>
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
               <p className="font-medium text-emerald-800">✅ Hari libur otomatis tercatat sendiri</p>
@@ -448,7 +450,7 @@ export default function PanduanKaryawanPage() {
             <li>✔️ Simpan surat dokter kalau sakit lebih dari 2 hari berturut — wajib mulai hari ke-3, dan potongannya jauh lebih ringan dibanding tanpa surat.</li>
             <li>🛑 Jangan biarkan Sakit/Izin/Alpha tidak jelas memanjang lebih dari 7 hari berturut — akun Anda bisa <strong>otomatis dinonaktifkan</strong> (bagian 7).</li>
             <li>✔️ Manfaatkan jatah 4 hari libur tiap periode — kalau tidak dipakai penuh, sisanya tetap dibayar tunai, jadi tidak rugi.</li>
-            <li>✔️ Weekend cuma boleh pilih 1 tanggal per periode — atur dari awal periode supaya kebagian tanggal yang diinginkan.</li>
+            <li>✔️ Satu tanggal maksimal 3 orang libur & weekend cuma boleh 1 per periode — pilih tanggal dari awal supaya kebagian tanggal yang diinginkan.</li>
             <li>✔️ Masih bingung soal gaji atau absen Anda sendiri? Klik <DiSiniLink /> untuk lihat angka asli Anda, atau tanya HR langsung.</li>
           </ul>
         </section>

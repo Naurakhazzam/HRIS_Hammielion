@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
 import { chargeableLateMinutes } from '@/lib/lateTolerance'
-import { getUpcomingRosterPeriod, rosterPeriodLabel } from '@/lib/rosterPeriod'
+import { getUpcomingRosterPeriod, rosterPeriodLabel, DAYOFF_PICK_QUOTA } from '@/lib/rosterPeriod'
 import { localDateStr } from '@/lib/date'
 import { calcDailyAccrual, type AccrualAttendanceDay } from '@/lib/salaryAccrualEstimate'
 import { fetchIncompleteCheckouts as fetchIncompleteCheckoutsShared, type IncompleteCheckoutItem } from '@/lib/checkoutClarification'
@@ -338,7 +338,7 @@ export default function PortalDashboardPage() {
     setEstPendapatanBerjalan({ ...result, lembur, flatSalary: false })
   }
 
-  // Jatah libur 4 tanggal untuk periode roster BERIKUTNYA -- selalu diperingatkan sampai
+  // Jatah libur DAYOFF_PICK_QUOTA tanggal untuk periode roster BERIKUTNYA -- selalu diperingatkan sampai
   // terpenuhi. RPC mengembalikan semua karyawan kalau yang login Owner (preview), jadi difilter.
   async function fetchQuotaLibur(employeeId: string) {
     const period = getUpcomingRosterPeriod()
@@ -553,11 +553,11 @@ export default function PortalDashboardPage() {
         </div>
       )}
 
-      {quotaLibur && quotaLibur.submitted < 4 && (
+      {quotaLibur && quotaLibur.submitted < DAYOFF_PICK_QUOTA && (
         <Link href="/portal/ajukan-libur" className="block bg-amber-50 border-2 border-amber-400 rounded-xl p-4 hover:bg-amber-100 transition">
           <p className="text-base font-bold text-amber-800">⚠️ Jatah libur Anda belum diambil!</p>
           <p className="text-sm text-amber-700 mt-1">
-            Baru <strong>{quotaLibur.submitted} dari 4</strong> tanggal libur terkirim untuk periode {quotaLibur.label}
+            Baru <strong>{quotaLibur.submitted} dari {DAYOFF_PICK_QUOTA}</strong> tanggal libur terkirim untuk periode {quotaLibur.label}
             {quotaLibur.draft > 0 ? ` (${quotaLibur.draft} masih draf, belum dikirim ke HR)` : ''}.
             {quotaLibur.daysUntil > 0 ? ` Periode mulai ${quotaLibur.daysUntil} hari lagi.` : ''}
           </p>

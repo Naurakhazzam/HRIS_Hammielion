@@ -3,6 +3,10 @@
 // mengajukan untuk periode BERIKUTNYA (yang belum mulai), bukan periode yang sedang berjalan.
 import { localDateStr } from './date'
 
+// Jatah tanggal yang bisa DIAJUKAN karyawan di Ajukan Libur per periode -- HARUS sama dengan
+// RLS insert roster_pick_requests (migration 066: < 4) dan hak libur di Slip Gaji.
+export const DAYOFF_PICK_QUOTA = 4
+
 export function getUpcomingRosterPeriod(refDate: Date = new Date()): { start: Date; end: Date } {
   // Periode yang MENAUNGI refDate saat ini: kalau tanggal refDate >= 26, periode itu mulai
   // bulan ini; kalau < 26, periode itu mulai bulan lalu.

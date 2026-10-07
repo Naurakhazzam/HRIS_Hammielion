@@ -133,6 +133,9 @@ input, select, textarea, button {
 .dark .border-yellow-200 { border-color: var(--color-yellow-800); }
 .dark .border-yellow-300 { border-color: var(--color-yellow-700); }
 .dark .border-yellow-400 { border-color: var(--color-yellow-600); }
+.dark .hover\:bg-yellow-100:hover { background-color: color-mix(in srgb, var(--color-yellow-900) 70%, transparent); }
+.dark .hover\:bg-green-100:hover { background-color: color-mix(in srgb, var(--color-green-900) 70%, transparent); }
+.dark .hover\:bg-amber-100:hover { background-color: color-mix(in srgb, var(--color-amber-900) 70%, transparent); }
 
 .dark .bg-amber-50 { background-color: var(--color-amber-950); }
 .dark .bg-amber-100 { background-color: color-mix(in srgb, var(--color-amber-900) 70%, transparent); }

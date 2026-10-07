@@ -7,12 +7,12 @@ import { createClient } from '@/lib/supabase/client'
 import { isPreviewModeClient, setPreviewMode, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 import { fetchAlphaAlerts as fetchAlphaAlertsShared } from '@/lib/alphaDetection'
 import { fetchOvertimeClaimAlerts as fetchOvertimeClaimAlertsShared } from '@/lib/overtimeClaim'
-import { getUpcomingRosterPeriod } from '@/lib/rosterPeriod'
+import { getUpcomingRosterPeriod, DAYOFF_PICK_QUOTA } from '@/lib/rosterPeriod'
 import { localDateStr } from '@/lib/date'
 
-// Jatah libur per periode roster -- HARUS selalu sama persis dengan MAX_PICKS di
-// portal/ajukan-libur/page.tsx dan LEAVE_QUOTA_PER_PERIOD di AlphaKlarifikasiPanel.
-const DAYOFF_QUOTA_PER_PERIOD = 4
+// Jatah tanggal yang bisa diajukan di Ajukan Libur per periode roster (badge sidebar) -- HARUS
+// sama dengan LEAVE_QUOTA_PER_PERIOD di AlphaKlarifikasiPanel (hak libur Slip Gaji).
+const DAYOFF_QUOTA_PER_PERIOD = DAYOFF_PICK_QUOTA
 
 type NavNode = {
   name: string

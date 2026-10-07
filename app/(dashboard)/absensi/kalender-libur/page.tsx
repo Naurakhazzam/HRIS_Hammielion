@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { getUpcomingRosterPeriod, rosterPeriodLabel } from '@/lib/rosterPeriod'
+import { getUpcomingRosterPeriod, rosterPeriodLabel, DAYOFF_PICK_QUOTA } from '@/lib/rosterPeriod'
 import { localDateStr } from '@/lib/date'
 
-const DAYOFF_QUOTA = 4
+const DAYOFF_QUOTA = DAYOFF_PICK_QUOTA
 type QuotaRow = { employee_id: string; full_name: string; branch_name: string | null; approved_count: number; pending_count: number; draft_count: number }
 
 type DayOffEntry = { employee_id: string; full_name: string; branch_name: string | null; source_type: string }
@@ -48,7 +48,7 @@ export default function KalenderLiburPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [expandedDate, setExpandedDate] = useState<string | null>(null)
 
-  // Peringatan level Owner: karyawan yang belum mengajukan jatah libur (4 tanggal) untuk
+  // Peringatan level Owner: karyawan yang belum mengajukan jatah libur (DAYOFF_QUOTA tanggal) untuk
   // periode roster BERIKUTNYA -- sama dengan periode yang dipilih di halaman Ajukan Libur.
   const [isOwner, setIsOwner] = useState(false)
   const [quotaRows, setQuotaRows] = useState<QuotaRow[]>([])
