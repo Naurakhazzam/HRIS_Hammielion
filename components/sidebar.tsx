@@ -95,6 +95,7 @@ const LOGISTIK_SUBMENU: NavNode[] = [
   { name: 'Master Toko', href: '/logistik/toko' },
   { name: 'Laporan Muat (Cabang)', href: '/logistik/laporan-muat' },
   { name: 'Kirim Barang (Cabang)', href: '/logistik/kirim-barang' },
+  { name: 'Order Grooming', href: '/logistik/grooming' },
   { name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur' },
 ]
 
@@ -329,6 +330,7 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, 
   if (isStoreBranchStaff) {
     extraLinks.push({ name: 'Laporan Muat', href: '/logistik/laporan-muat', icon: '📦' })
     extraLinks.push({ name: 'Kirim Barang', href: '/logistik/kirim-barang', icon: '🛵' })
+    extraLinks.push({ name: 'Order Grooming', href: '/logistik/grooming', icon: '✂️' })
   }
   if (isTokoPusat) {
     extraLinks.push({ name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur', icon: '↩️' })
@@ -370,22 +372,32 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // foto kembali (+ trip macet >6 jam utk Owner). Jemput Barang Cabang (driver): paket menunggu.
   const [kirimBarangBadge, setKirimBarangBadge] = useState(0)
   const [jemputBadge, setJemputBadge] = useState(0)
+  // Order Grooming: kucing yang saya groom & belum selesai + kucing groomer tanpa akun di order
+  // buatan saya (perlu Paksa Lanjut) + order buatan saya yang siap diserahkan (migrasi 070).
+  const [groomingBadge, setGroomingBadge] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
-      const [kirim, jemput] = await Promise.all([
+      const [kirim, jemput, groom] = await Promise.all([
         supabase.rpc('get_tp_delivery_badge_count'),
         supabase.rpc('get_central_pickup_badge_count'),
+        supabase.rpc('get_grooming_badge_count'),
       ])
       if (cancelled) return
       setKirimBarangBadge(Number(kirim.data) || 0)
       setJemputBadge(Number(jemput.data) || 0)
+      setGroomingBadge(Number(groom.data) || 0)
     }
     load()
     const timer = setInterval(load, 60000)
     window.addEventListener('kirim-barang-badge-refresh', load)
-    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('kirim-barang-badge-refresh', load) }
+    window.addEventListener('grooming-badge-refresh', load)
+    return () => {
+      cancelled = true; clearInterval(timer)
+      window.removeEventListener('kirim-barang-badge-refresh', load)
+      window.removeEventListener('grooming-badge-refresh', load)
+    }
   }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Angka merah di menu Catatan Meeting: catatan belum dibaca + tugas yang belum dilaporkan
@@ -496,10 +508,12 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     '/portal/lembur': lemburBadge,
     '/portal/ajukan-libur': liburBadge,
     '/logistik/kirim-barang': kirimBarangBadge,
+    '/logistik/grooming': groomingBadge,
   }
   // Badge di item top-level (link tunggal driver/Toko Pusat).
   const topBadgeByHref: Record<string, number> = {
     '/logistik/kirim-barang': kirimBarangBadge,
+    '/logistik/grooming': groomingBadge,
     '/logistik/jemput-toko-pusat': jemputBadge,
   }
 

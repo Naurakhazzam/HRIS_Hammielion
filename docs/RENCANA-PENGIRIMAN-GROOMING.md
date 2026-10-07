@@ -16,7 +16,7 @@ Bahasa ke user: **Bahasa Indonesia**.
 - [x] **Fase 0** — Kirim Barang Toko Pusat (sudah live, commit `2f926d9`, migrasi `067_toko_pusat_self_delivery.sql`)
 - [x] **Fase 1** — Kiriman barang multi-cabang (migrasi `068_multi_branch_delivery.sql`, commit `330e0db`)
 - [x] **Fase 2** — Master Toko: label Toko/Pelanggan, nomor HP, pengaturan cabang grooming (migrasi `069_store_kind_grooming_branches.sql`, commit `d7ea5cf`)
-- [ ] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut)
+- [x] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut) (migrasi `070_grooming_orders.sql`, commit lihat `git log`)
 - [ ] **Fase 4** — Perjalanan jemput & antar grooming
 - [ ] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual
 
@@ -257,6 +257,37 @@ Baca dulu sebelum mengubah apa pun:
 - RPC atomik untuk tiap transisi (pola sama dgn migrasi 067), semua waktu server.
 - Halaman baru (mis. `/grooming/order`) + menu sidebar dengan badge (order yang menunggu aksi saya:
   kucing yang saya groom & belum selesai, dsb).
+
+### Hasil Fase 3 (sudah live) — yang perlu diketahui fase berikutnya
+- Halaman **`/logistik/grooming`** ("Order Grooming"): tab Order Aktif / + Buat Order / Riwayat
+  (periode gaji, rekap per groomer). Menu: staf 4 cabang (link ✂️) + submenu Pengiriman Logistik
+  (admin & Kepala Gudang). Badge `get_grooming_badge_count()` + event `grooming-badge-refresh`.
+- Tabel: `grooming_orders` (status `menunggu → dikerjakan → siap → selesai`, atau `batal` +
+  `status_before_cancel`), `grooming_order_cats` (harga, `groomer_id`, foto selesai, `forced_reason`,
+  `groomer_changed_after_start` = ⚠️), `grooming_groomer_changes` (penugasan awal old NULL),
+  `grooming_price_changes`, `grooming_extra_groomers` (isi: Elan Suherlan; Owner bisa tambah).
+  Semua tulis lewat RPC; RLS hanya SELECT.
+- Nomor nota disimpan **UPPERCASE** & unik per cabang penerima **kecuali order batal**
+  (partial unique index) — order batal membebaskan nomornya.
+- Kolom ongkir & pengantar per perjalanan sudah ada: `pickup_ongkir/pickup_assignee` (jemput),
+  `delivery_ongkir/delivery_assignee` (antar); constraint wajib isi sesuai mode.
+- RPC: `create_grooming_order(12 arg, p_cats jsonb)`, `mark_grooming_arrived`, `finish_grooming_cat
+  (p_cat_id, p_photo_url, p_forced_reason)`, `change_grooming_groomer`, `correct_grooming_price`,
+  `complete_grooming_handover`, `cancel_grooming_order`, `list_groomer_candidates`,
+  `get_grooming_price_options(groom_branch)`. Helper: `is_valid_groomer`, `get_grooming_promo_product
+  (groom_branch)` (produk promo aktif bernama *groom*, periode terbaru — **dipakai Fase 5 untuk % bonus**),
+  `is_grooming_order_staff`, `can_read_grooming_order`, `is_my_grooming_cat_order`.
+- Aturan yang diterapkan: harga saat buat order harus salah satu `price_options` (koreksi bebas >0
+  oleh pembuat/Owner, tercatat); foto selesai kucing ≥ 5 menit sejak sampai; Paksa Lanjut = pembuat
+  order/Owner + alasan ≥ 5 huruf; ganti groomer oleh staf cabang penerima/pengerja/pembuat/Owner
+  selama kucing belum selesai; batal oleh pembuat/staf cabang penerima/Owner, order **selesai** hanya
+  Owner. Foto di bucket `logistics-photos` folder `grooming/<order_id atau uuid>/`.
+- **SEMENTARA sampai Fase 4**: langkah "sampai di cabang grooming" untuk order **jemput** dan
+  "serah terima" untuk order **antar** cukup 1 foto (`mark_grooming_arrived` boleh juga oleh
+  penjemput; `complete_grooming_handover` boleh juga oleh pengantar). Fase 4 harus mengganti ini
+  dengan trip 3 foto (dan menolak jalur foto tunggal untuk mode jemput/antar).
+- **Untuk Fase 5**: `correct_grooming_price` & `cancel_grooming_order` belum cek "bonus sudah
+  disetujui" — tambahkan saat ledger/approval dibuat.
 
 ---
 
