@@ -38,7 +38,29 @@ type LoadingPackage = {
 
 type Store = { id: string; name: string }
 
+type PackageSummary = { total: number; diambil: number; takers: string[]; lastTakenAt: string | null }
+
+type PickupFilter = 'semua' | 'belum' | 'sudah' | 'proses'
+
 const fmtDateTime = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+function fmtDuration(ms: number) {
+  const totalMin = Math.max(0, Math.floor(ms / 60000))
+  const days = Math.floor(totalMin / 1440)
+  const hours = Math.floor((totalMin % 1440) / 60)
+  const mins = totalMin % 60
+  if (days > 0) return `${days} hari${hours > 0 ? ` ${hours} jam` : ''}`
+  if (hours > 0) return `${hours} jam${mins > 0 ? ` ${mins} menit` : ''}`
+  return `${mins} menit`
+}
+
+// Makin lama paket nongkrong di Toko Pusat, makin mencolok warnanya.
+function waitingTone(ms: number) {
+  const hours = ms / 3600000
+  if (hours >= 24) return 'bg-red-50 border-red-200 text-red-700'
+  if (hours >= 6) return 'bg-orange-50 border-orange-200 text-orange-700'
+  return 'bg-amber-50 border-amber-200 text-amber-700'
+}
 
 export default function LaporanMuatPage() {
   const supabase = createClient()
@@ -53,7 +75,14 @@ export default function LaporanMuatPage() {
 
   const [loadings, setLoadings] = useState<Loading[]>([])
   const [itemCounts, setItemCounts] = useState<Record<string, number>>({})
-  const [packageCounts, setPackageCounts] = useState<Record<string, { total: number; diambil: number }>>({})
+  const [packageCounts, setPackageCounts] = useState<Record<string, PackageSummary>>({})
+  const [pickupFilter, setPickupFilter] = useState<PickupFilter>('semua')
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60000)
+    return () => clearInterval(t)
+  }, [])
 
   const [allStores, setAllStores] = useState<Store[]>([])
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -95,12 +124,20 @@ export default function LaporanMuatPage() {
       ;(itemRows as { loading_id: string }[] || []).forEach(r => { iCounts[r.loading_id] = (iCounts[r.loading_id] || 0) + 1 })
       setItemCounts(iCounts)
 
-      const { data: pkgRows } = await supabase.from('logistics_central_loading_packages').select('loading_id, status').in('loading_id', ids)
-      const pCounts: Record<string, { total: number; diambil: number }> = {}
-      ;(pkgRows as { loading_id: string; status: string }[] || []).forEach(r => {
-        if (!pCounts[r.loading_id]) pCounts[r.loading_id] = { total: 0, diambil: 0 }
-        pCounts[r.loading_id].total++
-        if (r.status === 'diambil') pCounts[r.loading_id].diambil++
+      const { data: pkgRows } = await supabase.from('logistics_central_loading_packages')
+        .select('loading_id, status, taken_at, taken:employees!logistics_central_loading_packages_taken_by_fkey(full_name)')
+        .in('loading_id', ids)
+      const pCounts: Record<string, PackageSummary> = {}
+      type PkgRow = { loading_id: string; status: string; taken_at: string | null; taken: { full_name: string } | { full_name: string }[] | null }
+      ;(pkgRows as unknown as PkgRow[] || []).forEach(r => {
+        const s = pCounts[r.loading_id] ??= { total: 0, diambil: 0, takers: [], lastTakenAt: null }
+        s.total++
+        if (r.status === 'diambil') {
+          s.diambil++
+          const name = Array.isArray(r.taken) ? r.taken[0]?.full_name : r.taken?.full_name
+          if (name && !s.takers.includes(name)) s.takers.push(name)
+          if (r.taken_at && (!s.lastTakenAt || r.taken_at > s.lastTakenAt)) s.lastTakenAt = r.taken_at
+        }
       })
       setPackageCounts(pCounts)
     } else {
@@ -263,6 +300,24 @@ export default function LaporanMuatPage() {
     await fetchDetail(selectedLoadingId)
   }
 
+  function pickupGroup(l: Loading): 'belum' | 'sudah' | 'proses' | 'batal' {
+    if (l.status === 'dibatalkan') return 'batal'
+    if (l.status === 'proses') return 'proses'
+    const pkg = packageCounts[l.id]
+    return pkg && pkg.diambil < pkg.total ? 'belum' : 'sudah'
+  }
+
+  // Yang belum diambil ditaruh paling atas, paling lama nunggu duluan.
+  const visibleLoadings = (pickupFilter === 'semua' ? loadings : loadings.filter(l => pickupGroup(l) === pickupFilter))
+    .slice()
+    .sort((a, b) => {
+      const aw = pickupGroup(a) === 'belum' ? 0 : 1
+      const bw = pickupGroup(b) === 'belum' ? 0 : 1
+      if (aw !== bw) return aw - bw
+      if (aw === 0) return (a.completed_at ?? '').localeCompare(b.completed_at ?? '')
+      return b.created_at.localeCompare(a.created_at)
+    })
+
   if (loading) return <div className="text-center py-12 text-slate-500">Memuat...</div>
 
   if (!canView) {
@@ -317,12 +372,40 @@ export default function LaporanMuatPage() {
         </div>
       )}
 
+      {(() => {
+        const cards: { key: PickupFilter; label: string; count: number; tone: string; active: string }[] = [
+          { key: 'belum', label: 'Belum Diambil', count: loadings.filter(l => pickupGroup(l) === 'belum').length,
+            tone: 'border-orange-200 text-orange-700', active: 'bg-orange-50 ring-2 ring-orange-400' },
+          { key: 'sudah', label: 'Sudah Diambil', count: loadings.filter(l => pickupGroup(l) === 'sudah').length,
+            tone: 'border-blue-200 text-blue-700', active: 'bg-blue-50 ring-2 ring-blue-400' },
+          { key: 'proses', label: 'Masih Proses', count: loadings.filter(l => pickupGroup(l) === 'proses').length,
+            tone: 'border-amber-200 text-amber-700', active: 'bg-amber-50 ring-2 ring-amber-400' },
+          { key: 'semua', label: 'Semua', count: loadings.length,
+            tone: 'border-slate-200 text-slate-700', active: 'bg-slate-50 ring-2 ring-slate-400' },
+        ]
+        return (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            {cards.map(c => (
+              <button key={c.key} onClick={() => setPickupFilter(c.key)}
+                className={`text-left bg-white border rounded-xl px-4 py-3 transition hover:shadow-sm ${c.tone} ${pickupFilter === c.key ? c.active : ''}`}>
+                <p className="text-2xl font-bold">{c.count}</p>
+                <p className="text-xs font-medium">{c.label}</p>
+              </button>
+            ))}
+          </div>
+        )
+      })()}
+
       <div className="space-y-3">
-        {loadings.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Belum ada laporan muat.</div>
-        ) : loadings.map(l => {
-          const pkg = packageCounts[l.id] || { total: 0, diambil: 0 }
+        {visibleLoadings.length === 0 ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
+            {loadings.length === 0 ? 'Belum ada laporan muat.' : 'Tidak ada laporan muat di kategori ini.'}
+          </div>
+        ) : visibleLoadings.map(l => {
+          const pkg = packageCounts[l.id] || { total: 0, diambil: 0, takers: [], lastTakenAt: null }
           const isOpen = selectedLoadingId === l.id
+          const group = pickupGroup(l)
+          const waitingMs = group === 'belum' && l.completed_at ? now - new Date(l.completed_at).getTime() : 0
           return (
             <div key={l.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               <button onClick={() => toggleSelect(l.id)} className="w-full text-left px-5 py-4 hover:bg-slate-50 transition flex items-center justify-between gap-3">
@@ -334,6 +417,17 @@ export default function LaporanMuatPage() {
                   <p className="text-xs text-slate-400">
                     {itemCounts[l.id] || 0} foto barang · {pkg.total} paket{pkg.total > 0 ? ` (${pkg.diambil} diambil)` : ''}
                   </p>
+                  {group === 'belum' && l.completed_at && (
+                    <p className={`inline-block mt-1.5 text-xs font-semibold px-2 py-1 rounded-md border ${waitingTone(waitingMs)}`}>
+                      ⏱ Sudah {fmtDuration(waitingMs)} belum diambil
+                      {pkg.diambil > 0 ? ` · sisa ${pkg.total - pkg.diambil} dari ${pkg.total} paket` : ''}
+                    </p>
+                  )}
+                  {pkg.takers.length > 0 && (
+                    <p className="text-xs text-blue-700 mt-1">
+                      🚚 Diambil oleh {pkg.takers.join(', ')}{group === 'sudah' && pkg.lastTakenAt ? ` · ${fmtDateTime(pkg.lastTakenAt)}` : ''}
+                    </p>
+                  )}
                 </div>
                 <div className="shrink-0 flex items-center gap-1.5">
                   <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
@@ -406,9 +500,17 @@ export default function LaporanMuatPage() {
                             <img src={pk.photo_url} alt={pk.caption} onClick={() => openLightbox(pk.photo_url, pk.caption)}
                               className="w-full aspect-square object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
                             <p className="text-xs text-slate-600 mt-1 truncate" title={pk.caption}>{pk.caption}</p>
-                            <span className={`inline-block mt-0.5 text-[11px] px-1.5 py-0.5 rounded font-medium ${pk.status === 'diambil' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                              {pk.status === 'diambil' ? `Diambil ${pk.taken?.full_name ?? ''} · ${pk.taken_at ? fmtDateTime(pk.taken_at) : ''}` : 'Belum diambil'}
-                            </span>
+                            {pk.status === 'diambil' ? (
+                              <span className="inline-block mt-0.5 text-[11px] px-1.5 py-0.5 rounded font-medium bg-green-100 text-green-700">
+                                ✓ Diambil {pk.taken?.full_name ?? ''} · {pk.taken_at ? fmtDateTime(pk.taken_at) : ''}
+                              </span>
+                            ) : l.status === 'selesai' && l.completed_at ? (
+                              <span className={`inline-block mt-0.5 text-[11px] px-1.5 py-0.5 rounded font-medium border ${waitingTone(now - new Date(l.completed_at).getTime())}`}>
+                                ⏱ Belum diambil · {fmtDuration(now - new Date(l.completed_at).getTime())}
+                              </span>
+                            ) : (
+                              <span className="inline-block mt-0.5 text-[11px] px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500">Belum diambil</span>
+                            )}
                             {canEdit && l.status === 'proses' && (
                               <button onClick={() => handleDeletePackage(pk.id)}
                                 className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-red-600 text-white rounded-full text-xs shadow">✕</button>
