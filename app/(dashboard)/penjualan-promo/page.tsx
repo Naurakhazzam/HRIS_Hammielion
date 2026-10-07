@@ -20,12 +20,15 @@ type ReportRow = {
   report_date: string; notes: string | null; status: ReportStatus; rejection_reason: string | null; created_at: string; is_late: boolean
   unit_price: number | null; original_qty: number | null; original_unit_price: number | null; edited_by_name: string | null; edited_at: string | null
   late_penalty_pct: number
+  // Laporan otomatis dari Order Grooming (migrasi 072): koreksi harga lewat order, bukan di sini.
+  grooming_cat_id: string | null; grooming_warning: boolean
 }
 type MyProgress = {
   product_id: string; product_name: string; target_qty: number | null; total_qty: number; my_qty: number; my_pending_qty: number
   bonus_percent: number | null; price_options: number[] | null; max_late_days: number | null
 }
 
+const isGroomingProduct = (p: { product_name: string; bonus_percent: number | null }) => /groom/i.test(p.product_name) && p.bonus_percent !== null
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const emptyForm = {
   id: null as string | null, branch_id: '', branch_ids: [] as string[], product_name: '', target_qty: '', period_month: 1, period_year: 2026, is_active: true,
@@ -85,6 +88,18 @@ export default function PenjualanPromoPage() {
   const [myProgress, setMyProgress] = useState<MyProgress[]>([])
   const [myBonus, setMyBonus] = useState<number | null>(null)
   const [loadingMine, setLoadingMine] = useState(true)
+  // Tanggal penutupan lapor manual Grooming (diatur Owner di Master Toko > Cabang Grooming).
+  const [groomingCloseDate, setGroomingCloseDate] = useState<string | null>(null)
+  const [groomingManualClosed, setGroomingManualClosed] = useState(false)
+  useEffect(() => {
+    supabase.from('grooming_settings').select('manual_report_close_date').maybeSingle()
+      .then(({ data }) => {
+        const d = (data?.manual_report_close_date as string | null) ?? null
+        const todayWib = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10)
+        setGroomingCloseDate(d)
+        setGroomingManualClosed(!!d && todayWib >= d)
+      })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [reportModal, setReportModal] = useState<MyProgress | null>(null)
   const [rQty, setRQty] = useState('')
   const [rDate, setRDate] = useState(() => toISODate(new Date()))
@@ -572,6 +587,8 @@ export default function PenjualanPromoPage() {
                                       <span className={`ml-1.5 font-semibold px-1.5 py-0.5 rounded ${STATUS_BADGE[r.status]}`}>{STATUS_LABEL[r.status]}</span>
                                       {r.is_late && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">⏰ TERLAMBAT (&gt;H+3)</span>}
                                       {r.late_penalty_pct > 0 && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700">⚠️ Bonus -{r.late_penalty_pct}% (lewat batas)</span>}
+                                      {r.grooming_cat_id && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-pink-100 text-pink-700">✂️ Otomatis dari Order Grooming</span>}
+                                      {r.grooming_warning && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700">⚠️ Cek: groomer diganti / paksa lanjut</span>}
                                     </p>
                                     {r.notes && <p className="text-xs text-slate-600 mt-1">{r.notes}</p>}
                                     {r.status === 'rejected' && r.rejection_reason && <p className="text-xs text-red-600 mt-1">Alasan: {r.rejection_reason}</p>}
@@ -585,7 +602,9 @@ export default function PenjualanPromoPage() {
                                     {r.status === 'pending' && (
                                       <>
                                         <button onClick={() => approveReport(r)} className="text-xs text-green-700 hover:underline font-medium">✓ Setujui</button>
-                                        <button onClick={() => openEditReport(r)} className="text-xs text-orange-600 hover:underline">✏️ Ubah qty/harga</button>
+                                        {r.grooming_cat_id
+                                          ? <span className="text-[11px] text-slate-400">Koreksi harga di Order Grooming</span>
+                                          : <button onClick={() => openEditReport(r)} className="text-xs text-orange-600 hover:underline">✏️ Ubah qty/harga</button>}
                                         <button onClick={() => setRejectFor(r)} className="text-xs text-red-600 hover:underline">✕ Tolak</button>
                                       </>
                                     )}
@@ -659,10 +678,18 @@ export default function PenjualanPromoPage() {
                     </div>
                   </div>
                 )}
-                <button onClick={() => openReport(p)} disabled={previewReadOnly}
-                  className="mt-4 px-5 py-3 rounded-xl text-base font-bold bg-green-600 hover:bg-green-700 text-white shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed">
-                  🧾 Lapor Penjualan
-                </button>
+                {isGroomingProduct(p) && groomingCloseDate && (
+                  <p className={`text-xs mt-2 rounded-lg px-3 py-2 border ${groomingManualClosed ? 'bg-pink-50 border-pink-200 text-pink-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                    ✂️ {groomingManualClosed ? 'Lapor manual ditutup sejak' : 'Lapor manual ditutup mulai'} {fmtDate(groomingCloseDate)} — bonus grooming otomatis
+                    dibuat dari menu Order Grooming saat order selesai (tetap perlu disetujui Finance).
+                  </p>
+                )}
+                {!(isGroomingProduct(p) && groomingManualClosed) && (
+                  <button onClick={() => openReport(p)} disabled={previewReadOnly}
+                    className="mt-4 px-5 py-3 rounded-xl text-base font-bold bg-green-600 hover:bg-green-700 text-white shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed">
+                    🧾 Lapor Penjualan
+                  </button>
+                )}
               </div>
             ))}
           </div>

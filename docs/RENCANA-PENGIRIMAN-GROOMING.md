@@ -18,7 +18,7 @@ Bahasa ke user: **Bahasa Indonesia**.
 - [x] **Fase 2** — Master Toko: label Toko/Pelanggan, nomor HP, pengaturan cabang grooming (migrasi `069_store_kind_grooming_branches.sql`, commit `d7ea5cf`)
 - [x] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut) (migrasi `070_grooming_orders.sql`, commit `2a9355a`)
 - [x] **Fase 4** — Perjalanan jemput & antar grooming (migrasi `071_grooming_trips.sql`, commit `2052af5`)
-- [ ] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual
+- [x] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual (migrasi `072_grooming_bonus.sql`, commit lihat `git log`)
 
 ---
 
@@ -378,6 +378,29 @@ Baca dulu sebelum mengubah apa pun:
   live, supaya groomer tidak kehilangan jalur lapor.
 - Implementasi: `submit_promo_sales_report` menolak produk grooming (mis. `bonus_percent` not null
   + flag `is_grooming`) bila tanggal lapor ≥ tanggal penutupan.
+
+### Hasil Fase 5 (sudah live)
+- Trigger `trg_grooming_order_bonus` di `grooming_orders`: status → `selesai` memanggil
+  `create_grooming_bonus_records` (idempoten per kucing); status → `batal` memanggil
+  `void_grooming_bonus_records` (ledger `void`, laporan promo otomatis `rejected`, slip draft disinkron).
+- Groomer target produk promo Grooming **cabangnya sendiri** pada periode gaji tanggal kucing selesai
+  (`grooming_promo_product_for`) → `promo_sales_reports` (pending, qty 1, foto = URL publik struk,
+  `grooming_cat_id`). Selain itu → `grooming_bonus_ledger` (persen dari `get_grooming_promo_product`
+  cabang pengerja, default 10; periode = periode gaji order **selesai**).
+- `payrolls.grooming_bonus` ("Bonus Grooming"); `get_employee_grooming_bonus`, `review_grooming_bonus`
+  (Owner/HR/Finance) → `resync_grooming_bonus_payroll` (slip draft). Rumus gross server sekarang satu:
+  `recalc_payroll_totals(payroll_id)` (dipakai resync ongkir, sync promo, resync grooming). Klien:
+  2 `newGross`, preview buat slip, struk HTML, detail slip admin & `portal/slip-gaji` ikut menjumlah.
+- `correct_grooming_price` menolak kalau bonus kucing sudah disetujui; kalau belum, ikut mengubah
+  laporan promo otomatis / ledger. `edit_promo_sales_report` menolak laporan otomatis.
+  `get_promo_sales_reports` + kolom `grooming_cat_id`, `grooming_warning` (badge ✂️ & ⚠️ di halaman promo).
+- `grooming_settings.manual_report_close_date` (Owner, tab "Persetujuan Bonus" di Order Grooming).
+  `submit_promo_sales_report` menolak produk *groom* (bonus_percent) bila tanggal struk ≥ tanggal itu.
+  Halaman Target Penjualan Promo karyawan menyembunyikan tombol lapor setelah tanggal itu.
+  **Belum diisi** — Owner yang menentukan kapan.
+- `lib/meeting.ts signedPhotoUrls` meneruskan URL http apa adanya (foto struk dari logistics-photos).
+- Badge Order Grooming: + jumlah ledger `pending` untuk Owner/HR/Finance; order siap buatan saya hanya
+  yang diambil sendiri.
 
 ---
 

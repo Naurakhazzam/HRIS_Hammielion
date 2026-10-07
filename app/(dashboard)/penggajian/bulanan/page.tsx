@@ -36,6 +36,7 @@ type Payroll = {
   extra_bonus_total: number
   promo_bonus: number
   ongkir_bonus: number
+  grooming_bonus: number
   gross_total: number
   net_total: number
   status: 'draft' | 'pending_approval' | 'approved' | 'paid'
@@ -253,6 +254,7 @@ export default function PenggajianBulananPage() {
     base: number; pos: number; meal: number; special: number; otHours: number; otTotal: number; kpiBonus: number
     conditionalBonus: number
     ongkirBonus: number
+    groomingBonus: number
     loyalitasDed: number; latDed: number; latMinutes: number; latRate: number
     kasbonDed: number
     absentDays: number; absentDed: number; absentRatePerDay: number
@@ -507,7 +509,7 @@ export default function PenggajianBulananPage() {
         inventory_loss_deduction, cashier_loss_deduction,
         absent_days, absent_deduction,
         libur_compensation_days, libur_compensation_amount,
-        extra_bonus_total, promo_bonus, ongkir_bonus,
+        extra_bonus_total, promo_bonus, ongkir_bonus, grooming_bonus,
         gross_total, net_total,
         status, approved_by, created_at,
         employee:employees!payrolls_employee_id_fkey(
@@ -1048,7 +1050,15 @@ export default function PenggajianBulananPage() {
     })
     const ongkirBonus = Number(ongkirData) || 0
 
-    const gross = base + pos + meal + special + otTotal + kpi + loyAutoRelease + conditionalBonus + liburKompensasi + ongkirBonus
+    // Bonus Grooming (groomer di luar daftar target promo, mis. Elan) -- catatan bonus dari Order
+    // Grooming yang sudah disetujui Owner/HR/Finance. Persetujuan SETELAH slip draft dibuat
+    // otomatis disinkron ke slip draft oleh server (resync_grooming_bonus_payroll, migrasi 072).
+    const { data: groomingData } = await supabase.rpc('get_employee_grooming_bonus', {
+      p_employee_id: empId, p_period_month: filterMonth, p_period_year: filterYear,
+    })
+    const groomingBonus = Number(groomingData) || 0
+
+    const gross = base + pos + meal + special + otTotal + kpi + loyAutoRelease + conditionalBonus + liburKompensasi + ongkirBonus + groomingBonus
     const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyAutoRelease > 0 ? 0 : loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
 
     const preview: SlipPreview = {
@@ -1065,6 +1075,7 @@ export default function PenggajianBulananPage() {
       loyAutoRelease, loyBalSaldo, loyDurasi,
       conditionalBonus,
       ongkirBonus,
+      groomingBonus,
       gross, net,
     }
     if (!silent) { setSlipPreview(preview); setBuildingPreview(false) }
@@ -1086,6 +1097,7 @@ export default function PenggajianBulananPage() {
       overtime_total: p.otTotal, kpi_bonus: p.kpiBonus,
       conditional_bonus: p.conditionalBonus,
       ongkir_bonus: p.ongkirBonus,
+      grooming_bonus: p.groomingBonus,
       late_deduction: p.latDed, kasbon_deduction: p.kasbonDed,
       loyalitas_deduction: p.loyAutoRelease > 0 ? 0 : p.loyalitasDed,
       loyalitas_auto_release: p.loyAutoRelease,
@@ -1781,7 +1793,7 @@ export default function PenggajianBulananPage() {
 
     // Update payroll: conditional_bonus + recalc gross & net
     const p = bonusModal
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + Number(p.promo_bonus ?? 0) + Number(p.ongkir_bonus ?? 0) + totalBonus
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.extra_bonus_total ?? 0) + Number(p.promo_bonus ?? 0) + Number(p.ongkir_bonus ?? 0) + Number(p.grooming_bonus ?? 0) + totalBonus
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const { error: updateErr } = await supabase
@@ -1835,7 +1847,7 @@ export default function PenggajianBulananPage() {
     if (insertErr) { showMessage('error', 'Gagal menyimpan bonus: ' + insertErr.message); setExtraBonusSaving(false); return }
 
     const newExtraTotal = Number(p.extra_bonus_total ?? 0) + amt
-    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + Number(p.promo_bonus ?? 0) + Number(p.ongkir_bonus ?? 0) + newExtraTotal
+    const newGross = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0) + Number(p.overtime_total) + Number(p.kpi_bonus) + Number(p.loyalitas_auto_release ?? 0) + Number(p.libur_compensation_amount ?? 0) + Number(p.conditional_bonus ?? 0) + Number(p.promo_bonus ?? 0) + Number(p.ongkir_bonus ?? 0) + Number(p.grooming_bonus ?? 0) + newExtraTotal
     const newNet = calcNet({ ...p, gross_total: newGross })
 
     const wasFinalized = p.status === 'pending_approval' || p.status === 'approved'
@@ -2015,6 +2027,7 @@ export default function PenggajianBulananPage() {
       <tr><td>Bonus Tambahan</td><td>${Number((p as any).extra_bonus_total??0)>0?fmtR(Number((p as any).extra_bonus_total)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus Promo</td><td>${Number((p as any).promo_bonus??0)>0?fmtR(Number((p as any).promo_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Bonus Ongkir</td><td>${Number((p as any).ongkir_bonus??0)>0?fmtR(Number((p as any).ongkir_bonus)):'<span class="zero">—</span>'}</td></tr>
+      <tr><td>Bonus Grooming</td><td>${Number(p.grooming_bonus??0)>0?fmtR(Number(p.grooming_bonus)):'<span class="zero">—</span>'}</td></tr>
       <tr><td>Kompensasi Libur Tidak Diambil (${(p as any).libur_compensation_days??0} hari)</td><td>${Number((p as any).libur_compensation_days??0)>0?fmtR(Number((p as any).libur_compensation_amount??0)):'<span class="zero">—</span>'}</td></tr>
       <tr class="section-label ded"><td colspan="2">Potongan</td></tr>
       <tr><td>Potongan Keterlambatan${lateDetailHtml}</td><td>${lateDed>0?'-'+fmtR(lateDed):'<span class="zero">—</span>'}</td></tr>
@@ -2784,6 +2797,7 @@ export default function PenggajianBulananPage() {
                     ['Bonus Tambahan',       (selectedPayroll as any).extra_bonus_total ?? 0],
                     ['Bonus Promo',          (selectedPayroll as any).promo_bonus ?? 0],
                     ['Bonus Ongkir',         (selectedPayroll as any).ongkir_bonus ?? 0],
+                    ['Bonus Grooming',       selectedPayroll.grooming_bonus ?? 0],
                   ].map(([label, val]) => (
                     <tr key={String(label)} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-700">{label}</td>
@@ -3338,6 +3352,7 @@ export default function PenggajianBulananPage() {
                     ['Bonus KPI', slipPreview.kpiBonus],
                     ...(slipPreview.conditionalBonus > 0 ? [['Bonus Kondisional', slipPreview.conditionalBonus]] : []),
                     ...(slipPreview.ongkirBonus > 0 ? [['Bonus Ongkir', slipPreview.ongkirBonus]] : []),
+                    ...(slipPreview.groomingBonus > 0 ? [['Bonus Grooming', slipPreview.groomingBonus]] : []),
                     ...(slipPreview.liburCompDays > 0 ? [[`Kompensasi Libur Tidak Diambil (${slipPreview.liburCompDays} hari)`, slipPreview.liburKompensasi]] : []),
                     ...(slipPreview.loyAutoRelease > 0 ? [[`✅ Cair Tabungan Loyalitas (${slipPreview.loyDurasi} bln)`, slipPreview.loyAutoRelease]] : []),
                   ].map(([l, v]) => Number(v) > 0 && (

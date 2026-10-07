@@ -124,10 +124,13 @@ export async function uploadReportPhotos(supabase: Supabase, memberId: string, f
 }
 
 export async function signedPhotoUrls(supabase: Supabase, paths: string[]): Promise<Record<string, string>> {
-  const unique = Array.from(new Set(paths))
-  if (unique.length === 0) return {}
-  const { data } = await supabase.storage.from('documents').createSignedUrls(unique, 3600)
   const map: Record<string, string> = {}
+  // Laporan promo otomatis dari Order Grooming menyimpan URL publik foto struk (bucket
+  // logistics-photos), bukan path di bucket 'documents' -- dipakai apa adanya.
+  paths.filter(p => /^https?:\/\//.test(p)).forEach(p => { map[p] = p })
+  const unique = Array.from(new Set(paths.filter(p => !/^https?:\/\//.test(p))))
+  if (unique.length === 0) return map
+  const { data } = await supabase.storage.from('documents').createSignedUrls(unique, 3600)
   ;(data || []).forEach(d => { if (d.path && d.signedUrl) map[d.path] = d.signedUrl })
   return map
 }

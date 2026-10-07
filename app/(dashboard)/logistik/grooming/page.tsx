@@ -130,7 +130,7 @@ async function uploadGroomingPhoto(supabase: SupabaseClient, folder: string, blo
   return supabase.storage.from('logistics-photos').getPublicUrl(path).data.publicUrl
 }
 
-type Me = { empId: string; name: string; isOwner: boolean; branchId: string; isStoreStaff: boolean; seeAll: boolean }
+type Me = { empId: string; name: string; isOwner: boolean; branchId: string; isStoreStaff: boolean; seeAll: boolean; isApprover: boolean }
 type Pending = { key: string; blob: Blob; run: (blob: Blob) => Promise<void> }
 
 export default function OrderGroomingPage() {
@@ -138,8 +138,8 @@ export default function OrderGroomingPage() {
   const { openLightbox } = usePhotoLightbox()
 
   const [loading, setLoading] = useState(true)
-  const [me, setMe] = useState<Me>({ empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false })
-  const [tab, setTab] = useState<'aktif' | 'buat' | 'riwayat'>('aktif')
+  const [me, setMe] = useState<Me>({ empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false, isApprover: false })
+  const [tab, setTab] = useState<'aktif' | 'buat' | 'riwayat' | 'bonus'>('aktif')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
@@ -183,7 +183,7 @@ export default function OrderGroomingPage() {
     async function init() {
       setLoading(true)
       const { data: { user } } = await supabase.auth.getUser()
-      const next: Me = { empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false }
+      const next: Me = { empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false, isApprover: false }
       if (user) {
         const { data: u } = await supabase.from('users').select('role, employee_id, employees(full_name, branch_id, positions(name))').eq('id', user.id).single()
         if (u) {
@@ -195,6 +195,7 @@ export default function OrderGroomingPage() {
           next.branchId = e?.branch_id || ''
           next.isOwner = u.role === 'owner'
           next.seeAll = ['owner', 'hr', 'finance'].includes(u.role) || pos?.name === 'Kepala Gudang'
+          next.isApprover = ['owner', 'hr', 'finance'].includes(u.role)
         }
       }
       const { data: sb } = await supabase.from('logistics_store_branches')
@@ -663,6 +664,7 @@ export default function OrderGroomingPage() {
           ['aktif', `Order Aktif (${active.length})`],
           ...(canCreate ? [['buat', '+ Buat Order']] : []),
           ['riwayat', 'Riwayat'],
+          ['bonus', me.isApprover ? 'Persetujuan Bonus' : 'Bonus Saya'],
         ] as [typeof tab, string][]).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${tab === k ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
@@ -691,6 +693,8 @@ export default function OrderGroomingPage() {
           reloadStores={fetchStores}
           onCreated={async () => { setTab('aktif'); await refresh() }} />
       )}
+
+      {tab === 'bonus' && <BonusTab me={me} showMessage={showMessage} />}
 
       {tab === 'riwayat' && (
         <section className="space-y-3">
@@ -744,6 +748,214 @@ export default function OrderGroomingPage() {
         </section>
       )}
     </div>
+  )
+}
+
+// ── Bonus grooming (migrasi 072) ────────────────────────────────────────────────────────────
+// Groomer yang terdaftar di produk promo Grooming cabangnya (Rahmat/Fikri) -> laporan otomatis di
+// menu Target Penjualan Promo. Groomer lain (termasuk Elan) -> catatan di sini, perlu disetujui
+// Owner/HR/Finance, masuk slip gaji sebagai "Bonus Grooming".
+type LedgerRow = {
+  id: string; employee_id: string; price: number; bonus_percent: number; amount: number; earned_at: string
+  period_month: number; period_year: number; status: 'pending' | 'approved' | 'rejected' | 'void'
+  rejection_reason: string | null; reviewed_at: string | null
+  employee: NameRel; reviewer: NameRel
+  order: { nota_number: string; receipt_photo_url: string; customer: { name: string } | null; groom_branch: { name: string } | null } | null
+  cat: { seq: number; cat_name: string | null; finished_photo_url: string | null; forced_reason: string | null; groomer_changed_after_start: boolean } | null
+}
+const LEDGER_STATUS: Record<LedgerRow['status'], { label: string; cls: string }> = {
+  pending: { label: 'Menunggu', cls: 'bg-amber-100 text-amber-800' },
+  approved: { label: 'Disetujui', cls: 'bg-green-100 text-green-700' },
+  rejected: { label: 'Ditolak', cls: 'bg-red-100 text-red-700' },
+  void: { label: 'Gugur (order batal)', cls: 'bg-slate-200 text-slate-600' },
+}
+
+function BonusTab({ me, showMessage }: { me: Me; showMessage: (type: 'success' | 'error', text: string) => void }) {
+  const supabase = createClient()
+  const { openLightbox } = usePhotoLightbox()
+  const [period, setPeriod] = useState(currentPeriod)
+  const [rows, setRows] = useState<LedgerRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [closeDate, setCloseDate] = useState('')
+  const [savedCloseDate, setSavedCloseDate] = useState('')
+
+  // setLoading(true) dipanggil oleh pengganti periode, bukan di sini (lint: setState di effect).
+  const load = useCallback(async (p: { month: number; year: number }) => {
+    let q = supabase.from('grooming_bonus_ledger').select(`id, employee_id, price, bonus_percent, amount, earned_at, period_month, period_year,
+        status, rejection_reason, reviewed_at,
+        employee:employees!grooming_bonus_ledger_employee_id_fkey(full_name),
+        reviewer:employees!grooming_bonus_ledger_reviewed_by_fkey(full_name),
+        order:grooming_orders!grooming_bonus_ledger_order_id_fkey(nota_number, receipt_photo_url,
+          customer:logistics_stores!grooming_orders_customer_id_fkey(name),
+          groom_branch:branches!grooming_orders_groom_branch_id_fkey(name)),
+        cat:grooming_order_cats!grooming_bonus_ledger_cat_id_fkey(seq, cat_name, finished_photo_url, forced_reason, groomer_changed_after_start)`)
+      .eq('period_month', p.month).eq('period_year', p.year).order('earned_at', { ascending: false })
+    if (!me.isApprover) q = q.eq('employee_id', me.empId || '00000000-0000-0000-0000-000000000000')
+    const { data, error } = await q
+    if (error) showMessage('error', 'Gagal memuat bonus: ' + error.message)
+    setRows((data as unknown as LedgerRow[]) || [])
+    setLoading(false)
+  }, [supabase, me.isApprover, me.empId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    async function init() { await load(period) }
+    init()
+    supabase.from('grooming_settings').select('manual_report_close_date').maybeSingle().then(({ data }) => {
+      const d = (data?.manual_report_close_date as string | null) ?? ''
+      setCloseDate(d); setSavedCloseDate(d)
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function review(r: LedgerRow, status: 'approved' | 'rejected' | 'pending') {
+    let reason: string | null = null
+    if (status === 'rejected') {
+      reason = window.prompt(`Tolak bonus ${r.employee?.full_name} (${fmtRp(Number(r.amount))}). Alasan:`)
+      if (reason === null) return
+      if (reason.trim().length < 3) { showMessage('error', 'Alasan wajib diisi.'); return }
+    }
+    setBusy(true)
+    const { error } = await supabase.rpc('review_grooming_bonus', { p_ledger_id: r.id, p_status: status, p_reason: reason })
+    setBusy(false)
+    if (error) { showMessage('error', error.message); return }
+    showMessage('success', status === 'approved' ? 'Bonus disetujui — slip gaji draft periode itu ikut diperbarui.' : status === 'rejected' ? 'Bonus ditolak.' : 'Dikembalikan ke menunggu.')
+    window.dispatchEvent(new Event('grooming-badge-refresh'))
+    await load(period)
+  }
+
+  async function saveCloseDate() {
+    setBusy(true)
+    const { error } = await supabase.rpc('set_grooming_manual_close_date', { p_date: closeDate || null })
+    setBusy(false)
+    if (error) { showMessage('error', error.message); return }
+    setSavedCloseDate(closeDate)
+    showMessage('success', closeDate ? `Lapor manual Grooming ditutup mulai ${closeDate}.` : 'Penutupan lapor manual dikosongkan.')
+  }
+
+  const totals = useMemo(() => {
+    const map: Record<string, { name: string; pending: number; approved: number }> = {}
+    rows.forEach(r => {
+      const t = map[r.employee_id] ??= { name: r.employee?.full_name ?? '-', pending: 0, approved: 0 }
+      if (r.status === 'pending') t.pending += Number(r.amount)
+      if (r.status === 'approved') t.approved += Number(r.amount)
+    })
+    return Object.values(map)
+  }, [rows])
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-bold text-slate-700">💰 {me.isApprover ? 'Persetujuan Bonus Grooming' : 'Bonus Grooming Saya'} — Periode Gaji</h2>
+        <div className="flex gap-2">
+          <select value={period.month} onChange={e => { const n = { ...period, month: Number(e.target.value) }; setPeriod(n); setLoading(true); load(n) }}
+            className="text-sm px-2 py-1 border border-slate-300 rounded-lg bg-white">
+            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+          <select value={period.year} onChange={e => { const n = { ...period, year: Number(e.target.value) }; setPeriod(n); setLoading(true); load(n) }}
+            className="text-sm px-2 py-1 border border-slate-300 rounded-lg bg-white">
+            {[period.year - 1, period.year, period.year + 1].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500">
+        Bonus = % harga × harga kucing, untuk groomer terakhir, dibuat otomatis saat order <b>selesai</b> (order batal = gugur).
+        Groomer yang terdaftar di produk promo Grooming cabangnya (mis. Rahmat, Fikri) masuk ke menu <b>Target Penjualan Promo</b>, bukan di sini.
+        {me.isApprover && ' Bonus yang disetujui masuk slip gaji sebagai "Bonus Grooming" (slip draft ikut diperbarui otomatis).'}
+      </p>
+
+      {me.isOwner && (
+        <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+          <p className="text-sm font-semibold text-slate-700">🔒 Penutupan lapor manual Grooming Kucing</p>
+          <p className="text-xs text-slate-500">
+            Mulai tanggal ini groomer tidak bisa lagi lapor manual produk promo Grooming (struk bertanggal ≥ tanggal ini ditolak) — bonusnya
+            lewat Order Grooming. Isi tanggal saat Order Grooming mulai dipakai penuh. Kosongkan = lapor manual tetap terbuka.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="date" value={closeDate} onChange={e => setCloseDate(e.target.value)}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white" />
+            <button disabled={busy || closeDate === savedCloseDate} onClick={saveCloseDate}
+              className="px-3 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50">Simpan</button>
+            {savedCloseDate && <span className="text-xs text-slate-500">Sekarang: ditutup mulai {savedCloseDate}</span>}
+          </div>
+        </div>
+      )}
+
+      {totals.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="bg-slate-50 px-3 py-2">Groomer</th>
+                <th className="bg-slate-50 px-3 py-2">Menunggu</th>
+                <th className="bg-slate-50 px-3 py-2">Disetujui (masuk slip)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {totals.map(t => (
+                <tr key={t.name} className="border-t border-slate-100">
+                  <td className="px-3 py-2 font-medium text-slate-700">{t.name}</td>
+                  <td className="px-3 py-2 text-amber-700">{t.pending > 0 ? fmtRp(t.pending) : '—'}</td>
+                  <td className="px-3 py-2 text-green-700 font-semibold">{t.approved > 0 ? fmtRp(t.approved) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {loading ? <div className="text-center py-6 text-slate-500 text-sm">Memuat...</div> : rows.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-500 text-sm">Belum ada bonus grooming di periode ini.</div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map(r => {
+            const st = LEDGER_STATUS[r.status]
+            const warn = r.cat?.groomer_changed_after_start || !!r.cat?.forced_reason
+            return (
+              <div key={r.id} className={`bg-white border rounded-xl p-3 space-y-1.5 ${warn && r.status === 'pending' ? 'border-red-300' : 'border-slate-200'}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800">{r.employee?.full_name ?? '-'} · <span className="text-green-700">{fmtRp(Number(r.amount))}</span></p>
+                    <p className="text-xs text-slate-500">
+                      Nota {r.order?.nota_number ?? '-'} · {r.order?.customer?.name ?? '-'} · Kucing {r.cat?.seq}{r.cat?.cat_name ? ` — ${r.cat.cat_name}` : ''}
+                      · {r.bonus_percent}% × {fmtRp(Number(r.price))} · selesai {fmtDateTime(r.earned_at)}
+                    </p>
+                    {r.cat?.groomer_changed_after_start && <p className="text-xs text-red-700 font-semibold">⚠️ Groomer diganti saat kucing dikerjakan — cek riwayat di order.</p>}
+                    {r.cat?.forced_reason && <p className="text-xs text-red-700">⚠️ Paksa lanjut (difoto pembuat order/Owner): &quot;{r.cat.forced_reason}&quot;</p>}
+                    {r.rejection_reason && r.status !== 'approved' && <p className="text-xs text-red-600">Alasan: {r.rejection_reason}</p>}
+                    {r.reviewed_at && r.status !== 'pending' && <p className="text-[11px] text-slate-400">Ditinjau {r.reviewer?.full_name ?? ''} · {fmtDateTime(r.reviewed_at)}</p>}
+                  </div>
+                  <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-semibold ${st.cls}`}>{st.label}</span>
+                </div>
+                <div className="flex gap-2 items-center">
+                  {r.order?.receipt_photo_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={r.order.receipt_photo_url} alt="Struk" onClick={() => openLightbox(r.order!.receipt_photo_url, 'Struk')}
+                      className="w-12 h-12 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                  )}
+                  {r.cat?.finished_photo_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={r.cat.finished_photo_url} alt="Hasil grooming" onClick={() => openLightbox(r.cat!.finished_photo_url!, 'Hasil grooming')}
+                      className="w-12 h-12 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                  )}
+                  {me.isApprover && r.status !== 'void' && (
+                    <div className="ml-auto flex gap-2">
+                      {r.status === 'pending' ? (
+                        <>
+                          <button disabled={busy} onClick={() => review(r, 'approved')} className="text-xs px-2.5 py-1 bg-green-600 text-white rounded-lg disabled:opacity-50">✓ Setujui</button>
+                          <button disabled={busy} onClick={() => review(r, 'rejected')} className="text-xs px-2.5 py-1 border border-red-200 text-red-600 rounded-lg disabled:opacity-50">✕ Tolak</button>
+                        </>
+                      ) : (
+                        <button disabled={busy} onClick={() => review(r, 'pending')} className="text-xs px-2.5 py-1 border border-slate-300 text-slate-600 rounded-lg disabled:opacity-50">Review ulang</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }
 
