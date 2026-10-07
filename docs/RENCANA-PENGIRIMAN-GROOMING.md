@@ -16,7 +16,7 @@ Bahasa ke user: **Bahasa Indonesia**.
 - [x] **Fase 0** — Kirim Barang Toko Pusat (sudah live, commit `2f926d9`, migrasi `067_toko_pusat_self_delivery.sql`)
 - [x] **Fase 1** — Kiriman barang multi-cabang (migrasi `068_multi_branch_delivery.sql`, commit `330e0db`)
 - [x] **Fase 2** — Master Toko: label Toko/Pelanggan, nomor HP, pengaturan cabang grooming (migrasi `069_store_kind_grooming_branches.sql`, commit `d7ea5cf`)
-- [x] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut) (migrasi `070_grooming_orders.sql`, commit lihat `git log`)
+- [x] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut) (migrasi `070_grooming_orders.sql`, commit `2a9355a`)
 - [ ] **Fase 4** — Perjalanan jemput & antar grooming
 - [ ] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual
 
