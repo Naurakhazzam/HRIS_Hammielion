@@ -52,13 +52,32 @@ type Order = {
   branch: { name: string } | null; groom_branch: { name: string } | null
   customer: { name: string; phone: string | null; address: string | null; kind: string } | null
   creator: NameRel; pickup_emp: NameRel; delivery_emp: NameRel; arriver: NameRel; handover_emp: NameRel; canceller: NameRel
+  arrived_forced_reason: string | null; handover_forced_reason: string | null
   grooming_order_cats: Cat[]
+  trip_stops: TripStopRel[]
+  grooming_assignment_changes: { id: string; leg: string; reason: string | null; changed_at: string; old: NameRel; new: NameRel; by: NameRel }[]
+  grooming_ongkir_changes: { id: string; leg: string; old_ongkir: number | null; new_ongkir: number; changed_at: string; by: NameRel }[]
+}
+// Perjalanan jemput/antar lewat menu Kirim Barang (migrasi 071).
+type TripStopRel = {
+  id: string; kind: 'jemput_kucing' | 'serah_kucing' | 'antar_kucing'
+  arrived_at: string | null; arrived_photo_url: string | null; cancelled_at: string | null; auto_on_return: boolean
+  logistics_tp_trips: { status: string; pj: NameRel } | null
 }
 
 const ORDER_SELECT = `
   id, branch_id, groom_branch_id, nota_number, receipt_photo_url, arrival_mode, return_mode,
   pickup_ongkir, pickup_assignee, delivery_ongkir, delivery_assignee, notes, status, created_by, created_at,
   arrived_at, arrived_photo_url, ready_at, handover_at, handover_photo_url, cancelled_at, cancel_reason, status_before_cancel,
+  arrived_forced_reason, handover_forced_reason,
+  trip_stops:logistics_tp_trip_stops(id, kind, arrived_at, arrived_photo_url, cancelled_at, auto_on_return,
+    logistics_tp_trips(status, pj:employees!logistics_tp_trips_pj_id_fkey(full_name))),
+  grooming_assignment_changes(id, leg, reason, changed_at,
+    old:employees!grooming_assignment_changes_old_emp_fkey(full_name),
+    new:employees!grooming_assignment_changes_new_emp_fkey(full_name),
+    by:employees!grooming_assignment_changes_changed_by_fkey(full_name)),
+  grooming_ongkir_changes(id, leg, old_ongkir, new_ongkir, changed_at,
+    by:employees!grooming_ongkir_changes_changed_by_fkey(full_name)),
   branch:branches!grooming_orders_branch_id_fkey(name),
   groom_branch:branches!grooming_orders_groom_branch_id_fkey(name),
   customer:logistics_stores!grooming_orders_customer_id_fkey(name, phone, address, kind),
@@ -271,6 +290,27 @@ export default function OrderGroomingPage() {
       `Ubah harga ${catLabel(c)}: ${fmtRp(c.price)} → ${fmtRp(price)}. Alasan (mis. tambah layanan):`, 'Harga dikoreksi.')
   }
 
+  async function handleReassignLeg(o: Order, leg: 'jemput' | 'antar', newId: string) {
+    if (!newId) return
+    const name = couriers.find(c => c.id === newId)?.full_name
+    await rpcWithReason('reassign_grooming_leg', { p_order_id: o.id, p_leg: leg, p_new_emp: newId },
+      `Ganti ${leg === 'jemput' ? 'penjemput' : 'pengantar'} nota ${o.nota_number} ke ${name}. Alasan:`, `${leg === 'jemput' ? 'Penjemput' : 'Pengantar'} diganti ke ${name}.`)
+  }
+
+  async function handleSetOngkir(o: Order, leg: 'jemput' | 'antar') {
+    const cur = Number((leg === 'jemput' ? o.pickup_ongkir : o.delivery_ongkir) ?? 0)
+    const raw = window.prompt(`Ongkir ${leg} nota ${o.nota_number} (sekarang ${fmtRp(cur)}). Ongkir baru (0 kalau tidak ada):`)
+    if (raw === null) return
+    const digits = raw.replace(/[^\d]/g, '')
+    if (digits === '') { showMessage('error', 'Ongkir tidak valid.'); return }
+    setBusy(true)
+    const { error } = await supabase.rpc('set_grooming_ongkir', { p_order_id: o.id, p_leg: leg, p_ongkir: Number(digits) })
+    setBusy(false)
+    if (error) { showMessage('error', error.message); return }
+    showMessage('success', 'Ongkir diubah.')
+    await refresh()
+  }
+
   const staffOf = (o: Order) => me.isOwner || (me.isStoreStaff && !!me.branchId && (me.branchId === o.branch_id || me.branchId === o.groom_branch_id))
   const isCreator = (o: Order) => !!me.empId && o.created_by === me.empId
 
@@ -301,6 +341,81 @@ export default function OrderGroomingPage() {
     )
   }
 
+  // Status & aksi perjalanan jemput/antar (dijalankan PJ lewat menu Kirim Barang).
+  function renderLeg(o: Order, leg: 'jemput' | 'antar') {
+    const done = leg === 'jemput' ? o.status !== 'menunggu' : o.status === 'selesai'
+    if (done) return null
+    const kind = leg === 'jemput' ? 'jemput_kucing' : 'antar_kucing'
+    const stop = o.trip_stops.find(s => s.kind === kind && !s.cancelled_at)
+    const inTrip = stop?.logistics_tp_trips?.status === 'berjalan'
+    const pj = stop?.logistics_tp_trips?.pj?.full_name ?? '-'
+    const assignee = (leg === 'jemput' ? o.pickup_emp?.full_name : o.delivery_emp?.full_name) ?? '-'
+    const assigneeId = leg === 'jemput' ? o.pickup_assignee : o.delivery_assignee
+    const groomBranchName = o.groom_branch?.name ?? 'cabang grooming'
+    const canManage = staffOf(o) || isCreator(o)
+    const ready = leg === 'jemput' ? o.status === 'menunggu' : o.status === 'siap'
+    const canEmergency = (me.isOwner || isCreator(o)) && ready && !inTrip
+    const reasonKey = `${leg}-${o.id}`
+    const reason = forceReason[reasonKey] ?? ''
+
+    let statusText: string
+    if (inTrip && stop) {
+      statusText = leg === 'jemput'
+        ? (stop.arrived_at ? `Kucing sudah dijemput ${pj}, dalam perjalanan ke ${groomBranchName}.` : `Sedang dijemput ${pj}.`)
+        : `Sedang diantar ${pj}.`
+    } else if (!ready) {
+      statusText = `Akan diantar ${assignee} setelah semua kucing selesai.`
+    } else {
+      statusText = `Menunggu diambil ${assignee} di menu Kirim Barang.`
+    }
+
+    return (
+      <div className={`border rounded-lg p-3 space-y-2 ${leg === 'jemput' ? 'bg-amber-50 border-amber-200' : 'bg-purple-50 border-purple-200'}`}>
+        <p className="text-sm font-semibold text-slate-800">🛵 {leg === 'jemput' ? 'Jemput' : 'Antar'} kucing</p>
+        <p className="text-xs text-slate-700">{statusText}</p>
+        {!stop && canManage && (
+          <div className="flex flex-wrap gap-2">
+            <select disabled={busy} value="" onChange={e => handleReassignLeg(o, leg, e.target.value)}
+              className="text-xs px-2 py-1 border border-slate-300 rounded-lg bg-white">
+              <option value="">Ganti {leg === 'jemput' ? 'penjemput' : 'pengantar'} ke...</option>
+              {couriers.filter(c => c.id !== assigneeId).map(c => <option key={c.id} value={c.id}>{c.full_name} — {c.branch_name}</option>)}
+            </select>
+            <button disabled={busy} onClick={() => handleSetOngkir(o, leg)}
+              className="text-xs px-2 py-1 border border-slate-300 bg-white rounded-lg text-slate-600 disabled:opacity-50">Ubah Ongkir</button>
+          </div>
+        )}
+        {stop && me.isOwner && (
+          <button disabled={busy} onClick={() => handleSetOngkir(o, leg)}
+            className="text-xs px-2 py-1 border border-slate-300 bg-white rounded-lg text-slate-600 disabled:opacity-50">Ubah Ongkir (Owner)</button>
+        )}
+        {canEmergency && (
+          <details className="bg-white border border-slate-200 rounded-lg p-2">
+            <summary className="text-xs text-slate-600 cursor-pointer">Jalur darurat (pembuat order/Owner)</summary>
+            <div className="mt-2 space-y-2">
+              <p className="text-xs text-slate-500">
+                Pakai hanya kalau perjalanan {leg} tidak terjadi lewat Kirim Barang (mis. trip ditutup paksa, pelanggan akhirnya {leg === 'jemput' ? 'datang' : 'mengambil'} sendiri).
+                Ongkir {leg} <b>tidak</b> jadi bonus.
+              </p>
+              <input type="text" value={reason} onChange={e => setForceReason(r => ({ ...r, [reasonKey]: e.target.value }))}
+                placeholder="Alasan (min. 5 huruf)" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+              {busy ? <p className="text-xs text-slate-500 text-center py-1">Mengirim...</p> : reason.trim().length >= 5 ? (
+                leg === 'jemput' ? (
+                  <LogisticsCameraCapture label={`Kucing Sampai di ${groomBranchName}`} employeeName={me.name} maxFileAgeMs={MAX_FILE_AGE_MS}
+                    onCaptured={blob => photoAction(`arrive-${o.id}`, blob, o.id, 'sampai', 'mark_grooming_arrived',
+                      url => ({ p_order_id: o.id, p_photo_url: url, p_forced_reason: reason.trim() }), 'Kucing sampai — status DIKERJAKAN.')} />
+                ) : (
+                  <LogisticsCameraCapture label="Serah Terima ke Pelanggan" employeeName={me.name} maxFileAgeMs={MAX_FILE_AGE_MS}
+                    onCaptured={blob => photoAction(`handover-${o.id}`, blob, o.id, 'serah', 'complete_grooming_handover',
+                      url => ({ p_order_id: o.id, p_photo_url: url, p_forced_reason: reason.trim() }), 'Order grooming selesai.')} />
+                )
+              ) : <p className="text-xs text-slate-400">Isi alasan dulu.</p>}
+            </div>
+          </details>
+        )}
+      </div>
+    )
+  }
+
   function renderOrder(o: Order, collapsible: boolean) {
     const cats = sortedCats(o)
     const st = STATUS_LABEL[o.status]
@@ -311,6 +426,8 @@ export default function OrderGroomingPage() {
     const canEditPrice = o.status !== 'batal' && (me.isOwner || isCreator(o))
     const canChangeGroomer = ['menunggu', 'dikerjakan'].includes(o.status) && (staffOf(o) || isCreator(o))
     const groomBranchName = o.groom_branch?.name ?? 'cabang grooming'
+    const jemputStop = o.trip_stops.find(s => s.kind === 'jemput_kucing' && !s.cancelled_at)
+    const serahAuto = o.trip_stops.some(s => s.kind === 'serah_kucing' && !s.cancelled_at && s.auto_on_return)
 
     const header = (
       <div className="flex items-start justify-between gap-2">
@@ -341,8 +458,13 @@ export default function OrderGroomingPage() {
 
         <div className="space-y-2">
           <PhotoRow label="🧾 Struk" url={o.receipt_photo_url} at={o.created_at} onOpen={openLightbox} />
+          {jemputStop?.arrived_at && jemputStop.arrived_photo_url && (
+            <PhotoRow label="📸 Kucing dijemput di pelanggan" url={jemputStop.arrived_photo_url} at={jemputStop.arrived_at}
+              extra={jemputStop.logistics_tp_trips?.pj?.full_name ?? undefined} onOpen={openLightbox} />
+          )}
           {o.arrived_photo_url && o.arrived_at && (
-            <PhotoRow label={`📸 Sampai di ${groomBranchName}`} url={o.arrived_photo_url} at={o.arrived_at} extra={o.arriver?.full_name ?? undefined} onOpen={openLightbox} />
+            <PhotoRow label={`📸 Sampai di ${groomBranchName}${serahAuto ? ' (foto kembali penjemput)' : ''}`} url={o.arrived_photo_url} at={o.arrived_at}
+              extra={[o.arriver?.full_name, o.arrived_forced_reason ? `jalur darurat: "${o.arrived_forced_reason}"` : ''].filter(Boolean).join(' · ') || undefined} onOpen={openLightbox} />
           )}
         </div>
 
@@ -438,33 +560,49 @@ export default function OrderGroomingPage() {
         </div>
 
         {o.handover_photo_url && o.handover_at && (
-          <PhotoRow label="📸 Serah terima ke pelanggan" url={o.handover_photo_url} at={o.handover_at} extra={o.handover_emp?.full_name ?? undefined} onOpen={openLightbox} />
+          <PhotoRow label="📸 Serah terima ke pelanggan" url={o.handover_photo_url} at={o.handover_at}
+            extra={[o.handover_emp?.full_name, o.handover_forced_reason ? `jalur darurat: "${o.handover_forced_reason}"` : ''].filter(Boolean).join(' · ') || undefined} onOpen={openLightbox} />
         )}
 
         {/* Aksi tahap order */}
-        {o.status === 'menunggu' && (staffOf(o) || o.pickup_assignee === me.empId) && (
+        {o.status === 'menunggu' && o.arrival_mode === 'datang_sendiri' && staffOf(o) && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
             <p className="text-sm font-semibold text-amber-900">📍 Kucing sudah sampai di {groomBranchName}?</p>
-            {o.arrival_mode === 'jemput' && <p className="text-xs text-amber-800">Dijemput {o.pickup_emp?.full_name}. (Perjalanan jemput 3 foto menyusul — sementara cukup foto saat sampai.)</p>}
             {busy ? <p className="text-xs text-slate-500 text-center py-1">Mengirim...</p> : (
               <LogisticsCameraCapture label={`Kucing Sampai di ${groomBranchName}`} employeeName={me.name} maxFileAgeMs={MAX_FILE_AGE_MS}
                 onCaptured={blob => photoAction(`arrive-${o.id}`, blob, o.id, 'sampai', 'mark_grooming_arrived',
-                  url => ({ p_order_id: o.id, p_photo_url: url }), 'Kucing sampai — status DIKERJAKAN.')} />
+                  url => ({ p_order_id: o.id, p_photo_url: url, p_forced_reason: null }), 'Kucing sampai — status DIKERJAKAN.')} />
             )}
           </div>
         )}
-        {o.status === 'siap' && (staffOf(o) || o.delivery_assignee === me.empId) && (
+        {o.arrival_mode === 'jemput' && ['menunggu', 'dikerjakan', 'siap'].includes(o.status) && renderLeg(o, 'jemput')}
+        {o.status === 'siap' && o.return_mode === 'ambil_sendiri' && staffOf(o) && (
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
             <p className="text-sm font-semibold text-purple-900">
-              🎀 Semua kucing selesai{o.ready_at ? ` (${fmtDateTime(o.ready_at)})` : ''}. {o.return_mode === 'antar' ? `Diantar ${o.delivery_emp?.full_name ?? ''}` : 'Diambil sendiri oleh pelanggan'}.
+              🎀 Semua kucing selesai{o.ready_at ? ` (${fmtDateTime(o.ready_at)})` : ''}. Diambil sendiri oleh pelanggan.
             </p>
-            <p className="text-xs text-purple-800">Foto saat kucing diserahkan ke pelanggan.{o.return_mode === 'antar' ? ' (Perjalanan antar 3 foto menyusul.)' : ''}</p>
+            <p className="text-xs text-purple-800">Foto saat kucing diserahkan ke pelanggan.</p>
             {busy ? <p className="text-xs text-slate-500 text-center py-1">Mengirim...</p> : (
               <LogisticsCameraCapture label="Serah Terima ke Pelanggan" employeeName={me.name} maxFileAgeMs={MAX_FILE_AGE_MS}
                 onCaptured={blob => photoAction(`handover-${o.id}`, blob, o.id, 'serah', 'complete_grooming_handover',
-                  url => ({ p_order_id: o.id, p_photo_url: url }), 'Order grooming selesai. Terima kasih!')} />
+                  url => ({ p_order_id: o.id, p_photo_url: url, p_forced_reason: null }), 'Order grooming selesai. Terima kasih!')} />
             )}
           </div>
+        )}
+        {o.return_mode === 'antar' && ['menunggu', 'dikerjakan', 'siap'].includes(o.status) && renderLeg(o, 'antar')}
+
+        {(o.grooming_assignment_changes.length > 0 || o.grooming_ongkir_changes.length > 0) && (
+          <details>
+            <summary className="text-xs text-blue-600 cursor-pointer">Riwayat penjemput/pengantar & ongkir ({o.grooming_assignment_changes.length + o.grooming_ongkir_changes.length})</summary>
+            <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
+              {o.grooming_assignment_changes.map(a => (
+                <li key={a.id}>{fmtDateTime(a.changed_at)} — {a.leg} {a.old?.full_name ?? '-'} → {a.new?.full_name ?? '-'} oleh {a.by?.full_name ?? 'Owner'}: &quot;{a.reason}&quot;</li>
+              ))}
+              {o.grooming_ongkir_changes.map(k => (
+                <li key={k.id}>{fmtDateTime(k.changed_at)} — ongkir {k.leg} {fmtRp(Number(k.old_ongkir ?? 0))} → {fmtRp(Number(k.new_ongkir))} oleh {k.by?.full_name ?? 'Owner'}</li>
+              ))}
+            </ul>
+          </details>
         )}
 
         {canCancel && (

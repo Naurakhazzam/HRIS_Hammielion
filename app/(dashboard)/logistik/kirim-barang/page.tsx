@@ -43,15 +43,42 @@ type WaitingLoading = {
   packages: { id: string; photo_url: string; caption: string }[]
 }
 
+// Order grooming yang ikut di trip / menunggu dijemput-diantar (migrasi 071).
+type GroomRel = {
+  id: string
+  nota_number: string
+  status: string
+  pickup_ongkir: number | null
+  delivery_ongkir: number | null
+  customer: StoreRel
+  groom_branch: { name: string } | null
+}
+
+type StopKind = 'barang' | 'antar_kucing' | 'jemput_kucing' | 'serah_kucing'
+
 type TripStop = {
   id: string
-  loading_id: string
+  kind: StopKind
+  loading_id: string | null
+  grooming_order_id: string | null
+  auto_on_return: boolean
   arrived_at: string | null
   arrived_photo_url: string | null
   arrival_order: number | null
   cancelled_at: string | null
   cancel_reason: string | null
   logistics_central_loadings: { ongkir: number; logistics_stores: StoreRel } | null
+  grooming_orders: GroomRel | null
+}
+
+type GroomTask = {
+  key: string
+  leg: 'jemput' | 'antar'
+  assignee: string | null
+  order: GroomRel & {
+    created_at: string; ready_at: string | null; branch: { name: string } | null
+    assignee_emp: { full_name: string } | null; cats: { id: string }[]
+  }
 }
 
 type Trip = {
@@ -100,13 +127,45 @@ function waitingTone(msVal: number) {
 const liveStops = (t: Trip) => t.logistics_tp_trip_stops.filter(s => !s.cancelled_at)
 const arrivedStops = (t: Trip) => liveStops(t).filter(s => s.arrived_at).sort((a, b) => ms(a.arrived_at!) - ms(b.arrived_at!))
 function lastEventAt(t: Trip) {
-  const arr = arrivedStops(t)
+  // Serah kucing yang otomatis tercatat oleh foto 3 bukan foto tersendiri.
+  const arr = arrivedStops(t).filter(s => !s.auto_on_return)
   return arr.length > 0 ? ms(arr[arr.length - 1].arrived_at!) : ms(t.pickup_at)
 }
+// Ongkir yang jadi dasar bonus PJ per tujuan (serah kucing = bagian dari jemput, 0).
+function stopOngkir(s: TripStop) {
+  if (s.kind === 'barang') return Number(s.logistics_central_loadings?.ongkir ?? 0)
+  if (s.kind === 'jemput_kucing') return Number(s.grooming_orders?.pickup_ongkir ?? 0)
+  if (s.kind === 'antar_kucing') return Number(s.grooming_orders?.delivery_ongkir ?? 0)
+  return 0
+}
+// Bonus perjalanan grooming baru cair kalau order grooming SELESAI total.
+const stopBonusReady = (s: TripStop) => s.kind === 'barang' || s.grooming_orders?.status === 'selesai'
 function tripBonus(t: Trip) {
   if (t.status !== 'selesai') return 0
-  return arrivedStops(t).reduce((s, st) => s + Math.floor(Number(st.logistics_central_loadings?.ongkir ?? 0) * 0.5), 0)
+  return arrivedStops(t).filter(stopBonusReady).reduce((s, st) => s + Math.floor(stopOngkir(st) * 0.5), 0)
 }
+function tripBonusPending(t: Trip) {
+  if (t.status !== 'selesai') return 0
+  return arrivedStops(t).filter(s => !stopBonusReady(s) && s.grooming_orders?.status !== 'batal')
+    .reduce((s, st) => s + Math.floor(stopOngkir(st) * 0.5), 0)
+}
+function stopTitle(s: TripStop) {
+  const g = s.grooming_orders
+  if (s.kind === 'barang') return s.logistics_central_loadings?.logistics_stores?.name ?? 'toko'
+  if (s.kind === 'antar_kucing') return `🐱 Antar kucing ke ${g?.customer?.name ?? 'pelanggan'} (nota ${g?.nota_number ?? '-'})`
+  if (s.kind === 'jemput_kucing') return `🐱 Jemput kucing di ${g?.customer?.name ?? 'pelanggan'} (nota ${g?.nota_number ?? '-'})`
+  return `🐱 Serahkan kucing di ${g?.groom_branch?.name ?? 'cabang grooming'} (nota ${g?.nota_number ?? '-'})`
+}
+function stopPlace(s: TripStop): StoreRel {
+  if (s.kind === 'barang') return s.logistics_central_loadings?.logistics_stores ?? null
+  if (s.kind === 'serah_kucing') return null
+  return s.grooming_orders?.customer ?? null
+}
+const GROOM_REL = `id, nota_number, status, pickup_ongkir, delivery_ongkir,
+  customer:logistics_stores!grooming_orders_customer_id_fkey(name, address, phone),
+  groom_branch:branches!grooming_orders_groom_branch_id_fkey(name)`
+// Folder foto di storage: kiriman barang = <loading_id>/, grooming = grooming/<order_id>/.
+const stopFolder = (s: TripStop) => s.loading_id ?? `grooming/${s.grooming_order_id}`
 
 // Periode gaji: 26 bulan lalu s/d 25 bulan ini.
 function periodRange(month: number, year: number) {
@@ -137,6 +196,7 @@ export default function KirimBarangPage() {
   const [now, setNow] = useState(() => Date.now())
 
   const [waiting, setWaiting] = useState<WaitingLoading[]>([])
+  const [groomTasks, setGroomTasks] = useState<GroomTask[]>([])
   const [activeTrips, setActiveTrips] = useState<Trip[]>([])
   const [historyTrips, setHistoryTrips] = useState<Trip[]>([])
   const [candidates, setCandidates] = useState<DeliveryCandidate[]>([])
@@ -145,7 +205,7 @@ export default function KirimBarangPage() {
   const [busy, setBusy] = useState(false)
   // Foto yang sudah diambil tapi gagal terkirim (sinyal jelek) -- disimpan supaya bisa dicoba
   // lagi tanpa foto ulang.
-  const [pending, setPending] = useState<{ kind: 'start' | 'arrive' | 'finish'; blob: Blob; url?: string; stopId?: string; loadingIds?: string[] } | null>(null)
+  const [pending, setPending] = useState<{ kind: 'start' | 'arrive' | 'finish'; blob: Blob; url?: string; stopId?: string; loadingIds?: string[]; groomKeys?: string[] } | null>(null)
 
   const [reasonCategory, setReasonCategory] = useState('')
   const [reasonNote, setReasonNote] = useState('')
@@ -163,8 +223,9 @@ export default function KirimBarangPage() {
     reason_category, reason_note, cancelled_at, cancel_reason, forced_at, forced_reason, reassigned_at, reassign_reason,
     pj:employees!logistics_tp_trips_pj_id_fkey(full_name, branches(name)),
     prev_pj:employees!logistics_tp_trips_reassigned_from_fkey(full_name),
-    logistics_tp_trip_stops(id, loading_id, arrived_at, arrived_photo_url, arrival_order, cancelled_at, cancel_reason,
-      logistics_central_loadings(ongkir, logistics_stores(name, address, phone)))
+    logistics_tp_trip_stops(id, kind, loading_id, grooming_order_id, auto_on_return, arrived_at, arrived_photo_url, arrival_order, cancelled_at, cancel_reason,
+      logistics_central_loadings(ongkir, logistics_stores(name, address, phone)),
+      grooming_orders(${GROOM_REL}))
   `
 
   const fetchAll = useCallback(async (empId: string, seeAll: boolean, p: { month: number; year: number }) => {
@@ -189,6 +250,31 @@ export default function KirimBarangPage() {
       taken = new Set(((stopRows as { loading_id: string }[]) || []).map(s => s.loading_id))
     }
     setWaiting(rows.filter(r => !taken.has(r.id)))
+
+    // Tugas jemput (order menunggu) & antar (order siap) kucing grooming.
+    const me = empId || '00000000-0000-0000-0000-000000000000'
+    const legSelect = (fk: string) => `${GROOM_REL}, created_at, ready_at,
+      branch:branches!grooming_orders_branch_id_fkey(name),
+      assignee_emp:employees!${fk}(full_name), cats:grooming_order_cats(id)`
+    let jq = supabase.from('grooming_orders').select(`${legSelect('grooming_orders_pickup_assignee_fkey')}, assignee:pickup_assignee`)
+      .eq('status', 'menunggu').eq('arrival_mode', 'jemput').order('created_at')
+    let aq = supabase.from('grooming_orders').select(`${legSelect('grooming_orders_delivery_assignee_fkey')}, assignee:delivery_assignee`)
+      .eq('status', 'siap').eq('return_mode', 'antar').order('ready_at')
+    if (!seeAll) { jq = jq.eq('pickup_assignee', me); aq = aq.eq('delivery_assignee', me) }
+    const [{ data: jRows }, { data: aRows }] = await Promise.all([jq, aq])
+    type LegRow = GroomTask['order'] & { assignee: string | null }
+    const legs: GroomTask[] = [
+      ...((jRows as unknown as LegRow[]) || []).map(o => ({ key: `g:${o.id}:jemput`, leg: 'jemput' as const, assignee: o.assignee, order: o })),
+      ...((aRows as unknown as LegRow[]) || []).map(o => ({ key: `g:${o.id}:antar`, leg: 'antar' as const, assignee: o.assignee, order: o })),
+    ]
+    let gTaken = new Set<string>()
+    if (legs.length > 0) {
+      const { data: gStops } = await supabase.from('logistics_tp_trip_stops').select('grooming_order_id, kind')
+        .in('grooming_order_id', legs.map(l => l.order.id)).in('kind', ['jemput_kucing', 'antar_kucing']).is('cancelled_at', null)
+      gTaken = new Set(((gStops as { grooming_order_id: string; kind: string }[]) || [])
+        .map(s => `g:${s.grooming_order_id}:${s.kind === 'jemput_kucing' ? 'jemput' : 'antar'}`))
+    }
+    setGroomTasks(legs.filter(l => !gTaken.has(l.key)))
 
     const { data: act } = await supabase.from('logistics_tp_trips').select(tripSelect)
       .eq('status', 'berjalan').order('pickup_at')
@@ -265,38 +351,44 @@ export default function KirimBarangPage() {
   const myTrip = useMemo(() => activeTrips.find(t => t.pj_id === myEmployeeId) || null, [activeTrips, myEmployeeId])
   const otherActive = activeTrips.filter(t => t.pj_id !== myEmployeeId)
   const myWaiting = waiting.filter(w => w.assigned_to === myEmployeeId)
+  const myGroomTasks = groomTasks.filter(g => g.assignee === myEmployeeId)
   const selectedIds = Object.keys(selected).filter(k => selected[k] && myWaiting.some(w => w.id === k))
+  const selectedGroomKeys = Object.keys(selected).filter(k => selected[k] && myGroomTasks.some(g => g.key === k))
+  const selectedCount = selectedIds.length + selectedGroomKeys.length
+  const waitingCount = waiting.length + groomTasks.length
   // Foto 3 = kembali di cabang asal PJ.
   const homeOf = (t: Trip) => t.pj?.branches?.name ?? 'cabang'
 
-  async function upload(folderLoadingId: string, blob: Blob, tag: string): Promise<string | null> {
-    const path = `${folderLoadingId}/tp-${tag}-${Date.now()}.jpg`
+  async function upload(folder: string, blob: Blob, tag: string): Promise<string | null> {
+    const path = `${folder}/tp-${tag}-${Date.now()}.jpg`
     const { error } = await supabase.storage.from('logistics-photos').upload(path, blob, { contentType: 'image/jpeg' })
     if (error) return null
     return supabase.storage.from('logistics-photos').getPublicUrl(path).data.publicUrl
   }
 
-  // ── FOTO 1 ──
-  async function doStart(blob: Blob, loadingIds: string[], existingUrl?: string) {
+  // ── FOTO 1 ── (kiriman barang + tugas jemput/antar kucing boleh sekaligus)
+  async function doStart(blob: Blob, loadingIds: string[], groomKeys: string[], existingUrl?: string) {
     setBusy(true)
-    const url = existingUrl ?? await upload(loadingIds[0], blob, 'ambil')
-    if (!url) { setBusy(false); setPending({ kind: 'start', blob, loadingIds }); showMessage('error', 'Foto gagal terkirim (cek sinyal). Tekan "Coba Kirim Lagi" — tidak perlu foto ulang.'); return }
-    const { error } = await supabase.rpc('start_tp_trip', { p_loading_ids: loadingIds, p_photo_url: url })
+    const folder = loadingIds[0] ?? `grooming/${groomKeys[0].split(':')[1]}`
+    const url = existingUrl ?? await upload(folder, blob, 'ambil')
+    if (!url) { setBusy(false); setPending({ kind: 'start', blob, loadingIds, groomKeys }); showMessage('error', 'Foto gagal terkirim (cek sinyal). Tekan "Coba Kirim Lagi" — tidak perlu foto ulang.'); return }
+    const grooming = groomKeys.map(k => { const [, orderId, leg] = k.split(':'); return { order_id: orderId, leg } })
+    const { error } = await supabase.rpc('start_tp_trip', { p_loading_ids: loadingIds, p_photo_url: url, p_grooming: grooming })
     setBusy(false)
     if (error) {
-      if (/fetch|network/i.test(error.message)) { setPending({ kind: 'start', blob, url, loadingIds }); showMessage('error', 'Gagal terhubung ke server. Tekan "Coba Kirim Lagi".'); return }
+      if (/fetch|network/i.test(error.message)) { setPending({ kind: 'start', blob, url, loadingIds, groomKeys }); showMessage('error', 'Gagal terhubung ke server. Tekan "Coba Kirim Lagi".'); return }
       setPending(null); showMessage('error', error.message); await refresh(); return
     }
     setPending(null)
     setSelected({})
-    showMessage('success', 'Barang diambil — Anda PJ kiriman ini. Foto lagi saat sampai di toko tujuan.')
+    showMessage('success', 'Tugas diambil — Anda PJ. Foto lagi di tiap tujuan.')
     await refresh()
   }
 
   // ── FOTO 2 ──
   async function doArrive(blob: Blob, stop: TripStop, existingUrl?: string) {
     setBusy(true)
-    const url = existingUrl ?? await upload(stop.loading_id, blob, 'sampai')
+    const url = existingUrl ?? await upload(stopFolder(stop), blob, 'sampai')
     if (!url) { setBusy(false); setPending({ kind: 'arrive', blob, stopId: stop.id }); showMessage('error', 'Foto gagal terkirim (cek sinyal). Tekan "Coba Kirim Lagi" — tidak perlu foto ulang.'); return }
     const { error } = await supabase.rpc('arrive_tp_stop', { p_stop_id: stop.id, p_photo_url: url })
     setBusy(false)
@@ -305,14 +397,14 @@ export default function KirimBarangPage() {
       setPending(null); showMessage('error', error.message); await refresh(); return
     }
     setPending(null)
-    showMessage('success', `Sampai di ${stop.logistics_central_loadings?.logistics_stores?.name ?? 'toko'} tercatat.`)
+    showMessage('success', stop.kind === 'barang' ? `Sampai di ${stopTitle(stop)} tercatat.` : `${stopTitle(stop).replace('🐱 ', '')} — tercatat.`)
     await refresh()
   }
 
   // ── FOTO 3 ──
   async function doFinish(blob: Blob, trip: Trip, existingUrl?: string) {
     setBusy(true)
-    const url = existingUrl ?? await upload(trip.logistics_tp_trip_stops[0].loading_id, blob, 'kembali')
+    const url = existingUrl ?? await upload(stopFolder(trip.logistics_tp_trip_stops[0]), blob, 'kembali')
     if (!url) { setBusy(false); setPending({ kind: 'finish', blob }); showMessage('error', 'Foto gagal terkirim (cek sinyal). Tekan "Coba Kirim Lagi" — tidak perlu foto ulang.'); return }
     const { error } = await supabase.rpc('finish_tp_trip', {
       p_trip_id: trip.id, p_photo_url: url,
@@ -339,7 +431,7 @@ export default function KirimBarangPage() {
 
   async function retryPending() {
     if (!pending) return
-    if (pending.kind === 'start' && pending.loadingIds) return doStart(pending.blob, pending.loadingIds, pending.url)
+    if (pending.kind === 'start' && pending.loadingIds) return doStart(pending.blob, pending.loadingIds, pending.groomKeys ?? [], pending.url)
     if (pending.kind === 'arrive' && myTrip) {
       const stop = myTrip.logistics_tp_trip_stops.find(s => s.id === pending.stopId)
       if (stop) return doArrive(pending.blob, stop, pending.url)
@@ -359,6 +451,13 @@ export default function KirimBarangPage() {
     showMessage('success', okText)
     await refresh()
   }
+
+  // Grooming ikut berubah (status order / tugas jemput-antar) -- segarkan badge-nya juga.
+  useEffect(() => {
+    const h = () => window.dispatchEvent(new Event('grooming-badge-refresh'))
+    window.addEventListener('kirim-barang-badge-refresh', h)
+    return () => window.removeEventListener('kirim-barang-badge-refresh', h)
+  }, [])
 
   async function handleReassign(trip: Trip, newPj: string) {
     if (!newPj) return
@@ -404,21 +503,24 @@ export default function KirimBarangPage() {
     const arr = arrivedStops(t)
     return (
       <div className="space-y-2">
-        <PhotoRow label="📸 Foto 1 — Barang diambil" url={t.pickup_photo_url} at={t.pickup_at} onOpen={openLightbox} />
+        <PhotoRow label="📸 Foto 1 — Barang/kucing diambil" url={t.pickup_photo_url} at={t.pickup_at} onOpen={openLightbox} />
         {liveStops(t).sort((a, b) => (a.arrival_order ?? 99) - (b.arrival_order ?? 99)).map(s => {
           const idx = arr.findIndex(x => x.id === s.id)
           const prevAt = idx <= 0 ? ms(t.pickup_at) : ms(arr[idx - 1].arrived_at!)
-          const store = s.logistics_central_loadings?.logistics_stores
           return s.arrived_at ? (
-            <PhotoRow key={s.id} label={`📸 Foto 2 — Sampai ${store?.name ?? ''}`} url={s.arrived_photo_url!} at={s.arrived_at}
-              extra={`${idx === 0 ? 'Lama berangkat' : 'Dari toko sebelumnya'}: ${fmtDur(ms(s.arrived_at) - prevAt)}`} onOpen={openLightbox} />
+            s.auto_on_return ? (
+              <div key={s.id} className="text-xs text-slate-600 pl-1">✓ {stopTitle(s)} — tercatat dengan foto kembali</div>
+            ) : (
+              <PhotoRow key={s.id} label={`📸 Foto 2 — ${s.kind === 'barang' ? 'Sampai ' : ''}${stopTitle(s)}`} url={s.arrived_photo_url!} at={s.arrived_at}
+                extra={`${idx === 0 ? 'Lama berangkat' : 'Dari tujuan sebelumnya'}: ${fmtDur(ms(s.arrived_at) - prevAt)}`} onOpen={openLightbox} />
+            )
           ) : (
-            <div key={s.id} className="text-xs text-slate-500 pl-1">⏳ {store?.name} — belum sampai</div>
+            <div key={s.id} className="text-xs text-slate-500 pl-1">⏳ {stopTitle(s)} — belum</div>
           )
         })}
         {t.logistics_tp_trip_stops.filter(s => s.cancelled_at).map(s => (
           <div key={s.id} className="text-xs text-slate-400 pl-1 line-through">
-            {s.logistics_central_loadings?.logistics_stores?.name} — dilepas: {s.cancel_reason}
+            {stopTitle(s)} — dilepas: {s.cancel_reason}
           </div>
         ))}
         {t.return_photo_url && t.return_at && (
@@ -433,8 +535,11 @@ export default function KirimBarangPage() {
     const diff = t.depart_minutes != null && t.return_minutes != null ? Math.abs(Number(t.return_minutes) - Number(t.depart_minutes)) : 0
     const flagged = t.status === 'selesai' && diff >= REASON_DIFF_MIN
     const total = t.return_at ? ms(t.return_at) - ms(t.pickup_at) : null
-    const stores = liveStops(t).map(s => s.logistics_central_loadings?.logistics_stores?.name).filter(Boolean).join(', ')
+    const stores = liveStops(t).filter(s => s.kind !== 'serah_kucing')
+      .map(s => s.kind === 'barang' ? s.logistics_central_loadings?.logistics_stores?.name : `🐱 ${s.grooming_orders?.customer?.name ?? ''}`)
+      .filter(Boolean).join(', ')
     const bonus = tripBonus(t)
+    const bonusPending = tripBonusPending(t)
     return (
       <details key={t.id} className={`bg-white border rounded-xl overflow-hidden ${flagged ? 'border-red-300' : 'border-slate-200'}`}>
         <summary className="px-4 py-3 cursor-pointer list-none">
@@ -456,7 +561,8 @@ export default function KirimBarangPage() {
             </p>
           )}
           {t.reason_category && <p className="text-xs text-red-700 mt-0.5">Alasan: {reasonLabel(t.reason_category)}{t.reason_note ? ` — "${t.reason_note}"` : ''}</p>}
-          {t.status === 'selesai' && <p className="text-xs text-green-700 mt-0.5">Bonus ongkir PJ: {bonus > 0 ? fmtRp(bonus) : '—'}</p>}
+          {t.status === 'selesai' && <p className="text-xs text-green-700 mt-0.5">Bonus ongkir PJ: {bonus > 0 ? fmtRp(bonus) : '—'}
+            {bonusPending > 0 && <span className="text-amber-700"> · {fmtRp(bonusPending)} menunggu order grooming selesai</span>}</p>}
           {t.status === 'batal' && <p className="text-xs text-slate-500 mt-0.5">Dibatalkan: {t.cancel_reason}</p>}
           {t.status === 'tutup_paksa' && <p className="text-xs text-red-700 mt-0.5">Ditutup paksa Owner: {t.forced_reason} (tanpa bonus)</p>}
           {t.reassigned_at && <p className="text-xs text-slate-500 mt-0.5">PJ dialihkan dari {t.prev_pj?.full_name}: {t.reassign_reason}</p>}
@@ -469,11 +575,15 @@ export default function KirimBarangPage() {
   // ── Trip aktif saya ──
   function renderMyTrip(t: Trip) {
     const live = liveStops(t)
-    const notArrived = live.filter(s => !s.arrived_at)
+    // Serah kucing di cabang asal PJ ikut tercatat oleh foto 3 -- tidak wajib foto tersendiri.
+    const serahAtHome = (s: TripStop) => s.kind === 'serah_kucing' && !!s.grooming_orders?.groom_branch?.name && s.grooming_orders.groom_branch.name === homeOf(t)
+    const jemputDone = (s: TripStop) => live.some(x => x.kind === 'jemput_kucing' && x.grooming_order_id === s.grooming_order_id && x.arrived_at)
+    const notArrived = live.filter(s => !s.arrived_at && !serahAtHome(s))
+    const autoSerah = live.filter(s => !s.arrived_at && serahAtHome(s))
     const arr = arrivedStops(t)
     const sinceLast = now - lastEventAt(t)
     const waitLeft = Math.max(0, MIN_STEP_MS - sinceLast)
-    const allArrived = live.length > 0 && notArrived.length === 0
+    const allArrived = live.length > 0 && notArrived.length === 0 && autoSerah.every(jemputDone)
     const estDep = arr.length > 0 ? (ms(arr[0].arrived_at!) - ms(t.pickup_at)) / 60000 : 0
     const estRet = sinceLast / 60000
     const needReason = allArrived && (reasonForced || Math.abs(estRet - estDep) >= REASON_DIFF_MIN)
@@ -499,30 +609,42 @@ export default function KirimBarangPage() {
         {notArrived.length > 0 && (
           <div className="space-y-3">
             {notArrived.map(s => {
-              const store = s.logistics_central_loadings?.logistics_stores
+              const place = stopPlace(s)
+              const blocked = s.kind === 'serah_kucing' && !jemputDone(s)
+              const title = stopTitle(s)
               return (
-                <div key={s.id} className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                <div key={s.id} className={`border rounded-lg p-3 space-y-2 ${s.kind === 'barang' ? 'bg-purple-50 border-purple-200' : 'bg-pink-50 border-pink-200'}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">📍 {store?.name}</p>
-                      {store?.address && <p className="text-xs text-slate-500">{store.address}</p>}
-                      {store?.phone && <a href={`tel:${store.phone}`} className="text-xs text-blue-600">📞 {store.phone}</a>}
+                      <p className="text-sm font-semibold text-slate-800">📍 {title}</p>
+                      {place?.address && <p className="text-xs text-slate-500">{place.address}</p>}
+                      {place?.phone && <a href={`tel:${place.phone}`} className="text-xs text-blue-600">📞 {place.phone}</a>}
                     </div>
-                    <button disabled={busy} onClick={() => rpcWithReason('release_tp_stop', { p_stop_id: s.id }, `Lepas ${store?.name} dari tugas ini (kiriman kembali ke daftar menunggu). Alasan:`, 'Toko dilepas dari tugas.')}
-                      className="shrink-0 text-[11px] px-2 py-1 border border-slate-300 bg-white rounded-lg text-slate-600 disabled:opacity-50">Lepas</button>
+                    {s.kind !== 'serah_kucing' && (
+                      <button disabled={busy} onClick={() => rpcWithReason('release_tp_stop', { p_stop_id: s.id }, `Lepas "${title}" dari tugas ini (kembali ke daftar menunggu). Alasan:`, 'Tujuan dilepas dari tugas.')}
+                        className="shrink-0 text-[11px] px-2 py-1 border border-slate-300 bg-white rounded-lg text-slate-600 disabled:opacity-50">Lepas</button>
+                    )}
                   </div>
-                  {waitLeft > 0 ? (
+                  {blocked ? (
+                    <p className="text-xs text-slate-500 text-center py-2">Foto jemput kucing di pelanggan dulu.</p>
+                  ) : waitLeft > 0 ? (
                     <p className="text-xs text-slate-500 text-center py-2">⏳ Foto sampai bisa diambil {Math.ceil(waitLeft / 60000)} menit lagi (minimal 5 menit per tahap).</p>
                   ) : busy ? (
                     <p className="text-xs text-slate-500 text-center py-2">Mengirim...</p>
                   ) : (
-                    <LogisticsCameraCapture label={`Foto Sampai — ${store?.name ?? ''}`} employeeName={myName}
+                    <LogisticsCameraCapture label={s.kind === 'barang' ? `Foto Sampai — ${title}` : title.replace('🐱 ', 'Foto ')} employeeName={myName}
                       maxFileAgeMs={MAX_FILE_AGE_MS} onCaptured={blob => doArrive(blob, s)} />
                   )}
                 </div>
               )
             })}
           </div>
+        )}
+        {autoSerah.length > 0 && (
+          <p className="text-xs bg-pink-50 border border-pink-200 text-pink-800 rounded-lg px-3 py-2">
+            🐱 {autoSerah.length} kucing dijemput untuk {homeOf(t)} — otomatis tercatat sampai saat Anda foto kembali di {homeOf(t)}.
+            {autoSerah.some(s => !jemputDone(s)) && ' (Foto jemput di pelanggan dulu.)'}
+          </p>
         )}
 
         {allArrived && (
@@ -568,7 +690,7 @@ export default function KirimBarangPage() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Kirim Barang</h1>
-        <p className="text-sm text-slate-500">Kiriman Laporan Muat jalur &quot;Diantar Sendiri&quot; — tugas muncul ke pengantar yang ditugaskan.</p>
+        <p className="text-sm text-slate-500">Kiriman Laporan Muat jalur &quot;Diantar Sendiri&quot; + jemput/antar kucing grooming — tugas muncul ke pengantar yang ditugaskan. Boleh diambil sekaligus dalam satu perjalanan.</p>
       </div>
 
       {message && (
@@ -590,8 +712,8 @@ export default function KirimBarangPage() {
 
       {/* Menunggu diambil */}
       <section className="space-y-3">
-        <h2 className="text-sm font-bold text-slate-700">📦 Menunggu Diambil {canSeeAll ? '' : 'oleh Saya '}({waiting.length})</h2>
-        {waiting.length === 0 ? (
+        <h2 className="text-sm font-bold text-slate-700">📦 Menunggu Diambil {canSeeAll ? '' : 'oleh Saya '}({waitingCount})</h2>
+        {waitingCount === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-500 text-sm">
             {canSeeAll ? 'Tidak ada kiriman yang menunggu.' : 'Tidak ada tugas antar untuk Anda.'}
           </div>
@@ -636,22 +758,67 @@ export default function KirimBarangPage() {
                 </label>
               )
             })}
-            {myWaiting.length > 0 && myTrip && (
-              <p className="text-xs text-slate-500 text-center">Selesaikan dulu tugas antar Anda (sampai foto kembali) sebelum mengambil kiriman baru.</p>
+            {groomTasks.map(g => {
+              const o = g.order
+              const mine = g.assignee === myEmployeeId
+              const selectable = mine && !myTrip
+              const since = g.leg === 'jemput' ? o.created_at : o.ready_at
+              const waitMs = since ? now - ms(since) : 0
+              const ongkir = Number((g.leg === 'jemput' ? o.pickup_ongkir : o.delivery_ongkir) ?? 0)
+              const cats = o.cats?.length ?? 0
+              return (
+                <label key={g.key} className={`block bg-white border rounded-xl p-4 ${selected[g.key] ? 'border-pink-400 ring-2 ring-pink-200' : 'border-pink-200'} ${selectable ? 'cursor-pointer' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    {selectable && (
+                      <input type="checkbox" checked={!!selected[g.key]} onChange={e => setSelected(s => ({ ...s, [g.key]: e.target.checked }))}
+                        className="mt-1 w-5 h-5 accent-pink-600" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-slate-800">
+                        🐱 {g.leg === 'jemput' ? 'Jemput' : 'Antar'} kucing — {o.customer?.name ?? '-'}
+                        <span className="font-normal text-xs text-slate-500"> · nota {o.nota_number} · {cats} kucing</span>
+                      </p>
+                      {o.customer?.address && <p className="text-xs text-slate-500">{o.customer.address}</p>}
+                      {o.customer?.phone && <a href={`tel:${o.customer.phone}`} onClick={e => e.stopPropagation()} className="text-xs text-blue-600">📞 {o.customer.phone}</a>}
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        {g.leg === 'jemput'
+                          ? <>Dibawa ke <b>{o.groom_branch?.name ?? '-'}</b> (cabang grooming)</>
+                          : <>📍 Ambil kucing di <b>{o.groom_branch?.name ?? '-'}</b></>}
+                        {!mine && <> · {g.leg === 'jemput' ? 'Penjemput' : 'Pengantar'}: <b>{o.assignee_emp?.full_name ?? '-'}</b></>}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Ongkir {ongkir > 0 ? <b>{fmtRp(ongkir)}</b> : 'tidak ada'}
+                        {ongkir > 0 && <span className="text-green-700"> (bonus PJ {fmtRp(Math.floor(ongkir * 0.5))}, cair setelah order grooming selesai)</span>}
+                      </p>
+                      <p className={`inline-block mt-1.5 text-xs font-semibold px-2 py-1 rounded-md border ${waitingTone(waitMs)}`}>
+                        ⏱ {g.leg === 'jemput' ? 'Order dibuat' : 'Siap diantar'} {fmtDur(waitMs)} lalu
+                      </p>
+                    </div>
+                  </div>
+                </label>
+              )
+            })}
+            {(myWaiting.length > 0 || myGroomTasks.length > 0) && myTrip && (
+              <p className="text-xs text-slate-500 text-center">Selesaikan dulu tugas antar Anda (sampai foto kembali) sebelum mengambil tugas baru.</p>
             )}
-            {!myTrip && selectedIds.length > 0 && (
+            {!myTrip && selectedCount > 0 && (
               <div className="bg-white border-2 border-purple-300 rounded-xl p-4 space-y-2 sticky bottom-4 shadow-lg">
                 <p className="text-sm font-semibold text-slate-800">
-                  Ambil & antar {selectedIds.length} kiriman — Anda jadi PJ.
+                  Ambil {[
+                    selectedIds.length > 0 ? `${selectedIds.length} kiriman barang` : '',
+                    selectedGroomKeys.length > 0 ? `${selectedGroomKeys.length} tugas kucing` : '',
+                  ].filter(Boolean).join(' + ')} — Anda jadi PJ.
                 </p>
-                <p className="text-xs text-slate-500">Foto barang yang dibawa sebagai bukti diambil.</p>
+                <p className="text-xs text-slate-500">
+                  Foto barang/kucing yang dibawa sebagai bukti berangkat{selectedGroomKeys.some(k => k.endsWith(':jemput')) ? ' (untuk jemput: foto saat berangkat dari cabang)' : ''}.
+                </p>
                 {busy ? <p className="text-xs text-slate-500 text-center py-2">Mengirim...</p> : (
-                  <LogisticsCameraCapture label="Foto Barang Diambil" employeeName={myName}
-                    maxFileAgeMs={MAX_FILE_AGE_MS} onCaptured={blob => doStart(blob, selectedIds)} />
+                  <LogisticsCameraCapture label="Foto Berangkat / Barang Diambil" employeeName={myName}
+                    maxFileAgeMs={MAX_FILE_AGE_MS} onCaptured={blob => doStart(blob, selectedIds, selectedGroomKeys)} />
                 )}
               </div>
             )}
-            {canSeeAll && myWaiting.length < waiting.length && (
+            {canSeeAll && myWaiting.length + myGroomTasks.length < waitingCount && (
               <p className="text-xs text-slate-400 text-center">Kiriman hanya bisa diambil (foto 1) oleh pengantar yang ditugaskan.</p>
             )}
           </>

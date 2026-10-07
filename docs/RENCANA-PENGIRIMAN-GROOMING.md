@@ -17,7 +17,7 @@ Bahasa ke user: **Bahasa Indonesia**.
 - [x] **Fase 1** — Kiriman barang multi-cabang (migrasi `068_multi_branch_delivery.sql`, commit `330e0db`)
 - [x] **Fase 2** — Master Toko: label Toko/Pelanggan, nomor HP, pengaturan cabang grooming (migrasi `069_store_kind_grooming_branches.sql`, commit `d7ea5cf`)
 - [x] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut) (migrasi `070_grooming_orders.sql`, commit `2a9355a`)
-- [ ] **Fase 4** — Perjalanan jemput & antar grooming
+- [x] **Fase 4** — Perjalanan jemput & antar grooming (migrasi `071_grooming_trips.sql`, commit lihat `git log`)
 - [ ] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual
 
 ---
@@ -316,6 +316,38 @@ Baca dulu sebelum mengubah apa pun:
 - Pengantar tiap perjalanan ditugaskan (Fase 1: tampil hanya ke orang itu); bisa beda orang.
 - Ongkir **per perjalanan**, bonus 50% untuk PJ perjalanan itu — **cair hanya jika order selesai
   total** (bukan saat trip selesai). Trip grooming tutup paksa / order batal → 0.
+
+### Hasil Fase 4 (sudah live) — yang perlu diketahui fase berikutnya
+- `logistics_tp_trip_stops` generik: `kind ('barang'|'antar_kucing'|'jemput_kucing'|'serah_kucing')`,
+  `loading_id` (nullable, wajib utk barang), `grooming_order_id` (wajib utk kucing), `auto_on_return`.
+  Unik: 1 stop hidup per (order, kind). Jemput selalu dibuat **berpasangan** dengan serah.
+- `start_tp_trip(p_loading_ids, p_photo_url, p_grooming jsonb [{order_id, leg:'jemput'|'antar'}])` —
+  satu trip boleh campur barang + kucing. Jemput: order `menunggu` & `pickup_assignee = saya`;
+  antar: order `siap` & `delivery_assignee = saya`.
+- `arrive_tp_stop`: serah → order `dikerjakan` (arrived_by = PJ); antar → order `selesai`
+  (handover_by = PJ). Serah butuh jemput order itu sudah difoto. `release_tp_stop`: jemput+serah dilepas
+  berpasangan; tidak bisa dilepas setelah kucing dijemput.
+- `finish_tp_trip`: serah kucing yang cabang pengerjanya = cabang PJ **otomatis** selesai dengan foto 3
+  (`auto_on_return = true`); kalau beda cabang wajib foto serah dulu. Waktu berangkat/kembali dihitung
+  sebelum serah otomatis.
+- Bonus ongkir: satu sumber rumus `tp_ongkir_bonus_items(emp)` (internal) dipakai
+  `get_employee_ongkir_bonus` & `resync_ongkir_bonus_payroll`. Stop grooming hanya dihitung kalau trip
+  `selesai` **dan** order `selesai`; jatuh di periode `payroll_period_of(GREATEST(return_at, completed_at))`.
+  `resync_grooming_order_ongkir(order)` dipanggil saat order selesai/batal/ongkir diubah.
+  ⇒ **Fase 5 tidak perlu lagi mengubah `get_employee_ongkir_bonus`** (sudah beres di sini).
+- Jalur foto tunggal Fase 3 untuk order jemput/antar → sekarang jalur darurat: `mark_grooming_arrived` &
+  `complete_grooming_handover` punya arg ke-3 `p_forced_reason`; untuk mode jemput/antar hanya pembuat
+  order/Owner + alasan, ditolak saat trip-nya masih berjalan; tercatat di `arrived_forced_reason` /
+  `handover_forced_reason`; ongkir leg itu tidak jadi bonus (tidak ada trip selesai).
+- RPC baru: `reassign_grooming_leg(order, leg, emp, reason)` (sebelum foto 1; staf cabang/pembuat/Owner),
+  `set_grooming_ongkir(order, leg, ongkir)` (setelah diambil hanya Owner). Jejak:
+  `grooming_assignment_changes`, `grooming_ongkir_changes`. `reassign_tp_trip` (Owner) ikut memindah
+  penjemput/pengantar grooming yang belum selesai. `cancel_grooming_order` melepas stop yang belum
+  difoto (trip jadi batal kalau kosong).
+- Badge Kirim Barang (`get_tp_delivery_badge_count`) + tugas jemput/antar kucing saya yang belum diambil.
+- UI: Kirim Barang menampilkan kartu 🐱 jemput/antar (bisa dicentang bareng kiriman barang), stop kucing
+  di trip, bonus "menunggu order grooming selesai". Order Grooming menampilkan status perjalanan, ganti
+  penjemput/pengantar, ubah ongkir, foto jemput, jalur darurat, riwayat penugasan/ongkir.
 
 ---
 
