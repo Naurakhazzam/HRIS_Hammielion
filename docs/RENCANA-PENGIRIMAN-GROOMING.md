@@ -15,7 +15,7 @@ Bahasa ke user: **Bahasa Indonesia**.
 
 - [x] **Fase 0** — Kirim Barang Toko Pusat (sudah live, commit `2f926d9`, migrasi `067_toko_pusat_self_delivery.sql`)
 - [x] **Fase 1** — Kiriman barang multi-cabang (migrasi `068_multi_branch_delivery.sql`, commit `330e0db`)
-- [ ] **Fase 2** — Master Toko: label Toko/Pelanggan, nomor HP, pengaturan cabang grooming
+- [x] **Fase 2** — Master Toko: label Toko/Pelanggan, nomor HP, pengaturan cabang grooming (migrasi `069_store_kind_grooming_branches.sql`)
 - [ ] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut)
 - [ ] **Fase 4** — Perjalanan jemput & antar grooming
 - [ ] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual
@@ -191,6 +191,27 @@ Baca dulu sebelum mengubah apa pun:
   cabang grooming (Owner) — boleh di Master Toko sebagai tab.
 - Cek semua query `logistics_stores` di halaman driver/rencana (`grep logistics_stores`) → tambah
   filter `kind = 'toko'` di pilihan toko pengiriman.
+
+### Hasil Fase 2 (sudah live) — yang perlu diketahui fase berikutnya
+- `logistics_stores.kind ('toko'|'pelanggan')`, `phone_normalized` (kolom generated dari
+  `normalize_phone_id(phone)`: +62/62/8xx → 08xx). Nomor yang diisi/diubah **disimpan** dalam
+  format 08xx oleh trigger `guard_logistics_store_phone` (validasi `^0[0-9]{8,13}$`).
+- **Unik hanya antar pelanggan** (`logistics_stores_pelanggan_phone_uniq`), bukan semua baris:
+  beberapa toko sah berbagi nomor pemilik (Sulung Ps ×3, Koinami/Milan). Pelanggan **wajib** nomor.
+  Nama pelanggan boleh sama (dibedakan nomor).
+- Trigger `guard_store_kind_toko` menolak pelanggan di `logistics_plan_stores` &
+  `logistics_central_loadings`. UI Rencana & Laporan Muat filter `kind = 'toko'`.
+- `quick_create_logistics_store(p_name, p_address, p_phone, p_kind default 'toko')` — untuk
+  pelanggan: nomor wajib, alamat opsional, cek dobel lewat nomor (bukan nama).
+- RPC `set_logistics_store_phone(p_store_id, p_phone)` → staf 4 cabang boleh isi nomor yang
+  **kosong**; ganti nomor yang sudah ada hanya Kepala Gudang/Owner. Dipakai order grooming (Fase 3).
+- `logistics_store_branches` terisi: Pusat & Raja `can_groom`; Depan→Pusat, Markas→Raja.
+  Tulis **hanya** lewat RPC `save_grooming_branch_settings(p_rows jsonb)` (Owner; validasi lintas
+  baris). Helper `get_groom_branch_id(branch)` → cabang pengerja (NULL = tidak terima order).
+- Tabel ini punya **2 FK ke `branches`** → embed wajib pakai nama FK:
+  `branches!logistics_store_branches_branch_id_fkey(...)` (query Laporan Muat sudah diperbaiki).
+- UI Master Toko: tab "Daftar Toko & Pelanggan" (filter jenis, filter tanpa nomor HP, kolom
+  Jenis, form pilih jenis) + tab "✂️ Cabang Grooming" (Owner edit, lainnya lihat).
 
 ---
 

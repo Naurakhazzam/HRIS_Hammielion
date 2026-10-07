@@ -109,7 +109,7 @@ export default function RencanaDetailPage() {
       .eq('plan_id', params.id).order('sequence_order')
     setPlanStores((psData as unknown as PlanStore[]) || [])
 
-    const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).order('name')
+    const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).eq('kind', 'toko').order('name')
     setAllStores(storeData || [])
 
     const { data: taskData } = await supabase.from('logistics_plan_supplier_tasks')

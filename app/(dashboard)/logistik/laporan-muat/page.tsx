@@ -223,7 +223,7 @@ export default function LaporanMuatPage() {
           setMyEmployeeId(userData.employee_id || '')
           const me = userData.employees as unknown as { full_name: string } | { full_name: string }[] | null
           setMyName((Array.isArray(me) ? me[0]?.full_name : me?.full_name) || '')
-          const { data: sbRows } = await supabase.from('logistics_store_branches').select('branch_id, branches(id, name)')
+          const { data: sbRows } = await supabase.from('logistics_store_branches').select('branch_id, branches!logistics_store_branches_branch_id_fkey(id, name)')
           type SbRow = { branch_id: string; branches: Branch | Branch[] | null }
           const sbs = ((sbRows as unknown as SbRow[]) || [])
             .map(r => (Array.isArray(r.branches) ? r.branches[0] : r.branches))
@@ -250,7 +250,7 @@ export default function LaporanMuatPage() {
           if (userData.role === 'owner' || isStoreStaff) setCandidates(await fetchDeliveryCandidates(supabase))
         }
       }
-      const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).order('name')
+      const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).eq('kind', 'toko').order('name')
       setAllStores(storeData || [])
       await fetchLoadings()
       setLoading(false)
@@ -344,7 +344,7 @@ export default function LaporanMuatPage() {
     setCreating(false)
     if (error || !data) { showMessage('error', 'Gagal membuat laporan muat: ' + error?.message); return }
     if (showNewStore) {
-      const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).order('name')
+      const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).eq('kind', 'toko').order('name')
       setAllStores(storeData || [])
     }
     setStoreSearchText('')
