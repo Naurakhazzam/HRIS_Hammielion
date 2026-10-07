@@ -293,6 +293,18 @@ Baca dulu sebelum mengubah apa pun:
 
 ## FASE 4 — Perjalanan jemput & antar grooming
 
+### Keputusan user (7 Okt 2026)
+- Tugas jemput/antar kucing tampil di menu **Kirim Barang** (satu tempat untuk semua tugas antar),
+  bukan dipisah di Order Grooming.
+- **Satu trip boleh campur**: antar barang + antar kucing + jemput kucing sekaligus ("kadang antar
+  barang sekalian ambil/jemput kucing"). Jadi stop trip harus generik (kiriman barang / antar kucing /
+  jemput kucing) dan PJ bisa mencentang tugas dari jenis berbeda saat foto 1.
+- Konsekuensi yang harus dirancang: untuk stop **jemput**, foto di pelanggan = kucing diambil, lalu
+  kucing baru "sampai di cabang grooming" saat ada foto di cabang pengerja — bisa berupa foto 3
+  (kalau cabang asal PJ = cabang pengerja) atau stop tambahan "serahkan kucing di [cabang pengerja]"
+  dalam trip yang sama. Untuk stop **antar kucing**, kucing harus ikut dibawa sejak foto 1 (order
+  berstatus `siap`); foto sampai di pelanggan = serah terima → order `selesai`.
+
 - Pakai ulang mesin trip 3 foto (Fase 0/1). Perlu dibuat **generik**: stop trip bisa menunjuk
   ke kiriman barang **atau** perjalanan grooming (jemput/antar). Opsi: kolom `kind` + FK nullable
   di `logistics_tp_trip_stops`, atau tabel trip terpisah yang memanggil fungsi waktu yang sama.
