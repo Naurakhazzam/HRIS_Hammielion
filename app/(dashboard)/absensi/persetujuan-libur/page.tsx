@@ -53,6 +53,12 @@ export default function PersetujuanLiburPage() {
   const [showDecided, setShowDecided] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [warningsById, setWarningsById] = useState<Record<string, PickWarning>>({})
+  // Pilih banyak (mode Daftar) -- setujui/tolak sekaligus; alasan tolak cukup diisi sekali untuk
+  // semua yang dipilih.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false)
+  const [bulkReason, setBulkReason] = useState('')
 
   const [changeRequests, setChangeRequests] = useState<ChangeRequestRow[]>([])
   const [loadingChange, setLoadingChange] = useState(true)
@@ -82,6 +88,9 @@ export default function PersetujuanLiburPage() {
     if (error) console.error('Gagal memuat pengajuan jadwal libur awal:', JSON.stringify(error, null, 2))
     const rows = (data as unknown as RequestRow[]) || []
     setRequests(rows)
+    // Buang pilihan yang sudah tidak menunggu lagi (sudah diputuskan, di sini atau dari kalender).
+    const stillPending = new Set(rows.filter(r => r.status === 'pending').map(r => r.id))
+    setSelectedIds(prev => new Set([...prev].filter(id => stillPending.has(id))))
     const pendingIds = rows.filter(r => r.status === 'pending').map(r => r.id)
     if (pendingIds.length) {
       const { data: warns } = await supabase.rpc('get_dayoff_pick_warnings', { p_request_ids: pendingIds })
@@ -139,6 +148,48 @@ export default function PersetujuanLiburPage() {
     setBusyId(null)
   }
 
+  function toggleSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Diproses satu per satu urut tanggal -- RPC mengecek ulang batas 3 orang/hari tiap pengajuan,
+  // jadi kalau beberapa yang dipilih menumpuk di tanggal yang sama, yang melewati batas gagal
+  // sendiri (dilaporkan), sisanya tetap jalan.
+  async function bulkDecide(approve: boolean, reason: string | null) {
+    const chosen = requests.filter(r => r.status === 'pending' && selectedIds.has(r.id))
+      .sort((a, b) => a.requested_date.localeCompare(b.requested_date))
+    if (!chosen.length) return
+    setBulkBusy(true)
+    const failures: string[] = []
+    for (const r of chosen) {
+      const { error } = await supabase.rpc('decide_roster_pick_request', { p_request_id: r.id, p_approve: approve, p_reason: reason })
+      if (error) failures.push(`${r.employees?.full_name} (${fmtDate(r.requested_date)}): ${error.message}`)
+    }
+    const okCount = chosen.length - failures.length
+    const verb = approve ? 'disetujui' : 'ditolak'
+    if (failures.length) showMsg('error', `${okCount} dari ${chosen.length} pengajuan ${verb}. Gagal: ${failures.join(' · ')}`)
+    else showMsg('success', `${okCount} pengajuan ${verb}.`)
+    setBulkRejectOpen(false)
+    setBulkReason('')
+    await fetchRequests()
+    setBulkBusy(false)
+  }
+
+  function bulkApprove() {
+    const chosen = requests.filter(r => r.status === 'pending' && selectedIds.has(r.id))
+    const warned = chosen.filter(r => warningLines(r.id).length > 0)
+    const warnText = warned.length
+      ? `\n\n⚠️ ${warned.length} di antaranya melanggar aturan libur:\n- ${warned.map(r => `${r.employees?.full_name} ${fmtDate(r.requested_date)}: ${warningLines(r.id).join('; ')}`).join('\n- ')}`
+      : ''
+    if (!confirm(`Setujui ${chosen.length} pengajuan libur sekaligus?${warnText}`)) return
+    bulkDecide(true, null)
+  }
+
   function openApproveModal(r: ChangeRequestRow) {
     setApproveModal(r)
     setRequesterScheduleId('')
@@ -188,6 +239,8 @@ export default function PersetujuanLiburPage() {
     rejected: { label: 'Ditolak', color: 'bg-red-100 text-red-800' },
   }
 
+  const pendingRows = requests.filter(r => r.status === 'pending')
+  const allPendingSelected = pendingRows.length > 0 && pendingRows.every(r => selectedIds.has(r.id))
   const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' })
   const scheduleOptionsFor = (deptId: string | null | undefined) => workSchedules.filter(s => !deptId || s.applies_to_dept === deptId)
 
@@ -222,7 +275,24 @@ export default function PersetujuanLiburPage() {
         <PersetujuanLiburKalender onChanged={fetchRequests} />
       ) : view === 'awal' ? (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-200 flex justify-end">
+          <div className="px-4 py-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            {selectedIds.size > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-slate-700">{selectedIds.size} dipilih</span>
+                <button onClick={bulkApprove} disabled={bulkBusy}
+                  className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg font-medium transition disabled:opacity-50">
+                  {bulkBusy ? 'Memproses...' : `Setujui ${selectedIds.size}`}
+                </button>
+                <button onClick={() => { setBulkRejectOpen(true); setBulkReason('') }} disabled={bulkBusy}
+                  className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg font-medium transition disabled:opacity-50">
+                  Tolak {selectedIds.size}
+                </button>
+                <button onClick={() => setSelectedIds(new Set())} disabled={bulkBusy}
+                  className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5">Batal pilih</button>
+              </div>
+            ) : (
+              <span className="text-xs text-slate-400">Centang beberapa pengajuan untuk menyetujui/menolak sekaligus.</span>
+            )}
             <label className="flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={showDecided} onChange={e => setShowDecided(e.target.checked)} className="w-4 h-4 rounded border-slate-300 text-blue-600" />
               Tampilkan yang sudah diproses
@@ -232,6 +302,15 @@ export default function PersetujuanLiburPage() {
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
+                  <th className="pl-4 pr-1 py-3 w-8">
+                    {pendingRows.length > 0 && (
+                      <input type="checkbox" aria-label="Pilih semua yang menunggu"
+                        checked={allPendingSelected}
+                        ref={el => { if (el) el.indeterminate = selectedIds.size > 0 && !allPendingSelected }}
+                        onChange={() => setSelectedIds(allPendingSelected ? new Set() : new Set(pendingRows.map(r => r.id)))}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer" />
+                    )}
+                  </th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Karyawan</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Tanggal Libur</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-center">Status</th>
@@ -240,15 +319,22 @@ export default function PersetujuanLiburPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading && requests.length === 0 ? (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Memuat...</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Memuat...</td></tr>
                 ) : requests.length === 0 ? (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Belum ada pengajuan{showDecided ? '' : ' yang menunggu'}.</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Belum ada pengajuan{showDecided ? '' : ' yang menunggu'}.</td></tr>
                 ) : (
                   requests.map(r => {
                     const cfg = STATUS_CONFIG[r.status]
                     const cluster = countByDate[r.requested_date] || 1
                     return (
-                      <tr key={r.id} className="hover:bg-slate-50/70">
+                      <tr key={r.id} className={selectedIds.has(r.id) ? 'bg-blue-50' : 'hover:bg-slate-50'}>
+                        <td className="pl-4 pr-1 py-3 w-8">
+                          {r.status === 'pending' && (
+                            <input type="checkbox" aria-label={`Pilih ${r.employees?.full_name} ${fmtDate(r.requested_date)}`}
+                              checked={selectedIds.has(r.id)} onChange={() => toggleSelected(r.id)} disabled={bulkBusy}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer" />
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <div className="font-medium text-slate-800">{r.employees?.full_name}</div>
                           <div className="text-xs text-slate-400">{r.employees?.employee_code} · {r.employees?.branches?.name}</div>
@@ -406,6 +492,41 @@ export default function PersetujuanLiburPage() {
                 <button type="button" onClick={confirmApproveChange} disabled={busyChangeId === approveModal.id}
                   className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
                   {busyChangeId === approveModal.id ? 'Memproses...' : 'Setujui'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bulkRejectOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md max-h-[85vh] overflow-y-auto">
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-slate-800 mb-1">Tolak {selectedIds.size} Pengajuan Sekaligus</h2>
+              <p className="text-xs text-slate-500 mb-3">Alasan yang sama akan dipakai untuk semua pengajuan di bawah. Kalau ada yang alasannya beda, batalkan centangnya dan tolak satu per satu.</p>
+              <ul className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-3 space-y-0.5 max-h-40 overflow-y-auto">
+                {requests.filter(r => selectedIds.has(r.id)).map(r => (
+                  <li key={r.id}>{r.employees?.full_name} <span className="text-slate-400">· {fmtDate(r.requested_date)}</span></li>
+                ))}
+              </ul>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Alasan Ditolak <span className="text-red-500">*</span></label>
+              <textarea
+                autoFocus
+                value={bulkReason}
+                onChange={e => setBulkReason(e.target.value)}
+                rows={3}
+                placeholder="Contoh: Tanggal ini sudah terlalu banyak yang libur, silakan pilih tanggal lain."
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+              <div className="flex justify-end gap-3 pt-4">
+                <button type="button" onClick={() => setBulkRejectOpen(false)} disabled={bulkBusy}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition">
+                  Batal
+                </button>
+                <button type="button" onClick={() => bulkDecide(false, bulkReason.trim())} disabled={!bulkReason.trim() || bulkBusy}
+                  className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50">
+                  {bulkBusy ? 'Memproses...' : `Tolak ${selectedIds.size} Pengajuan`}
                 </button>
               </div>
             </div>
