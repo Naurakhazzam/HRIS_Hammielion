@@ -231,6 +231,7 @@ export default function JalanPengirimanPage() {
         .select('id, logistics_central_loadings!inner(status)', { count: 'exact', head: true })
         .eq('status', 'pending')
         .eq('logistics_central_loadings.status', 'selesai')
+        .eq('logistics_central_loadings.delivery_method', 'driver')
       const n = count || 0
       setCentralPendingCount(n)
       if (n > 0 && reminderDismissedFor !== selectedPlan.id) setShowCentralReminder(true)
@@ -909,9 +910,9 @@ export default function JalanPengirimanPage() {
           {showCentralReminder && selectedPlan && (
             <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-                <h3 className="font-semibold text-slate-800 mb-2">📦 Ada Titipan di Toko Pusat</h3>
+                <h3 className="font-semibold text-slate-800 mb-2">📦 Ada Titipan di Cabang Toko</h3>
                 <p className="text-sm text-slate-600 mb-4">
-                  Ada <strong>{centralPendingCount} paket</strong> barang di Toko Pusat yang masih menunggu diambil driver — bisa saja bukan buat toko di rencana ini, cek dulu sebelum berangkat.
+                  Ada <strong>{centralPendingCount} paket</strong> barang di cabang toko (Toko Pusat/Toko Depan/Markas/Raja) yang masih menunggu diambil driver — bisa saja bukan buat toko di rencana ini, cek dulu sebelum berangkat.
                 </p>
                 <div className="flex gap-3">
                   <button onClick={() => { setShowCentralReminder(false); setReminderDismissedFor(selectedPlan.id) }}

@@ -4,12 +4,14 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import LogisticsCameraCapture from '@/components/LogisticsCameraCapture'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
+import { fetchDeliveryCandidates, type DeliveryCandidate } from '@/components/DeliveryAssigneePicker'
 
-// Menu "Kirim Barang" -- kiriman Laporan Muat yang dipilih "Diantar Toko Pusat Sendiri".
-// Alur 3 foto (semua waktu dari jam SERVER, lihat migrasi 067):
-//   FOTO 1 ambil barang (yang foto = PJ) -> FOTO 2 sampai di tiap toko tujuan -> FOTO 3 kembali
-//   di Toko Pusat. Tiap tahap minimal 5 menit; selisih lama berangkat vs lama kembali >= 20 menit
-//   wajib alasan. Bonus PJ = 50% ongkir, hanya kalau trip selesai lengkap s/d foto 3.
+// Menu "Kirim Barang" -- kiriman Laporan Muat jalur "Diantar Sendiri" (4 cabang toko).
+// Alur 3 foto (semua waktu dari jam SERVER, lihat migrasi 067 & 068):
+//   FOTO 1 ambil barang (hanya pengantar yang DITUGASKAN, yang foto = PJ) -> FOTO 2 sampai di
+//   tiap toko tujuan -> FOTO 3 kembali di cabang asal PJ. Tiap tahap minimal 5 menit; selisih
+//   lama berangkat vs lama kembali >= 20 menit wajib alasan. Bonus PJ = 50% ongkir, hanya kalau
+//   trip selesai lengkap s/d foto 3.
 
 const MIN_STEP_MS = 5 * 60000
 const REASON_DIFF_MIN = 20
@@ -32,9 +34,12 @@ type StoreRel = { name: string; address: string | null; phone: string | null } |
 type WaitingLoading = {
   id: string
   ongkir: number
+  assigned_to: string | null
   completed_at: string | null
   logistics_stores: StoreRel
+  origin: { name: string } | null
   completer: { full_name: string } | null
+  assignee: { full_name: string } | null
   packages: { id: string; photo_url: string; caption: string }[]
 }
 
@@ -67,12 +72,10 @@ type Trip = {
   forced_reason: string | null
   reassigned_at: string | null
   reassign_reason: string | null
-  pj: { full_name: string } | null
+  pj: { full_name: string; branches: { name: string } | null } | null
   prev_pj: { full_name: string } | null
   logistics_tp_trip_stops: TripStop[]
 }
-
-type Employee = { id: string; full_name: string }
 
 const fmtDateTime = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
@@ -126,7 +129,8 @@ export default function KirimBarangPage() {
   const [myEmployeeId, setMyEmployeeId] = useState('')
   const [myName, setMyName] = useState('')
   const [isOwner, setIsOwner] = useState(false)
-  const [isTokoPusat, setIsTokoPusat] = useState(false)
+  // Cabang asal saya (foto 3 = kembali di cabang ini).
+  const [myBranchName, setMyBranchName] = useState('')
   const [canView, setCanView] = useState(false)
   const [canSeeAll, setCanSeeAll] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -135,7 +139,7 @@ export default function KirimBarangPage() {
   const [waiting, setWaiting] = useState<WaitingLoading[]>([])
   const [activeTrips, setActiveTrips] = useState<Trip[]>([])
   const [historyTrips, setHistoryTrips] = useState<Trip[]>([])
-  const [tokoPusatEmployees, setTokoPusatEmployees] = useState<Employee[]>([])
+  const [candidates, setCandidates] = useState<DeliveryCandidate[]>([])
 
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
@@ -157,19 +161,25 @@ export default function KirimBarangPage() {
   const tripSelect = `
     id, pj_id, status, pickup_photo_url, pickup_at, return_photo_url, return_at, depart_minutes, return_minutes,
     reason_category, reason_note, cancelled_at, cancel_reason, forced_at, forced_reason, reassigned_at, reassign_reason,
-    pj:employees!logistics_tp_trips_pj_id_fkey(full_name),
+    pj:employees!logistics_tp_trips_pj_id_fkey(full_name, branches(name)),
     prev_pj:employees!logistics_tp_trips_reassigned_from_fkey(full_name),
     logistics_tp_trip_stops(id, loading_id, arrived_at, arrived_photo_url, arrival_order, cancelled_at, cancel_reason,
       logistics_central_loadings(ongkir, logistics_stores(name, address, phone)))
   `
 
   const fetchAll = useCallback(async (empId: string, seeAll: boolean, p: { month: number; year: number }) => {
-    const { data: loadRows, error: loadErr } = await supabase.from('logistics_central_loadings')
-      .select(`id, ongkir, completed_at, logistics_stores(name, address, phone),
+    // Menunggu Diambil: hanya tugas yang ditugaskan ke saya; Owner/Kepala Gudang/HR/Finance
+    // melihat semua (pantau saja -- yang bisa foto 1 tetap cuma pengantar yang ditugaskan).
+    let lq = supabase.from('logistics_central_loadings')
+      .select(`id, ongkir, assigned_to, completed_at, logistics_stores(name, address, phone),
+        origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
         completer:employees!logistics_central_loadings_completed_by_fkey(full_name),
+        assignee:employees!logistics_central_loadings_assigned_to_fkey(full_name),
         packages:logistics_central_loading_packages(id, photo_url, caption)`)
-      .eq('status', 'selesai').eq('delivery_method', 'toko_pusat')
+      .eq('status', 'selesai').eq('delivery_method', 'antar_sendiri')
       .order('completed_at', { ascending: true })
+    if (!seeAll) lq = lq.eq('assigned_to', empId || '00000000-0000-0000-0000-000000000000')
+    const { data: loadRows, error: loadErr } = await lq
     if (loadErr) { showMessage('error', 'Gagal memuat kiriman: ' + loadErr.message); return }
     const rows = (loadRows as unknown as WaitingLoading[]) || []
     let taken = new Set<string>()
@@ -208,23 +218,22 @@ export default function KirimBarangPage() {
           setMyName((Array.isArray(me) ? me[0]?.full_name : me?.full_name) || '')
           if (userData.role === 'owner') { setIsOwner(true); seeAll = true }
           if (['hr', 'finance'].includes(userData.role)) seeAll = true
-          let tp = false, kg = false
+          let storeStaff = false, kg = false
           if (empId) {
-            const { data: emp } = await supabase.from('employees').select('positions(name), branches(name)').eq('id', empId).single()
+            const { data: emp } = await supabase.from('employees').select('branch_id, positions(name), branches(name)').eq('id', empId).single()
             type NameRel = { name: string } | { name: string }[] | null
             const pos = emp?.positions as NameRel
             const br = emp?.branches as NameRel
-            tp = (Array.isArray(br) ? br[0]?.name : br?.name) === 'Toko Pusat'
+            setMyBranchName((Array.isArray(br) ? br[0]?.name : br?.name) || '')
             kg = (Array.isArray(pos) ? pos[0]?.name : pos?.name) === 'Kepala Gudang'
+            if (emp?.branch_id) {
+              const { data: sb } = await supabase.from('logistics_store_branches').select('branch_id').eq('branch_id', emp.branch_id).maybeSingle()
+              storeStaff = !!sb
+            }
           }
-          setIsTokoPusat(tp)
           if (kg) seeAll = true
-          setCanView(tp || seeAll)
-          if (userData.role === 'owner') {
-            const { data: emps } = await supabase.from('employees').select('id, full_name, branches!inner(name)')
-              .eq('branches.name', 'Toko Pusat').eq('is_active', true).order('full_name')
-            setTokoPusatEmployees(((emps as unknown as Employee[]) || []).map(e => ({ id: e.id, full_name: e.full_name })))
-          }
+          setCanView(storeStaff || seeAll)
+          if (userData.role === 'owner') setCandidates(await fetchDeliveryCandidates(supabase))
         }
       }
       setCanSeeAll(seeAll)
@@ -255,7 +264,10 @@ export default function KirimBarangPage() {
 
   const myTrip = useMemo(() => activeTrips.find(t => t.pj_id === myEmployeeId) || null, [activeTrips, myEmployeeId])
   const otherActive = activeTrips.filter(t => t.pj_id !== myEmployeeId)
-  const selectedIds = Object.keys(selected).filter(k => selected[k] && waiting.some(w => w.id === k))
+  const myWaiting = waiting.filter(w => w.assigned_to === myEmployeeId)
+  const selectedIds = Object.keys(selected).filter(k => selected[k] && myWaiting.some(w => w.id === k))
+  // Foto 3 = kembali di cabang asal PJ.
+  const homeOf = (t: Trip) => t.pj?.branches?.name ?? 'cabang'
 
   async function upload(folderLoadingId: string, blob: Blob, tag: string): Promise<string | null> {
     const path = `${folderLoadingId}/tp-${tag}-${Date.now()}.jpg`
@@ -350,7 +362,7 @@ export default function KirimBarangPage() {
 
   async function handleReassign(trip: Trip, newPj: string) {
     if (!newPj) return
-    const name = tokoPusatEmployees.find(e => e.id === newPj)?.full_name
+    const name = candidates.find(e => e.id === newPj)?.full_name
     await rpcWithReason('reassign_tp_trip', { p_trip_id: trip.id, p_new_pj: newPj },
       `Alihkan PJ dari ${trip.pj?.full_name} ke ${name}. Alasan:`, `PJ dialihkan ke ${name}.`)
   }
@@ -381,7 +393,7 @@ export default function KirimBarangPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Kirim Barang</h1>
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3 mt-4">
-          Cuma Team Toko Pusat, Kepala Gudang, atau Owner yang bisa membuka halaman ini.
+          Cuma staf cabang toko (Toko Pusat, Toko Depan, Markas, Raja), Kepala Gudang, atau Owner yang bisa membuka halaman ini.
         </div>
       </div>
     )
@@ -410,7 +422,7 @@ export default function KirimBarangPage() {
           </div>
         ))}
         {t.return_photo_url && t.return_at && (
-          <PhotoRow label="📸 Foto 3 — Kembali di Toko Pusat" url={t.return_photo_url} at={t.return_at}
+          <PhotoRow label={`📸 Foto 3 — Kembali di ${homeOf(t)}`} url={t.return_photo_url} at={t.return_at}
             extra={`Lama kembali: ${fmtMin(t.return_minutes)}`} onOpen={openLightbox} />
         )}
       </div>
@@ -515,7 +527,7 @@ export default function KirimBarangPage() {
 
         {allArrived && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
-            <p className="text-sm font-semibold text-green-800">🏪 Sudah kembali di Toko Pusat? Foto sebagai tanda tugas selesai.</p>
+            <p className="text-sm font-semibold text-green-800">🏪 Sudah kembali di {myBranchName || homeOf(t)}? Foto sebagai tanda tugas selesai.</p>
             <p className="text-xs text-slate-600">Lama berangkat: <b>{fmtDur(estDep * 60000)}</b> · Sejak foto terakhir: <b>{fmtDur(sinceLast)}</b></p>
             {needReason && (
               <div className="bg-white border border-red-200 rounded-lg p-3 space-y-2">
@@ -538,7 +550,7 @@ export default function KirimBarangPage() {
               <button disabled={!reasonOk} onClick={() => retryPending()}
                 className="w-full py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50">Kirim Ulang (foto sudah tersimpan)</button>
             ) : reasonOk ? (
-              <LogisticsCameraCapture label="Foto Kembali di Toko Pusat" employeeName={myName}
+              <LogisticsCameraCapture label={`Foto Kembali di ${myBranchName || homeOf(t)}`} employeeName={myName}
                 maxFileAgeMs={MAX_FILE_AGE_MS} onCaptured={blob => doFinish(blob, t)} />
             ) : (
               <p className="text-xs text-red-600 text-center py-2">Isi alasan dulu sebelum foto kembali.</p>
@@ -556,7 +568,7 @@ export default function KirimBarangPage() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Kirim Barang</h1>
-        <p className="text-sm text-slate-500">Kiriman Laporan Muat yang diantar sendiri oleh orang Toko Pusat.</p>
+        <p className="text-sm text-slate-500">Kiriman Laporan Muat jalur &quot;Diantar Sendiri&quot; — tugas muncul ke pengantar yang ditugaskan.</p>
       </div>
 
       {message && (
@@ -578,14 +590,17 @@ export default function KirimBarangPage() {
 
       {/* Menunggu diambil */}
       <section className="space-y-3">
-        <h2 className="text-sm font-bold text-slate-700">📦 Menunggu Diambil ({waiting.length})</h2>
+        <h2 className="text-sm font-bold text-slate-700">📦 Menunggu Diambil {canSeeAll ? '' : 'oleh Saya '}({waiting.length})</h2>
         {waiting.length === 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-500 text-sm">Tidak ada kiriman yang menunggu.</div>
+          <div className="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-500 text-sm">
+            {canSeeAll ? 'Tidak ada kiriman yang menunggu.' : 'Tidak ada tugas antar untuk Anda.'}
+          </div>
         ) : (
           <>
             {waiting.map(w => {
               const waitMs = w.completed_at ? now - ms(w.completed_at) : 0
-              const selectable = isTokoPusat && !myTrip
+              const mine = w.assigned_to === myEmployeeId
+              const selectable = mine && !myTrip
               return (
                 <label key={w.id} className={`block bg-white border rounded-xl p-4 ${selected[w.id] ? 'border-purple-400 ring-2 ring-purple-200' : 'border-slate-200'} ${selectable ? 'cursor-pointer' : ''}`}>
                   <div className="flex items-start gap-3">
@@ -596,6 +611,10 @@ export default function KirimBarangPage() {
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-slate-800">{w.logistics_stores?.name}</p>
                       {w.logistics_stores?.address && <p className="text-xs text-slate-500">{w.logistics_stores.address}</p>}
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        📍 Ambil di <b>{w.origin?.name ?? '-'}</b>
+                        {!mine && <> · Pengantar: <b>{w.assignee?.full_name ?? '-'}</b></>}
+                      </p>
                       <p className="text-xs text-slate-500 mt-0.5">
                         {w.packages.length} paket · Ongkir {w.ongkir > 0 ? <b>{fmtRp(w.ongkir)}</b> : 'tidak ada'}
                         {w.ongkir > 0 && <span className="text-green-700"> (bonus PJ {fmtRp(Math.floor(w.ongkir * 0.5))})</span>}
@@ -617,10 +636,10 @@ export default function KirimBarangPage() {
                 </label>
               )
             })}
-            {isTokoPusat && myTrip && (
+            {myWaiting.length > 0 && myTrip && (
               <p className="text-xs text-slate-500 text-center">Selesaikan dulu tugas antar Anda (sampai foto kembali) sebelum mengambil kiriman baru.</p>
             )}
-            {isTokoPusat && !myTrip && selectedIds.length > 0 && (
+            {!myTrip && selectedIds.length > 0 && (
               <div className="bg-white border-2 border-purple-300 rounded-xl p-4 space-y-2 sticky bottom-4 shadow-lg">
                 <p className="text-sm font-semibold text-slate-800">
                   Ambil & antar {selectedIds.length} kiriman — Anda jadi PJ.
@@ -632,7 +651,9 @@ export default function KirimBarangPage() {
                 )}
               </div>
             )}
-            {!isTokoPusat && <p className="text-xs text-slate-400 text-center">Hanya karyawan Toko Pusat yang bisa mengambil kiriman.</p>}
+            {canSeeAll && myWaiting.length < waiting.length && (
+              <p className="text-xs text-slate-400 text-center">Kiriman hanya bisa diambil (foto 1) oleh pengantar yang ditugaskan.</p>
+            )}
           </>
         )}
       </section>
@@ -668,7 +689,7 @@ export default function KirimBarangPage() {
                     <select disabled={busy} value="" onChange={e => handleReassign(t, e.target.value)}
                       className="text-xs px-2 py-1 border border-slate-300 rounded-lg bg-white">
                       <option value="">Alihkan PJ ke...</option>
-                      {tokoPusatEmployees.filter(e => e.id !== t.pj_id).map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+                      {candidates.filter(e => e.id !== t.pj_id).map(e => <option key={e.id} value={e.id}>{e.full_name} — {e.branch_name}</option>)}
                     </select>
                   </div>
                 )}

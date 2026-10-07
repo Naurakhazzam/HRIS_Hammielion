@@ -1,0 +1,319 @@
+# Rencana: Pengiriman Multi-Cabang & Jemput Grooming
+
+Dokumen kerja untuk dikerjakan **per fase di sesi chat terpisah**. Cara pakai:
+
+> Baca `hris-app/docs/RENCANA-PENGIRIMAN-GROOMING.md`, kerjakan Fase N.
+
+Setiap fase selesai: centang checklist di bagian **Status**, catat nomor migrasi & commit, lalu
+push (user selalu tes di app yang sudah di-deploy, bukan localhost).
+
+Bahasa ke user: **Bahasa Indonesia**.
+
+---
+
+## Status
+
+- [x] **Fase 0** — Kirim Barang Toko Pusat (sudah live, commit `2f926d9`, migrasi `067_toko_pusat_self_delivery.sql`)
+- [x] **Fase 1** — Kiriman barang multi-cabang (migrasi `068_multi_branch_delivery.sql`, commit: lihat `git log --grep "Fase 1"`)
+- [ ] **Fase 2** — Master Toko: label Toko/Pelanggan, nomor HP, pengaturan cabang grooming
+- [ ] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut)
+- [ ] **Fase 4** — Perjalanan jemput & antar grooming
+- [ ] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual
+
+---
+
+## 0. Kondisi yang SUDAH ADA (Fase 0)
+
+Baca dulu sebelum mengubah apa pun:
+
+- `database/migrations/067_toko_pusat_self_delivery.sql` — sumber kebenaran logika DB.
+- `hris-app/app/(dashboard)/logistik/laporan-muat/page.tsx` — buat Laporan Muat, Tandai Selesai
+  (pilih jalur driver / toko_pusat + ongkir), pindah jalur, ubah ongkir, tambah toko baru.
+- `hris-app/app/(dashboard)/logistik/kirim-barang/page.tsx` — menu Kirim Barang (alur 3 foto,
+  riwayat, rekap per karyawan, tutup paksa & alihkan PJ oleh Owner).
+- `hris-app/app/(dashboard)/logistik/jemput-toko-pusat/page.tsx` — halaman driver (sudah filter
+  `delivery_method = 'driver'`).
+- `hris-app/components/sidebar.tsx` — menu + badge (`get_tp_delivery_badge_count`,
+  `get_central_pickup_badge_count`, event `kirim-barang-badge-refresh`).
+- `hris-app/components/LogisticsCameraCapture.tsx` — prop `maxFileAgeMs` (tolak foto galeri lewat
+  jalur kamera bawaan HP).
+- Payroll: kolom `payrolls.ongkir_bonus`, `get_employee_ongkir_bonus`, `resync_ongkir_bonus_payroll`
+  (auto-sinkron ke slip **draft**), baris "Bonus Ongkir" di `penggajian/bulanan` & `portal/slip-gaji`.
+
+### Struktur DB saat ini
+- `logistics_central_loadings` + kolom `delivery_method ('driver'|'toko_pusat')`, `ongkir`,
+  `ongkir_set_by`, `ongkir_set_at`.
+- `logistics_ongkir_changes` — jejak perubahan ongkir.
+- `logistics_tp_trips` — trip (PJ, foto 1 ambil, foto 3 kembali, depart/return_minutes, alasan,
+  batal, tutup paksa, alihkan PJ). Status: `berjalan|selesai|batal|tutup_paksa`.
+- `logistics_tp_trip_stops` — 1 baris per kiriman di trip (foto 2 sampai, `arrival_order`, dilepas).
+- RPC: `finish_central_loading`, `set_central_loading_method`, `set_central_loading_ongkir`,
+  `quick_create_logistics_store`, `start_tp_trip`, `arrive_tp_stop`, `finish_tp_trip`,
+  `release_tp_stop`, `cancel_tp_trip`, `force_close_tp_trip`, `reassign_tp_trip`,
+  `tp_trip_last_event_at`, `payroll_period_of`.
+- Semua tulis ke tabel trip **lewat RPC** (RLS tabel trip cuma SELECT).
+
+### Aturan yang SUDAH berlaku (pertahankan di semua fase)
+- Semua waktu dari **jam server** (`now()`), bukan jam HP.
+- Tiap tahap foto **minimal 5 menit** dari foto sebelumnya.
+- |lama berangkat − lama kembali| **≥ 20 menit → alasan wajib** (macet, bensin, istirahat,
+  menunggu_toko, tugas_lain*, lainnya* — *wajib keterangan).
+- PJ tidak bisa ambil trip baru sebelum foto kembali.
+- Batal antar / lepas toko hanya sebelum toko itu difoto sampai.
+- **Tutup Paksa & Alihkan PJ: Owner saja.** Trip tutup paksa **tidak dapat bonus**.
+- Peringatan trip > **6 jam** tanpa foto → merah + masuk badge Owner.
+- Bonus ongkir **50%** (dibulatkan ke bawah), hanya trip **selesai normal**. Periode gaji
+  **26 bulan lalu – 25 bulan ini (WIB)**.
+- Kamera: wajib kamera langsung; jalur cadangan menolak file > 2 menit (`maxFileAgeMs`).
+- Pengisi ongkir **boleh** jadi PJ (kecurangan ketahuan saat settlement kasir; ongkir terkunci
+  setelah foto 1, perubahan setelahnya hanya Owner dan tercatat).
+
+---
+
+## Data cabang & orang (per 7 Okt 2026)
+
+| Sebutan user | Nama di `branches` | Grooming? |
+|---|---|---|
+| Toko Pusat | `Toko Pusat` | Ya (mengerjakan) |
+| Toko Raja | `Raja Petshop` | Ya (mengerjakan) |
+| Toko Depan | `Toko Depan` | Terima order, dikerjakan **Toko Pusat** |
+| Toko Markas | `Markas Petshop` | Terima order, dikerjakan **Raja Petshop** |
+
+- Groomer terdaftar di produk promo "Grooming Kucing": **Rahmat Saleh** (Toko Pusat, Groomer) dan
+  **Fikri Mulyana** (Raja Petshop, Kasir).
+- **Elan Suherlan**: Back Office / Owner, **tidak punya akun aplikasi**, harus selalu muncul di
+  pilihan groomer, **dapat bonus** grooming (catatan terpisah → slip gajinya).
+- Master Toko (`logistics_stores`): 268 baris, 174 tanpa nomor HP.
+- Produk promo "Grooming Kucing" (Okt 2026): bonus 10% × harga, harga pilihan
+  40rb/50rb/55rb/75rb/100rb, `max_late_days = 2`, cabang Toko Pusat (target 80) & Raja (target 60).
+
+---
+
+## FASE 1 — Kiriman barang multi-cabang
+
+### Keputusan
+1. Berlaku untuk 4 cabang: Toko Pusat, Toko Depan, Markas Petshop, Raja Petshop.
+2. Pembuat kiriman **wajib memilih nama pengantar** (boleh **lintas cabang**). Tugas hanya
+   tampil (dan menyalakan badge) di orang itu. Pengantar pasti punya akun aplikasi → pilihan
+   pengantar hanya karyawan aktif yang punya baris di `users`.
+3. **Ganti Penerima Tugas**: pembuat kiriman atau rekan **satu cabang pembuat**, alasan wajib,
+   hanya **sebelum foto 1**. Setelah foto 1 → Owner saja (`reassign_tp_trip` yang sudah ada).
+4. Opsi driver diberi label **"🚚 Diantar Driver Gudang"**, berlaku semua cabang.
+5. Tiap cabang hanya melihat kiriman cabangnya. Pengecualian: pengantar yang ditugaskan (lintas
+   cabang) melihat tugasnya; Owner/Kepala Gudang/HR/Finance melihat semua.
+
+### Perubahan DB (migrasi baru, nomor berikutnya setelah yang terakhir di `database/migrations`)
+- Konstanta cabang toko: buat helper `is_store_branch(branch_name)` atau tabel kecil
+  `logistics_store_branches(branch_id, can_groom, groom_branch_id)` — **lebih baik tabel** karena
+  Fase 2 butuh pengaturan cabang grooming juga (lihat Fase 2; boleh dibuat di Fase 1 dengan kolom
+  grooming dibiarkan untuk Fase 2).
+- `logistics_central_loadings`: tambah `origin_branch_id` (backfill = Toko Pusat), `assigned_to`
+  (employee, wajib untuk jalur `toko_pusat` — pertimbangkan rename nilai `toko_pusat` →
+  `antar_sendiri`; kalau rename, update SEMUA RPC & UI yang memakai string itu).
+- Tabel jejak `logistics_assignment_changes(loading_id, old_emp, new_emp, changed_by, reason, at)`.
+- Helper baru `is_store_branch_staff()` (karyawan aktif di salah satu cabang toko, atau owner)
+  menggantikan `is_toko_pusat_or_owner()` di RLS/RPC Laporan Muat & Kirim Barang.
+- RLS baca `logistics_central_loadings` & turunannya: cabang sendiri **atau** `assigned_to = saya`
+  **atau** pengantar di trip **atau** owner/kepala gudang/hr/finance **atau** driver (hanya jalur
+  driver). Hati-hati: driver tetap perlu baca kiriman jalur driver dari cabang mana pun.
+- `finish_central_loading(p_loading_id, p_method, p_ongkir, p_assigned_to)` — wajib
+  `p_assigned_to` untuk antar sendiri; validasi orang aktif + punya akun.
+- RPC baru `reassign_loading_before_pickup(p_loading_id, p_new_emp, p_reason)`.
+- `start_tp_trip`: hanya kiriman dengan `assigned_to = saya`; hapus syarat "harus karyawan Toko
+  Pusat" (ganti: karyawan aktif yang ditugaskan).
+- `finish_tp_trip`: foto 3 = **kembali ke cabang asal PJ** (teks UI), logika waktu tetap.
+- Badge `get_tp_delivery_badge_count`: hitung kiriman `assigned_to = saya` yang belum diambil +
+  trip saya berjalan (+ Owner: trip > 6 jam). Jangan lagi hitung semua kiriman cabang.
+- `get_central_pickup_badge_count`: tetap (jalur driver, semua cabang).
+- `quick_create_logistics_store`: izinkan staf 4 cabang (bukan cuma Toko Pusat).
+
+### Perubahan UI
+- Sidebar: menu Laporan Muat & Kirim Barang tampil untuk staf 4 cabang (bukan cuma
+  `isTokoPusat`). Ganti `isTokoPusat` → `isStoreBranchStaff` (cek dari tabel cabang toko / daftar).
+- Halaman driver: ganti judul & menu **"Jemput Toko Pusat" → "Jemput Barang Cabang"**, tampilkan
+  **cabang asal** (lokasi ambil) per paket. Route boleh tetap `/logistik/jemput-toko-pusat`.
+- Laporan Muat: teks "Toko Pusat" → nama cabang asal; Tandai Selesai jalur antar sendiri wajib
+  pilih pengantar (dropdown dicari, tampil nama + cabang); tombol **Ganti Penerima Tugas**.
+- Kirim Barang: "Menunggu Diambil" hanya kiriman `assigned_to = saya` (checkbox ambil sekaligus
+  tetap); Owner melihat semua. Teks foto 3: "Kembali di [cabang asal]".
+- `penerimaan-retur` juga masih hard-code Toko Pusat — **jangan diubah** di fase ini (di luar scope).
+
+### Tes (wajib, simulasi DB dalam `DO $$ ... RAISE EXCEPTION 'RESULT ...' $$` agar ter-rollback)
+- Staf Toko Depan buat kiriman, tugaskan ke staf Toko Pusat → hanya staf itu yang lihat & bisa foto 1.
+- Staf lain (cabang sama/beda) tidak bisa `start_tp_trip` kiriman itu.
+- Ganti penerima sebelum foto 1 oleh rekan satu cabang → sukses; setelah foto 1 → ditolak.
+- Driver tidak melihat kiriman antar sendiri; melihat jalur Driver Gudang dari semua cabang.
+- Staf Markas tidak melihat Laporan Muat Toko Pusat.
+
+### Hasil Fase 1 (sudah live) — yang perlu diketahui fase berikutnya
+- Nilai jalur **sudah di-rename** `toko_pusat` → `antar_sendiri` (DB, RPC, UI).
+- Tabel `logistics_store_branches(branch_id, can_groom, groom_branch_id)` sudah ada, isi 4 cabang;
+  kolom grooming masih default (diisi di Fase 2). RLS: baca semua, tulis Owner.
+- `logistics_central_loadings`: `origin_branch_id` (NOT NULL, diisi trigger dari cabang pembuat;
+  Owner kirim sendiri), `assigned_to`, `assigned_at`. Constraint: `antar_sendiri` + `selesai` wajib
+  `assigned_to`. Update langsung dari klien **hanya** kolom `status/cancelled_by/cancelled_at`
+  (column grant) dan hanya untuk membatalkan; sisanya lewat RPC.
+- Helper: `is_store_branch_staff()`, `is_logistics_overseer()` (owner/kepala gudang/hr/finance),
+  `can_manage_branch_loading(branch)`, `is_valid_delivery_assignee(emp)`,
+  `list_store_delivery_candidates()` (RPC dropdown pengantar), `can_read_central_loading(id)`,
+  `can_read_tp_trip(id)`, `is_my_tp_loading(id)`.
+- **Jebakan RLS**: policy SELECT tabel induk jangan pakai fungsi lookup-by-id (baris hasil INSERT
+  belum terlihat → `insert().select()` gagal). Pakai kolom langsung; fungsi by-id hanya utk tabel anak.
+- RPC baru `reassign_loading_before_pickup`; `finish_central_loading` & `set_central_loading_method`
+  sekarang 4 argumen (`p_assigned_to`). `reassign_tp_trip` ikut memindah `assigned_to` stop yang
+  belum sampai + catat jejak. Jejak di `logistics_assignment_changes` (penugasan awal: old NULL).
+- Pengantar dibatasi ke karyawan aktif **4 cabang toko** yang punya akun (supaya menu Kirim Barang
+  pasti tampil di dia).
+- UI: komponen `components/DeliveryAssigneePicker.tsx` (cari nama + cabang) — pakai ulang di Fase 3/4.
+- `is_toko_pusat_or_owner()` masih dipakai Penerimaan Retur (sengaja tidak diubah).
+
+---
+
+## FASE 2 — Master Toko & pengaturan cabang grooming
+
+### Keputusan
+- Pelanggan grooming disimpan di **tabel yang sama** dengan Master Toko (`logistics_stores`),
+  diberi label **jenis: `toko` | `pelanggan`**. Data lama = `toko`.
+- Rencana Pengiriman driver (dan pilihan toko lain milik gudang) hanya menampilkan `toko`.
+  Order grooming bisa pilih keduanya.
+- **Nomor HP wajib** saat dipakai di order grooming: kalau pelanggan yang dipilih belum punya
+  nomor → wajib diisi dulu (tersimpan ke Master Toko). Nomor dinormalisasi (08xx / 62xx → satu
+  format) dan **unik** → mencegah pelanggan dobel.
+- Pengaturan cabang grooming (Owner bisa ubah): cabang mana yang **mengerjakan** grooming dan
+  cabang penerima order dikerjakan oleh cabang mana:
+  Toko Pusat→Toko Pusat, Raja→Raja, Toko Depan→Toko Pusat, Markas→Raja.
+
+### Perubahan
+- `logistics_stores`: kolom `kind text default 'toko' check in ('toko','pelanggan')`,
+  `phone_normalized` + unique partial index (where not null).
+- Tabel `logistics_store_branches` (dari Fase 1) kolom `can_groom bool`, `groom_branch_id uuid`.
+- Halaman `logistik/toko` (Master Toko): filter & kolom jenis, edit nomor; halaman pengaturan
+  cabang grooming (Owner) — boleh di Master Toko sebagai tab.
+- Cek semua query `logistics_stores` di halaman driver/rencana (`grep logistics_stores`) → tambah
+  filter `kind = 'toko'` di pilihan toko pengiriman.
+
+---
+
+## FASE 3 — Order Grooming
+
+### Alur
+```
+① ORDER DIBUAT (siapa saja di cabang penerima order)
+   - foto struk WAJIB + nomor nota WAJIB & UNIK per cabang
+   - pelanggan (Master Toko, jenis pelanggan; nomor HP wajib)
+   - qty kucing → tiap kucing: harga layanan (dari price_options produk promo) + groomer
+   - cara DATANG: dijemput | datang sendiri
+   - cara PULANG: diantar | diambil sendiri          (4 kombinasi, bebas)
+   - ongkir per perjalanan (jemput / antar) + pengantar yang ditugaskan per perjalanan
+② (kalau dijemput) perjalanan jemput — Fase 4
+③ 📸 SAMPAI DI CABANG GROOMING → status DIKERJAKAN
+④ 📸 SELESAI GROOMING (per kucing, oleh groomer) → status KUCING SELESAI
+⑤ (kalau diantar) perjalanan antar — Fase 4; (kalau diambil sendiri) 📸 serah terima di toko
+⑥ ORDER SELESAI → semua bonus jadi sah (Fase 5)
+```
+
+### Keputusan
+- Pilihan groomer: semua karyawan aktif **cabang yang mengerjakan grooming** (sesuai pengaturan
+  Fase 2: Toko Pusat & Raja Petshop) **+ Elan Suherlan selalu muncul**. Groomer boleh tidak
+  punya akun.
+- Qty > 1 → pilih groomer per kucing (boleh beda-beda).
+- Groomer **bisa diganti kapan saja** sampai kucing selesai; alasan wajib; tercatat (dari, ke,
+  oleh, kapan); pergantian setelah DIKERJAKAN diberi tanda ⚠️ di laporan persetujuan.
+- **Bonus selalu ke groomer terakhir** (yang tercatat saat kucing selesai).
+- **Paksa lanjut fase**: pembuat order atau Owner bisa menandai fase sudah dikerjakan (untuk
+  orang tanpa aplikasi, mis. Elan). Tetap wajib foto oleh yang menekan + alasan, tercatat.
+- Harga per kucing bisa dikoreksi pembuat order / Owner selama bonusnya belum disetujui (tercatat).
+- **Batal** order (kapan pun) → **tidak ada bonus apa pun** (grooming & ongkir).
+- Order dari Toko Depan dikerjakan di Toko Pusat; Markas di Raja → "sampai di cabang grooming"
+  = cabang pengerja, bukan cabang penerima order.
+
+### Perubahan (rancangan, sesuaikan saat mengerjakan)
+- Tabel `grooming_orders` (cabang penerima, cabang pengerja, pelanggan, nomor nota, foto struk,
+  mode datang/pulang, status, dibuat oleh, batal...). Unique `(branch_id, nota_number)`.
+- Tabel `grooming_order_cats` (order, nama/keterangan kucing, harga, groomer_id, status,
+  foto mulai/selesai, waktu, forced_by...).
+- Tabel `grooming_groomer_changes` (jejak ganti groomer).
+- RPC atomik untuk tiap transisi (pola sama dgn migrasi 067), semua waktu server.
+- Halaman baru (mis. `/grooming/order`) + menu sidebar dengan badge (order yang menunggu aksi saya:
+  kucing yang saya groom & belum selesai, dsb).
+
+---
+
+## FASE 4 — Perjalanan jemput & antar grooming
+
+- Pakai ulang mesin trip 3 foto (Fase 0/1). Perlu dibuat **generik**: stop trip bisa menunjuk
+  ke kiriman barang **atau** perjalanan grooming (jemput/antar). Opsi: kolom `kind` + FK nullable
+  di `logistics_tp_trip_stops`, atau tabel trip terpisah yang memanggil fungsi waktu yang sama.
+- **Jemput**: foto 1 = berangkat dari cabang, foto 2 = **jemput kucing di pelanggan**, foto 3 =
+  **sampai di cabang grooming** (= otomatis status DIKERJAKAN di Fase 3). Aturan 5 menit & 20
+  menit berlaku.
+- **Antar**: sama seperti Kirim Barang (ambil di cabang grooming → sampai pelanggan → kembali).
+- **Diambil sendiri**: tidak ada trip, cukup 📸 serah terima di toko.
+- Pengantar tiap perjalanan ditugaskan (Fase 1: tampil hanya ke orang itu); bisa beda orang.
+- Ongkir **per perjalanan**, bonus 50% untuk PJ perjalanan itu — **cair hanya jika order selesai
+  total** (bukan saat trip selesai). Trip grooming tutup paksa / order batal → 0.
+
+---
+
+## FASE 5 — Bonus grooming & slip gaji
+
+### Keputusan
+- Bonus grooming = **10% × harga** kucing (persen diambil dari produk promo cabang pengerja).
+- Groomer **Rahmat Saleh / Fikri Mulyana** (yang terdaftar di `target_employee_ids` produk
+  Grooming Kucing) → **otomatis** dibuat `promo_sales_reports` (status `pending`, `unit_price` =
+  harga, tanggal = tanggal kucing selesai, foto = struk order, `late_penalty_pct = 0`) saat order
+  SELESAI → jalur Bonus Promo yang sudah ada (perlu approve + sync).
+- Groomer **lain (termasuk Elan Suherlan)** → **catatan terpisah** (tabel baru mis.
+  `grooming_bonus_ledger`): bisa dilihat & dibaca, perlu approve Owner/HR/Finance, masuk slip gaji
+  sebagai baris sendiri **"Bonus Grooming"** (kolom baru `payrolls.grooming_bonus`, pola sama
+  dengan `ongkir_bonus`: hitung saat buat slip + auto-resync ke slip draft). **Pisah** dari Bonus
+  Promo, tidak ikut target cabang.
+- Bonus ongkir grooming → ikut `ongkir_bonus` yang sudah ada, tapi hanya dihitung bila order
+  grooming selesai total (perlu ubah `get_employee_ongkir_bonus` & `resync_ongkir_bonus_payroll`).
+- Setiap rumus gross di DB/klien harus ikut menjumlah kolom bonus baru:
+  `sync_promo_bonus_to_payroll`, `resync_ongkir_bonus_payroll`, 2 rumus `newGross` di
+  `penggajian/bulanan/page.tsx`, `buildSlipPreview`, struk HTML, export, `portal/slip-gaji`.
+- Laporan bonus otomatis: tidak bisa diedit manual oleh groomer; koreksi lewat order.
+
+### Penutupan lapor manual Grooming Kucing
+- Lapor manual **ditutup otomatis pada tanggal fitur order grooming mulai dipakai** (tanggal
+  diatur Owner di pengaturan, mis. kolom di tabel pengaturan cabang grooming). Sebelum tanggal
+  itu lapor manual tetap jalan (aturan H+2 / potong 50% tetap). JANGAN menutup sebelum Fase 3–5
+  live, supaya groomer tidak kehilangan jalur lapor.
+- Implementasi: `submit_promo_sales_report` menolak produk grooming (mis. `bonus_percent` not null
+  + flag `is_grooming`) bila tanggal lapor ≥ tanggal penutupan.
+
+---
+
+## Celah yang sudah diidentifikasi & solusinya
+
+| # | Celah | Solusi |
+|---|---|---|
+| 1 | Elan tidak punya akun → tidak bisa foto | Paksa lanjut fase oleh pembuat order/Owner (foto + alasan) |
+| 2 | Groomer di luar daftar target promo → laporan promo ditolak | Groomer lain masuk ledger terpisah (Fase 5) |
+| 3 | Groomer diganti di tengah jalan | Bonus ke groomer terakhir, jejak ganti + ⚠️, tetap perlu approve |
+| 4 | Struk dipakai ulang | Nomor nota wajib & unik per cabang |
+| 5 | Harga berubah (tambah layanan) | Koreksi oleh pembuat order/Owner sebelum approve, tercatat |
+| 6 | Pelanggan perorangan membanjiri Master Toko | Label `toko`/`pelanggan`, daftar driver hanya `toko` |
+| 7 | Pelanggan dobel | Nomor HP wajib + unik (dinormalisasi) |
+| 8 | Order batal setelah dijemput | Tidak ada bonus apa pun (keputusan user) |
+| 9 | Lokasi "sampai toko" untuk order lintas cabang | Pakai cabang pengerja dari pengaturan Fase 2 |
+| 10 | Penerima tugas berhalangan sebelum berangkat | Ganti Penerima Tugas (pembuat / rekan satu cabang) sebelum foto 1 |
+| 11 | Lapor manual ditutup sebelum fitur siap | Tutup otomatis di tanggal mulai yang diatur Owner |
+| 12 | Jam HP dimanipulasi | Semua waktu dari server |
+| 13 | Foto dari galeri | Kamera langsung + `maxFileAgeMs` |
+
+---
+
+## Catatan teknis untuk setiap sesi
+
+- Proyek Supabase: `rwzerjfzazhpcnfktgax` (Hris-Hammielion). Terapkan migrasi via MCP
+  `apply_migration`, simpan juga file SQL di `database/migrations/NNN_nama.sql`.
+- Repo git ada di `hris-app/` (root `D:\HRIS Hammielion` bukan repo). Branch `main`, commit
+  langsung ke main lalu push (pola yang sudah dipakai).
+- Cek tipe: `npx tsc --noEmit -p .` dan `npx eslint <file>` di `hris-app/`. Lint `sidebar.tsx`
+  sudah punya 9 masalah lama — jangan dihitung sebagai regresi.
+- PowerShell 5.1 merusak UTF-8 (em-dash, box drawing) bila pakai `Get-Content`/`Set-Content` →
+  pakai tool Edit/Write untuk mengubah file.
+- Header tabel sticky: beri `bg-*` di setiap `<th>`.
+- Perubahan UI yang ada sisi karyawan & sisi persetujuan → terapkan di kedua halaman.

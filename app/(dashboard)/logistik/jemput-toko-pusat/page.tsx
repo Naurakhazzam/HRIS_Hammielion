@@ -17,7 +17,7 @@ type PendingPackage = {
   photo_url: string
   caption: string
   loading_id: string
-  logistics_central_loadings: { logistics_stores: { name: string } | null } | null
+  logistics_central_loadings: { origin: { name: string } | null; logistics_stores: { name: string } | null } | null
 }
 
 type TakenPackage = {
@@ -28,7 +28,7 @@ type TakenPackage = {
   logistics_central_loadings: { logistics_stores: { name: string } | null } | null
 }
 
-// Beda dari PendingPackage: ini bukan paket fisik yang sudah ada di Toko Pusat, tapi sekadar
+// Beda dari PendingPackage: ini bukan paket fisik yang sudah ada di cabang toko, tapi sekadar
 // PENANDA "toko X ada retur menunggu diambil" -- barangnya sendiri masih di toko konsumen,
 // baru akan dipegang driver nanti pas mampir ke toko itu (lihat migration 058).
 type PendingReturn = {
@@ -40,7 +40,8 @@ type PendingReturn = {
 
 const fmtDateTime = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 
-export default function JemputTokoPusatPage() {
+// Route tetap /logistik/jemput-toko-pusat, tapi sejak migrasi 068 isinya paket dari 4 cabang toko.
+export default function JemputBarangCabangPage() {
   const supabase = createClient()
   const { openLightbox } = usePhotoLightbox()
 
@@ -75,10 +76,10 @@ export default function JemputTokoPusatPage() {
   const fetchPending = useCallback(async () => {
     const { data } = await supabase
       .from('logistics_central_loading_packages')
-      .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, logistics_stores(name))')
+      .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name), logistics_stores(name))')
       .eq('status', 'pending')
       .eq('logistics_central_loadings.status', 'selesai')
-      // Kiriman jalur "Diantar Toko Pusat Sendiri" tidak boleh terlihat/diklaim driver.
+      // Kiriman jalur "Diantar Sendiri" tidak boleh terlihat/diklaim driver.
       .eq('logistics_central_loadings.delivery_method', 'driver')
       .order('created_at')
     setPending((data as unknown as PendingPackage[]) || [])
@@ -158,8 +159,8 @@ export default function JemputTokoPusatPage() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-bold text-slate-800 mb-1">Jemput Toko Pusat</h1>
-      <p className="text-sm text-slate-500 mb-6">Barang titipan dari Toko Pusat yang harus diambil sebelum/selama trip.</p>
+      <h1 className="text-2xl font-bold text-slate-800 mb-1">Jemput Barang Cabang</h1>
+      <p className="text-sm text-slate-500 mb-6">Barang titipan dari cabang toko (Toko Pusat, Toko Depan, Markas, Raja) yang harus diambil sebelum/selama trip.</p>
 
       {message && (
         <div className={`p-4 mb-6 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
@@ -205,6 +206,7 @@ export default function JemputTokoPusatPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-800 truncate">{pk.logistics_central_loadings?.logistics_stores?.name ?? '-'}</p>
                   <p className="text-xs text-slate-500 truncate">{pk.caption}</p>
+                  <p className="text-xs text-blue-700 font-medium truncate">📍 Ambil di {pk.logistics_central_loadings?.origin?.name ?? '-'}</p>
                 </div>
                 <button onClick={() => handleClaim(pk)} disabled={!selectedPlanId || claimingId === pk.id}
                   className="shrink-0 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50">

@@ -93,8 +93,8 @@ const LOGISTIK_SUBMENU: NavNode[] = [
   { name: 'Jalankan Pengiriman', href: '/logistik/jalan' },
   { name: 'Laporan Pengiriman', href: '/logistik/laporan' },
   { name: 'Master Toko', href: '/logistik/toko' },
-  { name: 'Laporan Muat (Toko Pusat)', href: '/logistik/laporan-muat' },
-  { name: 'Kirim Barang (Toko Pusat)', href: '/logistik/kirim-barang' },
+  { name: 'Laporan Muat (Cabang)', href: '/logistik/laporan-muat' },
+  { name: 'Kirim Barang (Cabang)', href: '/logistik/kirim-barang' },
   { name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur' },
 ]
 
@@ -294,7 +294,7 @@ const employeeNavItems: NavNode[] = [
   { name: 'Target Penjualan Promo', href: '/penjualan-promo', icon: '🎯' },
 ]
 
-function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isTokoPusat: boolean): NavNode[] {
+function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isTokoPusat: boolean, isStoreBranchStaff: boolean): NavNode[] {
   // "Pendapatan Ritase" (submenu Portal Saya) cuma relevan buat Driver/Kenek -- item dasarnya
   // (index 0,1) tetap dipakai apa adanya, cuma Portal Saya (index 2) yang dibangun ulang di sini.
   const baseItems = [
@@ -322,11 +322,15 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, 
     // lengkap seperti Dashboard/Rencana/Laporan/Master Toko) — RLS di halaman itu sendiri
     // sudah membatasi datanya ke rencana milik driver/kenek yang bersangkutan.
     extraLinks.push({ name: 'Pengiriman Logistik', href: '/logistik/jalan', icon: '🚚' })
-    extraLinks.push({ name: 'Jemput Toko Pusat', href: '/logistik/jemput-toko-pusat', icon: '📦' })
+    extraLinks.push({ name: 'Jemput Barang Cabang', href: '/logistik/jemput-toko-pusat', icon: '📦' })
   }
-  if (isTokoPusat) {
+  // Laporan Muat & Kirim Barang: staf 4 cabang toko (migrasi 068). Penerimaan Retur masih
+  // khusus Toko Pusat (di luar scope multi-cabang).
+  if (isStoreBranchStaff) {
     extraLinks.push({ name: 'Laporan Muat', href: '/logistik/laporan-muat', icon: '📦' })
     extraLinks.push({ name: 'Kirim Barang', href: '/logistik/kirim-barang', icon: '🛵' })
+  }
+  if (isTokoPusat) {
     extraLinks.push({ name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur', icon: '↩️' })
   }
   if (extraLinks.length === 0) return baseItems
@@ -354,6 +358,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [isDriverOrKenek, setIsDriverOrKenek] = useState(false)
   const [isKepalaGudang, setIsKepalaGudang] = useState(false)
   const [isTokoPusat, setIsTokoPusat] = useState(false)
+  const [isStoreBranchStaff, setIsStoreBranchStaff] = useState(false)
   const [meetingBadge, setMeetingBadge] = useState(0)
   const [dailyTaskBadge, setDailyTaskBadge] = useState(0)
   // Angka merah di submenu Klarifikasi Alpha / Klaim Lembur / Ajukan Libur -- berapa banyak
@@ -361,8 +366,8 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [alphaBadge, setAlphaBadge] = useState(0)
   const [lemburBadge, setLemburBadge] = useState(0)
   const [liburBadge, setLiburBadge] = useState(0)
-  // Kirim Barang (Toko Pusat): kiriman menunggu diambil + tugas antar saya yang belum foto
-  // kembali (+ trip macet >6 jam utk Owner). Jemput Toko Pusat (driver): paket menunggu.
+  // Kirim Barang: kiriman yang ditugaskan ke saya & belum diambil + tugas antar saya yang belum
+  // foto kembali (+ trip macet >6 jam utk Owner). Jemput Barang Cabang (driver): paket menunggu.
   const [kirimBarangBadge, setKirimBarangBadge] = useState(0)
   const [jemputBadge, setJemputBadge] = useState(0)
 
@@ -447,7 +452,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
               const submitted = mine ? mine.approved_count + mine.pending_count : DAYOFF_QUOTA_PER_PERIOD
               setLiburBadge(Math.max(0, DAYOFF_QUOTA_PER_PERIOD - submitted))
             })
-            supabase.from('employees').select('employee_type, can_drive, can_help, departments(name), positions(name), branches(name)').eq('id', effectiveEmployeeId).single().then(({ data: emp }) => {
+            supabase.from('employees').select('employee_type, can_drive, can_help, branch_id, departments(name), positions(name), branches(name)').eq('id', effectiveEmployeeId).single().then(({ data: emp }) => {
               if (emp) {
                 // Driver "asli" (employee_type='driver') belum tentu punya can_drive=true —
                 // kolom itu dibuat belakangan khusus untuk menandai karyawan LAIN yang bisa
@@ -464,6 +469,10 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                 setIsDriverOrKenek(emp.employee_type === 'driver' || !!emp.can_drive || !!emp.can_help || dept?.name === 'Team Gudang')
                 setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
                 setIsTokoPusat(branch?.name === 'Toko Pusat')
+                if (emp.branch_id) {
+                  supabase.from('logistics_store_branches').select('branch_id').eq('branch_id', emp.branch_id).maybeSingle()
+                    .then(({ data: sb }) => setIsStoreBranchStaff(!!sb))
+                }
               }
             })
           }
@@ -477,7 +486,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // tombol toggle preview itu sendiri, supaya karyawan asli tidak bisa iseng balik ke menu admin.
   const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
   const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
-  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isTokoPusat) : adminNavItems
+  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isTokoPusat, isStoreBranchStaff) : adminNavItems
 
   // Angka merah di submenu (beda dari meetingBadge/dailyTaskBadge yang nempel di item
   // top-level) -- dicocokkan lewat href, bukan nama, supaya tetap ketemu walau labelnya
