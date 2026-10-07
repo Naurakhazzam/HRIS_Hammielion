@@ -18,7 +18,7 @@ Bahasa ke user: **Bahasa Indonesia**.
 - [x] **Fase 2** — Master Toko: label Toko/Pelanggan, nomor HP, pengaturan cabang grooming (migrasi `069_store_kind_grooming_branches.sql`, commit `d7ea5cf`)
 - [x] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut) (migrasi `070_grooming_orders.sql`, commit `2a9355a`)
 - [x] **Fase 4** — Perjalanan jemput & antar grooming (migrasi `071_grooming_trips.sql`, commit `2052af5`)
-- [x] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual (migrasi `072_grooming_bonus.sql`, commit lihat `git log`)
+- [x] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual (migrasi `072_grooming_bonus.sql`, commit `bca03d0`)
 
 ---
 
