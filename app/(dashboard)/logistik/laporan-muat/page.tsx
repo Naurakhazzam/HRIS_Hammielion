@@ -335,11 +335,22 @@ export default function LaporanMuatPage() {
                     {itemCounts[l.id] || 0} foto barang · {pkg.total} paket{pkg.total > 0 ? ` (${pkg.diambil} diambil)` : ''}
                   </p>
                 </div>
-                <span className={`shrink-0 text-xs px-2.5 py-1 rounded-full font-semibold ${
-                  l.status === 'selesai' ? 'bg-green-100 text-green-700' : l.status === 'dibatalkan' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'
-                }`}>
-                  {l.status === 'selesai' ? 'Selesai' : l.status === 'dibatalkan' ? 'Dibatalkan' : 'Proses'}
-                </span>
+                <div className="shrink-0 flex items-center gap-1.5">
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+                    l.status === 'selesai' ? 'bg-green-100 text-green-700' : l.status === 'dibatalkan' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {l.status === 'selesai' ? 'Selesai' : l.status === 'dibatalkan' ? 'Dibatalkan' : 'Proses'}
+                  </span>
+                  {l.status === 'selesai' && pkg.total > 0 && (
+                    pkg.diambil < pkg.total ? (
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-orange-100 text-orange-700">
+                        Belum Diambil{pkg.diambil > 0 ? ` (${pkg.diambil}/${pkg.total})` : ''}
+                      </span>
+                    ) : (
+                      <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-blue-100 text-blue-700">Sudah Diambil</span>
+                    )
+                  )}
+                </div>
               </button>
 
               {isOpen && (
