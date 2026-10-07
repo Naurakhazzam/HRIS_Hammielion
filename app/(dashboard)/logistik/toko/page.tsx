@@ -2,20 +2,34 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { toWaLink } from '@/lib/whatsapp'
+import { toWaLink, returnTaskWaLink } from '@/lib/whatsapp'
 
 type StoreKind = 'toko' | 'pelanggan'
 type Store = { id: string; name: string; address: string | null; phone: string | null; is_active: boolean; kind: StoreKind }
 
 const KIND_LABEL: Record<StoreKind, string> = { toko: 'Toko', pelanggan: 'Pelanggan' }
 
+type PlanDriver = { full_name: string; phone: string | null }
+
+// 'diambil' = sudah ditugaskan tim ke sebuah trip (migrasi 076).
 type StoreReturn = {
   id: string; store_id: string; status: 'menunggu' | 'diambil'; note: string | null
   branches: { name: string } | null
-  claimer: { full_name: string } | null
+  plan: { plan_date: string; driver: PlanDriver | null } | null
+}
+
+// Trip yang masih bisa menerima Tugas Ambil Retur (draft / siap kirim / berjalan).
+type ActivePlan = {
+  id: string; plan_date: string; status: string
+  vehicles: { name: string } | null
+  delivery_routes: { name: string } | null
+  driver: PlanDriver | null
 }
 
 type Branch = { id: string; name: string }
+
+const fmtShortDate = (s: string) => new Date(s).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
+const planLabel = (p: ActivePlan) => `${fmtShortDate(p.plan_date)} — ${p.driver?.full_name ?? '-'} (${p.vehicles?.name ?? '-'} / ${p.delivery_routes?.name ?? '-'})`
 
 // Pengaturan cabang grooming (migrasi 069): can_groom = cabang ini mengerjakan grooming;
 // groom_branch_id = order yang diterima cabang ini dikerjakan di cabang mana.
@@ -52,7 +66,12 @@ export default function MasterTokoPage() {
   const [flagStoreId, setFlagStoreId] = useState<string | null>(null)
   const [flagBranchId, setFlagBranchId] = useState('')
   const [flagNote, setFlagNote] = useState('')
+  const [flagPlanId, setFlagPlanId] = useState('')
   const [flagSubmitting, setFlagSubmitting] = useState(false)
+  const [activePlans, setActivePlans] = useState<ActivePlan[]>([])
+  const [assignReturn, setAssignReturn] = useState<StoreReturn | null>(null)
+  const [assignPlanId, setAssignPlanId] = useState('')
+  const [assignSubmitting, setAssignSubmitting] = useState(false)
   const [cancellingReturnId, setCancellingReturnId] = useState<string | null>(null)
 
   const filteredStores = stores.filter(s => {
@@ -91,7 +110,7 @@ export default function MasterTokoPage() {
         }
       }
     }
-    await Promise.all([fetchStores(), fetchReturns(), fetchBranches(), fetchGroomSettings()])
+    await Promise.all([fetchStores(), fetchReturns(), fetchBranches(), fetchGroomSettings(), fetchActivePlans()])
     setLoading(false)
   }
 
@@ -103,11 +122,19 @@ export default function MasterTokoPage() {
 
   async function fetchReturns() {
     const { data } = await supabase.from('logistics_store_returns')
-      .select('id, store_id, status, note, branches(name), claimer:employees!logistics_store_returns_claimed_by_fkey(full_name)')
+      .select('id, store_id, status, note, branches(name), plan:logistics_delivery_plans(plan_date, driver:employees!logistics_delivery_plans_driver_id_fkey(full_name, phone))')
       .in('status', ['menunggu', 'diambil'])
     const map: Record<string, StoreReturn> = {}
     ;(data as unknown as StoreReturn[] || []).forEach(r => { map[r.store_id] = r })
     setReturnsByStore(map)
+  }
+
+  async function fetchActivePlans() {
+    const { data } = await supabase.from('logistics_delivery_plans')
+      .select('id, plan_date, status, vehicles(name), delivery_routes(name), driver:employees!logistics_delivery_plans_driver_id_fkey(full_name, phone)')
+      .in('status', ['draft', 'ready', 'departed'])
+      .order('plan_date', { ascending: false })
+    setActivePlans((data as unknown as ActivePlan[]) || [])
   }
 
   async function fetchBranches() {
@@ -149,34 +176,51 @@ export default function MasterTokoPage() {
     setFlagStoreId(storeId)
     setFlagBranchId('')
     setFlagNote('')
+    setFlagPlanId('')
   }
 
+  // Satu-satunya cara retur masuk ke trip: tim memilih trip-nya (langsung di sini, atau nanti
+  // lewat "Masukkan ke Trip" / Rencana Pengiriman). Driver tidak mengklaim sendiri.
   async function submitFlagReturn() {
     if (!flagStoreId || !flagBranchId) return
     setFlagSubmitting(true)
     const { error } = await supabase.rpc('flag_store_return', {
       p_store_id: flagStoreId, p_recipient_branch_id: flagBranchId, p_note: flagNote.trim() || null,
+      p_plan_id: flagPlanId || null,
     })
     if (error) showMessage('error', 'Gagal menandai retur: ' + error.message)
-    else showMessage('success', 'Toko berhasil ditandai ada retur menunggu diambil.')
+    else showMessage('success', flagPlanId
+      ? 'Retur ditugaskan ke trip. Kabari driver lewat tombol 💬 di kolom Retur.'
+      : 'Toko ditandai ada retur. Masukkan ke trip lewat "Masukkan ke Trip" atau dari Rencana Pengiriman.')
     setFlagStoreId(null)
     await fetchReturns()
     setFlagSubmitting(false)
   }
 
-  // Lepas klaim: retur 'diambil' kembali 'menunggu' supaya bisa diklaim trip lain (mis. driver
+  async function submitAssignReturn() {
+    if (!assignReturn || !assignPlanId) return
+    setAssignSubmitting(true)
+    const { error } = await supabase.rpc('assign_store_return', { p_return_id: assignReturn.id, p_plan_id: assignPlanId })
+    setAssignSubmitting(false)
+    if (error) { showMessage('error', 'Gagal menugaskan retur: ' + error.message); return }
+    showMessage('success', 'Retur ditugaskan ke trip. Kabari driver lewat tombol 💬 di kolom Retur.')
+    setAssignReturn(null)
+    await fetchReturns()
+  }
+
+  // Lepas dari trip: retur kembali ke antrean supaya bisa ditugaskan ke trip lain (mis. driver
   // tidak jadi ke toko itu). Barang yang sudah tercatat tetap tersimpan.
   async function releaseReturn(r: StoreReturn) {
-    if (!confirm(`Lepas klaim retur ini dari ${r.claimer?.full_name ?? 'driver'}? Retur akan kembali "Menunggu Diambil" dan bisa diklaim driver lain.`)) return
+    if (!confirm(`Lepas retur ini dari trip ${r.plan?.driver?.full_name ?? 'driver'}? Retur kembali ke antrean dan bisa ditugaskan ke trip lain.`)) return
     setCancellingReturnId(r.id)
     const { error } = await supabase.rpc('release_store_return', { p_return_id: r.id })
-    if (error) showMessage('error', 'Gagal melepas klaim: ' + error.message)
-    else { showMessage('success', 'Klaim retur dilepas. Retur kembali menunggu diambil.'); await fetchReturns() }
+    if (error) showMessage('error', 'Gagal melepas retur: ' + error.message)
+    else { showMessage('success', 'Retur dilepas dari trip dan kembali ke antrean.'); await fetchReturns() }
     setCancellingReturnId(null)
   }
 
-  // Cuma bisa batalkan selagi status masih 'menunggu' (belum diklaim driver manapun) -- sesuai
-  // RLS store_returns_delete. Kalau sudah 'diambil', lepas klaim dulu (releaseReturn).
+  // Cuma bisa batalkan selagi status masih 'menunggu' (belum ditugaskan ke trip) -- sesuai
+  // RLS store_returns_delete. Kalau sudah ditugaskan, lepas dari trip dulu (releaseReturn).
   async function cancelReturn(r: StoreReturn) {
     if (!confirm('Batalkan penandaan retur untuk toko ini?')) return
     setCancellingReturnId(r.id)
@@ -474,20 +518,36 @@ export default function MasterTokoPage() {
                     {ret ? (
                       <div className="flex flex-col items-center gap-1">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${ret.status === 'menunggu' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                          {ret.status === 'menunggu' ? 'Menunggu Diambil' : 'Sedang Diambil'}
+                          {ret.status === 'menunggu' ? 'Belum Ada Trip' : 'Masuk Trip'}
                         </span>
                         {ret.branches?.name && <span className="text-[11px] text-slate-400">untuk {ret.branches.name}</span>}
-                        {ret.status === 'diambil' && ret.claimer?.full_name && <span className="text-[11px] text-slate-400">oleh {ret.claimer.full_name}</span>}
+                        {ret.status === 'diambil' && ret.plan && (
+                          <span className="text-[11px] text-slate-400">{ret.plan.driver?.full_name ?? '-'} · {fmtShortDate(ret.plan.plan_date)}</span>
+                        )}
                         {ret.status === 'menunggu' ? (
-                          <button onClick={() => cancelReturn(ret)} disabled={cancellingReturnId === ret.id}
-                            className="text-xs text-red-500 hover:underline disabled:opacity-50">
-                            {cancellingReturnId === ret.id ? 'Membatalkan...' : 'Batalkan'}
-                          </button>
+                          <div className="flex gap-2">
+                            <button onClick={() => { setAssignReturn(ret); setAssignPlanId('') }}
+                              className="text-xs text-blue-600 hover:underline">
+                              Masukkan ke Trip
+                            </button>
+                            <button onClick={() => cancelReturn(ret)} disabled={cancellingReturnId === ret.id}
+                              className="text-xs text-red-500 hover:underline disabled:opacity-50">
+                              {cancellingReturnId === ret.id ? 'Membatalkan...' : 'Batalkan'}
+                            </button>
+                          </div>
                         ) : (
-                          <button onClick={() => releaseReturn(ret)} disabled={cancellingReturnId === ret.id}
-                            className="text-xs text-blue-600 hover:underline disabled:opacity-50">
-                            {cancellingReturnId === ret.id ? 'Memproses...' : 'Lepas Klaim'}
-                          </button>
+                          <div className="flex gap-2">
+                            {ret.plan?.driver?.phone && (
+                              <a href={returnTaskWaLink(ret.plan.driver.phone, s, ret.note)} target="_blank" rel="noopener noreferrer"
+                                className="text-xs text-green-600 hover:underline font-medium">
+                                💬 Kabari Driver
+                              </a>
+                            )}
+                            <button onClick={() => releaseReturn(ret)} disabled={cancellingReturnId === ret.id}
+                              className="text-xs text-blue-600 hover:underline disabled:opacity-50">
+                              {cancellingReturnId === ret.id ? 'Memproses...' : 'Lepas dari Trip'}
+                            </button>
+                          </div>
                         )}
                       </div>
                     ) : s.kind !== 'toko' ? (
@@ -533,13 +593,46 @@ export default function MasterTokoPage() {
             <label className="text-xs font-medium text-slate-600 block mb-1">Catatan (opsional)</label>
             <textarea value={flagNote} onChange={e => setFlagNote(e.target.value)} rows={3}
               placeholder="Misal: toko telepon, ada barang rusak mau diretur"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none mb-4" />
-            <p className="text-[11px] text-slate-400 mb-4">Detail barang (nama, foto, alasan) akan diisi driver sendiri saat mengambil di lapangan.</p>
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none mb-3" />
+            <label className="text-xs font-medium text-slate-600 block mb-1">Tugaskan ke Trip</label>
+            <select value={flagPlanId} onChange={e => setFlagPlanId(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none mb-1">
+              <option value="">-- Nanti saja (simpan di antrean) --</option>
+              {activePlans.map(p => <option key={p.id} value={p.id}>{planLabel(p)}</option>)}
+            </select>
+            <p className="text-[11px] text-slate-400 mb-4">Driver hanya melihat retur yang sudah ditugaskan ke trip-nya. Detail barang (nama, foto, alasan) diisi driver saat mengambil di toko.</p>
             <div className="flex gap-3">
               <button onClick={() => setFlagStoreId(null)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
               <button onClick={submitFlagReturn} disabled={!flagBranchId || flagSubmitting}
                 className="flex-1 py-2 text-sm text-white bg-amber-600 hover:bg-amber-700 rounded-lg disabled:opacity-50">
                 {flagSubmitting ? 'Menyimpan...' : 'Tandai'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {assignReturn && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="font-semibold text-slate-800 mb-1">Masukkan Retur ke Trip</h3>
+            <p className="text-xs text-slate-500 mb-4">{stores.find(s => s.id === assignReturn.store_id)?.name}</p>
+            {activePlans.length === 0 ? (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                Belum ada trip aktif. Buat dulu di Rencana Pengiriman (boleh trip khusus ambil retur).
+              </p>
+            ) : (
+              <select value={assignPlanId} onChange={e => setAssignPlanId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none mb-4">
+                <option value="">-- Pilih Trip --</option>
+                {activePlans.map(p => <option key={p.id} value={p.id}>{planLabel(p)}</option>)}
+              </select>
+            )}
+            <div className="flex gap-3">
+              <button onClick={() => setAssignReturn(null)} className="flex-1 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Batal</button>
+              <button onClick={submitAssignReturn} disabled={!assignPlanId || assignSubmitting}
+                className="flex-1 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
+                {assignSubmitting ? 'Menyimpan...' : 'Masukkan'}
               </button>
             </div>
           </div>

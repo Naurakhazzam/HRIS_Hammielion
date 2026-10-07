@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { returnTaskWaLink } from '@/lib/whatsapp'
 
 type Plan = {
   id: string
@@ -15,7 +16,7 @@ type Plan = {
   helper_id: string | null
   vehicles: { name: string; plate_number: string | null } | null
   delivery_routes: { name: string } | null
-  driver: { full_name: string } | null
+  driver: { full_name: string; phone: string | null } | null
   helper: { full_name: string } | null
 }
 
@@ -29,7 +30,7 @@ type PlanStore = {
   logistics_stores: { name: string; address: string | null } | null
 }
 
-type Store = { id: string; name: string }
+type Store = { id: string; name: string; address: string | null }
 
 type PlanSupplierTask = {
   id: string
@@ -40,6 +41,19 @@ type PlanSupplierTask = {
 }
 
 type SupplierRoute = { id: string; name: string }
+
+// Tugas Ambil Retur (migrasi 076): 'diambil' = sudah ditugaskan ke sebuah trip.
+type StoreReturn = {
+  id: string
+  store_id: string
+  plan_id: string | null
+  status: 'menunggu' | 'diambil' | 'selesai'
+  note: string | null
+  logistics_stores: { name: string; address: string | null } | null
+  branches: { name: string } | null
+}
+
+type Branch = { id: string; name: string }
 
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Draft', ready: 'Siap Kirim', departed: 'Berjalan',
@@ -62,6 +76,13 @@ export default function RencanaDetailPage() {
   const [supplierRoutes, setSupplierRoutes] = useState<SupplierRoute[]>([])
   const [supplierRouteSearchText, setSupplierRouteSearchText] = useState('')
   const [supplierTaskNotes, setSupplierTaskNotes] = useState('')
+  // Retur trip ini + antrean retur yang belum masuk trip mana pun + retur aktif di trip lain.
+  const [returns, setReturns] = useState<StoreReturn[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [returnStoreSearchText, setReturnStoreSearchText] = useState('')
+  const [returnBranchId, setReturnBranchId] = useState('')
+  const [returnNote, setReturnNote] = useState('')
+  const [returnSubmitting, setReturnSubmitting] = useState(false)
   const [hasRateConfig, setHasRateConfig] = useState<boolean | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -91,7 +112,7 @@ export default function RencanaDetailPage() {
         id, plan_date, status, vehicle_id, route_id, driver_id, helper_id,
         vehicles(name, plate_number),
         delivery_routes(name),
-        driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
+        driver:employees!logistics_delivery_plans_driver_id_fkey(full_name, phone),
         helper:employees!logistics_delivery_plans_helper_id_fkey(full_name)
       `)
       .eq('id', params.id).single()
@@ -109,8 +130,17 @@ export default function RencanaDetailPage() {
       .eq('plan_id', params.id).order('sequence_order')
     setPlanStores((psData as unknown as PlanStore[]) || [])
 
-    const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).eq('kind', 'toko').order('name')
+    const { data: storeData } = await supabase.from('logistics_stores').select('id, name, address').eq('is_active', true).eq('kind', 'toko').order('name')
     setAllStores(storeData || [])
+
+    const { data: retData } = await supabase.from('logistics_store_returns')
+      .select('id, store_id, plan_id, status, note, logistics_stores(name, address), branches(name)')
+      .or(`plan_id.eq.${params.id},status.in.(menunggu,diambil)`)
+      .order('flagged_at')
+    setReturns((retData as unknown as StoreReturn[]) || [])
+
+    const { data: branchData } = await supabase.from('branches').select('id, name').order('name')
+    setBranches(branchData || [])
 
     const { data: taskData } = await supabase.from('logistics_plan_supplier_tasks')
       .select('id, route_id, status, notes, delivery_routes(name)')
@@ -232,6 +262,49 @@ export default function RencanaDetailPage() {
     else fetchAll()
   }
 
+  // Tugas Ambil Retur -- sama seperti Tugas Belanja, ditambahkan tim ke trip ini. Toko retur
+  // TIDAK masuk Daftar Toko (bukan tujuan kirim), jadi trip boleh berisi retur saja.
+  const planReturns = returns.filter(r => r.plan_id === params.id)
+  const queuedReturns = returns.filter(r => r.status === 'menunggu')
+  const activeReturnStoreIds = new Set(returns.filter(r => r.status === 'diambil').map(r => r.store_id))
+  const canAddReturn = canManage && !!plan && ['draft', 'ready', 'departed'].includes(plan.status)
+  const returnStoreOptions = allStores.filter(s => !activeReturnStoreIds.has(s.id))
+  const matchedReturnStore = returnStoreOptions.find(s => s.name.trim().toLowerCase() === returnStoreSearchText.trim().toLowerCase())
+  const matchedQueuedReturn = matchedReturnStore ? queuedReturns.find(r => r.store_id === matchedReturnStore.id) : undefined
+
+  async function assignReturn(r: StoreReturn) {
+    setReturnSubmitting(true)
+    const { error } = await supabase.rpc('assign_store_return', { p_return_id: r.id, p_plan_id: params.id })
+    setReturnSubmitting(false)
+    if (error) { showMessage('error', 'Gagal menambah tugas retur: ' + error.message); return }
+    setReturnStoreSearchText(''); setReturnBranchId(''); setReturnNote('')
+    fetchAll()
+  }
+
+  async function handleAddReturn(e: React.FormEvent) {
+    e.preventDefault()
+    if (!matchedReturnStore) { showMessage('error', 'Toko tidak ditemukan. Ketik nama toko lalu pilih dari saran yang muncul.'); return }
+    // Toko yang sudah ditandai di Master Toko cukup dimasukkan, tidak dibuat dobel.
+    if (matchedQueuedReturn) { await assignReturn(matchedQueuedReturn); return }
+    if (!returnBranchId) { showMessage('error', 'Pilih cabang pemilik barang retur.'); return }
+    setReturnSubmitting(true)
+    const { error } = await supabase.rpc('flag_store_return', {
+      p_store_id: matchedReturnStore.id, p_recipient_branch_id: returnBranchId,
+      p_note: returnNote.trim() || null, p_plan_id: params.id,
+    })
+    setReturnSubmitting(false)
+    if (error) { showMessage('error', 'Gagal menambah tugas retur: ' + error.message); return }
+    setReturnStoreSearchText(''); setReturnBranchId(''); setReturnNote('')
+    fetchAll()
+  }
+
+  async function handleReleaseReturn(r: StoreReturn) {
+    if (!confirm(`Lepas tugas retur "${r.logistics_stores?.name}" dari trip ini? Retur kembali ke antrean (barang yang sudah dicatat tetap tersimpan).`)) return
+    const { error } = await supabase.rpc('release_store_return', { p_return_id: r.id })
+    if (error) showMessage('error', 'Gagal melepas tugas retur: ' + error.message)
+    else fetchAll()
+  }
+
   async function handleMove(index: number, direction: -1 | 1) {
     const target = index + direction
     if (target < 0 || target >= planStores.length) return
@@ -243,7 +316,9 @@ export default function RencanaDetailPage() {
   }
 
   async function handleSiapKirim() {
-    if (planStores.length === 0) { showMessage('error', 'Tambahkan minimal satu toko dulu.'); return }
+    if (planStores.length === 0 && supplierTasks.length === 0 && planReturns.length === 0) {
+      showMessage('error', 'Tambahkan minimal satu toko, tugas belanja, atau tugas ambil retur dulu.'); return
+    }
     if (!hasRateConfig) { showMessage('error', 'Tarif untuk kombinasi Mobil dan Ritase ini belum disetup. Setup dulu di Penggajian Driver → Tarif & Mobil Driver.'); return }
     setSubmitting(true)
     const { error } = await supabase.from('logistics_delivery_plans').update({
@@ -446,6 +521,102 @@ export default function RencanaDetailPage() {
           {availableSupplierRoutes.length === 0 && supplierRoutes.length === 0 && (
             <p className="text-xs text-slate-400 mt-2">Belum ada rute "Belanja" di Master Rute. <Link href="/penggajian/driver/setup" className="text-blue-600 hover:underline">Tambah dulu di sini</Link>.</p>
           )}
+        </div>
+      )}
+
+      {/* Tugas Ambil Retur — satu-satunya cara retur sampai ke driver: tim memasukkannya ke
+          trip (di sini atau dari Master Toko). Toko retur bukan tujuan kirim, jadi tidak masuk
+          Daftar Toko dan trip boleh berisi retur saja. Upah ikut ritase trip, tanpa tarif sendiri. */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-200">
+          <span className="text-sm font-bold text-slate-700">↩️ Tugas Ambil Retur ({planReturns.length})</span>
+        </div>
+        {planReturns.length === 0 ? (
+          <div className="p-6 text-center text-sm text-slate-500">Belum ada tugas ambil retur.</div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {planReturns.map(r => (
+              <div key={r.id} className="flex items-center gap-3 px-5 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-800 truncate">{r.logistics_stores?.name}</p>
+                  <p className="text-xs text-slate-400 truncate">
+                    {r.branches?.name ? `Untuk ${r.branches.name}` : ''}{r.note ? ` · ${r.note}` : ''}
+                  </p>
+                </div>
+                {r.status === 'selesai' ? (
+                  <span className="text-xs px-2 py-0.5 rounded font-medium shrink-0 bg-green-100 text-green-700">Selesai</span>
+                ) : (
+                  <>
+                    <span className="text-xs px-2 py-0.5 rounded font-medium shrink-0 bg-slate-100 text-slate-500">Belum Diproses</span>
+                    {plan.driver?.phone && r.logistics_stores && (
+                      <a href={returnTaskWaLink(plan.driver.phone, r.logistics_stores, r.note)} target="_blank" rel="noopener noreferrer"
+                        title="Kabari driver lewat WhatsApp"
+                        className="w-7 h-7 flex items-center justify-center text-green-600 hover:bg-green-50 rounded shrink-0">💬</a>
+                    )}
+                    {(editable || canEditActive) && canManage && (
+                      <button onClick={() => handleReleaseReturn(r)} className="w-7 h-7 flex items-center justify-center text-red-400 hover:bg-red-50 rounded shrink-0">✕</button>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {canAddReturn && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
+          {canEditActive && <p className="text-xs text-amber-600 mb-2">⚠ Trip sudah berjalan — tugas retur baru langsung muncul di HP driver/kenek.</p>}
+
+          {queuedReturns.length > 0 && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-semibold text-amber-800 mb-2">Retur yang sudah ditandai, belum masuk trip ({queuedReturns.length})</p>
+              <div className="space-y-1.5">
+                {queuedReturns.map(r => (
+                  <div key={r.id} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-slate-800 truncate">{r.logistics_stores?.name}</p>
+                      {r.note && <p className="text-xs text-slate-500 truncate">{r.note}</p>}
+                    </div>
+                    <button onClick={() => assignReturn(r)} disabled={returnSubmitting}
+                      className="shrink-0 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-lg transition disabled:opacity-50">
+                      + Masukkan
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleAddReturn} className="space-y-2">
+            <input type="text" list="return-stores-datalist" value={returnStoreSearchText}
+              onChange={e => setReturnStoreSearchText(e.target.value)}
+              placeholder="Ketik nama toko yang ada retur..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+            <datalist id="return-stores-datalist">
+              {returnStoreOptions.map(s => <option key={s.id} value={s.name} />)}
+            </datalist>
+            {matchedQueuedReturn ? (
+              <p className="text-xs text-amber-700">Toko ini sudah ditandai ada retur{matchedQueuedReturn.branches?.name ? ` (untuk ${matchedQueuedReturn.branches.name})` : ''} — tinggal dimasukkan ke trip.</p>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select value={returnBranchId} onChange={e => setReturnBranchId(e.target.value)}
+                  className="sm:w-56 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                  <option value="">-- Barang milik cabang --</option>
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <input type="text" value={returnNote} onChange={e => setReturnNote(e.target.value)}
+                  placeholder="Catatan (opsional)"
+                  className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+            )}
+            <div className="flex justify-end">
+              <button type="submit" disabled={!matchedReturnStore || (!matchedQueuedReturn && !returnBranchId) || returnSubmitting}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 whitespace-nowrap">
+                {returnSubmitting ? 'Menyimpan...' : '+ Tambah Tugas Retur'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

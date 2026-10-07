@@ -60,8 +60,8 @@ type PlanSupplierTask = {
   delivery_routes: { name: string } | null
 }
 
-// Beda dari PlanStore: barangnya BELUM di tangan driver sama sekali begitu diklaim (masih di
-// toko konsumen) -- baru dipegang fisik pas driver sampai di toko itu, dicatat satu-per-satu
+// Beda dari PlanStore: tugas retur ditugaskan tim ke trip ini (migrasi 076), barangnya masih di
+// toko konsumen -- baru dipegang fisik pas driver sampai di toko itu, dicatat satu-per-satu
 // lewat logistics_store_return_items (lihat migration 058).
 type PlanReturn = {
   id: string
@@ -753,7 +753,11 @@ export default function JalanPengirimanPage() {
 
           <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
             <p className="font-bold text-slate-800">{selectedPlan?.vehicles?.name} — {selectedPlan?.delivery_routes?.name}</p>
-            <p className="text-xs text-slate-500">{planStores.length} toko dalam rencana ini</p>
+            <p className="text-xs text-slate-500">
+              {planStores.length} toko dalam rencana ini
+              {supplierTasks.length > 0 && ` · ${supplierTasks.length} belanja`}
+              {planReturns.length > 0 && ` · ${planReturns.length} ambil retur`}
+            </p>
           </div>
 
           {selectedPlan?.status === 'ready' && (
@@ -848,6 +852,7 @@ export default function JalanPengirimanPage() {
                     className="w-full text-left px-4 py-3 hover:bg-purple-50/50 transition flex items-center gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-800 truncate">{r.logistics_stores?.name}</p>
+                      {r.note && <p className="text-xs text-slate-500 truncate">{r.note}</p>}
                       <p className="text-xs text-slate-400 truncate">{returnItemsByReturn[r.id]?.length || 0} barang sudah dicatat</p>
                     </div>
                     <span className="text-slate-300">›</span>
