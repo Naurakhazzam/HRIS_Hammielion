@@ -402,6 +402,26 @@ Baca dulu sebelum mengubah apa pun:
 - Badge Order Grooming: + jumlah ledger `pending` untuk Owner/HR/Finance; order siap buatan saya hanya
   yang diambil sendiri.
 
+### Lanjutan setelah Fase 5 (permintaan user 7 Okt 2026)
+- `DeliveryAssigneePicker` tidak lagi pakai `<datalist>` (saran tidak muncul di HP Android) → daftar
+  sendiri (commit `54f8250`). Dipakai Laporan Muat & Order Grooming.
+- Migrasi 073: jabatan **Groomer** tidak bisa membuat order (`is_my_position_groomer`, tab Buat Order
+  disembunyikan). Rahmat & Fikri sekarang berjabatan Groomer.
+- Koreksi harga **tetap** hanya pembuat order/Owner (keputusan user: groomer bisa curang).
+- Tanggal tutup lapor manual **sengaja belum diisi** (keputusan user).
+- Migrasi 074:
+  - `promo_products.is_grooming` (centang "✂️ Produk Grooming" di form produk promo; wajib mode %).
+    Semua logika grooming (`get_grooming_promo_product`, `grooming_promo_product_for`,
+    `submit_promo_sales_report`) pakai tanda ini, bukan nama.
+  - `ensure_grooming_promo_product(branch, ts)`: produk Grooming periode itu belum ada & produk periode
+    terakhir aktif → disalin otomatis (`created_by NULL`, tampil badge "🔁 Disalin otomatis"). Produk
+    periode itu ada tapi nonaktif → dianggap sengaja dimatikan (bonus lewat catatan).
+  - Cek dobel: `grooming_order_cat_exists` / `grooming_manual_report_exists` (groomer + tanggal WIB +
+    harga sama). `get_promo_sales_reports.possible_duplicate` → badge merah di halaman promo.
+  - `get_grooming_bonus_recap(month, year)`: 3 sumber (promo_otomatis, catatan, manual) dalam satu
+    daftar → tab "Rekap Bonus" (Owner/HR/Finance semua; karyawan "Bonus Saya" miliknya sendiri).
+    Tab "Persetujuan Bonus" sekarang hanya untuk Owner/HR/Finance.
+
 ---
 
 ## Celah yang sudah diidentifikasi & solusinya

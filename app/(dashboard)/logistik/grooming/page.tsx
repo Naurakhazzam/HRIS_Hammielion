@@ -7,6 +7,7 @@ import LogisticsCameraCapture from '@/components/LogisticsCameraCapture'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
 import RupiahInput from '@/components/RupiahInput'
 import DeliveryAssigneePicker, { fetchDeliveryCandidates, type DeliveryCandidate } from '@/components/DeliveryAssigneePicker'
+import { signedPhotoUrls } from '@/lib/meeting'
 
 // Menu "Order Grooming" (Fase 3, migrasi 070). Alur:
 //   ① order dibuat di cabang penerima (foto struk + nomor nota unik per cabang, pelanggan wajib
@@ -139,7 +140,7 @@ export default function OrderGroomingPage() {
 
   const [loading, setLoading] = useState(true)
   const [me, setMe] = useState<Me>({ empId: '', name: '', isOwner: false, branchId: '', isStoreStaff: false, seeAll: false, isApprover: false, isGroomer: false })
-  const [tab, setTab] = useState<'aktif' | 'buat' | 'riwayat' | 'bonus'>('aktif')
+  const [tab, setTab] = useState<'aktif' | 'buat' | 'riwayat' | 'bonus' | 'rekap'>('aktif')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
@@ -661,12 +662,13 @@ export default function OrderGroomingPage() {
         </div>
       )}
 
-      <div className="flex gap-1 border-b border-slate-200">
+      <div className="flex gap-1 border-b border-slate-200 overflow-x-auto whitespace-nowrap">
         {([
           ['aktif', `Order Aktif (${active.length})`],
           ...(canCreate ? [['buat', '+ Buat Order']] : []),
           ['riwayat', 'Riwayat'],
-          ['bonus', me.isApprover ? 'Persetujuan Bonus' : 'Bonus Saya'],
+          ...(me.isApprover ? [['bonus', 'Persetujuan Bonus']] : []),
+          ['rekap', me.isApprover ? 'Rekap Bonus' : 'Bonus Saya'],
         ] as [typeof tab, string][]).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${tab === k ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
@@ -696,7 +698,8 @@ export default function OrderGroomingPage() {
           onCreated={async () => { setTab('aktif'); await refresh() }} />
       )}
 
-      {tab === 'bonus' && <BonusTab me={me} showMessage={showMessage} />}
+      {tab === 'bonus' && me.isApprover && <BonusTab me={me} showMessage={showMessage} />}
+      {tab === 'rekap' && <RecapTab me={me} showMessage={showMessage} />}
 
       {tab === 'riwayat' && (
         <section className="space-y-3">
@@ -951,6 +954,166 @@ function BonusTab({ me, showMessage }: { me: Me; showMessage: (type: 'success' |
                       )}
                     </div>
                   )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ── Rekap semua bonus grooming (migrasi 074) ────────────────────────────────────────────────
+// Satu tempat untuk 3 sumber: laporan promo otomatis dari order, catatan bonus grooming, dan lapor
+// manual produk Grooming. Laporan manual yang groomer + tanggal + harganya sama dengan order selesai
+// ditandai "kemungkinan dobel" supaya tidak disetujui dua kali.
+type RecapRow = {
+  source: 'promo_otomatis' | 'catatan' | 'manual'; record_id: string; employee_id: string; employee_name: string; branch_name: string | null
+  report_date: string; nota_number: string | null; cat_label: string | null; qty: number; price: number | null; bonus_amount: number
+  status: string; possible_duplicate: boolean; warning: boolean; photo: string | null
+}
+const SOURCE_LABEL: Record<RecapRow['source'], { label: string; cls: string; where: string }> = {
+  promo_otomatis: { label: '✂️ Otomatis (promo)', cls: 'bg-pink-100 text-pink-700', where: 'disetujui di Target Penjualan Promo' },
+  catatan: { label: '✂️ Otomatis (catatan)', cls: 'bg-purple-100 text-purple-700', where: 'disetujui di tab Persetujuan Bonus' },
+  manual: { label: '✍️ Lapor manual', cls: 'bg-slate-200 text-slate-700', where: 'disetujui di Target Penjualan Promo' },
+}
+const RECAP_STATUS: Record<string, { label: string; cls: string }> = {
+  pending: { label: 'Menunggu', cls: 'bg-amber-100 text-amber-800' },
+  approved: { label: 'Disetujui', cls: 'bg-green-100 text-green-700' },
+  rejected: { label: 'Ditolak', cls: 'bg-red-100 text-red-700' },
+  void: { label: 'Gugur', cls: 'bg-slate-200 text-slate-600' },
+}
+
+function RecapTab({ me, showMessage }: { me: Me; showMessage: (type: 'success' | 'error', text: string) => void }) {
+  const supabase = createClient()
+  const { openLightbox } = usePhotoLightbox()
+  const [period, setPeriod] = useState(currentPeriod)
+  const [rows, setRows] = useState<RecapRow[]>([])
+  const [photos, setPhotos] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<'semua' | 'dobel' | RecapRow['source']>('semua')
+
+  const load = useCallback(async (p: { month: number; year: number }) => {
+    const { data, error } = await supabase.rpc('get_grooming_bonus_recap', { p_period_month: p.month, p_period_year: p.year })
+    if (error) showMessage('error', 'Gagal memuat rekap: ' + error.message)
+    const list = (data as RecapRow[]) || []
+    setRows(list)
+    setPhotos(await signedPhotoUrls(supabase, list.map(r => r.photo).filter((x): x is string => !!x)))
+    setLoading(false)
+  }, [supabase]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    async function init() { await load(period) }
+    init()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function changePeriod(n: { month: number; year: number }) { setPeriod(n); setLoading(true); load(n) }
+
+  const shown = rows.filter(r => filter === 'semua' ? true : filter === 'dobel' ? r.possible_duplicate : r.source === filter)
+  const dupCount = rows.filter(r => r.possible_duplicate).length
+  const totals = useMemo(() => {
+    const map: Record<string, { name: string; branch: string; cats: number; pending: number; approved: number }> = {}
+    rows.forEach(r => {
+      const t = map[r.employee_id] ??= { name: r.employee_name, branch: r.branch_name ?? '-', cats: 0, pending: 0, approved: 0 }
+      if (r.status === 'rejected' || r.status === 'void') return
+      t.cats += Number(r.qty)
+      if (r.status === 'pending') t.pending += Number(r.bonus_amount)
+      if (r.status === 'approved') t.approved += Number(r.bonus_amount)
+    })
+    return Object.values(map).sort((a, b) => b.cats - a.cats)
+  }, [rows])
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-bold text-slate-700">📊 {me.isApprover ? 'Rekap Bonus Grooming' : 'Bonus Grooming Saya'} — Periode Gaji</h2>
+        <div className="flex gap-2">
+          <select value={period.month} onChange={e => changePeriod({ ...period, month: Number(e.target.value) })}
+            className="text-sm px-2 py-1 border border-slate-300 rounded-lg bg-white">
+            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+          <select value={period.year} onChange={e => changePeriod({ ...period, year: Number(e.target.value) })}
+            className="text-sm px-2 py-1 border border-slate-300 rounded-lg bg-white">
+            {[period.year - 1, period.year, period.year + 1].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500">
+        Semua bonus grooming di satu tempat: otomatis dari Order Grooming (jalur promo untuk groomer target produk Grooming, jalur
+        catatan untuk groomer lain) dan lapor manual produk Grooming. Persetujuan tetap di tempat masing-masing.
+      </p>
+
+      {dupCount > 0 && (
+        <button onClick={() => setFilter('dobel')}
+          className="w-full text-left text-sm bg-red-50 border border-red-300 text-red-800 rounded-lg px-3 py-2 font-semibold">
+          ⚠️ {dupCount} catatan kemungkinan dobel (lapor manual & Order Grooming untuk groomer, tanggal & harga yang sama) — jangan setujui dua-duanya. Tampilkan →
+        </button>
+      )}
+
+      {totals.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="bg-slate-50 px-3 py-2">Groomer</th>
+                <th className="bg-slate-50 px-3 py-2">Kucing</th>
+                <th className="bg-slate-50 px-3 py-2">Bonus menunggu</th>
+                <th className="bg-slate-50 px-3 py-2">Bonus disetujui</th>
+              </tr>
+            </thead>
+            <tbody>
+              {totals.map(t => (
+                <tr key={t.name} className="border-t border-slate-100">
+                  <td className="px-3 py-2 font-medium text-slate-700">{t.name} <span className="text-slate-400 font-normal">· {t.branch}</span></td>
+                  <td className="px-3 py-2">{t.cats}</td>
+                  <td className="px-3 py-2 text-amber-700">{t.pending > 0 ? fmtRp(t.pending) : '—'}</td>
+                  <td className="px-3 py-2 text-green-700 font-semibold">{t.approved > 0 ? fmtRp(t.approved) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-1.5">
+        {([['semua', 'Semua'], ['promo_otomatis', 'Otomatis (promo)'], ['catatan', 'Otomatis (catatan)'], ['manual', 'Lapor manual'], ['dobel', '⚠️ Kemungkinan dobel']] as [typeof filter, string][]).map(([k, l]) => (
+          <button key={k} onClick={() => setFilter(k)}
+            className={`text-xs px-2.5 py-1 rounded-full border ${filter === k ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-600'}`}>{l}</button>
+        ))}
+      </div>
+
+      {loading ? <div className="text-center py-6 text-slate-500 text-sm">Memuat...</div> : shown.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 text-center text-slate-500 text-sm">Tidak ada data.</div>
+      ) : (
+        <div className="space-y-2">
+          {shown.map(r => {
+            const src = SOURCE_LABEL[r.source]
+            const st = RECAP_STATUS[r.status] ?? { label: r.status, cls: 'bg-slate-100 text-slate-600' }
+            const photoUrl = r.photo ? photos[r.photo] : undefined
+            return (
+              <div key={`${r.source}-${r.record_id}`} className={`bg-white border rounded-xl p-3 flex gap-3 ${r.possible_duplicate ? 'border-red-400 ring-1 ring-red-200' : 'border-slate-200'}`}>
+                {photoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photoUrl} alt="Struk" onClick={() => openLightbox(photoUrl, 'Struk')}
+                    className="w-12 h-12 object-cover rounded-lg border border-slate-200 cursor-zoom-in shrink-0" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-semibold text-slate-800">{r.employee_name}</span>
+                    <span className="text-sm text-green-700 font-semibold">{fmtRp(Number(r.bonus_amount))}</span>
+                    <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${src.cls}`}>{src.label}</span>
+                    <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${st.cls}`}>{st.label}</span>
+                    {r.possible_duplicate && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-red-600 text-white">⚠️ Kemungkinan dobel</span>}
+                    {r.warning && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700">⚠️ Groomer diganti / paksa lanjut</span>}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {new Date(r.report_date + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    {r.nota_number && <> · Nota {r.nota_number}</>}
+                    {r.cat_label && <> · {r.cat_label}</>}
+                    {' · '}{Number(r.qty) > 1 ? `${r.qty} × ` : ''}{r.price != null ? fmtRp(Number(r.price)) : '-'}
+                  </p>
+                  {me.isApprover && <p className="text-[11px] text-slate-400">{src.where}</p>}
                 </div>
               </div>
             )

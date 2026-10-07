@@ -14,6 +14,9 @@ type AdminRow = {
   target_qty: number | null; total_qty: number; pending_count: number; achievement_pct: number | null; is_active: boolean
   bonus_rate_reached: number | null; bonus_rate_below: number | null; target_employee_ids: string[] | null
   bonus_percent: number | null; price_options: number[] | null; max_late_days: number | null
+  // Produk Grooming (migrasi 074): laporan Order Grooming masuk ke sini; auto_created = disalin
+  // otomatis dari periode sebelumnya karena Finance belum membuat produk periode ini.
+  is_grooming: boolean; auto_created: boolean
 }
 type ReportRow = {
   id: string; employee_id: string; full_name: string; qty: number; receipt_photo_paths: string[]
@@ -22,18 +25,22 @@ type ReportRow = {
   late_penalty_pct: number
   // Laporan otomatis dari Order Grooming (migrasi 072): koreksi harga lewat order, bukan di sini.
   grooming_cat_id: string | null; grooming_warning: boolean
+  // Laporan manual & order grooming dengan groomer + tanggal + harga sama (bisa tercatat 2x).
+  possible_duplicate: boolean
 }
 type MyProgress = {
   product_id: string; product_name: string; target_qty: number | null; total_qty: number; my_qty: number; my_pending_qty: number
   bonus_percent: number | null; price_options: number[] | null; max_late_days: number | null
+  is_grooming: boolean
 }
 
-const isGroomingProduct = (p: { product_name: string; bonus_percent: number | null }) => /groom/i.test(p.product_name) && p.bonus_percent !== null
+const isGroomingProduct = (p: { is_grooming: boolean }) => p.is_grooming
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const emptyForm = {
   id: null as string | null, branch_id: '', branch_ids: [] as string[], product_name: '', target_qty: '', period_month: 1, period_year: 2026, is_active: true,
   bonus_rate_reached: '', bonus_rate_below: '', restrict_employees: false, target_employee_ids: [] as string[],
   bonus_mode_percent: false, bonus_percent: '', price_options: [] as number[], max_late_days: '',
+  is_grooming: false,
 }
 const PRICE_OPTION_CHOICES = [40000, 50000, 55000, 75000, 100000]
 // Kelonggaran 1 hari utk potongan bonus telat lapor -- cuma berlaku tanggal ini (lihat migrasi
@@ -208,6 +215,7 @@ export default function PenjualanPromoPage() {
       bonus_percent: row.bonus_percent === null ? '' : String(row.bonus_percent),
       price_options: row.price_options ?? [],
       max_late_days: row.max_late_days === null ? '' : String(row.max_late_days),
+      is_grooming: row.is_grooming,
     })
     setFormError('')
     setShowForm(true)
@@ -286,6 +294,7 @@ export default function PenjualanPromoPage() {
       p_bonus_percent: bonusPercent,
       p_price_options: form.bonus_mode_percent ? form.price_options : null,
       p_max_late_days: maxLateDays,
+      p_is_grooming: form.bonus_mode_percent && form.is_grooming,
     })))
     setSaving(false)
 
@@ -532,6 +541,8 @@ export default function PenjualanPromoPage() {
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-1.5 mb-1">
                             <span className="text-sm font-semibold text-slate-800">{row.product_name}</span>
+                            {row.is_grooming && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-pink-100 text-pink-700">✂️ Grooming</span>}
+                            {row.auto_created && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Dibuat otomatis karena belum ada produk Grooming periode ini">🔁 Disalin otomatis — cek</span>}
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">{row.branch_name}</span>
                             {row.pending_count > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">{row.pending_count} MENUNGGU</span>}
                             {!row.is_active && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-600">NONAKTIF</span>}
@@ -589,6 +600,12 @@ export default function PenjualanPromoPage() {
                                       {r.late_penalty_pct > 0 && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700">⚠️ Bonus -{r.late_penalty_pct}% (lewat batas)</span>}
                                       {r.grooming_cat_id && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-pink-100 text-pink-700">✂️ Otomatis dari Order Grooming</span>}
                                       {r.grooming_warning && <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700">⚠️ Cek: groomer diganti / paksa lanjut</span>}
+                                      {r.possible_duplicate && (
+                                        <span className="ml-1.5 font-semibold px-1.5 py-0.5 rounded bg-red-600 text-white"
+                                          title="Groomer, tanggal & harga sama dengan laporan lain (manual vs Order Grooming) -- jangan setujui dua-duanya">
+                                          ⚠️ Kemungkinan dobel {r.grooming_cat_id ? 'dengan lapor manual' : 'dengan Order Grooming'}
+                                        </span>
+                                      )}
                                     </p>
                                     {r.notes && <p className="text-xs text-slate-600 mt-1">{r.notes}</p>}
                                     {r.status === 'rejected' && r.rejection_reason && <p className="text-xs text-red-600 mt-1">Alasan: {r.rejection_reason}</p>}
@@ -741,6 +758,17 @@ export default function PenjualanPromoPage() {
               </div>
               {form.bonus_mode_percent ? (
                 <div className="border-t border-slate-100 pt-3 space-y-3">
+                  <div className="bg-pink-50 border border-pink-200 rounded-lg p-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-pink-900 cursor-pointer">
+                      <input type="checkbox" checked={form.is_grooming} onChange={e => setForm({ ...form, is_grooming: e.target.checked })} className="rounded" />
+                      ✂️ Produk Grooming
+                    </label>
+                    <p className="text-[11px] text-pink-800 mt-1">
+                      Centang untuk produk bonus grooming. Order Grooming yang selesai otomatis membuat laporan di produk ini untuk karyawan
+                      target di bawah. Kalau produk periode baru belum dibuat, sistem menyalin produk ini otomatis
+                      (nonaktifkan produknya kalau bonus grooming promo memang dihentikan).
+                    </p>
+                  </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">Persentase Bonus (%) <span className="text-red-500">*</span></label>
                     <input type="number" min="0" max="100" step="0.1" value={form.bonus_percent} onChange={e => setForm({ ...form, bonus_percent: e.target.value })} placeholder="10"
