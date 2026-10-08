@@ -34,10 +34,8 @@ function hasActiveDescendant(item: NavNode, pathname: string): boolean {
   return pathname === item.href
 }
 
-// Dipakai bareng oleh adminNavItems DAN getEmployeeNavItems — supaya isinya selalu identik,
-// tidak ada risiko salah satu ketinggalan diupdate kalau ada perubahan di lain waktu.
-// "Pendapatan Ritase" disisipkan lewat buildPortalSayaSubmenu (bukan ditulis statis di sini)
-// karena cuma relevan untuk Driver/Kenek.
+// Portal Saya milik admin (Owner/HR/Finance). Menu karyawan punya susunan sendiri (lihat
+// EMPLOYEE_PORTAL_SAYA dan grup-grup di bawahnya).
 const PORTAL_SAYA_SUBMENU_BASE: NavNode[] = [
   { name: 'Dashboard Saya', href: '/portal' },
   { name: 'Klarifikasi Alpha', href: '/portal/alpha' },
@@ -51,37 +49,40 @@ const PORTAL_SAYA_SUBMENU_BASE: NavNode[] = [
   { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
 ]
 
-// Item "tentang saya" tambahan — CUMA dipakai untuk karyawan lewat buildPortalSayaSubmenu,
-// supaya Portal Saya milik admin (adminNavItems, pakai PORTAL_SAYA_SUBMENU_BASE langsung,
-// tanpa lewat sini) tidak ikut berubah.
-const EMPLOYEE_PORTAL_EXTRA: NavNode[] = [
-  { name: 'KPI Saya', href: '/portal/kpi-saya' },
-  { name: 'Kasbon', href: '/kasbon' },
-  { name: 'Aturan Potongan Gaji', href: '/potongan' },
+// Menu karyawan dikelompokkan per kebutuhan (permintaan Owner, Okt 2026): Portal Saya cuma
+// data & absensi pribadi; urusan uang, libur, pekerjaan harian, dan logistik masing-masing
+// punya grup sendiri — supaya sidebar tidak lagi berisi belasan item sejajar.
+const EMPLOYEE_PORTAL_SAYA: NavNode[] = [
+  { name: 'Profil Saya', href: '/portal/profil' },
+  { name: 'Jadwal Saya', href: '/portal/jadwal' },
+  { name: 'Rekap Absensi', href: '/portal/absensi' },
+  { name: 'Klarifikasi Alpha', href: '/portal/alpha' },
+  { name: 'Klaim Lembur', href: '/portal/lembur' },
 ]
 
-// Untuk karyawan, submenu Portal Saya dibangun ulang dari base: "Dashboard Saya" dibuang
-// (sudah naik jadi item top-level sendiri), "Ajukan Libur"/"Ganti Hari Libur"/"Kalender Libur"
-// dibuang (dipindah ke grup Cuti & Izin / top-level sendiri) — Portal Saya employee jadi
-// khusus menampung info & tindakan personal harian, bukan lagi campur dengan urusan libur.
-function buildPortalSayaSubmenu(isDriverOrKenek: boolean): NavNode[] {
-  const EXCLUDED = new Set(['Dashboard Saya', 'Ajukan Libur', 'Ganti Hari Libur', 'Kalender Libur'])
-  const base = PORTAL_SAYA_SUBMENU_BASE.filter(item => !EXCLUDED.has(item.name))
-  if (isDriverOrKenek) {
-    // Disisip persis setelah "Slip Gaji" — sama-sama halaman penghasilan, biar ketemu berdekatan.
-    base.splice(4, 0, { name: 'Pendapatan Ritase', href: '/portal/pendapatan-ritase' })
-  }
-  return [...base, ...EMPLOYEE_PORTAL_EXTRA]
+// "Pendapatan Ritase" cuma relevan untuk Driver/Kenek (gajinya lewat ritase, bukan cuma Slip Gaji).
+function buildGajiKasbonSubmenu(isDriverOrKenek: boolean): NavNode[] {
+  return [
+    { name: 'Slip Gaji', href: '/portal/slip-gaji' },
+    ...(isDriverOrKenek ? [{ name: 'Pendapatan Ritase', href: '/portal/pendapatan-ritase' }] : []),
+    { name: 'Kasbon', href: '/kasbon' },
+    { name: 'Aturan Potongan Gaji', href: '/potongan' },
+  ]
 }
 
-// Semua yang berhubungan dengan "tidak masuk kerja" (selain Kalender Libur, yang naik jadi
-// top-level sendiri) digabung di sini — sebelumnya pengajuannya tersebar di Portal Saya
-// sementara tab "Cuti & Izin" sendiri cuma berisi riwayat, tanpa cara mengajukan dari situ.
-const CUTI_IZIN_SUBMENU: NavNode[] = [
+// Semua yang berhubungan dengan "tidak masuk kerja" digabung di sini, termasuk Kalender Libur.
+const CUTI_LIBUR_SUBMENU: NavNode[] = [
+  { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
   { name: 'Ajukan Cuti / Izin', href: '/cuti/ajukan' },
   { name: 'Riwayat Cuti & Izin', href: '/cuti' },
   { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
   { name: 'Ganti Hari Libur', href: '/portal/ganti-libur' },
+]
+
+const PEKERJAAN_SUBMENU: NavNode[] = [
+  { name: 'Tugas & Laporan', href: '/tugas-harian' },
+  { name: 'Catatan Meeting', href: '/catatan-meeting' },
+  { name: 'Target Penjualan Promo', href: '/penjualan-promo' },
 ]
 
 // Dipakai bareng oleh adminNavItems DAN getEmployeeNavItems (untuk Kepala Gudang, yang
@@ -105,7 +106,6 @@ const LOGISTIK_SUBMENU: NavNode[] = [
 // Catatan Meeting, Manajemen User) sengaja TIDAK dipaksa masuk salah satu kelompok.
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
-  { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
   // Owner/HR/Finance juga karyawan (punya employee_id sendiri) — bukan cuma pengelola sistem.
   // Grup ini kasih mereka akses ke data pribadi sendiri (profil, slip gaji, absensi, jadwal),
   // sama seperti yang dilihat karyawan biasa di menu "Portal Saya".
@@ -115,7 +115,8 @@ const adminNavItems: NavNode[] = [
     icon: '👤',
     submenu: PORTAL_SAYA_SUBMENU_BASE
   },
-  { name: 'KPI Saya', href: '/portal/kpi-saya', icon: '📊' },
+  { name: 'Kinerja Saya', href: '/portal/kpi-saya', icon: '📊' },
+  { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
   {
     name: 'SDM / HR',
     href: '/karyawan',
@@ -271,76 +272,50 @@ const adminNavItems: NavNode[] = [
 // Menu untuk Karyawan (employee/supervisor) — sengaja TIDAK menyertakan Keuangan: RLS di
 // database sudah menolak akses role employee ke semua tabel fin_*/supplier_purchases, jadi
 // menampilkan menunya di sini cuma bikin karyawan buka halaman kosong tanpa penjelasan.
-// "Pengiriman Logistik" disisipkan lewat getEmployeeNavItems (bukan di sini) karena cuma
-// boleh muncul untuk karyawan yang Driver/Kenek (employees.can_drive/can_help) — bukan
-// berdasarkan role, karena Driver/Kenek di tabel users tetap ber-role 'employee' biasa.
-const employeeNavItems: NavNode[] = [
-  { name: 'Dashboard Saya', href: '/portal', icon: '🏠' },
-  { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
-  {
-    name: 'Portal Saya',
-    href: '/portal',
-    icon: '👤',
-    submenu: PORTAL_SAYA_SUBMENU_BASE // diganti isinya lewat buildPortalSayaSubmenu di bawah
-  },
-  { name: 'Kalender Libur', href: '/absensi/kalender-libur', icon: '📅' },
-  {
-    name: 'Cuti & Izin',
-    href: '/cuti',
-    icon: '🗓️',
-    submenu: CUTI_IZIN_SUBMENU
-  },
-  { name: 'Catatan Meeting', href: '/catatan-meeting', icon: '📝' },
-  { name: 'Tugas & Laporan', href: '/tugas-harian', icon: '📋' },
-  { name: 'Target Penjualan Promo', href: '/penjualan-promo', icon: '🎯' },
-]
-
-function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isTokoPusat: boolean, isStoreBranchStaff: boolean): NavNode[] {
-  // "Pendapatan Ritase" (submenu Portal Saya) cuma relevan buat Driver/Kenek -- item dasarnya
-  // (index 0,1) tetap dipakai apa adanya, cuma Portal Saya (index 2) yang dibangun ulang di sini.
-  const baseItems = [
-    employeeNavItems[0], employeeNavItems[1],
-    { ...employeeNavItems[2], submenu: buildPortalSayaSubmenu(isDriverOrKenek) },
-    ...employeeNavItems.slice(3),
+// Grup "Logistik" disusun per karyawan (jabatan/cabang, bukan role — Driver/Kenek & staf toko
+// di tabel users tetap ber-role 'employee' biasa) dan cuma muncul kalau ada isinya.
+function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isReturRecipient: boolean, isStoreBranchStaff: boolean): NavNode[] {
+  const items: NavNode[] = [
+    { name: 'Dashboard Saya', href: '/portal', icon: '🏠' },
+    { name: 'Portal Saya', href: '/portal/profil', icon: '👤', submenu: EMPLOYEE_PORTAL_SAYA },
+    { name: 'Kinerja Saya', href: '/portal/kpi-saya', icon: '📊' },
+    { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
+    { name: 'Gaji & Kasbon', href: '/portal/slip-gaji', icon: '💰', submenu: buildGajiKasbonSubmenu(isDriverOrKenek) },
+    { name: 'Cuti & Libur', href: '/cuti', icon: '🗓️', submenu: CUTI_LIBUR_SUBMENU },
+    { name: 'Pekerjaan', href: '/tugas-harian', icon: '📋', submenu: PEKERJAAN_SUBMENU },
   ]
 
   // Kepala Gudang dapat submenu LENGKAP (sama seperti admin) karena dia yang bikin Rencana
-  // Pengiriman & kelola Master Toko — bukan cuma jalankan trip seperti driver/kenek. Dicek
-  // duluan sebelum isDriverOrKenek supaya kalau kebetulan Kepala Gudang juga ditandai
-  // can_drive/can_help, dia tetap dapat menu lengkap, bukan cuma link tunggal.
+  // Pengiriman & kelola Master Toko. Selain dia, isi grup disusun dari peran masing-masing —
+  // tidak saling eksklusif (jarang, tapi Driver/Kenek bisa juga staf toko), jadi dicek
+  // independen lalu dibuang yang dobel.
+  let logistik: NavNode[]
   if (isKepalaGudang) {
-    return [
-      ...baseItems.slice(0, 3),
-      { name: 'Pengiriman Logistik', href: '/logistik/toko', icon: '🚚', submenu: LOGISTIK_SUBMENU },
-      ...baseItems.slice(3),
-    ]
+    logistik = LOGISTIK_SUBMENU
+  } else {
+    logistik = []
+    if (isDriverOrKenek) {
+      // Cuma aplikasi lapangan — RLS di halaman itu sendiri sudah membatasi datanya ke
+      // rencana milik driver/kenek yang bersangkutan.
+      logistik.push({ name: 'Jalankan Pengiriman', href: '/logistik/jalan' })
+      logistik.push({ name: 'Jemput Barang Cabang', href: '/logistik/jemput-toko-pusat' })
+    }
+    // Laporan Muat, Kirim Barang & Order Grooming: staf cabang toko (migrasi 068/070).
+    if (isStoreBranchStaff) {
+      logistik.push({ name: 'Laporan Muat', href: '/logistik/laporan-muat' })
+      logistik.push({ name: 'Kirim Barang', href: '/logistik/kirim-barang' })
+      logistik.push({ name: 'Order Grooming', href: '/logistik/grooming' })
+    }
+    // Penerimaan Retur: cuma karyawan yang cabangnya jadi tujuan retur (migrasi 081).
+    if (isReturRecipient) {
+      logistik.push({ name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur' })
+    }
+    logistik = logistik.filter((n, i) => logistik.findIndex(m => m.href === n.href) === i)
   }
-  // Driver/Kenek & Team Toko Pusat bukan posisi yang saling eksklusif (jarang, tapi bisa
-  // keduanya) — jadi link masing-masing disisipkan independen, bukan if/else berantai.
-  const extraLinks: NavNode[] = []
-  if (isDriverOrKenek) {
-    // Disisip setelah Portal Saya, cuma link ke aplikasi lapangan (bukan submenu admin
-    // lengkap seperti Dashboard/Rencana/Laporan/Master Toko) — RLS di halaman itu sendiri
-    // sudah membatasi datanya ke rencana milik driver/kenek yang bersangkutan.
-    extraLinks.push({ name: 'Pengiriman Logistik', href: '/logistik/jalan', icon: '🚚' })
-    extraLinks.push({ name: 'Jemput Barang Cabang', href: '/logistik/jemput-toko-pusat', icon: '📦' })
+  if (logistik.length > 0) {
+    items.push({ name: 'Logistik', href: logistik[0].href, icon: '🚚', submenu: logistik })
   }
-  // Laporan Muat & Kirim Barang: staf 4 cabang toko (migrasi 068). Penerimaan Retur masih
-  // khusus Toko Pusat (di luar scope multi-cabang).
-  if (isStoreBranchStaff) {
-    extraLinks.push({ name: 'Laporan Muat', href: '/logistik/laporan-muat', icon: '📦' })
-    extraLinks.push({ name: 'Kirim Barang', href: '/logistik/kirim-barang', icon: '🛵' })
-    extraLinks.push({ name: 'Order Grooming', href: '/logistik/grooming', icon: '✂️' })
-  }
-  if (isTokoPusat) {
-    extraLinks.push({ name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur', icon: '↩️' })
-  }
-  if (extraLinks.length === 0) return baseItems
-  return [
-    ...baseItems.slice(0, 3),
-    ...extraLinks,
-    ...baseItems.slice(3),
-  ]
+  return items
 }
 
 type SidebarProps = {
@@ -359,7 +334,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [previewMode, setPreviewModeState] = useState(false)
   const [isDriverOrKenek, setIsDriverOrKenek] = useState(false)
   const [isKepalaGudang, setIsKepalaGudang] = useState(false)
-  const [isTokoPusat, setIsTokoPusat] = useState(false)
+  const [isReturRecipient, setIsReturRecipient] = useState(false)
   const [isStoreBranchStaff, setIsStoreBranchStaff] = useState(false)
   const [meetingBadge, setMeetingBadge] = useState(0)
   const [dailyTaskBadge, setDailyTaskBadge] = useState(0)
@@ -464,7 +439,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
               const submitted = mine ? mine.approved_count + mine.pending_count : DAYOFF_QUOTA_PER_PERIOD
               setLiburBadge(Math.max(0, DAYOFF_QUOTA_PER_PERIOD - submitted))
             })
-            supabase.from('employees').select('employee_type, can_drive, can_help, branch_id, departments(name), positions(name), branches(name)').eq('id', effectiveEmployeeId).single().then(({ data: emp }) => {
+            supabase.from('employees').select('employee_type, can_drive, can_help, branch_id, departments(name), positions(name)').eq('id', effectiveEmployeeId).single().then(({ data: emp }) => {
               if (emp) {
                 // Driver "asli" (employee_type='driver') belum tentu punya can_drive=true —
                 // kolom itu dibuat belakangan khusus untuk menandai karyawan LAIN yang bisa
@@ -477,13 +452,16 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                 // sekali, jadi Helper Gudang biasa (can_help masih false) tidak lolos di sini
                 // walau sudah lolos di halaman lain (kasus nyata: Riki Yusdinar Pahas).
                 const dept = Array.isArray((emp as any).departments) ? (emp as any).departments[0] : (emp as any).departments
-                const branch = Array.isArray((emp as any).branches) ? (emp as any).branches[0] : (emp as any).branches
                 setIsDriverOrKenek(emp.employee_type === 'driver' || !!emp.can_drive || !!emp.can_help || dept?.name === 'Team Gudang')
                 setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
-                setIsTokoPusat(branch?.name === 'Toko Pusat')
                 if (emp.branch_id) {
                   supabase.from('logistics_store_branches').select('branch_id').eq('branch_id', emp.branch_id).maybeSingle()
                     .then(({ data: sb }) => setIsStoreBranchStaff(!!sb))
+                  // Penerimaan Retur cuma untuk cabang yang pernah/sedang jadi tujuan retur --
+                  // syarat yang sama dipakai halaman /logistik/penerimaan-retur.
+                  supabase.from('logistics_store_returns').select('id', { count: 'exact', head: true })
+                    .eq('recipient_branch_id', emp.branch_id)
+                    .then(({ count }) => setIsReturRecipient((count ?? 0) > 0))
                 }
               }
             })
@@ -498,24 +476,27 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // tombol toggle preview itu sendiri, supaya karyawan asli tidak bisa iseng balik ke menu admin.
   const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
   const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
-  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isTokoPusat, isStoreBranchStaff) : adminNavItems
+  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isReturRecipient, isStoreBranchStaff) : adminNavItems
 
   // Angka merah di submenu (beda dari meetingBadge/dailyTaskBadge yang nempel di item
   // top-level) -- dicocokkan lewat href, bukan nama, supaya tetap ketemu walau labelnya
   // beda posisi (Klarifikasi Alpha, Klaim Lembur, Ajukan Libur, dst.).
+  // Catatan Meeting & Tugas & Laporan ikut di sini karena di menu karyawan keduanya ada di
+  // dalam grup Pekerjaan (di menu admin tetap top-level, badge-nya lewat render di bawah).
   const subBadgeByHref: Record<string, number> = {
     '/portal/alpha': alphaBadge,
     '/portal/lembur': lemburBadge,
     '/portal/ajukan-libur': liburBadge,
     '/logistik/kirim-barang': kirimBarangBadge,
     '/logistik/grooming': groomingBadge,
-  }
-  // Badge di item top-level (link tunggal driver/Toko Pusat).
-  const topBadgeByHref: Record<string, number> = {
-    '/logistik/kirim-barang': kirimBarangBadge,
-    '/logistik/grooming': groomingBadge,
     '/logistik/jemput-toko-pusat': jemputBadge,
+    '/catatan-meeting': meetingBadge,
+    '/tugas-harian': dailyTaskBadge,
   }
+  // Grup yang sedang tertutup menampilkan total angka merah isinya, supaya tugas yang
+  // menunggu tetap kelihatan walau menunya dilipat.
+  const groupBadge = (item: NavNode) =>
+    (item.submenu || []).reduce((sum, sub) => sum + (sub.submenu ? 0 : subBadgeByHref[sub.href] || 0), 0)
 
   function togglePreview() {
     const next = !previewMode
@@ -532,7 +513,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     || pathname === '/keuangan/pembelian' || pathname.startsWith('/kasbon')
 
   // Kalender Libur secara URL ada di bawah /absensi/*, tapi menunya sengaja dipindah ke
-  // grup Portal Saya (bisa dilihat semua orang) — jadi dikecualikan dari trigger auto-expand
+  // grup Portal Saya / Cuti & Libur (bisa dilihat semua orang) — jadi dikecualikan dari trigger auto-expand
   // grup SDM/HR & Absensi supaya tidak salah expand grup yang tidak punya item aktif.
   const inKalenderLibur = pathname.startsWith('/absensi/kalender-libur')
 
@@ -560,9 +541,13 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
       || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
 
     'Portal Saya': pathname.startsWith('/portal') || inKalenderLibur,
-    // Hanya relevan untuk menu karyawan (grup ini tidak ada di adminNavItems) — Ajukan
-    // Libur & Ganti Hari Libur kini tampil di sini, bukan lagi di dalam Portal Saya.
-    'Cuti & Izin': pathname.startsWith('/cuti') || pathname.startsWith('/portal/ajukan-libur') || pathname.startsWith('/portal/ganti-libur'),
+    // Grup di bawah ini hanya ada di menu karyawan (lihat getEmployeeNavItems).
+    'Gaji & Kasbon': pathname.startsWith('/portal/slip-gaji') || pathname.startsWith('/portal/pendapatan-ritase')
+      || pathname.startsWith('/kasbon') || pathname.startsWith('/potongan'),
+    'Cuti & Libur': pathname.startsWith('/cuti') || pathname.startsWith('/portal/ajukan-libur')
+      || pathname.startsWith('/portal/ganti-libur') || inKalenderLibur,
+    'Pekerjaan': pathname.startsWith('/tugas-harian') || pathname.startsWith('/catatan-meeting') || pathname.startsWith('/penjualan-promo'),
+    'Logistik': pathname.startsWith('/logistik'),
   }
 
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(defaultOpen)
@@ -624,8 +609,13 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                         <span className="text-lg">{item.icon}</span>
                         {item.name}
                       </div>
+                      {!openMenus[item.name] && groupBadge(item) > 0 && (
+                        <span className="ml-auto mr-2 inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
+                          {groupBadge(item) > 99 ? '99+' : groupBadge(item)}
+                        </span>
+                      )}
                       <svg
-                        className={`w-4 h-4 transition-transform ${openMenus[item.name] ? 'rotate-180' : ''}`}
+                        className={`w-4 h-4 shrink-0 transition-transform ${openMenus[item.name] ? 'rotate-180' : ''}`}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor"
                       >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -723,11 +713,6 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                     {item.href === '/tugas-harian' && dailyTaskBadge > 0 && (
                       <span className="ml-auto inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
                         {dailyTaskBadge > 99 ? '99+' : dailyTaskBadge}
-                      </span>
-                    )}
-                    {(topBadgeByHref[item.href] || 0) > 0 && (
-                      <span className="ml-auto inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
-                        {topBadgeByHref[item.href] > 99 ? '99+' : topBadgeByHref[item.href]}
                       </span>
                     )}
                   </Link>

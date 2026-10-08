@@ -36,6 +36,7 @@ export default function PenerimaanReturPage() {
   // tetap di RPC receive_store_return (cek cabang vs recipient_branch_id, atau Owner).
   const [isOwner, setIsOwner] = useState(false)
   const [myBranchId, setMyBranchId] = useState<string | null>(null)
+  const [scopeBranch, setScopeBranch] = useState<string | null>(null)
 
   const [pending, setPending] = useState<ReturnRow[]>([])
   const [history, setHistory] = useState<ReturnRow[]>([])
@@ -48,8 +49,10 @@ export default function PenerimaanReturPage() {
     setTimeout(() => setMessage(null), 6000)
   }
 
-  const fetchReturns = useCallback(async () => {
-    const { data } = await supabase.from('logistics_store_returns')
+  // onlyBranch: karyawan biasa cuma melihat retur yang ditujukan ke cabangnya sendiri;
+  // Owner/HR/Finance & Kepala Gudang (pengawas) melihat semua (null).
+  const fetchReturns = useCallback(async (onlyBranch: string | null) => {
+    let q = supabase.from('logistics_store_returns')
       .select(`
         id, note, final_photo_url, final_location_note, received_by, received_at, received_photo_url, recipient_branch_id, no_items_reason,
         logistics_stores(name), branches(name),
@@ -57,7 +60,8 @@ export default function PenerimaanReturPage() {
         receiver:employees!logistics_store_returns_received_by_fkey(full_name)
       `)
       .eq('status', 'selesai')
-      .order('finished_at', { ascending: false })
+    if (onlyBranch) q = q.eq('recipient_branch_id', onlyBranch)
+    const { data } = await q.order('finished_at', { ascending: false })
     const rows = (data as unknown as ReturnRow[]) || []
     // Retur "toko tidak ada barang" tidak ada yang diserahterimakan -- langsung masuk riwayat.
     setPending(rows.filter(r => !r.received_at && !r.no_items_reason))
@@ -85,20 +89,35 @@ export default function PenerimaanReturPage() {
       if (user) {
         const { data: userData } = await supabase.from('users').select('role, employee_id').eq('id', user.id).single()
         if (userData) {
-          if (userData.role === 'owner') { setIsOwner(true); setCanView(true) }
-          else if (userData.employee_id) {
+          if (userData.role === 'owner') setIsOwner(true)
+          let overseer = ['owner', 'hr', 'finance'].includes(userData.role)
+          let branchId: string | null = null
+          if (userData.employee_id) {
             const { data: emp } = await supabase.from('employees')
-              .select('full_name, branch_id, positions(name), branches(name)')
+              .select('full_name, branch_id, positions(name)')
               .eq('id', userData.employee_id).single()
             setMyName((emp as any)?.full_name || '')
-            setMyBranchId((emp as any)?.branch_id || null)
-            const posName = (emp as any)?.positions?.name
-            const branchName = (emp as any)?.branches?.name
-            setCanView(posName === 'Kepala Gudang' || branchName === 'Toko Pusat')
+            branchId = (emp as any)?.branch_id || null
+            setMyBranchId(branchId)
+            if ((emp as any)?.positions?.name === 'Kepala Gudang') overseer = true
+          }
+          if (overseer) {
+            setCanView(true)
+            setScopeBranch(null)
+            await fetchReturns(null)
+          } else if (branchId) {
+            // Karyawan biasa: hanya kalau cabangnya pernah/sedang jadi tujuan retur -- syarat
+            // yang sama dengan munculnya menu ini di sidebar.
+            const { count } = await supabase.from('logistics_store_returns')
+              .select('id', { count: 'exact', head: true }).eq('recipient_branch_id', branchId)
+            if ((count ?? 0) > 0) {
+              setCanView(true)
+              setScopeBranch(branchId)
+              await fetchReturns(branchId)
+            }
           }
         }
       }
-      await fetchReturns()
       setLoading(false)
     }
     init()
@@ -120,7 +139,7 @@ export default function PenerimaanReturPage() {
     setReceivingId(null)
     if (error) { showMessage('error', 'Gagal konfirmasi penerimaan: ' + error.message); return }
     showMessage('success', `Retur "${r.logistics_stores?.name}" berhasil ditandai diterima.`)
-    await fetchReturns()
+    await fetchReturns(scopeBranch)
   }
 
   if (loading) return <div className="text-center py-12 text-slate-500">Memuat...</div>
@@ -138,7 +157,7 @@ export default function PenerimaanReturPage() {
 
       {!canView ? (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
-          Halaman ini khusus Kepala Gudang, Owner, atau Team Toko Pusat.
+          Halaman ini khusus karyawan cabang tujuan retur, Kepala Gudang, atau Owner/HR/Finance.
         </div>
       ) : (
         <>

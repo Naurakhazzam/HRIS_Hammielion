@@ -362,7 +362,7 @@ export default function OrderGroomingPage() {
     const assignee = (leg === 'jemput' ? o.pickup_emp?.full_name : o.delivery_emp?.full_name) ?? '-'
     const assigneeId = leg === 'jemput' ? o.pickup_assignee : o.delivery_assignee
     const groomBranchName = o.groom_branch?.name ?? 'cabang grooming'
-    const canManage = staffOf(o) || isCreator(o)
+    const canManage = me.isOwner || isCreator(o)
     const ready = leg === 'jemput' ? o.status === 'menunggu' : o.status === 'siap'
     const canEmergency = (me.isOwner || isCreator(o)) && ready && !inTrip
     const reasonKey = `${leg}-${o.id}`
@@ -432,9 +432,11 @@ export default function OrderGroomingPage() {
     const total = cats.reduce((s, c) => s + Number(c.price), 0)
     const sinceArrive = o.arrived_at ? now - ms(o.arrived_at) : 0
     const waitLeft = Math.max(0, MIN_STEP_MS - sinceArrive)
-    const canCancel = o.status !== 'batal' && (me.isOwner || isCreator(o) || (me.isStoreStaff && me.branchId === o.branch_id)) && (o.status !== 'selesai' || me.isOwner)
+    // Ubah order (batal, ganti groomer, koreksi harga) cuma pembuat order / Owner (migrasi 081) --
+    // staf cabang lain cukup foto tahapan (sampai, selesai, serah terima).
+    const canCancel = o.status !== 'batal' && (me.isOwner || isCreator(o)) && (o.status !== 'selesai' || me.isOwner)
     const canEditPrice = o.status !== 'batal' && (me.isOwner || isCreator(o))
-    const canChangeGroomer = ['menunggu', 'dikerjakan'].includes(o.status) && (staffOf(o) || isCreator(o))
+    const canChangeGroomer = ['menunggu', 'dikerjakan'].includes(o.status) && (me.isOwner || isCreator(o))
     const groomBranchName = o.groom_branch?.name ?? 'cabang grooming'
     const jemputStop = o.trip_stops.find(s => s.kind === 'jemput_kucing' && !s.cancelled_at)
     const serahAuto = o.trip_stops.some(s => s.kind === 'serah_kucing' && !s.cancelled_at && s.auto_on_return)

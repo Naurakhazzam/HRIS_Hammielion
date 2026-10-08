@@ -101,7 +101,7 @@ export default function PortalKpiSayaPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">📊 KPI Saya</h1>
+        <h1 className="text-2xl font-bold text-slate-800 mb-1">📊 Kinerja Saya</h1>
         <p className="text-sm text-slate-500">Halo, <strong>{myName}</strong>. Ini rincian penilaian kinerja Anda periode ini.</p>
       </div>
 
