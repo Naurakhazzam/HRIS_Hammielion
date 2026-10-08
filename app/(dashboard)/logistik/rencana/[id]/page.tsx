@@ -21,6 +21,7 @@ type Plan = {
 }
 
 type Employee = { id: string; full_name: string }
+type PermRow = Employee & { departments: { name: string } | { name: string }[] | null }
 
 type PlanStore = {
   id: string
@@ -168,11 +169,11 @@ export default function RencanaDetailPage() {
     const { data: helperDrivers } = await supabase.from('employees').select('id, full_name')
       .eq('employee_type', 'driver').eq('can_help', true).eq('is_active', true)
     if (allPerm) {
-      const gudangWorkers = (allPerm as any[]).filter(pw => {
+      const gudangWorkers = (allPerm as unknown as PermRow[]).filter(pw => {
         const dept = Array.isArray(pw.departments) ? pw.departments[0] : pw.departments
         return dept?.name === 'Team Gudang'
       })
-      const toEmployee = (arr: any[]) => arr.map(pw => ({ id: pw.id, full_name: pw.full_name }))
+      const toEmployee = (arr: Employee[]) => arr.map(pw => ({ id: pw.id, full_name: pw.full_name }))
       const base = gudangWorkers.length > 0 ? toEmployee(gudangWorkers) : toEmployee(allPerm)
       setHelpers([...base, ...(helperDrivers || [])])
     }
@@ -190,7 +191,7 @@ export default function RencanaDetailPage() {
           if (userData.role === 'owner') setCanManage(true)
           else if (userData.employee_id) {
             const { data: emp } = await supabase.from('employees').select('positions(name)').eq('id', userData.employee_id).single()
-            setCanManage((emp as any)?.positions?.name === 'Kepala Gudang')
+            setCanManage((emp as unknown as { positions: { name: string } | null } | null)?.positions?.name === 'Kepala Gudang')
           }
         }
       }
@@ -409,7 +410,7 @@ export default function RencanaDetailPage() {
 
         {hasRateConfig === false && (
           <p className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-            ⚠ Tarif untuk kombinasi Mobil + Ritase ini belum disetup — rencana tidak bisa ditandai "Siap Kirim" sampai tarifnya diatur di Penggajian Driver → Tarif &amp; Mobil Driver.
+            ⚠ Tarif untuk kombinasi Mobil + Ritase ini belum disetup — rencana tidak bisa ditandai &quot;Siap Kirim&quot; sampai tarifnya diatur di Penggajian Driver → Tarif &amp; Mobil Driver.
           </p>
         )}
       </div>
@@ -523,7 +524,7 @@ export default function RencanaDetailPage() {
               className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 whitespace-nowrap">+ Tambah Tugas</button>
           </form>
           {availableSupplierRoutes.length === 0 && supplierRoutes.length === 0 && (
-            <p className="text-xs text-slate-400 mt-2">Belum ada rute "Belanja" di Master Rute. <Link href="/penggajian/driver/setup" className="text-blue-600 hover:underline">Tambah dulu di sini</Link>.</p>
+            <p className="text-xs text-slate-400 mt-2">Belum ada rute &quot;Belanja&quot; di Master Rute. <Link href="/penggajian/driver/setup" className="text-blue-600 hover:underline">Tambah dulu di sini</Link>.</p>
           )}
         </div>
       )}

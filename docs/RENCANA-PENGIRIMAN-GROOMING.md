@@ -180,7 +180,8 @@ Baca dulu sebelum mengubah apa pun:
 ### Keputusan
 - Pelanggan grooming disimpan di **tabel yang sama** dengan Master Toko (`logistics_stores`),
   diberi label **jenis: `toko` | `pelanggan`**. Data lama = `toko`.
-- Rencana Pengiriman driver (dan pilihan toko lain milik gudang) hanya menampilkan `toko`.
+- ~~Rencana Pengiriman driver (dan pilihan toko lain milik gudang) hanya menampilkan `toko`.~~
+  **Dibatalkan 8 Okt 2026 (migrasi 079)**: pelanggan boleh lewat semua jalur pengiriman.
   Order grooming bisa pilih keduanya.
 - **Nomor HP wajib** saat dipakai di order grooming: kalau pelanggan yang dipilih belum punya
   nomor → wajib diisi dulu (tersimpan ke Master Toko). Nomor dinormalisasi (08xx / 62xx → satu
@@ -205,8 +206,10 @@ Baca dulu sebelum mengubah apa pun:
 - **Unik hanya antar pelanggan** (`logistics_stores_pelanggan_phone_uniq`), bukan semua baris:
   beberapa toko sah berbagi nomor pemilik (Sulung Ps ×3, Koinami/Milan). Pelanggan **wajib** nomor.
   Nama pelanggan boleh sama (dibedakan nomor).
-- Trigger `guard_store_kind_toko` menolak pelanggan di `logistics_plan_stores` &
-  `logistics_central_loadings`. UI Rencana & Laporan Muat filter `kind = 'toko'`.
+- ~~Trigger `guard_store_kind_toko` menolak pelanggan di `logistics_plan_stores` &
+  `logistics_central_loadings`. UI Rencana & Laporan Muat filter `kind = 'toko'`.~~
+  **Sudah dicabut (migrasi 079)**: trigger dihapus; Rencana & Laporan Muat menampilkan Toko +
+  Pelanggan (label "Nama · Pelanggan 08xx"). Tugas Ambil Retur tetap khusus Toko.
 - `quick_create_logistics_store(p_name, p_address, p_phone, p_kind default 'toko')` — untuk
   pelanggan: nomor wajib, alamat opsional, cek dobel lewat nomor (bukan nama).
 - RPC `set_logistics_store_phone(p_store_id, p_phone)` → staf 4 cabang boleh isi nomor yang
