@@ -16,6 +16,9 @@ import { signedPhotoUrls } from '@/lib/meeting'
 //   ③ 📸 selesai grooming per kucing oleh groomernya (atau Paksa Lanjut oleh pembuat order/Owner
 //     untuk groomer tanpa akun, mis. Elan) -> semua selesai = SIAP
 //   ④ 📸 serah terima ke pelanggan -> SELESAI
+// Lintas cabang (migrasi 080, mis. Toko Depan -> Toko Pusat): ② difoto staf cabang PENGERJA saat
+// mengambil kucing; kalau diambil sendiri, kucing diantar balik lalu 📸 diterima staf cabang
+// PENERIMA, baru 📸 serah terima ke pelanggan di cabang penerima.
 // Perjalanan jemput/antar (trip 3 foto) menyusul di Fase 4; sementara ini ② dan ④ cukup foto.
 // Semua waktu dari jam server; tulis lewat RPC.
 
@@ -48,11 +51,11 @@ type Order = {
   notes: string | null; status: 'menunggu' | 'dikerjakan' | 'siap' | 'selesai' | 'batal'
   created_by: string | null; created_at: string
   arrived_at: string | null; arrived_photo_url: string | null
-  ready_at: string | null; handover_at: string | null; handover_photo_url: string | null
+  ready_at: string | null; returned_at: string | null; returned_photo_url: string | null; handover_at: string | null; handover_photo_url: string | null
   cancelled_at: string | null; cancel_reason: string | null; status_before_cancel: string | null
   branch: { name: string } | null; groom_branch: { name: string } | null
   customer: { name: string; phone: string | null; address: string | null; kind: string } | null
-  creator: NameRel; pickup_emp: NameRel; delivery_emp: NameRel; arriver: NameRel; handover_emp: NameRel; canceller: NameRel
+  creator: NameRel; pickup_emp: NameRel; delivery_emp: NameRel; arriver: NameRel; handover_emp: NameRel; returner: NameRel; canceller: NameRel
   arrived_forced_reason: string | null; handover_forced_reason: string | null
   grooming_order_cats: Cat[]
   trip_stops: TripStopRel[]
@@ -69,7 +72,7 @@ type TripStopRel = {
 const ORDER_SELECT = `
   id, branch_id, groom_branch_id, nota_number, receipt_photo_url, arrival_mode, return_mode,
   pickup_ongkir, pickup_assignee, delivery_ongkir, delivery_assignee, notes, status, created_by, created_at,
-  arrived_at, arrived_photo_url, ready_at, handover_at, handover_photo_url, cancelled_at, cancel_reason, status_before_cancel,
+  arrived_at, arrived_photo_url, ready_at, returned_at, returned_photo_url, handover_at, handover_photo_url, cancelled_at, cancel_reason, status_before_cancel,
   arrived_forced_reason, handover_forced_reason,
   trip_stops:logistics_tp_trip_stops(id, kind, arrived_at, arrived_photo_url, cancelled_at, auto_on_return,
     logistics_tp_trips(status, pj:employees!logistics_tp_trips_pj_id_fkey(full_name))),
@@ -87,6 +90,7 @@ const ORDER_SELECT = `
   delivery_emp:employees!grooming_orders_delivery_assignee_fkey(full_name),
   arriver:employees!grooming_orders_arrived_by_fkey(full_name),
   handover_emp:employees!grooming_orders_handover_by_fkey(full_name),
+  returner:employees!grooming_orders_returned_by_fkey(full_name),
   canceller:employees!grooming_orders_cancelled_by_fkey(full_name),
   grooming_order_cats(id, seq, cat_name, price, groomer_id, finished_at, finished_photo_url, forced_reason, groomer_changed_after_start,
     groomer:employees!grooming_order_cats_groomer_id_fkey(full_name),
@@ -316,6 +320,8 @@ export default function OrderGroomingPage() {
   }
 
   const staffOf = (o: Order) => me.isOwner || (me.isStoreStaff && !!me.branchId && (me.branchId === o.branch_id || me.branchId === o.groom_branch_id))
+  // Staf yang secara fisik berada di cabang itu (foto sampai / terima kembali / serah terima).
+  const atBranch = (id: string) => me.isOwner || (me.isStoreStaff && !!me.branchId && me.branchId === id)
   const isCreator = (o: Order) => !!me.empId && o.created_by === me.empId
 
   // Kucing yang perlu aksi saya (badge).
@@ -432,6 +438,9 @@ export default function OrderGroomingPage() {
     const groomBranchName = o.groom_branch?.name ?? 'cabang grooming'
     const jemputStop = o.trip_stops.find(s => s.kind === 'jemput_kucing' && !s.cancelled_at)
     const serahAuto = o.trip_stops.some(s => s.kind === 'serah_kucing' && !s.cancelled_at && s.auto_on_return)
+    const branchName = o.branch?.name ?? 'cabang penerima'
+    const crossBranch = o.branch_id !== o.groom_branch_id
+    const awaitingReturn = crossBranch && o.status === 'siap' && o.return_mode === 'ambil_sendiri' && !o.returned_at
 
     const header = (
       <div className="flex items-start justify-between gap-2">
@@ -445,7 +454,7 @@ export default function OrderGroomingPage() {
             {o.branch?.name}{o.groom_branch_id !== o.branch_id && <> → dikerjakan di <b>{groomBranchName}</b></>} · {fmtDateTime(o.created_at)}
           </p>
         </div>
-        <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-semibold ${st.cls}`}>{st.label}</span>
+        <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-semibold ${st.cls}`}>{awaitingReturn ? `Kembali ke ${branchName}` : st.label}</span>
       </div>
     )
 
@@ -569,9 +578,16 @@ export default function OrderGroomingPage() {
         )}
 
         {/* Aksi tahap order */}
-        {o.status === 'menunggu' && o.arrival_mode === 'datang_sendiri' && staffOf(o) && (
+        {o.status === 'menunggu' && o.arrival_mode === 'datang_sendiri' && !atBranch(o.groom_branch_id) && staffOf(o) && (
+          <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">
+            📍 Kucing ada di {branchName}, menunggu diambil staf {groomBranchName}. Foto kucing sampai diambil oleh staf {groomBranchName}.
+          </p>
+        )}
+        {o.status === 'menunggu' && o.arrival_mode === 'datang_sendiri' && atBranch(o.groom_branch_id) && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-            <p className="text-sm font-semibold text-amber-900">📍 Kucing sudah sampai di {groomBranchName}?</p>
+            <p className="text-sm font-semibold text-amber-900">
+              📍 {crossBranch ? `Ambil kucing di ${branchName}, foto saat sampai di ${groomBranchName}.` : `Kucing sudah sampai di ${groomBranchName}?`}
+            </p>
             {busy ? <p className="text-xs text-slate-500 text-center py-1">Mengirim...</p> : (
               <LogisticsCameraCapture label={`Kucing Sampai di ${groomBranchName}`} employeeName={me.name} maxFileAgeMs={MAX_FILE_AGE_MS}
                 onCaptured={blob => photoAction(`arrive-${o.id}`, blob, o.id, 'sampai', 'mark_grooming_arrived',
@@ -580,10 +596,37 @@ export default function OrderGroomingPage() {
           </div>
         )}
         {o.arrival_mode === 'jemput' && ['menunggu', 'dikerjakan', 'siap'].includes(o.status) && renderLeg(o, 'jemput')}
-        {o.status === 'siap' && o.return_mode === 'ambil_sendiri' && staffOf(o) && (
+        {o.returned_photo_url && o.returned_at && (
+          <PhotoRow label={`📸 Diterima kembali di ${branchName}`} url={o.returned_photo_url} at={o.returned_at}
+            extra={o.returner?.full_name ?? undefined} onOpen={openLightbox} />
+        )}
+        {awaitingReturn && !atBranch(o.branch_id) && staffOf(o) && (
+          <p className="text-xs bg-purple-50 border border-purple-200 text-purple-800 rounded-lg px-3 py-2">
+            🎀 Semua kucing selesai{o.ready_at ? ` (${fmtDateTime(o.ready_at)})` : ''}. Antar kembali ke {branchName} — staf {branchName} yang memfoto saat menerima.
+          </p>
+        )}
+        {awaitingReturn && atBranch(o.branch_id) && (
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
             <p className="text-sm font-semibold text-purple-900">
-              🎀 Semua kucing selesai{o.ready_at ? ` (${fmtDateTime(o.ready_at)})` : ''}. Diambil sendiri oleh pelanggan.
+              🎀 Semua kucing selesai{o.ready_at ? ` (${fmtDateTime(o.ready_at)})` : ''} di {groomBranchName}.
+            </p>
+            <p className="text-xs text-purple-800">Foto saat kucing diterima kembali dari {groomBranchName} di {branchName}.</p>
+            {busy ? <p className="text-xs text-slate-500 text-center py-1">Mengirim...</p> : (
+              <LogisticsCameraCapture label={`Terima Kucing di ${branchName}`} employeeName={me.name} maxFileAgeMs={MAX_FILE_AGE_MS}
+                onCaptured={blob => photoAction(`return-${o.id}`, blob, o.id, 'kembali', 'mark_grooming_returned',
+                  url => ({ p_order_id: o.id, p_photo_url: url }), `Kucing diterima di ${branchName}. Siap diambil pelanggan.`)} />
+            )}
+          </div>
+        )}
+        {o.status === 'siap' && o.return_mode === 'ambil_sendiri' && !awaitingReturn && !atBranch(o.branch_id) && staffOf(o) && (
+          <p className="text-xs bg-purple-50 border border-purple-200 text-purple-800 rounded-lg px-3 py-2">
+            🎀 Siap diambil pelanggan di {branchName}.
+          </p>
+        )}
+        {o.status === 'siap' && o.return_mode === 'ambil_sendiri' && !awaitingReturn && atBranch(o.branch_id) && (
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+            <p className="text-sm font-semibold text-purple-900">
+              🎀 Semua kucing selesai{o.ready_at ? ` (${fmtDateTime(o.ready_at)})` : ''}. Diambil sendiri oleh pelanggan{crossBranch ? ` di ${branchName}` : ''}.
             </p>
             <p className="text-xs text-purple-800">Foto saat kucing diserahkan ke pelanggan.</p>
             {busy ? <p className="text-xs text-slate-500 text-center py-1">Mengirim...</p> : (

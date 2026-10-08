@@ -24,6 +24,10 @@ Bahasa ke user: **Bahasa Indonesia**.
   Pengiriman). Pengaman jenis dari 069/077 dicabut (migrasi `077_pelanggan_antar_sendiri.sql`,
   `079_pelanggan_semua_jalur.sql`). Jenis kini hanya membedakan aturan No. HP. Tugas Ambil Retur
   tetap khusus Toko. Jeda foto trip 5 → 2 menit (migrasi `078_jeda_foto_kirim_2_menit.sql`).
+- [x] **Tambahan** — Grooming lintas cabang (Toko Depan→Toko Pusat, Markas→Raja), migrasi
+  `080_grooming_lintas_cabang.sql`: foto kucing sampai (datang sendiri) **hanya staf cabang pengerja**;
+  kalau diambil sendiri, kucing diantar balik lalu 📸 **diterima staf cabang penerima**
+  (`mark_grooming_returned`, kolom `returned_*`), baru 📸 serah terima ke pelanggan di cabang penerima.
 
 ---
 
