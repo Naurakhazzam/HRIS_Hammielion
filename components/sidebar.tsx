@@ -70,9 +70,9 @@ function buildGajiKasbonSubmenu(isDriverOrKenek: boolean): NavNode[] {
   ]
 }
 
-// Semua yang berhubungan dengan "tidak masuk kerja" digabung di sini, termasuk Kalender Libur.
+// Semua yang berhubungan dengan "tidak masuk kerja" digabung di sini (Kalender Libur sengaja
+// top-level sendiri di menu karyawan, supaya gampang dicek tanpa membuka grup).
 const CUTI_LIBUR_SUBMENU: NavNode[] = [
-  { name: 'Kalender Libur', href: '/absensi/kalender-libur' },
   { name: 'Ajukan Cuti / Izin', href: '/cuti/ajukan' },
   { name: 'Riwayat Cuti & Izin', href: '/cuti' },
   { name: 'Ajukan Libur', href: '/portal/ajukan-libur' },
@@ -279,6 +279,7 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, 
     { name: 'Dashboard Saya', href: '/portal', icon: '🏠' },
     { name: 'Portal Saya', href: '/portal/profil', icon: '👤', submenu: EMPLOYEE_PORTAL_SAYA },
     { name: 'Kinerja Saya', href: '/portal/kpi-saya', icon: '📊' },
+    { name: 'Kalender Libur', href: '/absensi/kalender-libur', icon: '📅' },
     { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
     { name: 'Gaji & Kasbon', href: '/portal/slip-gaji', icon: '💰', submenu: buildGajiKasbonSubmenu(isDriverOrKenek) },
     { name: 'Cuti & Libur', href: '/cuti', icon: '🗓️', submenu: CUTI_LIBUR_SUBMENU },
@@ -545,7 +546,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     'Gaji & Kasbon': pathname.startsWith('/portal/slip-gaji') || pathname.startsWith('/portal/pendapatan-ritase')
       || pathname.startsWith('/kasbon') || pathname.startsWith('/potongan'),
     'Cuti & Libur': pathname.startsWith('/cuti') || pathname.startsWith('/portal/ajukan-libur')
-      || pathname.startsWith('/portal/ganti-libur') || inKalenderLibur,
+      || pathname.startsWith('/portal/ganti-libur'),
     'Pekerjaan': pathname.startsWith('/tugas-harian') || pathname.startsWith('/catatan-meeting') || pathname.startsWith('/penjualan-promo'),
     'Logistik': pathname.startsWith('/logistik'),
   }
