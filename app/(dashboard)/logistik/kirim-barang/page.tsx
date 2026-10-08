@@ -9,11 +9,11 @@ import { fetchDeliveryCandidates, type DeliveryCandidate } from '@/components/De
 // Menu "Kirim Barang" -- kiriman Laporan Muat jalur "Diantar Sendiri" (4 cabang toko).
 // Alur 3 foto (semua waktu dari jam SERVER, lihat migrasi 067 & 068):
 //   FOTO 1 ambil barang (hanya pengantar yang DITUGASKAN, yang foto = PJ) -> FOTO 2 sampai di
-//   tiap toko tujuan -> FOTO 3 kembali di cabang asal PJ. Tiap tahap minimal 5 menit; selisih
+//   tiap toko tujuan -> FOTO 3 kembali di cabang asal PJ. Tiap tahap minimal 2 menit; selisih
 //   lama berangkat vs lama kembali >= 20 menit wajib alasan. Bonus PJ = 50% ongkir, hanya kalau
 //   trip selesai lengkap s/d foto 3.
 
-const MIN_STEP_MS = 5 * 60000
+const MIN_STEP_MS = 2 * 60000
 const REASON_DIFF_MIN = 20
 const STALE_MS = 6 * 3600000
 // Foto dari jalur cadangan kamera bawaan HP yang lebih tua dari ini dianggap dari galeri.
@@ -628,7 +628,7 @@ export default function KirimBarangPage() {
                   {blocked ? (
                     <p className="text-xs text-slate-500 text-center py-2">Foto jemput kucing di pelanggan dulu.</p>
                   ) : waitLeft > 0 ? (
-                    <p className="text-xs text-slate-500 text-center py-2">⏳ Foto sampai bisa diambil {Math.ceil(waitLeft / 60000)} menit lagi (minimal 5 menit per tahap).</p>
+                    <p className="text-xs text-slate-500 text-center py-2">⏳ Foto sampai bisa diambil {Math.ceil(waitLeft / 60000)} menit lagi (minimal 2 menit per tahap).</p>
                   ) : busy ? (
                     <p className="text-xs text-slate-500 text-center py-2">Mengirim...</p>
                   ) : (
@@ -665,7 +665,7 @@ export default function KirimBarangPage() {
               </div>
             )}
             {waitLeft > 0 ? (
-              <p className="text-xs text-slate-500 text-center py-2">⏳ Foto kembali bisa diambil {Math.ceil(waitLeft / 60000)} menit lagi (minimal 5 menit per tahap).</p>
+              <p className="text-xs text-slate-500 text-center py-2">⏳ Foto kembali bisa diambil {Math.ceil(waitLeft / 60000)} menit lagi (minimal 2 menit per tahap).</p>
             ) : busy ? (
               <p className="text-xs text-slate-500 text-center py-2">Mengirim...</p>
             ) : pending?.kind === 'finish' && pending.url ? (

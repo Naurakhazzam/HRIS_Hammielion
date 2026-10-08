@@ -19,10 +19,11 @@ Bahasa ke user: **Bahasa Indonesia**.
 - [x] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut) (migrasi `070_grooming_orders.sql`, commit `2a9355a`)
 - [x] **Fase 4** — Perjalanan jemput & antar grooming (migrasi `071_grooming_trips.sql`, commit `2052af5`)
 - [x] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual (migrasi `072_grooming_bonus.sql`, commit `bca03d0`)
-- [x] **Tambahan** — Kirim pesanan konsumen lewat Laporan Muat: tujuan boleh **Pelanggan**, tapi
-  hanya jalur **Antar Sendiri** (Driver Gudang & Rencana Pengiriman tetap khusus Toko). Trigger
-  `guard_loading_store_kind` menggantikan `guard_store_kind_toko` di `logistics_central_loadings`
-  saja (migrasi `077_pelanggan_antar_sendiri.sql`).
+- [x] **Tambahan** — Kirim pesanan konsumen lewat Laporan Muat. Master Toko satu sumber untuk Toko &
+  Pelanggan, dan **pelanggan boleh lewat semua jalur** (Antar Sendiri, Driver Gudang, Rencana
+  Pengiriman). Pengaman jenis dari 069/077 dicabut (migrasi `077_pelanggan_antar_sendiri.sql`,
+  `079_pelanggan_semua_jalur.sql`). Jenis kini hanya membedakan aturan No. HP. Tugas Ambil Retur
+  tetap khusus Toko. Jeda foto trip 5 → 2 menit (migrasi `078_jeda_foto_kirim_2_menit.sql`).
 
 ---
 
@@ -59,7 +60,8 @@ Baca dulu sebelum mengubah apa pun:
 
 ### Aturan yang SUDAH berlaku (pertahankan di semua fase)
 - Semua waktu dari **jam server** (`now()`), bukan jam HP.
-- Tiap tahap foto **minimal 5 menit** dari foto sebelumnya.
+- Tiap tahap foto **minimal 2 menit** dari foto sebelumnya (dulu 5 menit; diubah di migrasi `078`).
+  Foto selesai grooming tetap ≥ 5 menit sejak kucing sampai.
 - |lama berangkat − lama kembali| **≥ 20 menit → alasan wajib** (macet, bensin, istirahat,
   menunggu_toko, tugas_lain*, lainnya* — *wajib keterangan).
 - PJ tidak bisa ambil trip baru sebelum foto kembali.

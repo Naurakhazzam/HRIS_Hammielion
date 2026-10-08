@@ -58,7 +58,7 @@ type LoadingPackage = {
 
 type Store = { id: string; name: string; kind: 'toko' | 'pelanggan'; phone: string | null }
 
-// Pelanggan (konsumen) boleh jadi tujuan Laporan Muat, tapi cuma jalur Antar Sendiri (migrasi 077).
+// Toko & Pelanggan satu sumber (Master Toko) dan boleh lewat jalur mana pun (migrasi 079).
 // Nama pelanggan wajar kembar, jadi teks pilihannya ikut nomor HP (unik antar pelanggan).
 const storeLabel = (s: Store) => s.kind === 'pelanggan' ? `${s.name} · Pelanggan ${s.phone ?? ''}`.trim() : s.name
 
@@ -621,9 +621,6 @@ export default function LaporanMuatPage() {
                     </button>
                   ))}
                 </div>
-                {newStoreKind === 'pelanggan' && (
-                  <p className="text-xs text-blue-700">Pelanggan hanya bisa dikirim lewat jalur Diantar Sendiri.</p>
-                )}
                 <input type="text" value={newStoreAddress} onChange={e => setNewStoreAddress(e.target.value)}
                   placeholder="Alamat (wajib)"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -835,12 +832,10 @@ export default function LaporanMuatPage() {
                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
                           <p className="text-sm font-bold text-slate-700">Siapa yang mengantar?</p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <button type="button" onClick={() => setFinishMethod('driver')} disabled={l.logistics_stores?.kind === 'pelanggan'}
-                              className={`text-left px-3 py-2.5 rounded-lg border text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${finishMethod === 'driver' ? 'border-green-500 bg-green-50 ring-2 ring-green-300' : 'border-slate-300 bg-white hover:bg-slate-50'}`}>
+                            <button type="button" onClick={() => setFinishMethod('driver')}
+                              className={`text-left px-3 py-2.5 rounded-lg border text-sm transition ${finishMethod === 'driver' ? 'border-green-500 bg-green-50 ring-2 ring-green-300' : 'border-slate-300 bg-white hover:bg-slate-50'}`}>
                               <span className="font-semibold">🚚 Diantar Driver Gudang</span>
-                              <span className="block text-xs text-slate-500">
-                                {l.logistics_stores?.kind === 'pelanggan' ? 'Tidak bisa untuk Pelanggan — khusus Toko' : 'Muncul di Jemput Barang Cabang (driver)'}
-                              </span>
+                              <span className="block text-xs text-slate-500">Muncul di Jemput Barang Cabang (driver)</span>
                             </button>
                             <button type="button" onClick={() => setFinishMethod('antar_sendiri')}
                               className={`text-left px-3 py-2.5 rounded-lg border text-sm transition ${finishMethod === 'antar_sendiri' ? 'border-purple-500 bg-purple-50 ring-2 ring-purple-300' : 'border-slate-300 bg-white hover:bg-slate-50'}`}>
@@ -898,7 +893,7 @@ export default function LaporanMuatPage() {
                                 👤 Ganti Penerima Tugas
                               </button>
                             )}
-                            {manage && !methodLocked && !(self && l.logistics_stores?.kind === 'pelanggan') && (
+                            {manage && !methodLocked && (
                               <button type="button" onClick={() => { setEditMode('method'); setOngkirMode(null); setOngkirDraft(''); setAssigneeDraft('') }}
                                 className="px-3 py-1.5 text-xs font-medium border border-slate-300 bg-white rounded-lg hover:bg-slate-100">
                                 ⇄ Pindah ke {!self ? 'Diantar Sendiri' : 'Diantar Driver Gudang'}

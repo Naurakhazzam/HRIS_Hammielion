@@ -30,7 +30,11 @@ type PlanStore = {
   logistics_stores: { name: string; address: string | null } | null
 }
 
-type Store = { id: string; name: string; address: string | null }
+type Store = { id: string; name: string; address: string | null; kind: 'toko' | 'pelanggan'; phone: string | null }
+
+// Toko & Pelanggan satu sumber (Master Toko), pelanggan boleh diantar driver (migrasi 079).
+// Nama pelanggan wajar kembar, jadi teks pilihannya ikut nomor HP (unik antar pelanggan).
+const storeLabel = (s: Store) => s.kind === 'pelanggan' ? `${s.name} · Pelanggan ${s.phone ?? ''}`.trim() : s.name
 
 type PlanSupplierTask = {
   id: string
@@ -130,7 +134,7 @@ export default function RencanaDetailPage() {
       .eq('plan_id', params.id).order('sequence_order')
     setPlanStores((psData as unknown as PlanStore[]) || [])
 
-    const { data: storeData } = await supabase.from('logistics_stores').select('id, name, address').eq('is_active', true).eq('kind', 'toko').order('name')
+    const { data: storeData } = await supabase.from('logistics_stores').select('id, name, address, kind, phone').eq('is_active', true).order('name')
     setAllStores(storeData || [])
 
     const { data: retData } = await supabase.from('logistics_store_returns')
@@ -223,7 +227,7 @@ export default function RencanaDetailPage() {
   const availableSupplierRoutes = supplierRoutes.filter(r => !supplierTasks.some(t => t.route_id === r.id && t.status === 'pending'))
   // Ketik nama toko, cocokkan persis (case-insensitive) ke saran yang muncul dari datalist —
   // supaya Kepala Gudang tidak perlu scroll dropdown ratusan toko satu-satu.
-  const matchedStore = availableStores.find(s => s.name.trim().toLowerCase() === storeSearchText.trim().toLowerCase())
+  const matchedStore = availableStores.find(s => storeLabel(s).trim().toLowerCase() === storeSearchText.trim().toLowerCase())
 
   async function handleAddStore(e: React.FormEvent) {
     e.preventDefault()
@@ -268,7 +272,7 @@ export default function RencanaDetailPage() {
   const queuedReturns = returns.filter(r => r.status === 'menunggu')
   const activeReturnStoreIds = new Set(returns.filter(r => r.status === 'diambil').map(r => r.store_id))
   const canAddReturn = canManage && !!plan && ['draft', 'ready', 'departed'].includes(plan.status)
-  const returnStoreOptions = allStores.filter(s => !activeReturnStoreIds.has(s.id))
+  const returnStoreOptions = allStores.filter(s => s.kind === 'toko' && !activeReturnStoreIds.has(s.id))
   const matchedReturnStore = returnStoreOptions.find(s => s.name.trim().toLowerCase() === returnStoreSearchText.trim().toLowerCase())
   const matchedQueuedReturn = matchedReturnStore ? queuedReturns.find(r => r.store_id === matchedReturnStore.id) : undefined
 
@@ -458,7 +462,7 @@ export default function RencanaDetailPage() {
               placeholder="Ketik nama toko untuk ditambahkan..."
               className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
             <datalist id="available-stores-datalist">
-              {availableStores.map(s => <option key={s.id} value={s.name} />)}
+              {availableStores.map(s => <option key={s.id} value={storeLabel(s)} />)}
             </datalist>
             <button type="submit" disabled={!matchedStore}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">+ Tambah</button>
