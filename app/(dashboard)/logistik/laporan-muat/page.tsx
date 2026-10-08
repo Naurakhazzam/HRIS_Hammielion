@@ -19,7 +19,7 @@ type Loading = {
   created_at: string
   completed_at: string | null
   cancelled_at: string | null
-  logistics_stores: { name: string; address: string | null } | null
+  logistics_stores: { name: string; address: string | null; kind: 'toko' | 'pelanggan' } | null
   origin: { name: string } | null
   creator: { full_name: string } | null
   completer: { full_name: string } | null
@@ -56,7 +56,11 @@ type LoadingPackage = {
   taken: { full_name: string } | null
 }
 
-type Store = { id: string; name: string }
+type Store = { id: string; name: string; kind: 'toko' | 'pelanggan'; phone: string | null }
+
+// Pelanggan (konsumen) boleh jadi tujuan Laporan Muat, tapi cuma jalur Antar Sendiri (migrasi 077).
+// Nama pelanggan wajar kembar, jadi teks pilihannya ikut nomor HP (unik antar pelanggan).
+const storeLabel = (s: Store) => s.kind === 'pelanggan' ? `${s.name} · Pelanggan ${s.phone ?? ''}`.trim() : s.name
 
 type PackageSummary = { total: number; diambil: number; takers: string[]; lastTakenAt: string | null }
 
@@ -126,6 +130,7 @@ export default function LaporanMuatPage() {
   const [showNewStore, setShowNewStore] = useState(false)
   const [newStoreAddress, setNewStoreAddress] = useState('')
   const [newStorePhone, setNewStorePhone] = useState('')
+  const [newStoreKind, setNewStoreKind] = useState<'toko' | 'pelanggan'>('toko')
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -156,7 +161,7 @@ export default function LaporanMuatPage() {
       .from('logistics_central_loadings')
       .select(`
         id, store_id, status, delivery_method, ongkir, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
-        logistics_stores(name, address),
+        logistics_stores(name, address, kind),
         origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
         creator:employees!logistics_central_loadings_created_by_fkey(full_name),
         completer:employees!logistics_central_loadings_completed_by_fkey(full_name),
@@ -250,7 +255,7 @@ export default function LaporanMuatPage() {
           if (userData.role === 'owner' || isStoreStaff) setCandidates(await fetchDeliveryCandidates(supabase))
         }
       }
-      const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).eq('kind', 'toko').order('name')
+      const { data: storeData } = await supabase.from('logistics_stores').select('id, name, kind, phone').eq('is_active', true).order('name')
       setAllStores(storeData || [])
       await fetchLoadings()
       setLoading(false)
@@ -322,7 +327,7 @@ export default function LaporanMuatPage() {
   }
 
   const availableStores = allStores
-  const matchedStore = availableStores.find(s => s.name.trim().toLowerCase() === storeSearchText.trim().toLowerCase())
+  const matchedStore = availableStores.find(s => storeLabel(s).trim().toLowerCase() === storeSearchText.trim().toLowerCase())
 
   async function handleCreateLoading(e: React.FormEvent) {
     e.preventDefault()
@@ -331,9 +336,9 @@ export default function LaporanMuatPage() {
       if (!showNewStore) { showMessage('error', 'Toko tidak ditemukan. Pilih dari saran yang muncul, atau tambahkan sebagai toko baru.'); return }
       setCreating(true)
       const { data: newId, error: storeErr } = await supabase.rpc('quick_create_logistics_store', {
-        p_name: storeSearchText, p_address: newStoreAddress, p_phone: newStorePhone,
+        p_name: storeSearchText, p_address: newStoreAddress, p_phone: newStorePhone, p_kind: newStoreKind,
       })
-      if (storeErr || !newId) { setCreating(false); showMessage('error', 'Gagal menambah toko: ' + storeErr?.message); return }
+      if (storeErr || !newId) { setCreating(false); showMessage('error', `Gagal menambah ${newStoreKind === 'pelanggan' ? 'pelanggan' : 'toko'}: ` + storeErr?.message); return }
       storeId = newId as string
     }
     if (!createBranchId) { showMessage('error', 'Pilih cabang asal kiriman dulu.'); return }
@@ -344,13 +349,14 @@ export default function LaporanMuatPage() {
     setCreating(false)
     if (error || !data) { showMessage('error', 'Gagal membuat laporan muat: ' + error?.message); return }
     if (showNewStore) {
-      const { data: storeData } = await supabase.from('logistics_stores').select('id, name').eq('is_active', true).eq('kind', 'toko').order('name')
+      const { data: storeData } = await supabase.from('logistics_stores').select('id, name, kind, phone').eq('is_active', true).order('name')
       setAllStores(storeData || [])
     }
     setStoreSearchText('')
     setShowNewStore(false)
     setNewStoreAddress('')
     setNewStorePhone('')
+    setNewStoreKind('toko')
     setShowCreateForm(false)
     resetFinishForm()
     await fetchLoadings()
@@ -584,35 +590,47 @@ export default function LaporanMuatPage() {
             <div className="flex gap-2">
               <input type="text" list="laporan-muat-stores-datalist" value={storeSearchText}
                 onChange={e => setStoreSearchText(e.target.value)}
-                placeholder="Ketik nama toko tujuan..."
+                placeholder="Ketik nama toko / pelanggan tujuan..."
                 className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
               <datalist id="laporan-muat-stores-datalist">
-                {availableStores.map(s => <option key={s.id} value={s.name} />)}
+                {availableStores.map(s => <option key={s.id} value={storeLabel(s)} />)}
               </datalist>
               <button type="submit"
-                disabled={creating || (!matchedStore && (!showNewStore || storeSearchText.trim().length < 3 || newStoreAddress.trim().length < 5))}
+                disabled={creating || (!matchedStore && (!showNewStore || storeSearchText.trim().length < 3 || newStoreAddress.trim().length < 5
+                  || (newStoreKind === 'pelanggan' && newStorePhone.trim().length < 9)))}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
                 {creating ? 'Membuat...' : '+ Buat'}
               </button>
             </div>
             {!matchedStore && storeSearchText.trim().length >= 3 && !showNewStore && (
               <div className="text-xs text-slate-500 flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                <span>Toko &quot;{storeSearchText.trim()}&quot; belum ada di Master Toko.</span>
+                <span>&quot;{storeSearchText.trim()}&quot; belum ada di Master Toko.</span>
                 <button type="button" onClick={() => setShowNewStore(true)} className="shrink-0 text-blue-600 font-semibold hover:underline">
-                  + Tambah Toko Baru
+                  + Tambah Baru
                 </button>
               </div>
             )}
             {!matchedStore && showNewStore && (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
-                <p className="text-xs font-semibold text-blue-800">Toko baru: &quot;{storeSearchText.trim()}&quot; — akan ditambahkan ke Master Toko</p>
+                <p className="text-xs font-semibold text-blue-800">Baru: &quot;{storeSearchText.trim()}&quot; — akan ditambahkan ke Master Toko</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['toko', 'pelanggan'] as const).map(k => (
+                    <button key={k} type="button" onClick={() => setNewStoreKind(k)}
+                      className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${newStoreKind === k ? 'border-blue-500 bg-white ring-2 ring-blue-300 text-blue-800' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
+                      {k === 'toko' ? '🏪 Toko' : '👤 Pelanggan (konsumen)'}
+                    </button>
+                  ))}
+                </div>
+                {newStoreKind === 'pelanggan' && (
+                  <p className="text-xs text-blue-700">Pelanggan hanya bisa dikirim lewat jalur Diantar Sendiri.</p>
+                )}
                 <input type="text" value={newStoreAddress} onChange={e => setNewStoreAddress(e.target.value)}
-                  placeholder="Alamat toko (wajib)"
+                  placeholder="Alamat (wajib)"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
                 <input type="tel" value={newStorePhone} onChange={e => setNewStorePhone(e.target.value)}
-                  placeholder="No. telepon (opsional)"
+                  placeholder={newStoreKind === 'pelanggan' ? 'No. HP pelanggan (wajib)' : 'No. telepon (opsional)'}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-                <button type="button" onClick={() => setShowNewStore(false)} className="text-xs text-slate-500 hover:underline">Batal tambah toko</button>
+                <button type="button" onClick={() => setShowNewStore(false)} className="text-xs text-slate-500 hover:underline">Batal tambah baru</button>
               </div>
             )}
           </form>
@@ -660,7 +678,10 @@ export default function LaporanMuatPage() {
             <div key={l.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               <button onClick={() => toggleSelect(l.id)} className="w-full text-left px-5 py-4 hover:bg-slate-50 transition flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-semibold text-slate-800 truncate">{l.logistics_stores?.name}</p>
+                  <p className="font-semibold text-slate-800 truncate">
+                    {l.logistics_stores?.name}
+                    {l.logistics_stores?.kind === 'pelanggan' && <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-pink-100 text-pink-700 align-middle">Pelanggan</span>}
+                  </p>
                   <p className="text-xs text-slate-400 mt-0.5">
                     {showOrigin && <span className="font-semibold text-slate-500">📍 {l.origin?.name ?? '-'} · </span>}
                     Dibuat oleh {l.creator?.full_name ?? '-'} · {fmtDateTime(l.created_at)}
@@ -814,10 +835,12 @@ export default function LaporanMuatPage() {
                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
                           <p className="text-sm font-bold text-slate-700">Siapa yang mengantar?</p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <button type="button" onClick={() => setFinishMethod('driver')}
-                              className={`text-left px-3 py-2.5 rounded-lg border text-sm transition ${finishMethod === 'driver' ? 'border-green-500 bg-green-50 ring-2 ring-green-300' : 'border-slate-300 bg-white hover:bg-slate-50'}`}>
+                            <button type="button" onClick={() => setFinishMethod('driver')} disabled={l.logistics_stores?.kind === 'pelanggan'}
+                              className={`text-left px-3 py-2.5 rounded-lg border text-sm transition disabled:opacity-50 disabled:cursor-not-allowed ${finishMethod === 'driver' ? 'border-green-500 bg-green-50 ring-2 ring-green-300' : 'border-slate-300 bg-white hover:bg-slate-50'}`}>
                               <span className="font-semibold">🚚 Diantar Driver Gudang</span>
-                              <span className="block text-xs text-slate-500">Muncul di Jemput Barang Cabang (driver)</span>
+                              <span className="block text-xs text-slate-500">
+                                {l.logistics_stores?.kind === 'pelanggan' ? 'Tidak bisa untuk Pelanggan — khusus Toko' : 'Muncul di Jemput Barang Cabang (driver)'}
+                              </span>
                             </button>
                             <button type="button" onClick={() => setFinishMethod('antar_sendiri')}
                               className={`text-left px-3 py-2.5 rounded-lg border text-sm transition ${finishMethod === 'antar_sendiri' ? 'border-purple-500 bg-purple-50 ring-2 ring-purple-300' : 'border-slate-300 bg-white hover:bg-slate-50'}`}>
@@ -875,7 +898,7 @@ export default function LaporanMuatPage() {
                                 👤 Ganti Penerima Tugas
                               </button>
                             )}
-                            {manage && !methodLocked && (
+                            {manage && !methodLocked && !(self && l.logistics_stores?.kind === 'pelanggan') && (
                               <button type="button" onClick={() => { setEditMode('method'); setOngkirMode(null); setOngkirDraft(''); setAssigneeDraft('') }}
                                 className="px-3 py-1.5 text-xs font-medium border border-slate-300 bg-white rounded-lg hover:bg-slate-100">
                                 ⇄ Pindah ke {!self ? 'Diantar Sendiri' : 'Diantar Driver Gudang'}

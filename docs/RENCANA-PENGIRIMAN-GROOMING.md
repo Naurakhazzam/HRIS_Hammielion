@@ -19,6 +19,10 @@ Bahasa ke user: **Bahasa Indonesia**.
 - [x] **Fase 3** — Order grooming (buat order, status grooming, ganti groomer, paksa lanjut) (migrasi `070_grooming_orders.sql`, commit `2a9355a`)
 - [x] **Fase 4** — Perjalanan jemput & antar grooming (migrasi `071_grooming_trips.sql`, commit `2052af5`)
 - [x] **Fase 5** — Bonus grooming + slip gaji + penutupan lapor manual (migrasi `072_grooming_bonus.sql`, commit `bca03d0`)
+- [x] **Tambahan** — Kirim pesanan konsumen lewat Laporan Muat: tujuan boleh **Pelanggan**, tapi
+  hanya jalur **Antar Sendiri** (Driver Gudang & Rencana Pengiriman tetap khusus Toko). Trigger
+  `guard_loading_store_kind` menggantikan `guard_store_kind_toko` di `logistics_central_loadings`
+  saja (migrasi `077_pelanggan_antar_sendiri.sql`).
 
 ---
 
