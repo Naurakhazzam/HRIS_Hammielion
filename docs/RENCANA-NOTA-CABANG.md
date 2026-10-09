@@ -336,4 +336,13 @@ Keputusan user 9 Okt 2026:
   Driver bisa ubah selama belum diputuskan & trip belum selesai; kalau barang sudah diterima gudang,
   potongan terkunci. Buku Piutang: kolom `cut_amount` di `fin_receivables`, sisa = nota − potongan −
   bayar − pelunasan. Badge: `get_pending_cut_count`.
-- Menyusul: jalur antar sendiri.
+- **Pemilik barang (migrasi 093, keputusan user 9 Okt 2026):** tiap barang wajib dipilih
+  **"punya siapa"** (Gudang / cabang asal nota di kunjungan itu; otomatis kalau cuma satu pemilik).
+  Potongan mengurangi **nota pemilik barang** (pemilik punya >1 nota → nota terbesarnya dulu); batas
+  potongan per pemilik = nota pemilik itu. Barang "dibawa kembali" → retur `diambil` per pemilik
+  (`logistics_store_returns.cut_plan_store_id`) = kartu **"📦 Antar Barang Potong Nota"** di layar
+  driver: wajib foto saat menyerahkan ke pemilik (`finish_store_return`), trip tidak bisa selesai
+  sebelum semua diantar, lalu cabang pemilik konfirmasi di Penerimaan Retur. Retur potong nota tidak
+  ikut aturan "satu retur aktif per toko" dan tidak bisa dilepas dari trip.
+- Menyusul: jalur antar sendiri; **B** pemilik per barang di Tugas Retur kantor; **C** kejadian
+  Retur/Salah Muat driver yang barangnya dibawa pulang (catat barang + pemilik → antar + foto).

@@ -78,6 +78,9 @@ type PlanReturn = {
   final_photo_url: string | null
   final_location_note: string | null
   no_items_reason: string | null
+  // Terisi = barang potong nota yang wajib diantar driver ke pemiliknya (migrasi 093).
+  cut_plan_store_id: string | null
+  branches: { name: string } | null
   logistics_stores: { name: string; address: string | null } | null
 }
 
@@ -102,7 +105,7 @@ type IncidentType = typeof INCIDENT_TYPES[number]
 
 // Nota cabang (Laporan Muat) yang paketnya dibawa ke kunjungan toko ini -- nominalnya sudah
 // diisi cabang, driver tidak mengetik ulang (migrasi 082/083).
-type BranchNota = { loading_id: string; amount: number; origin: string }
+type BranchNota = { loading_id: string; amount: number; origin: string; origin_id: string | null }
 // Surat jalan gudang yang dibawa kunjungan (dicatat kantor, migrasi 090).
 type SjNote = { id: string; plan_store_id: string; note_number: string | null; amount: number; notes: string | null }
 
@@ -197,20 +200,33 @@ function BalanceNote({ invoice, received }: { invoice: number; received: number 
 // Finance/Owner -- selama belum disetujui (atau ditolak) tetap dihitung kurang bayar.
 type CutReason = 'salah_muat' | 'rusak' | 'kurang_jumlah' | 'harga_beda' | 'lainnya'
 type CutGoods = 'dibawa_kembali' | 'tidak_ada'
-type CutItem = { item_name: string; amount: string; reason: CutReason | ''; goods: CutGoods | '' }
-type SavedCut = { id: string; plan_store_id: string; item_name: string; amount: number; reason: CutReason; goods: CutGoods }
+// owner = cabang pemilik barang (Gudang / cabang asal nota). Potongan mengurangi nota pemilik itu,
+// dan barang yang dibawa kembali wajib diantar driver ke pemiliknya (migrasi 093).
+type CutItem = { item_name: string; amount: string; reason: CutReason | ''; goods: CutGoods | ''; owner: string }
+type SavedCut = { id: string; plan_store_id: string; item_name: string; amount: number; reason: CutReason; goods: CutGoods; owner_branch_id: string | null }
+type CutOwner = { id: string; name: string; total: number }
 const CUT_REASON_LABEL: Record<CutReason, string> = {
   salah_muat: 'Salah muat', rusak: 'Rusak / kedaluwarsa', kurang_jumlah: 'Kurang jumlah', harga_beda: 'Harga beda', lainnya: 'Lainnya',
 }
 const CUT_STATUS_LABEL: Record<string, string> = { menunggu: 'menunggu persetujuan Finance', disetujui: 'disetujui', ditolak: 'ditolak' }
-const emptyCut = (): CutItem => ({ item_name: '', amount: '', reason: '', goods: '' })
+const emptyCut = (): CutItem => ({ item_name: '', amount: '', reason: '', goods: '', owner: '' })
 const cutTotalOf = (items: CutItem[]) => items.reduce((s, i) => s + (Number(i.amount) || 0), 0)
-const cutItemsValid = (items: CutItem[]) =>
-  items.length > 0 && items.every(i => i.item_name.trim() && Number(i.amount) > 0 && i.reason && i.goods)
-const cutPayload = (items: CutItem[]) =>
-  items.map(i => ({ item_name: i.item_name.trim(), amount: Number(i.amount), reason: i.reason, goods: i.goods }))
+// Pemilik terisi otomatis kalau kunjungan cuma membawa nota satu pemilik.
+const ownerOf = (i: CutItem, owners: CutOwner[]) => i.owner || (owners.length === 1 ? owners[0].id : '')
+const cutItemsValid = (items: CutItem[], owners: CutOwner[]) =>
+  items.length > 0 && items.every(i => i.item_name.trim() && Number(i.amount) > 0 && i.reason && i.goods && ownerOf(i, owners))
+const cutPayload = (items: CutItem[], owners: CutOwner[]) =>
+  items.map(i => ({ item_name: i.item_name.trim(), amount: Number(i.amount), reason: i.reason, goods: i.goods, owner_branch_id: ownerOf(i, owners) || null }))
+// Pesan error kalau potongan satu pemilik melebihi nota pemilik itu.
+function cutOwnerError(items: CutItem[], owners: CutOwner[]): string | null {
+  for (const o of owners) {
+    const sum = items.filter(i => ownerOf(i, owners) === o.id).reduce((s, i) => s + (Number(i.amount) || 0), 0)
+    if (sum > o.total) return `Potongan barang ${o.name} (${fmtRp(sum)}) melebihi nota ${o.name} (${fmtRp(o.total)}).`
+  }
+  return null
+}
 
-function CutItemsEditor({ items, onChange }: { items: CutItem[]; onChange: (v: CutItem[]) => void }) {
+function CutItemsEditor({ items, onChange, owners }: { items: CutItem[]; onChange: (v: CutItem[]) => void; owners: CutOwner[] }) {
   const set = (idx: number, patch: Partial<CutItem>) => onChange(items.map((it, i) => i === idx ? { ...it, ...patch } : it))
   return (
     <div className="space-y-2">
@@ -231,10 +247,19 @@ function CutItemsEditor({ items, onChange }: { items: CutItem[]; onChange: (v: C
             <option value="">— Alasan potongan —</option>
             {(Object.keys(CUT_REASON_LABEL) as CutReason[]).map(r => <option key={r} value={r}>{CUT_REASON_LABEL[r]}</option>)}
           </select>
+          {owners.length > 1 ? (
+            <select value={it.owner} onChange={e => set(idx, { owner: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+              <option value="">— Barang ini punya siapa? —</option>
+              {owners.map(o => <option key={o.id} value={o.id}>{o.name} (nota {fmtRp(o.total)})</option>)}
+            </select>
+          ) : owners.length === 1 && (
+            <p className="text-xs text-slate-600">Pemilik barang: <b>{owners[0].name}</b></p>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={() => set(idx, { goods: 'dibawa_kembali' })}
               className={`px-2 py-2 rounded-lg text-xs border text-left ${it.goods === 'dibawa_kembali' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>
-              <b>↩️ Dibawa kembali</b><span className="block opacity-80">Barangnya ikut driver ke gudang</span>
+              <b>↩️ Dibawa kembali</b><span className="block opacity-80">Wajib diantar ke pemiliknya</span>
             </button>
             <button type="button" onClick={() => set(idx, { goods: 'tidak_ada' })}
               className={`px-2 py-2 rounded-lg text-xs border text-left ${it.goods === 'tidak_ada' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>
@@ -325,6 +350,7 @@ export default function JalanPengirimanPage() {
   const [cutItems, setCutItems] = useState<CutItem[]>([emptyCut()])
   const [cutPhotoUrl, setCutPhotoUrl] = useState('')
   const [visitCuts, setVisitCuts] = useState<Record<string, SavedCut[]>>({})
+  const [gudangBranchId, setGudangBranchId] = useState('')
 
   // Form Gagal Kirim: Kirim Besok (toko tutup, barang kembali & dijadwalkan lagi) atau Gagal
   // (ditolak / batal pesan) -- wajib alasan + foto (migrasi 088).
@@ -403,13 +429,30 @@ export default function JalanPengirimanPage() {
   const selectedStore = pendingStores.find(ps => ps.id === selectedStoreId) || null
   const selectedNotas = selectedStore ? (branchNotas[selectedStore.id] ?? []) : []
   const editNotas = editHistoryStore ? (branchNotas[editHistoryStore.id] ?? []) : []
+  // Pemilik nota kunjungan (Gudang + cabang asal nota) -- pilihan "barang ini punya siapa?".
+  const visitOwners = (invoice: string, noGud: boolean, notas: BranchNota[], sj: SjNote[]): CutOwner[] => {
+    const list: CutOwner[] = []
+    const gudangTotal = sj.length > 0 ? sj.reduce((t, n) => t + Number(n.amount), 0) : (noGud ? 0 : Number(invoice) || 0)
+    if (gudangTotal > 0 && gudangBranchId) list.push({ id: gudangBranchId, name: 'Gudang', total: gudangTotal })
+    for (const n of notas) {
+      if (!n.origin_id) continue
+      const o = list.find(x => x.id === n.origin_id)
+      if (o) o.total += n.amount
+      else list.push({ id: n.origin_id, name: n.origin, total: n.amount })
+    }
+    return list
+  }
+  const selectedOwners = selectedStore ? visitOwners(invoiceAmount, noGudang, selectedNotas, visitSj[selectedStore.id] ?? []) : []
+  const editOwners = editHistoryStore ? visitOwners(editInvoiceAmount, editNoGudang, editNotas, visitSj[editHistoryStore.id] ?? []) : []
   const pendingSupplierTasks = supplierTasks.filter(t => t.status === 'pending')
   const selectedSupplierTask = pendingSupplierTasks.find(t => t.id === selectedSupplierTaskId) || null
   // Belum 'selesai' = masih boleh ditambah barang & masih wajib dilaporkan posisi akhirnya di
   // Lapor Sampai Garasi -- sengaja TIDAK ikut hitungan allResolved (lihat catatan di migration
   // 058: proses ambil retur jalan independen dari toko/belanja, baru jadi syarat wajib di
   // tahap penutupan trip, bareng foto amper bensin).
-  const activeReturns = planReturns.filter(r => r.status === 'diambil')
+  const activeReturns = planReturns.filter(r => r.status === 'diambil' && !r.cut_plan_store_id)
+  // Barang potong nota yang belum diantar ke pemiliknya -- trip tidak bisa selesai sebelum ini kosong.
+  const cutDeliveries = planReturns.filter(r => r.status === 'diambil' && !!r.cut_plan_store_id)
   const selectedReturn = activeReturns.find(r => r.id === selectedReturnId) || null
   // planReturns ikut dihitung sbg "ada tugas" -- trip yang isinya cuma ambil retur (tanpa toko
   // kirim/belanja) tetap harus bisa lanjut ke foto box & Lapor Sampai Garasi.
@@ -446,6 +489,8 @@ export default function JalanPengirimanPage() {
     const empId = userData?.employee_id || ''
     setMyEmployeeId(empId)
     setMyName((userData as any)?.employees?.full_name || '')
+    const { data: gud } = await supabase.from('branches').select('id').eq('name', 'Gudang').maybeSingle()
+    setGudangBranchId(gud?.id ?? '')
     if (empId) await fetchPlans(empId)
     const { data: settings } = await supabase.from('logistics_settings').select('garage_gap_active').eq('id', true).maybeSingle()
     setGarageGapMinutes(settings?.garage_gap_active === false ? 0 : GARAGE_GAP_MINUTES_DEFAULT)
@@ -478,9 +523,9 @@ export default function JalanPengirimanPage() {
     const map: Record<string, BranchNota[]> = {}
     if (rows.length > 0) {
       const { data: pkgs } = await supabase.from('logistics_central_loading_packages')
-        .select('plan_store_id, loading_id, logistics_central_loadings(nota_amount, nota_payment_method, nota_plan_store_id, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name))')
+        .select('plan_store_id, loading_id, logistics_central_loadings(nota_amount, nota_payment_method, nota_plan_store_id, origin_branch_id, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name))')
         .in('plan_store_id', rows.map(r => r.id)).eq('status', 'diambil')
-      type PkgRow = { plan_store_id: string; loading_id: string; logistics_central_loadings: { nota_amount: number | null; nota_payment_method: string | null; nota_plan_store_id: string | null; origin: { name: string } | null } | null }
+      type PkgRow = { plan_store_id: string; loading_id: string; logistics_central_loadings: { nota_amount: number | null; nota_payment_method: string | null; nota_plan_store_id: string | null; origin_branch_id: string | null; origin: { name: string } | null } | null }
       for (const p of (pkgs as unknown as PkgRow[]) || []) {
         const l = p.logistics_central_loadings
         const amount = l?.nota_amount
@@ -489,7 +534,7 @@ export default function JalanPengirimanPage() {
         if (l?.nota_payment_method && l.nota_plan_store_id !== p.plan_store_id) continue
         const list = map[p.plan_store_id] ??= []
         if (!list.some(n => n.loading_id === p.loading_id)) {
-          list.push({ loading_id: p.loading_id, amount: Number(amount), origin: p.logistics_central_loadings?.origin?.name ?? 'Cabang' })
+          list.push({ loading_id: p.loading_id, amount: Number(amount), origin: p.logistics_central_loadings?.origin?.name ?? 'Cabang', origin_id: l?.origin_branch_id ?? null })
         }
       }
     }
@@ -507,7 +552,7 @@ export default function JalanPengirimanPage() {
     const cutIds = rows.filter(r => Number(r.cut_total) > 0).map(r => r.id)
     if (cutIds.length > 0) {
       const { data: cutData } = await supabase.from('logistics_visit_cuts')
-        .select('id, plan_store_id, item_name, amount, reason, goods').in('plan_store_id', cutIds).order('created_at')
+        .select('id, plan_store_id, item_name, amount, reason, goods, owner_branch_id').in('plan_store_id', cutIds).order('created_at')
       for (const c of (cutData as SavedCut[]) || []) (cutMap[c.plan_store_id] ??= []).push(c)
     }
     setVisitCuts(cutMap)
@@ -525,7 +570,7 @@ export default function JalanPengirimanPage() {
 
   async function fetchPlanReturns(planId: string) {
     const { data } = await supabase.from('logistics_store_returns')
-      .select('id, store_id, status, note, final_photo_url, final_location_note, no_items_reason, logistics_stores(name, address)')
+      .select('id, store_id, status, note, final_photo_url, final_location_note, no_items_reason, cut_plan_store_id, branches(name), logistics_stores(name, address)')
       .eq('plan_id', planId).order('claimed_at')
     const returns = (data as unknown as PlanReturn[]) || []
     setPlanReturns(returns)
@@ -749,6 +794,22 @@ export default function JalanPengirimanPage() {
     setFinishingReturnId(null)
   }
 
+  // Barang potong nota: driver antar ke cabang pemilik & foto saat menyerahkan (migrasi 093).
+  async function submitCutDelivery(ret: PlanReturn) {
+    const photo = closingReturnPhotos[ret.id]
+    if (!photo) return
+    const who = closingReturnNotes[ret.id]?.trim()
+    setFinishingReturnId(ret.id)
+    const { error } = await supabase.rpc('finish_store_return', {
+      p_return_id: ret.id, p_final_photo_url: photo,
+      p_final_location_note: `Diserahkan ke ${ret.branches?.name ?? 'pemilik'}${who ? ` (diterima ${who})` : ''}`,
+    })
+    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setFinishingReturnId(null); return }
+    showMessage('success', `Barang potong nota sudah diantar ke ${ret.branches?.name ?? 'pemilik'}.`)
+    if (selectedPlanId) await fetchPlanReturns(selectedPlanId)
+    setFinishingReturnId(null)
+  }
+
   async function confirmBoxPhoto() {
     if (!selectedPlan || !boxPhotoUrl) return
     setSubmitting(true)
@@ -762,7 +823,7 @@ export default function JalanPengirimanPage() {
     setSubmitting(false)
   }
 
-  const canSubmitSelesaiKirim = !!garagePhotoUrl && needsRefuel !== null && (!needsRefuel || (!!refuelAmount && Number(refuelAmount) > 0)) && activeReturns.length === 0
+  const canSubmitSelesaiKirim = !!garagePhotoUrl && needsRefuel !== null && (!needsRefuel || (!!refuelAmount && Number(refuelAmount) > 0)) && activeReturns.length === 0 && cutDeliveries.length === 0
 
   async function submitSelesaiKirim() {
     if (!selectedPlan || !canSubmitSelesaiKirim) return
@@ -804,10 +865,10 @@ export default function JalanPengirimanPage() {
     paymentMethod === 'transfer' ? !!paymentPhotoUrl :
     paymentMethod === 'tempo' ? !!paymentDueDate : true
   )
-  const cutOverNota = cutYes && cutTotalOf(cutItems) > visitNotaTotal(invoiceAmount, noGudang, selectedNotas)
+  const cutOverNota = cutYes ? cutOwnerError(cutItems, selectedOwners) : null
   const canSubmitKirim = canProceedStep1 && canProceedStep2 &&
     (incidentType === 'tidak_ada' || (!!incidentPhotoUrl && incidentDescription.trim().length > 0)) &&
-    (!cutYes || (cutItemsValid(cutItems) && !!cutPhotoUrl && !cutOverNota))
+    (!cutYes || (cutItemsValid(cutItems, selectedOwners) && !!cutPhotoUrl && !cutOverNota))
 
   // Kunci tombol 1 detik setiap kali tampilan tombol berganti (pindah langkah, kotak konfirmasi
   // muncul/hilang, pilih toko, buka modal) -- tap kedua dari double-tap jadi tidak "tembus".
@@ -843,7 +904,7 @@ export default function JalanPengirimanPage() {
     let cutError: string | null = null
     if (!alreadyDone && cutYes) {
       const { error: cErr } = await supabase.rpc('set_visit_cuts', {
-        p_plan_store_id: selectedStore.id, p_items: cutPayload(cutItems), p_photo_url: cutPhotoUrl,
+        p_plan_store_id: selectedStore.id, p_items: cutPayload(cutItems, selectedOwners), p_photo_url: cutPhotoUrl,
       })
       if (cErr) cutError = cErr.message
     }
@@ -907,17 +968,17 @@ export default function JalanPengirimanPage() {
     setEditIncidentDescription(ps.incident_description || '')
     const saved = visitCuts[ps.id] ?? []
     setEditCutYes(saved.length > 0)
-    setEditCutItems(saved.length > 0 ? saved.map(c => ({ item_name: c.item_name, amount: String(c.amount), reason: c.reason, goods: c.goods })) : [emptyCut()])
+    setEditCutItems(saved.length > 0 ? saved.map(c => ({ item_name: c.item_name, amount: String(c.amount), reason: c.reason, goods: c.goods, owner: c.owner_branch_id ?? '' })) : [emptyCut()])
     setEditCutPhotoUrl(ps.cut_photo_url || '')
   }
 
   // Potongan yang sudah diputuskan Finance tidak bisa diubah driver lagi (server juga menolak).
   const editCutLocked = !!editHistoryStore && (editHistoryStore.cut_status === 'disetujui' || editHistoryStore.cut_status === 'ditolak')
-  const editCutOverNota = editCutYes && cutTotalOf(editCutItems) > visitNotaTotal(editInvoiceAmount, editNoGudang, editNotas)
+  const editCutOverNota = editCutYes ? cutOwnerError(editCutItems, editOwners) : null
   const canSubmitEditHistory = isPaymentValid(editPaymentMethod, editInvoiceAmount, editPaymentAmount, editNoGudang, editNotas.length) &&
     (editPaymentMethod !== 'tempo' || !!editPaymentDueDate) &&
     (editIncidentType === 'tidak_ada' || (!!editIncidentPhotoUrl && editIncidentDescription.trim().length > 0)) &&
-    (editCutLocked || !editCutYes || (cutItemsValid(editCutItems) && !!editCutPhotoUrl && !editCutOverNota))
+    (editCutLocked || !editCutYes || (cutItemsValid(editCutItems, editOwners) && !!editCutPhotoUrl && !editCutOverNota))
 
   // Foto bukti transfer TIDAK diminta ulang di sini (fitur ini cuma untuk betulkan salah
   // ketik nominal/metode/tanggal, bukan mengulang seluruh alur foto) — kalau metode diubah
@@ -942,7 +1003,7 @@ export default function JalanPengirimanPage() {
     const hadCuts = (visitCuts[editHistoryStore.id] ?? []).length > 0
     if (!error && !editCutLocked && (editCutYes || hadCuts)) {
       const { error: cErr } = await supabase.rpc('set_visit_cuts', {
-        p_plan_store_id: editHistoryStore.id, p_items: editCutYes ? cutPayload(editCutItems) : [], p_photo_url: editCutYes ? editCutPhotoUrl : null,
+        p_plan_store_id: editHistoryStore.id, p_items: editCutYes ? cutPayload(editCutItems, editOwners) : [], p_photo_url: editCutYes ? editCutPhotoUrl : null,
       })
       if (cErr) cutError = cErr.message
     }
@@ -1085,6 +1146,44 @@ export default function JalanPengirimanPage() {
                   if (url) await submitSupplierTaskDone(selectedSupplierTask, url)
                 }} />
               {supplierTaskSubmitting && <p className="text-xs text-slate-400 mt-2">Menyimpan...</p>}
+            </div>
+          )}
+
+          {(selectedPlan?.status === 'departed' || selectedPlan?.status === 'closing') && !selectedStore && !selectedSupplierTask && !selectedReturn && cutDeliveries.length > 0 && (
+            <div className="bg-white rounded-xl border border-rose-200 overflow-hidden mt-4">
+              <div className="px-4 py-3 bg-rose-50 border-b border-rose-100">
+                <p className="text-sm font-bold text-rose-800">📦 Antar Barang Potong Nota ({cutDeliveries.length})</p>
+                <p className="text-xs text-rose-600 mt-0.5">Wajib diantar ke pemilik barang & difoto saat diserahkan. Trip belum bisa selesai sebelum semua diantar.</p>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {cutDeliveries.map(r => (
+                  <div key={r.id} className="px-4 py-3 space-y-2">
+                    <p className="text-sm font-semibold text-slate-800">Antar ke: {r.branches?.name ?? '-'}</p>
+                    <p className="text-xs text-slate-500">Dari toko {r.logistics_stores?.name} · {(returnItemsByReturn[r.id] ?? []).map(it => it.item_name).join(', ') || '-'}</p>
+                    {closingReturnPhotos[r.id] ? (
+                      <div className="space-y-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={closingReturnPhotos[r.id]} alt="Bukti serah barang" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                        <button onClick={() => setClosingReturnPhotos(prev => ({ ...prev, [r.id]: '' }))} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                      </div>
+                    ) : (
+                      <LogisticsCameraCapture label={`Foto Saat Menyerahkan ke ${r.branches?.name ?? 'Pemilik'}`} employeeName={myName}
+                        onCaptured={async blob => {
+                          const url = await uploadPlanPhoto(blob, `potong-antar-${r.id}`)
+                          if (url) setClosingReturnPhotos(prev => ({ ...prev, [r.id]: url }))
+                        }} />
+                    )}
+                    <input type="text" value={closingReturnNotes[r.id] || ''}
+                      onChange={e => setClosingReturnNotes(prev => ({ ...prev, [r.id]: e.target.value }))}
+                      placeholder="Diterima oleh siapa? (opsional)"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-rose-500 outline-none" />
+                    <button onClick={() => submitCutDelivery(r)} disabled={!closingReturnPhotos[r.id] || finishingReturnId === r.id}
+                      className="w-full py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
+                      {finishingReturnId === r.id ? 'Menyimpan...' : 'Sudah Diantar'}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1502,8 +1601,8 @@ export default function JalanPengirimanPage() {
                         </div>
                         {cutYes && (
                           <div className="space-y-2">
-                            <CutItemsEditor items={cutItems} onChange={setCutItems} />
-                            {cutOverNota && <p className="text-xs text-red-600">Total potongan melebihi total nota.</p>}
+                            <CutItemsEditor items={cutItems} onChange={setCutItems} owners={selectedOwners} />
+                            {cutOverNota && <p className="text-xs text-red-600">{cutOverNota}</p>}
                             {cutPhotoUrl ? (
                               <div className="space-y-2">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1519,7 +1618,7 @@ export default function JalanPengirimanPage() {
                             )}
                             <p className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
                               Potongan menunggu persetujuan Finance. Selama belum disetujui, tetap dihitung kurang bayar.
-                              {cutItems.some(i => i.goods === 'dibawa_kembali') && ' Barang yang dibawa kembali diserahkan ke Gudang (Penerimaan Retur).'}
+                              {cutItems.some(i => i.goods === 'dibawa_kembali') && ' Barang yang dibawa kembali WAJIB Anda antar ke pemiliknya dan difoto saat diserahkan (muncul di kartu "Antar Barang Potong Nota").'}
                             </p>
                           </div>
                         )}
@@ -1680,6 +1779,11 @@ export default function JalanPengirimanPage() {
                         ))}
                       </div>
                     )}
+                    {cutDeliveries.length > 0 && (
+                      <p className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                        ⚠ Masih ada {cutDeliveries.length} barang potong nota yang belum diantar ke pemiliknya (lihat kartu 📦 di atas).
+                      </p>
+                    )}
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Foto Amper Bensin</p>
                       {garagePhotoUrl ? (
@@ -1769,7 +1873,10 @@ export default function JalanPengirimanPage() {
                       <p className={`text-xs mt-1 ${ps.cut_status === 'ditolak' ? 'text-red-600' : ps.cut_status === 'disetujui' ? 'text-green-700' : 'text-rose-700'}`}>
                         ✂️ Potong nota {fmtRp(Number(ps.cut_total))} — {CUT_STATUS_LABEL[ps.cut_status ?? 'menunggu']}
                         {ps.cut_decision_note ? ` (${ps.cut_decision_note})` : ''}
-                        {(visitCuts[ps.id] ?? []).map(c => ` · ${c.item_name} ${fmtRp(Number(c.amount))}${c.goods === 'dibawa_kembali' ? ' ↩️' : ''}`).join('')}
+                        {(visitCuts[ps.id] ?? []).map(c => {
+                          const owner = c.owner_branch_id === gudangBranchId ? 'Gudang' : (branchNotas[ps.id] ?? []).find(n => n.origin_id === c.owner_branch_id)?.origin
+                          return ` · ${c.item_name} ${fmtRp(Number(c.amount))}${owner ? ` (${owner})` : ''}${c.goods === 'dibawa_kembali' ? ' ↩️' : ''}`
+                        }).join('')}
                         {ps.cut_photo_url && <> · <button type="button" onClick={() => openLightbox(ps.cut_photo_url!, 'Foto potong nota')} className="underline">foto</button></>}
                       </p>
                     )}
@@ -1955,8 +2062,8 @@ export default function JalanPengirimanPage() {
                   </div>
                   {editCutYes && (
                     <div className="space-y-2">
-                      <CutItemsEditor items={editCutItems} onChange={setEditCutItems} />
-                      {editCutOverNota && <p className="text-xs text-red-600">Total potongan melebihi total nota.</p>}
+                      <CutItemsEditor items={editCutItems} onChange={setEditCutItems} owners={editOwners} />
+                      {editCutOverNota && <p className="text-xs text-red-600">{editCutOverNota}</p>}
                       {editCutPhotoUrl ? (
                         <div className="space-y-2">
                           {/* eslint-disable-next-line @next/next/no-img-element */}

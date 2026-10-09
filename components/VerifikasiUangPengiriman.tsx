@@ -360,7 +360,7 @@ type CutRow = {
   cut_decided_at: string | null; cut_decision_note: string | null; resolved_at: string | null; payment_method: string | null
   invoice_amount: number | null; logistics_stores: { name: string } | null; plan: { driver: NameRel } | null; decider: NameRel
 }
-type CutLine = { plan_store_id: string; item_name: string; amount: number; reason: string; goods: string }
+type CutLine = { plan_store_id: string; item_name: string; amount: number; reason: string; goods: string; owner: { name: string } | null }
 
 // Persetujuan potong nota (migrasi 092). Yang menunggu tampil semua bulan; yang sudah
 // diputuskan per bulan pengiriman. Keputusan boleh diubah selama nota belum ada pelunasan.
@@ -389,8 +389,8 @@ function PotongNotaList({ month, onChanged }: { month: string; onChanged: () => 
     const map: Record<string, CutLine[]> = {}
     if (all.length > 0) {
       const { data } = await supabase.from('logistics_visit_cuts')
-        .select('plan_store_id, item_name, amount, reason, goods').in('plan_store_id', all.map(r => r.id)).order('created_at')
-      for (const c of (data as CutLine[]) || []) (map[c.plan_store_id] ??= []).push(c)
+        .select('plan_store_id, item_name, amount, reason, goods, owner:branches(name)').in('plan_store_id', all.map(r => r.id)).order('created_at')
+      for (const c of (data as unknown as CutLine[]) || []) (map[c.plan_store_id] ??= []).push(c)
     }
     setRows(all)
     setLines(map)
@@ -425,7 +425,7 @@ function PotongNotaList({ month, onChanged }: { month: string; onChanged: () => 
       <p className="text-xs text-slate-500">
         Potongan nota dari driver (barang salah / rusak / kurang / harga beda). Selama belum disetujui atau bila ditolak,
         potongan tetap dihitung kurang bayar (piutang). Disetujui = nota dikurangi, nota terbesar dulu.
-        Barang yang dibawa kembali dikonfirmasi Gudang di Penerimaan Retur.
+        Potongan mengurangi nota pemilik barangnya. Barang yang dibawa kembali diantar driver ke pemiliknya, lalu dikonfirmasi di Penerimaan Retur.
       </p>
       {loading ? (
         <div className="text-center py-10 text-slate-500 text-sm">Memuat...</div>
@@ -448,7 +448,7 @@ function PotongNotaList({ month, onChanged }: { month: string; onChanged: () => 
             <div className="text-sm space-y-1">
               {(lines[r.id] ?? []).map((c, i) => (
                 <div key={i} className="flex justify-between gap-2">
-                  <span className="text-slate-600">✂️ {c.item_name} <span className="text-xs text-slate-400">· {CUT_REASON_LABEL[c.reason] ?? c.reason} · {c.goods === 'dibawa_kembali' ? '↩️ dibawa kembali' : '🚫 memang tidak ada'}</span></span>
+                  <span className="text-slate-600">✂️ {c.item_name} <span className="text-xs text-slate-400">· {c.owner?.name ? `milik ${c.owner.name} · ` : ''}{CUT_REASON_LABEL[c.reason] ?? c.reason} · {c.goods === 'dibawa_kembali' ? '↩️ dibawa kembali' : '🚫 memang tidak ada'}</span></span>
                   <span>{fmtRp(Number(c.amount))}</span>
                 </div>
               ))}
