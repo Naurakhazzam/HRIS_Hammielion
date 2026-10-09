@@ -13,6 +13,7 @@ type Loading = {
   status: 'proses' | 'selesai' | 'dibatalkan'
   delivery_method: 'driver' | 'antar_sendiri'
   ongkir: number
+  nota_amount: number | null
   created_by: string
   origin_branch_id: string
   assigned_to: string | null
@@ -33,6 +34,14 @@ type AssignmentChange = {
   changed_at: string
   old: { full_name: string } | null
   new: { full_name: string } | null
+  by: { full_name: string } | null
+}
+
+type NotaChange = {
+  id: string
+  old_amount: number | null
+  new_amount: number
+  changed_at: string
   by: { full_name: string } | null
 }
 
@@ -83,7 +92,7 @@ type LoadingRow = Loading & {
 }
 
 const LOADING_SELECT = `
-  id, store_id, status, delivery_method, ongkir, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
+  id, store_id, status, delivery_method, ongkir, nota_amount, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
   logistics_stores(name, address, kind),
   origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
   creator:employees!logistics_central_loadings_created_by_fkey(full_name),
@@ -184,8 +193,11 @@ export default function LaporanMuatPage() {
   const [assigneeDraft, setAssigneeDraft] = useState('')
   const [ongkirMode, setOngkirMode] = useState<'tidak' | 'ada' | null>(null)
   const [ongkirDraft, setOngkirDraft] = useState('')
-  // Pindah jalur / ubah ongkir / ganti penerima tugas setelah selesai.
-  const [editMode, setEditMode] = useState<'method' | 'ongkir' | 'assignee' | null>(null)
+  // Nominal nota cabang -- wajib di Tandai Selesai (kedua jalur), lihat migrasi 082.
+  const [notaDraft, setNotaDraft] = useState('')
+  const [detailNotaChanges, setDetailNotaChanges] = useState<NotaChange[]>([])
+  // Pindah jalur / ubah ongkir / ubah nota / ganti penerima tugas setelah selesai.
+  const [editMode, setEditMode] = useState<'method' | 'ongkir' | 'nota' | 'assignee' | null>(null)
   const [reassignReason, setReassignReason] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
   const [detailChanges, setDetailChanges] = useState<AssignmentChange[]>([])
@@ -350,12 +362,18 @@ export default function LaporanMuatPage() {
       `)
       .eq('loading_id', loadingId).order('changed_at')
     setDetailChanges((changes as unknown as AssignmentChange[]) || [])
+
+    const { data: notaChanges } = await supabase.from('logistics_nota_changes')
+      .select('id, old_amount, new_amount, changed_at, by:employees!logistics_nota_changes_changed_by_fkey(full_name)')
+      .eq('loading_id', loadingId).order('changed_at')
+    setDetailNotaChanges((notaChanges as unknown as NotaChange[]) || [])
   }
 
   function toggleSelect(id: string) {
     if (selectedLoadingId === id) { setSelectedLoadingId(null); return }
     setSelectedLoadingId(id)
     setDetailChanges([])
+    setDetailNotaChanges([])
     setItemCaptionDraft('')
     setPackageCaptionDraft('')
     resetFinishForm()
@@ -367,8 +385,15 @@ export default function LaporanMuatPage() {
     setAssigneeDraft('')
     setOngkirMode(null)
     setOngkirDraft('')
+    setNotaDraft('')
     setEditMode(null)
     setReassignReason('')
+  }
+
+  // Nominal nota dari form: null = belum diisi / tidak valid.
+  function notaFromForm(): number | null {
+    const n = parseInt(notaDraft || '0', 10)
+    return n > 0 ? n : null
   }
 
   // Kelola isi laporan (foto, selesai, jalur, ongkir) -- staf cabang asal atau Owner.
@@ -495,6 +520,8 @@ export default function LaporanMuatPage() {
 
   async function handleTandaiSelesai() {
     if (!selectedLoadingId || detailPackages.length === 0 || !finishMethod) return
+    const nota = notaFromForm()
+    if (nota === null) { showMessage('error', 'Isi nominal nota dulu (wajib).'); return }
     const self = finishMethod === 'antar_sendiri'
     const ongkir = self ? ongkirFromForm() : 0
     if (ongkir === null) { showMessage('error', 'Pilih "Tidak ada ongkir" atau isi nominal ongkirnya.'); return }
@@ -503,10 +530,11 @@ export default function LaporanMuatPage() {
     const jalur = !self
       ? 'DIANTAR DRIVER GUDANG (muncul di Jemput Barang Cabang)'
       : `DIANTAR SENDIRI oleh ${assignee?.full_name} (${assignee?.branch_name}) — ongkir ${ongkir > 0 ? fmtRp(ongkir) : 'tidak ada'}`
-    if (!confirm(`Tandai laporan muat ini selesai — ${jalur}?\nFoto tidak bisa ditambah/dihapus lagi setelah ini.`)) return
+    if (!confirm(`Tandai laporan muat ini selesai — ${jalur}?\nNota: ${fmtRp(nota)}\nFoto tidak bisa ditambah/dihapus lagi setelah ini.`)) return
     setFinishing(true)
     const { error } = await supabase.rpc('finish_central_loading', {
       p_loading_id: selectedLoadingId, p_method: finishMethod, p_ongkir: ongkir, p_assigned_to: self ? assigneeDraft : null,
+      p_nota_amount: nota,
     })
     setFinishing(false)
     if (error) { showMessage('error', 'Gagal menandai selesai: ' + error.message); return }
@@ -537,6 +565,10 @@ export default function LaporanMuatPage() {
       ;({ error } = await supabase.rpc('reassign_loading_before_pickup', {
         p_loading_id: l.id, p_new_emp: assigneeDraft, p_reason: reassignReason.trim(),
       }))
+    } else if (editMode === 'nota') {
+      const nota = notaFromForm()
+      if (nota === null) { setSavingEdit(false); showMessage('error', 'Nominal nota wajib lebih dari 0.'); return }
+      ;({ error } = await supabase.rpc('set_central_loading_nota', { p_loading_id: l.id, p_nota_amount: nota }))
     } else {
       const ongkir = ongkirFromForm()
       if (ongkir === null) { setSavingEdit(false); showMessage('error', 'Pilih "Tidak ada ongkir" atau isi nominal ongkirnya.'); return }
@@ -545,7 +577,8 @@ export default function LaporanMuatPage() {
     setSavingEdit(false)
     if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); return }
     showMessage('success', editMode === 'method' ? 'Jalur pengantaran berhasil dipindah.'
-      : editMode === 'assignee' ? 'Penerima tugas berhasil diganti.' : 'Ongkir berhasil diubah.')
+      : editMode === 'assignee' ? 'Penerima tugas berhasil diganti.'
+      : editMode === 'nota' ? 'Nominal nota berhasil diubah.' : 'Ongkir berhasil diubah.')
     resetFinishForm()
     window.dispatchEvent(new Event('kirim-barang-badge-refresh'))
     await refreshOne(l.id)
@@ -750,6 +783,11 @@ export default function LaporanMuatPage() {
                   <p className="text-xs text-slate-400">
                     {itemCounts[l.id] || 0} foto barang · {pkg.total} paket{pkg.total > 0 ? ` (${pkg.diambil} diambil)` : ''}
                   </p>
+                  {l.nota_amount != null ? (
+                    <p className="text-xs font-semibold text-emerald-700 mt-0.5">🧾 Nota {fmtRp(l.nota_amount)}</p>
+                  ) : l.status === 'selesai' && (
+                    <p className="text-xs text-slate-400 mt-0.5">🧾 Nota belum diisi</p>
+                  )}
                   {group === 'belum' && l.completed_at && (
                     <p className={`inline-block mt-1.5 text-xs font-semibold px-2 py-1 rounded-md border ${waitingTone(waitingMs)}`}>
                       ⏱ Sudah {fmtDuration(waitingMs)} belum diambil
@@ -894,6 +932,15 @@ export default function LaporanMuatPage() {
                     <div className="space-y-3">
                       {detailPackages.length > 0 && (
                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                          <div className="space-y-1">
+                            <p className="text-sm font-bold text-slate-700">Nominal nota (wajib)</p>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm text-slate-500">Rp</span>
+                              <RupiahInput value={notaDraft} onChange={setNotaDraft} placeholder="Total nota untuk toko tujuan"
+                                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                            </div>
+                            <p className="text-xs text-slate-500">Sesuai nota yang dibawa ke toko tujuan. Pengantar/driver tidak perlu mengetik ulang.</p>
+                          </div>
                           <p className="text-sm font-bold text-slate-700">Siapa yang mengantar?</p>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <button type="button" onClick={() => setFinishMethod('driver')}
@@ -924,11 +971,12 @@ export default function LaporanMuatPage() {
                           {cancelling ? 'Membatalkan...' : 'Batalkan Laporan'}
                         </button>
                         <button onClick={handleTandaiSelesai}
-                          disabled={detailPackages.length === 0 || finishing || !finishMethod
+                          disabled={detailPackages.length === 0 || finishing || notaFromForm() === null || !finishMethod
                             || (finishMethod === 'antar_sendiri' && (!assigneeDraft || ongkirFromForm() === null))}
                           className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg shadow-sm transition disabled:opacity-50">
                           {finishing ? 'Menyimpan...'
                             : detailPackages.length === 0 ? 'Tambah minimal 1 foto packing dulu'
+                            : notaFromForm() === null ? 'Isi nominal nota dulu'
                             : !finishMethod ? 'Pilih siapa yang mengantar dulu'
                             : finishMethod === 'antar_sendiri' && !assigneeDraft ? 'Pilih pengantar dulu'
                             : finishMethod === 'antar_sendiri' && ongkirFromForm() === null ? 'Isi ongkir dulu'
@@ -942,12 +990,15 @@ export default function LaporanMuatPage() {
                     const self = l.delivery_method === 'antar_sendiri'
                     const methodLocked = !self ? pkg.diambil > 0 : !!tp
                     const ongkirLocked = !!tp && !isOwner
+                    // Sama dengan server (is_central_loading_taken): terkunci begitu barang diambil, kecuali Owner.
+                    const notaLocked = (pkg.diambil > 0 || !!tp) && !isOwner
                     return (
                       <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
                         <div className="flex flex-wrap items-center gap-2 text-sm">
                           <span className="text-slate-600">Jalur: <b>{!self ? '🚚 Diantar Driver Gudang' : '🛵 Diantar Sendiri'}</b></span>
                           {self && <span className="text-slate-600">· Pengantar: <b>{l.assignee?.full_name ?? '-'}</b></span>}
                           {self && <span className="text-slate-600">· Ongkir: <b>{l.ongkir > 0 ? fmtRp(l.ongkir) : 'tidak ada'}</b></span>}
+                          <span className="text-slate-600">· Nota: <b>{l.nota_amount != null ? fmtRp(l.nota_amount) : 'belum diisi'}</b></span>
                         </div>
                         {editMode === null && (
                           <div className="flex flex-wrap gap-2">
@@ -969,6 +1020,13 @@ export default function LaporanMuatPage() {
                                 ✎ Ubah Ongkir
                               </button>
                             )}
+                            {manage && !notaLocked && (
+                              <button type="button" onClick={() => { setEditMode('nota'); setNotaDraft(l.nota_amount != null ? String(l.nota_amount) : '') }}
+                                className="px-3 py-1.5 text-xs font-medium border border-slate-300 bg-white rounded-lg hover:bg-slate-100">
+                                🧾 {l.nota_amount != null ? 'Ubah Nota' : 'Isi Nota'}
+                              </button>
+                            )}
+                            {manage && notaLocked && <span className="text-xs text-slate-400">Nota terkunci — barang sudah diambil, hanya Owner yang bisa mengubah.</span>}
                             {manage && methodLocked && <span className="text-xs text-slate-400">Jalur terkunci — kiriman sudah diambil.</span>}
                             {self && tp && <span className="text-xs text-slate-400">Penerima tugas terkunci setelah foto 1 — hanya Owner yang bisa mengalihkan (menu Kirim Barang).</span>}
                             {manage && self && ongkirLocked && <span className="text-xs text-slate-400">Ongkir terkunci — hanya Owner yang bisa mengubah.</span>}
@@ -992,6 +1050,16 @@ export default function LaporanMuatPage() {
                               </div>
                             )}
                             {(editMode === 'ongkir' || (editMode === 'method' && !self)) && renderOngkirPicker()}
+                            {editMode === 'nota' && (
+                              <div className="space-y-1">
+                                <p className="text-xs font-semibold text-slate-600">Nominal nota baru:</p>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-slate-500">Rp</span>
+                                  <RupiahInput value={notaDraft} onChange={setNotaDraft} placeholder="Nominal nota"
+                                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                                </div>
+                              </div>
+                            )}
                             {editMode === 'method' && self && (
                               <p className="text-xs text-slate-600">Kiriman akan dipindah ke Driver Gudang dan muncul di Jemput Barang Cabang.</p>
                             )}
@@ -1007,6 +1075,20 @@ export default function LaporanMuatPage() {
                       </div>
                     )
                   })()}
+
+                  {detailNotaChanges.length > 0 && (
+                    <div>
+                      <p className="text-sm font-bold text-slate-700 mb-2">🧾 Riwayat Nota</p>
+                      <ul className="space-y-1">
+                        {detailNotaChanges.map(c => (
+                          <li key={c.id} className="text-xs text-slate-600">
+                            {fmtDateTime(c.changed_at)} · {c.old_amount != null ? <>{fmtRp(c.old_amount)} → </> : 'Diisi '}<b>{fmtRp(c.new_amount)}</b>
+                            {' '}oleh {c.by?.full_name ?? '-'}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   {detailChanges.length > 0 && (
                     <div>

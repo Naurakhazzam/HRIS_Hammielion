@@ -34,6 +34,7 @@ type StoreRel = { name: string; address: string | null; phone: string | null } |
 type WaitingLoading = {
   id: string
   ongkir: number
+  nota_amount: number | null
   assigned_to: string | null
   completed_at: string | null
   logistics_stores: StoreRel
@@ -232,7 +233,7 @@ export default function KirimBarangPage() {
     // Menunggu Diambil: hanya tugas yang ditugaskan ke saya; Owner/Kepala Gudang/HR/Finance
     // melihat semua (pantau saja -- yang bisa foto 1 tetap cuma pengantar yang ditugaskan).
     let lq = supabase.from('logistics_central_loadings')
-      .select(`id, ongkir, assigned_to, completed_at, logistics_stores(name, address, phone),
+      .select(`id, ongkir, nota_amount, assigned_to, completed_at, logistics_stores(name, address, phone),
         origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
         completer:employees!logistics_central_loadings_completed_by_fkey(full_name),
         assignee:employees!logistics_central_loadings_assigned_to_fkey(full_name),
@@ -741,6 +742,7 @@ export default function KirimBarangPage() {
                         {w.packages.length} paket · Ongkir {w.ongkir > 0 ? <b>{fmtRp(w.ongkir)}</b> : 'tidak ada'}
                         {w.ongkir > 0 && <span className="text-green-700"> (bonus PJ {fmtRp(Math.floor(w.ongkir * 0.5))})</span>}
                       </p>
+                      {w.nota_amount != null && <p className="text-xs font-semibold text-emerald-700 mt-0.5">🧾 Nota {fmtRp(w.nota_amount)}</p>}
                       <p className="text-xs text-slate-400">Disiapkan {w.completer?.full_name ?? '-'}{w.completed_at ? ` · ${fmtDateTime(w.completed_at)}` : ''}</p>
                       <p className={`inline-block mt-1.5 text-xs font-semibold px-2 py-1 rounded-md border ${waitingTone(waitMs)}`}>⏱ Sudah {fmtDur(waitMs)} belum diambil</p>
                       {w.packages.length > 0 && (

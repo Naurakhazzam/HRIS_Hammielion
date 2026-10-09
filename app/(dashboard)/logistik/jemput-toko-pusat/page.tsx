@@ -17,7 +17,7 @@ type PendingPackage = {
   photo_url: string
   caption: string
   loading_id: string
-  logistics_central_loadings: { origin: { name: string } | null; logistics_stores: { name: string } | null } | null
+  logistics_central_loadings: { nota_amount: number | null; origin: { name: string } | null; logistics_stores: { name: string } | null } | null
 }
 
 type TakenPackage = {
@@ -25,10 +25,12 @@ type TakenPackage = {
   photo_url: string
   caption: string
   taken_at: string | null
-  logistics_central_loadings: { logistics_stores: { name: string } | null } | null
+  logistics_central_loadings: { nota_amount: number | null; logistics_stores: { name: string } | null } | null
 }
 
-const fmtDateTime = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
+
+const fmtDateTime =(s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 // Route tetap /logistik/jemput-toko-pusat, tapi sejak migrasi 068 isinya paket dari 4 cabang toko.
 export default function JemputBarangCabangPage() {
@@ -64,7 +66,7 @@ export default function JemputBarangCabangPage() {
   const fetchPending = useCallback(async () => {
     const { data } = await supabase
       .from('logistics_central_loading_packages')
-      .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name), logistics_stores(name))')
+      .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, nota_amount, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name), logistics_stores(name))')
       .eq('status', 'pending')
       .eq('logistics_central_loadings.status', 'selesai')
       // Kiriman jalur "Diantar Sendiri" tidak boleh terlihat/diklaim driver.
@@ -76,7 +78,7 @@ export default function JemputBarangCabangPage() {
   const fetchTaken = useCallback(async (empId: string, planId: string) => {
     const { data } = await supabase
       .from('logistics_central_loading_packages')
-      .select('id, photo_url, caption, taken_at, logistics_central_loadings(logistics_stores(name)), plan_store_id, logistics_plan_stores!inner(plan_id)')
+      .select('id, photo_url, caption, taken_at, logistics_central_loadings(nota_amount, logistics_stores(name)), plan_store_id, logistics_plan_stores!inner(plan_id)')
       .eq('taken_by', empId)
       .eq('logistics_plan_stores.plan_id', planId)
       .order('taken_at', { ascending: false })
@@ -163,7 +165,10 @@ export default function JemputBarangCabangPage() {
           <div className="p-6 text-center text-sm text-slate-500">Tidak ada paket yang menunggu diambil saat ini.</div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {pending.map(pk => (
+            {pending.map(pk => {
+              const nota = pk.logistics_central_loadings?.nota_amount
+              const sameNota = pending.filter(p => p.loading_id === pk.loading_id).length
+              return (
               <div key={pk.id} className="flex items-center gap-3 px-4 py-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={pk.photo_url} alt={pk.caption} onClick={() => openLightbox(pk.photo_url, pk.caption)}
@@ -172,13 +177,19 @@ export default function JemputBarangCabangPage() {
                   <p className="text-sm font-semibold text-slate-800 truncate">{pk.logistics_central_loadings?.logistics_stores?.name ?? '-'}</p>
                   <p className="text-xs text-slate-500 truncate">{pk.caption}</p>
                   <p className="text-xs text-blue-700 font-medium truncate">📍 Ambil di {pk.logistics_central_loadings?.origin?.name ?? '-'}</p>
+                  {nota != null && (
+                    <p className="text-xs text-emerald-700 font-semibold">
+                      🧾 Nota {fmtRp(nota)}{sameNota > 1 ? ` · ${sameNota} paket satu nota, wajib dibawa semua` : ''}
+                    </p>
+                  )}
                 </div>
                 <button onClick={() => handleClaim(pk)} disabled={!selectedPlanId || claimingId === pk.id}
                   className="shrink-0 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50">
                   {claimingId === pk.id ? 'Menyimpan...' : '✓ Saya Ambil'}
                 </button>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
@@ -197,6 +208,9 @@ export default function JemputBarangCabangPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-700 truncate">{pk.logistics_central_loadings?.logistics_stores?.name ?? '-'}</p>
                   <p className="text-xs text-slate-400 truncate">{pk.caption} · {pk.taken_at ? fmtDateTime(pk.taken_at) : '-'}</p>
+                  {pk.logistics_central_loadings?.nota_amount != null && (
+                    <p className="text-xs text-emerald-700 font-medium">🧾 Nota {fmtRp(pk.logistics_central_loadings.nota_amount)}</p>
+                  )}
                 </div>
               </div>
             ))}
