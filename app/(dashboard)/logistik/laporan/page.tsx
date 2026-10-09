@@ -37,6 +37,7 @@ type PlanStore = {
   payment_method: string | null
   invoice_amount: number | null
   payment_amount: number | null
+  received_total: number | null
   payment_photo_url: string | null
   payment_due_date: string | null
   incident_type: string
@@ -48,6 +49,8 @@ type PlanStore = {
   office_verified_by: string | null
   office_verified_at: string | null
   logistics_stores: { name: string } | null
+  // Nota cabang (Laporan Muat) yang ditagih di kunjungan ini -- diisi setelah fetch (migrasi 083).
+  branch_notas?: { origin: string; amount: number }[]
 }
 
 type PlanSupplierTask = {
@@ -87,9 +90,15 @@ const fmtJam = (ts: string) => new Date(ts).toLocaleTimeString('id-ID', { hour: 
 
 const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
+// Sementara sebelum tab verifikasi finance (Tahap 3): satu kunjungan bisa membawa Nota Gudang
+// + nota cabang, dan driver mengetik SATU angka uang diterima untuk semuanya (received_total).
+// Data lama (sebelum migrasi 083) cuma punya payment_amount = uang diterima.
+const visitInvoice = (s: PlanStore) =>
+  Number(s.invoice_amount || 0) + (s.branch_notas ?? []).reduce((sum, n) => sum + n.amount, 0)
+const reported = (s: PlanStore) => Number(s.received_total ?? s.payment_amount ?? 0)
+
 // > 0 = sisa piutang konsumen, < 0 = lebih bayar (jadi saldo konsumen).
-const storeBalance = (s: { invoice_amount: number | null; payment_amount: number | null }) =>
-  Number(s.invoice_amount || 0) - Number(s.payment_amount || 0)
+const storeBalance = (s: PlanStore) => visitInvoice(s) - reported(s)
 
 export default function LaporanPengirimanPage() {
   const supabase = createClient()
@@ -144,13 +153,25 @@ export default function LaporanPengirimanPage() {
     if (list.length > 0) {
       const { data: storeData } = await supabase.from('logistics_plan_stores')
         .select(`id, plan_id, sequence_order, status, delivery_photo_urls,
-          payment_method, invoice_amount, payment_amount, payment_photo_url, payment_due_date,
+          payment_method, invoice_amount, payment_amount, received_total, payment_photo_url, payment_due_date,
           incident_type, incident_photo_url, incident_description, failed_reason, resolved_at,
           office_verified_amount, office_verified_by, office_verified_at,
           logistics_stores(name)`)
         .in('plan_id', list.map(p => p.id)).order('sequence_order')
+      const storeRows = (storeData as unknown as PlanStore[]) || []
+      if (storeRows.length > 0) {
+        const { data: notaRows } = await supabase.from('logistics_central_loadings')
+          .select('nota_amount, nota_plan_store_id, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name)')
+          .in('nota_plan_store_id', storeRows.map(s => s.id))
+        type NotaRow = { nota_amount: number; nota_plan_store_id: string; origin: { name: string } | null }
+        const byStore: Record<string, { origin: string; amount: number }[]> = {}
+        for (const n of (notaRows as unknown as NotaRow[]) || []) {
+          ;(byStore[n.nota_plan_store_id] ??= []).push({ origin: n.origin?.name ?? 'Cabang', amount: Number(n.nota_amount) })
+        }
+        storeRows.forEach(s => { s.branch_notas = byStore[s.id] ?? [] })
+      }
       const grouped: Record<string, PlanStore[]> = {}
-      ;(storeData as unknown as PlanStore[] || []).forEach(s => {
+      storeRows.forEach(s => {
         if (!grouped[s.plan_id]) grouped[s.plan_id] = []
         grouped[s.plan_id].push(s)
       })
@@ -233,7 +254,7 @@ export default function LaporanPengirimanPage() {
 
   function openVerify(s: PlanStore) {
     setVerifyingId(s.id)
-    setVerifyAmount(s.office_verified_amount != null ? String(s.office_verified_amount) : (s.payment_amount != null ? String(s.payment_amount) : ''))
+    setVerifyAmount(s.office_verified_amount != null ? String(s.office_verified_amount) : (s.received_total != null || s.payment_amount != null ? String(reported(s)) : ''))
   }
 
   async function submitVerify(storeId: string) {
@@ -248,14 +269,14 @@ export default function LaporanPengirimanPage() {
 
   const allStores = Object.values(storesByPlan).flat()
   const cashStores = allStores.filter(s => s.payment_method === 'cash')
-  const totalCash = cashStores.reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
+  const totalCash = cashStores.reduce((sum, s) => sum + reported(s), 0)
   const totalTransfer = allStores.filter(s => s.payment_method === 'transfer').length
-  const totalDeposit = allStores.filter(s => s.payment_method === 'deposit').reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
+  const totalDeposit = allStores.filter(s => s.payment_method === 'deposit').reduce((sum, s) => sum + reported(s), 0)
   const totalTempo = allStores.filter(s => s.payment_method === 'tempo').length
   // Piutang konsumen = nota - uang diterima (migration 075). Toko lama tanpa nominal nota
   // tidak ikut dihitung -- dihitung terpisah supaya kelihatan masih ada yang belum lengkap.
   const storesWithInvoice = allStores.filter(s => s.status === 'delivered' && s.invoice_amount != null)
-  const totalInvoice = storesWithInvoice.reduce((sum, s) => sum + Number(s.invoice_amount), 0)
+  const totalInvoice = storesWithInvoice.reduce((sum, s) => sum + visitInvoice(s), 0)
   const totalPiutang = storesWithInvoice.reduce((sum, s) => sum + Math.max(0, storeBalance(s)), 0)
   const totalLebihBayar = storesWithInvoice.reduce((sum, s) => sum + Math.max(0, -storeBalance(s)), 0)
   const piutangStoreCount = storesWithInvoice.filter(s => storeBalance(s) > 0).length
@@ -270,7 +291,7 @@ export default function LaporanPengirimanPage() {
 
   // Uang dipisah: yang sudah diverifikasi (nominal DITERIMA kantor, bukan yang dilaporkan driver)
   // vs yang belum -- jangan dijumlah jadi satu supaya kelihatan berapa yang benar-benar sudah masuk.
-  const sumReported = (list: PlanStore[]) => list.reduce((sum, s) => sum + Number(s.payment_amount || 0), 0)
+  const sumReported = (list: PlanStore[]) => list.reduce((sum, s) => sum + reported(s), 0)
   const sumReceived = (list: PlanStore[]) => list.reduce((sum, s) => sum + Number(s.office_verified_amount || 0), 0)
   const byMethod = (list: PlanStore[], m: string) => list.filter(s => s.payment_method === m)
   const verifiedReported = sumReported(verifiedCashStores)
@@ -587,7 +608,11 @@ export default function LaporanPengirimanPage() {
                                 <>
                                   {s.payment_method && (
                                     <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
-                                      {PAYMENT_LABEL[s.payment_method]}{s.invoice_amount != null ? ` — nota ${fmtRp(Number(s.invoice_amount))}` : ''}{s.payment_amount ? ` — diterima ${fmtRp(Number(s.payment_amount))}` : ''}{s.payment_due_date ? ` — jatuh tempo ${new Date(s.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
+                                      {PAYMENT_LABEL[s.payment_method]}
+                                      {(s.branch_notas ?? []).length > 0
+                                        ? `${s.invoice_amount ? ` — nota gudang ${fmtRp(Number(s.invoice_amount))}` : ''}${(s.branch_notas ?? []).map(n => ` — nota ${n.origin} ${fmtRp(n.amount)}`).join('')}`
+                                        : s.invoice_amount != null ? ` — nota ${fmtRp(Number(s.invoice_amount))}` : ''}
+                                      {reported(s) ? ` — diterima ${fmtRp(reported(s))}` : ''}{s.payment_due_date ? ` — jatuh tempo ${new Date(s.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
                                     </span>
                                   )}
                                   {s.invoice_amount != null && storeBalance(s) !== 0 && (
@@ -651,7 +676,7 @@ export default function LaporanPengirimanPage() {
                                   </div>
                                 ) : s.office_verified_amount != null ? (
                                   (() => {
-                                    const selisih = Number(s.office_verified_amount) - Number(s.payment_amount || 0)
+                                    const selisih = Number(s.office_verified_amount) - reported(s)
                                     return (
                                       <div className="flex items-center gap-2">
                                         <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">

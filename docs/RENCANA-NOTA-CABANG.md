@@ -29,6 +29,14 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   - Klaim paket kini hanya digabung ke kunjungan toko yang masih **pending** (dulu bisa menempel ke
     kunjungan yang sudah terkirim → nota tidak tertagih).
   - Belum: Laporan Pengiriman (finance) belum menampilkan nota cabang — masuk Tahap 3.
+- [x] **Perbaikan audit (9 Okt 2026)** — migrasi `084_fast_logistics_participant_visibility.sql`
+  (timeout/error 500 di Laporan Muat, Kirim Barang, grooming: policy `employees` dihitung lewat
+  `can_see_logistics_participant`, hak lihat terbukti sama untuk 22 akun) dan
+  `085_nota_release_and_transfer_photo.sql` (kunci "1 nota = 1 driver" hanya selama trip driver
+  pertama masih aktif; nota cabang hanya ditagih sekali; antar sendiri transfer wajib foto bukti —
+  wajibnya baru di aplikasi, server belum memaksa supaya versi lama tidak macet). Laporan Pengiriman:
+  perbaikan sementara — tampil nota cabang, "diterima" = `received_total`, piutang dari semua nota.
+  **Belum di-push** (permintaan user: dikumpulkan, push sekaligus nanti).
 - [ ] **Tahap 3** — Tab verifikasi finance (Cocok / Tidak Cocok + pemberitahuan kurang bayar)
 - [ ] **Tahap 4** — Gagal / Kirim Besok + tab Tertunda (berlaku nota gudang & nota cabang)
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)

@@ -377,12 +377,15 @@ export default function JalanPengirimanPage() {
     const map: Record<string, BranchNota[]> = {}
     if (rows.length > 0) {
       const { data: pkgs } = await supabase.from('logistics_central_loading_packages')
-        .select('plan_store_id, loading_id, logistics_central_loadings(nota_amount, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name))')
+        .select('plan_store_id, loading_id, logistics_central_loadings(nota_amount, nota_payment_method, nota_plan_store_id, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name))')
         .in('plan_store_id', rows.map(r => r.id)).eq('status', 'diambil')
-      type PkgRow = { plan_store_id: string; loading_id: string; logistics_central_loadings: { nota_amount: number | null; origin: { name: string } | null } | null }
+      type PkgRow = { plan_store_id: string; loading_id: string; logistics_central_loadings: { nota_amount: number | null; nota_payment_method: string | null; nota_plan_store_id: string | null; origin: { name: string } | null } | null }
       for (const p of (pkgs as unknown as PkgRow[]) || []) {
-        const amount = p.logistics_central_loadings?.nota_amount
+        const l = p.logistics_central_loadings
+        const amount = l?.nota_amount
         if (amount == null) continue
+        // Nota yang sudah ditagih di kunjungan/driver lain tidak ditagih lagi (migrasi 085).
+        if (l?.nota_payment_method && l.nota_plan_store_id !== p.plan_store_id) continue
         const list = map[p.plan_store_id] ??= []
         if (!list.some(n => n.loading_id === p.loading_id)) {
           list.push({ loading_id: p.loading_id, amount: Number(amount), origin: p.logistics_central_loadings?.origin?.name ?? 'Cabang' })

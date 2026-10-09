@@ -113,8 +113,10 @@ type PayMethod = 'cash' | 'transfer' | 'deposit' | 'tempo'
 const PAY_LABEL: Record<PayMethod, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit (DP)', tempo: 'Tempo' }
 // Kiriman barang bernota wajib isi cara bayar di Foto 2; tempo tidak ada uang diterima.
 const stopNota = (s: TripStop) => s.kind === 'barang' ? s.logistics_central_loadings?.nota_amount ?? null : null
-const payValid = (d?: { method: PayMethod | ''; received: string }) =>
-  !!d?.method && (d.method === 'tempo' || Number(d.received) > 0)
+// Transfer wajib foto bukti -- belum ada bukti berarti dicatat tempo.
+type PayDraft = { method: PayMethod | ''; received: string; photoUrl?: string }
+const payValid = (d?: PayDraft) =>
+  !!d?.method && (d.method === 'tempo' || Number(d.received) > 0) && (d.method !== 'transfer' || !!d.photoUrl)
 const ms = (s: string) => new Date(s).getTime()
 
 function fmtDur(msVal: number) {
@@ -213,7 +215,7 @@ export default function KirimBarangPage() {
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
   // Pembayaran nota per tujuan (Foto 2), lihat migrasi 083. Uang diterima wajib diketik.
-  const [payDraft, setPayDraft] = useState<Record<string, { method: PayMethod | ''; received: string }>>({})
+  const [payDraft, setPayDraft] = useState<Record<string, PayDraft>>({})
   // Foto yang sudah diambil tapi gagal terkirim (sinyal jelek) -- disimpan supaya bisa dicoba
   // lagi tanpa foto ulang.
   const [pending, setPending] = useState<{ kind: 'start' | 'arrive' | 'finish'; blob: Blob; url?: string; stopId?: string; loadingIds?: string[]; groomKeys?: string[] } | null>(null)
@@ -406,6 +408,7 @@ export default function KirimBarangPage() {
       p_stop_id: stop.id, p_photo_url: url,
       p_method: pay?.method || null,
       p_received: pay ? (pay.method === 'tempo' ? 0 : Number(pay.received)) : null,
+      p_payment_photo_url: pay?.method === 'transfer' ? pay.photoUrl ?? null : null,
     })
     setBusy(false)
     if (error) {
@@ -648,7 +651,7 @@ export default function KirimBarangPage() {
                       <p className="text-sm font-semibold text-emerald-800">🧾 Nota {fmtRp(nota)} — toko bayar pakai apa?</p>
                       <div className="grid grid-cols-2 gap-1.5">
                         {(Object.keys(PAY_LABEL) as PayMethod[]).map(m => (
-                          <button key={m} type="button" onClick={() => setPayDraft(p => ({ ...p, [s.id]: { method: m, received: p[s.id]?.received ?? '' } }))}
+                          <button key={m} type="button" onClick={() => setPayDraft(p => ({ ...p, [s.id]: { ...p[s.id], method: m, received: p[s.id]?.received ?? '' } }))}
                             className={`py-1.5 rounded-lg text-sm font-medium border ${pay?.method === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300'}`}>
                             {PAY_LABEL[m]}
                           </button>
@@ -657,17 +660,41 @@ export default function KirimBarangPage() {
                       {pay?.method && pay.method !== 'tempo' && (
                         <div>
                           <label className="block text-xs font-medium text-slate-600 mb-1">Uang yang diterima (Rp) *</label>
-                          <RupiahInput value={pay.received} onChange={v => setPayDraft(p => ({ ...p, [s.id]: { method: p[s.id]?.method ?? '', received: v } }))}
+                          <RupiahInput value={pay.received} onChange={v => setPayDraft(p => ({ ...p, [s.id]: { ...p[s.id], method: p[s.id]?.method ?? '', received: v } }))}
                             placeholder="Ketik jumlah uang"
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
                         </div>
+                      )}
+                      {pay?.method === 'transfer' && (
+                        pay.photoUrl ? (
+                          <div className="space-y-1">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={pay.photoUrl} alt="Bukti transfer" onClick={() => openLightbox(pay.photoUrl!, 'Bukti transfer')}
+                              className="w-full rounded-lg aspect-[4/3] object-cover cursor-zoom-in" />
+                            <button type="button" onClick={() => setPayDraft(p => ({ ...p, [s.id]: { ...p[s.id], photoUrl: undefined } }))}
+                              className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <p className="text-xs text-slate-500">Foto bukti transfer wajib. Belum ada bukti transfer? Pilih <b>Tempo</b>.</p>
+                            <LogisticsCameraCapture label="Foto Bukti Transfer" employeeName={myName}
+                              onCaptured={async blob => {
+                                const url = await upload(stopFolder(s), blob, 'transfer')
+                                if (url) setPayDraft(p => ({ ...p, [s.id]: { ...p[s.id], method: 'transfer', received: p[s.id]?.received ?? '', photoUrl: url } }))
+                              }} />
+                          </div>
+                        )
                       )}
                     </div>
                   )}
                   {blocked ? (
                     <p className="text-xs text-slate-500 text-center py-2">Foto jemput kucing di pelanggan dulu.</p>
                   ) : nota != null && !payValid(pay) ? (
-                    <p className="text-xs text-slate-500 text-center py-2">Pilih cara bayar{pay?.method && pay.method !== 'tempo' ? ' & isi uang yang diterima' : ''} dulu, baru foto sampai.</p>
+                    <p className="text-xs text-slate-500 text-center py-2">
+                      {!pay?.method ? 'Pilih cara bayar dulu, baru foto sampai.'
+                        : pay.method !== 'tempo' && !(Number(pay.received) > 0) ? 'Isi uang yang diterima dulu, baru foto sampai.'
+                        : 'Foto bukti transfer dulu, baru foto sampai.'}
+                    </p>
                   ) : waitLeft > 0 ? (
                     <p className="text-xs text-slate-500 text-center py-2">⏳ Foto sampai bisa diambil {Math.ceil(waitLeft / 60000)} menit lagi (minimal 2 menit per tahap).</p>
                   ) : busy ? (

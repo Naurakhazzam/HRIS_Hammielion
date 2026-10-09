@@ -17,7 +17,10 @@ type PendingPackage = {
   photo_url: string
   caption: string
   loading_id: string
-  logistics_central_loadings: { nota_amount: number | null; origin: { name: string } | null; logistics_stores: { name: string } | null } | null
+  logistics_central_loadings: {
+    nota_amount: number | null; origin: { name: string } | null; logistics_stores: { name: string } | null
+    siblings: { status: string; taken_by: string | null; taken: { full_name: string } | null }[]
+  } | null
 }
 
 type TakenPackage = {
@@ -66,7 +69,7 @@ export default function JemputBarangCabangPage() {
   const fetchPending = useCallback(async () => {
     const { data } = await supabase
       .from('logistics_central_loading_packages')
-      .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, nota_amount, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name), logistics_stores(name))')
+      .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, nota_amount, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name), logistics_stores(name), siblings:logistics_central_loading_packages(status, taken_by, taken:employees!logistics_central_loading_packages_taken_by_fkey(full_name)))')
       .eq('status', 'pending')
       .eq('logistics_central_loadings.status', 'selesai')
       // Kiriman jalur "Diantar Sendiri" tidak boleh terlihat/diklaim driver.
@@ -168,6 +171,10 @@ export default function JemputBarangCabangPage() {
             {pending.map(pk => {
               const nota = pk.logistics_central_loadings?.nota_amount
               const sameNota = pending.filter(p => p.loading_id === pk.loading_id).length
+              // Satu nota = satu driver selama tripnya berjalan (migrasi 085) -- beri tahu sebelum klik.
+              const otherTakers = nota == null ? [] : [...new Set((pk.logistics_central_loadings?.siblings ?? [])
+                .filter(sb => sb.status === 'diambil' && sb.taken_by !== myEmployeeId)
+                .map(sb => sb.taken?.full_name ?? 'driver lain'))]
               return (
               <div key={pk.id} className="flex items-center gap-3 px-4 py-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -180,6 +187,11 @@ export default function JemputBarangCabangPage() {
                   {nota != null && (
                     <p className="text-xs text-emerald-700 font-semibold">
                       🧾 Nota {fmtRp(nota)}{sameNota > 1 ? ` · ${sameNota} paket satu nota, wajib dibawa semua` : ''}
+                    </p>
+                  )}
+                  {otherTakers.length > 0 && (
+                    <p className="text-xs text-amber-700">
+                      🔒 Paket lain nota ini sudah dibawa {otherTakers.join(', ')} — selama tripnya masih jalan, hanya dia yang bisa mengambil.
                     </p>
                   )}
                 </div>
