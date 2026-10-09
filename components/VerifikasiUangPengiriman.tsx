@@ -55,7 +55,7 @@ const VISIT_SELECT: string = `id, payment_method, invoice_amount, received_total
         plan:logistics_delivery_plans!logistics_plan_stores_plan_id_fkey(driver:employees!logistics_delivery_plans_driver_id_fkey(full_name)),
         verifier:employees!logistics_plan_stores_office_verified_by_fkey(full_name)`
 const ANTAR_SELECT: string = `id, nota_amount, nota_reported_amount, nota_payment_method, nota_payment_photo_url, nota_received_at,
-        nota_verified_amount, nota_verified_at, nota_account_id,
+        nota_verified_amount, nota_verified_at, nota_account_id, nota_cut_total, nota_cut_status,
         logistics_stores(name),
         origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
         receiver:employees!logistics_central_loadings_nota_received_by_fkey(full_name),
@@ -154,6 +154,7 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
     type AntarRow = {
       id: string; nota_amount: number; nota_reported_amount: number | null; nota_payment_method: Method; nota_payment_photo_url: string | null
       nota_received_at: string | null; nota_verified_amount: number | null; nota_verified_at: string | null; nota_account_id: string | null
+      nota_cut_total: number | null; nota_cut_status: string | null
       logistics_stores: { name: string } | null; origin: { name: string } | null; receiver: NameRel; verifier: NameRel
     }
 
@@ -175,7 +176,7 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
         notas: [{ label: `Nota ${l.origin?.name ?? 'Cabang'}`, amount: Number(l.nota_amount) }],
         reported: Number(l.nota_reported_amount ?? 0), verified: l.nota_verified_amount != null ? Number(l.nota_verified_amount) : null,
         verifiedAt: l.nota_verified_at, verifier: l.verifier?.full_name ?? null, accountId: l.nota_account_id, photoUrl: l.nota_payment_photo_url,
-        cutTotal: 0, cutStatus: null,
+        cutTotal: Number(l.nota_cut_total ?? 0), cutStatus: l.nota_cut_status,
       })),
     ].sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''))
     setItems(list)
@@ -355,12 +356,24 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
   )
 }
 
+// Satu baris persetujuan: kunjungan driver (plan_store) atau kiriman antar sendiri (loading, migrasi 095).
 type CutRow = {
-  id: string; cut_total: number; cut_status: 'menunggu' | 'disetujui' | 'ditolak'; cut_photo_url: string | null
+  kind: 'visit' | 'antar'; id: string; person: string
+  cut_total: number; cut_status: 'menunggu' | 'disetujui' | 'ditolak'; cut_photo_url: string | null
   cut_decided_at: string | null; cut_decision_note: string | null; resolved_at: string | null; payment_method: string | null
-  invoice_amount: number | null; logistics_stores: { name: string } | null; plan: { driver: NameRel } | null; decider: NameRel
+  logistics_stores: { name: string } | null; decider: NameRel
 }
-type CutLine = { plan_store_id: string; item_name: string; amount: number; reason: string; goods: string; owner: { name: string } | null }
+type VisitCutRow = Omit<CutRow, 'kind' | 'person'> & { plan: { driver: NameRel } | null }
+type AntarCutRow = {
+  id: string; nota_cut_total: number; nota_cut_status: CutRow['cut_status']; nota_cut_photo_url: string | null
+  nota_cut_decided_at: string | null; nota_cut_decision_note: string | null; nota_received_at: string | null; nota_payment_method: string | null
+  logistics_stores: { name: string } | null; receiver: NameRel; decider: NameRel
+}
+const ANTAR_CUT_SELECT: string = `id, nota_cut_total, nota_cut_status, nota_cut_photo_url, nota_cut_decided_at, nota_cut_decision_note,
+        nota_received_at, nota_payment_method, logistics_stores(name),
+        receiver:employees!logistics_central_loadings_nota_received_by_fkey(full_name),
+        decider:employees!logistics_central_loadings_nota_cut_decided_by_fkey(full_name)`
+type CutLine = { plan_store_id: string | null; loading_id: string | null; item_name: string; amount: number; reason: string; goods: string; owner: { name: string } | null }
 
 // Persetujuan potong nota (migrasi 092). Yang menunggu tampil semua bulan; yang sudah
 // diputuskan per bulan pengiriman. Keputusan boleh diubah selama nota belum ada pelunasan.
@@ -378,19 +391,37 @@ function PotongNotaList({ month, onChanged }: { month: string; onChanged: () => 
     const [y, m] = month.split('-').map(Number)
     const start = new Date(y, m - 1, 1).toISOString()
     const end = new Date(y, m, 1).toISOString()
-    const [pend, done] = await Promise.all([
+    const [pend, done, aPend, aDone] = await Promise.all([
       supabase.from('logistics_plan_stores').select(CUT_SELECT).eq('cut_status', 'menunggu').order('resolved_at'),
       supabase.from('logistics_plan_stores').select(CUT_SELECT).in('cut_status', ['disetujui', 'ditolak'])
         .gte('resolved_at', start).lt('resolved_at', end).order('resolved_at', { ascending: false }),
+      supabase.from('logistics_central_loadings').select(ANTAR_CUT_SELECT).eq('nota_cut_status', 'menunggu').order('nota_received_at'),
+      supabase.from('logistics_central_loadings').select(ANTAR_CUT_SELECT).in('nota_cut_status', ['disetujui', 'ditolak'])
+        .gte('nota_received_at', start).lt('nota_received_at', end).order('nota_received_at', { ascending: false }),
     ])
-    const err = pend.error || done.error
+    const err = pend.error || done.error || aPend.error || aDone.error
     if (err) { setMessage({ type: 'error', text: 'Gagal memuat: ' + err.message }); setLoading(false); return }
-    const all = [...((pend.data as unknown as CutRow[]) || []), ...((done.data as unknown as CutRow[]) || [])]
+    const fromVisit = (r: VisitCutRow): CutRow => ({ ...r, kind: 'visit', person: `🚚 ${r.plan?.driver?.full_name ?? 'Driver'}` })
+    const fromAntar = (l: AntarCutRow): CutRow => ({
+      kind: 'antar', id: l.id, person: `🛵 ${l.receiver?.full_name ?? 'Pengantar'} (antar sendiri)`,
+      cut_total: l.nota_cut_total, cut_status: l.nota_cut_status, cut_photo_url: l.nota_cut_photo_url,
+      cut_decided_at: l.nota_cut_decided_at, cut_decision_note: l.nota_cut_decision_note, resolved_at: l.nota_received_at,
+      payment_method: l.nota_payment_method, logistics_stores: l.logistics_stores, decider: l.decider,
+    })
+    const all = [
+      ...((pend.data as unknown as VisitCutRow[]) || []).map(fromVisit), ...((aPend.data as unknown as AntarCutRow[]) || []).map(fromAntar),
+      ...((done.data as unknown as VisitCutRow[]) || []).map(fromVisit), ...((aDone.data as unknown as AntarCutRow[]) || []).map(fromAntar),
+    ]
     const map: Record<string, CutLine[]> = {}
-    if (all.length > 0) {
-      const { data } = await supabase.from('logistics_visit_cuts')
-        .select('plan_store_id, item_name, amount, reason, goods, owner:branches(name)').in('plan_store_id', all.map(r => r.id)).order('created_at')
-      for (const c of (data as unknown as CutLine[]) || []) (map[c.plan_store_id] ??= []).push(c)
+    const visitIds = all.filter(r => r.kind === 'visit').map(r => r.id)
+    const antarIds = all.filter(r => r.kind === 'antar').map(r => r.id)
+    const lineSel = 'plan_store_id, loading_id, item_name, amount, reason, goods, owner:branches(name)'
+    const [vl, al] = await Promise.all([
+      visitIds.length > 0 ? supabase.from('logistics_visit_cuts').select(lineSel).in('plan_store_id', visitIds).order('created_at') : Promise.resolve({ data: [] }),
+      antarIds.length > 0 ? supabase.from('logistics_visit_cuts').select(lineSel).in('loading_id', antarIds).order('created_at') : Promise.resolve({ data: [] }),
+    ])
+    for (const c of [...((vl.data as unknown as CutLine[]) || []), ...((al.data as unknown as CutLine[]) || [])]) {
+      ;(map[(c.plan_store_id ?? c.loading_id)!] ??= []).push(c)
     }
     setRows(all)
     setLines(map)
@@ -406,7 +437,10 @@ function PotongNotaList({ month, onChanged }: { month: string; onChanged: () => 
     const note = rejectDraft[r.id]?.trim() ?? ''
     if (decision === 'ditolak' && note.length < 3) { setMessage({ type: 'error', text: 'Tulis alasan penolakan.' }); return }
     setBusyId(r.id)
-    const { error } = await supabase.rpc('decide_visit_cut', { p_plan_store_id: r.id, p_decision: decision, p_note: decision === 'ditolak' ? note : null })
+    const p_note = decision === 'ditolak' ? note : null
+    const { error } = r.kind === 'visit'
+      ? await supabase.rpc('decide_visit_cut', { p_plan_store_id: r.id, p_decision: decision, p_note })
+      : await supabase.rpc('decide_loading_cut', { p_loading_id: r.id, p_decision: decision, p_note })
     setBusyId(null)
     if (error) { setMessage({ type: 'error', text: 'Gagal: ' + error.message }); return }
     setMessage({ type: 'success', text: `Potongan ${r.logistics_stores?.name ?? ''} ${decision}.` })
@@ -423,7 +457,7 @@ function PotongNotaList({ month, onChanged }: { month: string; onChanged: () => 
         </div>
       )}
       <p className="text-xs text-slate-500">
-        Potongan nota dari driver (barang salah / rusak / kurang / harga beda). Selama belum disetujui atau bila ditolak,
+        Potongan nota dari driver & antar sendiri (barang salah / rusak / kurang / harga beda). Selama belum disetujui atau bila ditolak,
         potongan tetap dihitung kurang bayar (piutang). Disetujui = nota dikurangi, nota terbesar dulu.
         Potongan mengurangi nota pemilik barangnya. Barang yang dibawa kembali diantar driver ke pemiliknya, lalu dikonfirmasi di Penerimaan Retur.
       </p>
@@ -435,11 +469,11 @@ function PotongNotaList({ month, onChanged }: { month: string; onChanged: () => 
         const busy = busyId === r.id
         const rej = rejectDraft[r.id]
         return (
-          <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+          <div key={`${r.kind}-${r.id}`} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <p className="font-semibold text-slate-800">{r.logistics_stores?.name ?? '-'}</p>
-                <p className="text-xs text-slate-500">🚚 {r.plan?.driver?.full_name ?? 'Driver'} · {fmtDate(r.resolved_at)}{r.payment_method ? ` · ${r.payment_method}` : ''}</p>
+                <p className="text-xs text-slate-500">{r.person} · {fmtDate(r.resolved_at)}{r.payment_method ? ` · ${r.payment_method}` : ''}</p>
               </div>
               <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${r.cut_status === 'menunggu' ? 'bg-rose-100 text-rose-700' : r.cut_status === 'disetujui' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                 {CUT_STATUS_LABEL[r.cut_status]}

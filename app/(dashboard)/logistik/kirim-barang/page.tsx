@@ -115,6 +115,26 @@ const PAY_LABEL: Record<PayMethod, string> = { cash: 'Cash', transfer: 'Transfer
 const stopNota = (s: TripStop) => s.kind === 'barang' ? s.logistics_central_loadings?.nota_amount ?? null : null
 // Transfer wajib foto bukti -- belum ada bukti berarti dicatat tempo.
 type PayDraft = { method: PayMethod | ''; received: string; photoUrl?: string; dueDate?: string }
+// Potong nota antar sendiri (migrasi 095): pemilik barang = cabang pengirim sendiri, jadi tidak
+// perlu dipilih. Barang yang dibawa kembali ikut pulang & selesai dengan Foto 3 (kembali di cabang).
+type CutReason = 'salah_muat' | 'rusak' | 'kurang_jumlah' | 'harga_beda' | 'lainnya'
+type CutItem = { item_name: string; amount: string; reason: CutReason | ''; goods: 'dibawa_kembali' | 'tidak_ada' | '' }
+type CutDraft = { yes: boolean; items: CutItem[]; photoUrl?: string }
+const CUT_REASON_LABEL: Record<CutReason, string> = {
+  salah_muat: 'Salah muat', rusak: 'Rusak / kedaluwarsa', kurang_jumlah: 'Kurang jumlah', harga_beda: 'Harga beda', lainnya: 'Lainnya',
+}
+const emptyCut = (): CutItem => ({ item_name: '', amount: '', reason: '', goods: '' })
+const cutTotalOf = (items: CutItem[]) => items.reduce((t, i) => t + (Number(i.amount) || 0), 0)
+// null = boleh lanjut; string = alasan belum boleh foto sampai.
+function cutProblem(d: CutDraft | undefined, nota: number): string | null {
+  if (!d?.yes) return null
+  if (d.items.length === 0 || !d.items.every(i => i.item_name.trim() && Number(i.amount) > 0 && i.reason && i.goods)) return 'Lengkapi data potong nota dulu, baru foto sampai.'
+  if (cutTotalOf(d.items) > nota) return 'Total potongan melebihi nota.'
+  if (!d.photoUrl) return 'Foto barang / nota yang dipotong dulu, baru foto sampai.'
+  return null
+}
+const cutPayload = (items: CutItem[]) => items.map(i => ({ item_name: i.item_name.trim(), amount: Number(i.amount), reason: i.reason, goods: i.goods }))
+
 const payValid = (d?: PayDraft) =>
   !!d?.method && (d.method === 'tempo' ? !!d.dueDate : Number(d.received) > 0) && (d.method !== 'transfer' || !!d.photoUrl)
 const ms = (s: string) => new Date(s).getTime()
@@ -218,6 +238,9 @@ export default function KirimBarangPage() {
   const [payDraft, setPayDraft] = useState<Record<string, PayDraft>>({})
   // Gagal kirim per tujuan barang (toko menolak / batal pesan) -- alasan + foto (migrasi 089).
   const [failDraft, setFailDraft] = useState<Record<string, { reason: string; photoUrl?: string }>>({})
+  // Potong nota per tujuan (key = stop id); cutRetry = gagal tersimpan setelah foto sampai, bisa diulang.
+  const [cutDraft, setCutDraft] = useState<Record<string, CutDraft>>({})
+  const [cutRetry, setCutRetry] = useState<Record<string, { loadingId: string; title: string; draft: CutDraft }>>({})
 
   async function submitFailStop(stop: TripStop) {
     const d = failDraft[stop.id]
@@ -435,8 +458,29 @@ export default function KirimBarangPage() {
       setPending(null); showMessage('error', error.message); await refresh(); return
     }
     setPending(null)
-    showMessage('success', stop.kind === 'barang' ? `Sampai di ${stopTitle(stop)} tercatat.` : `${stopTitle(stop).replace('🐱 ', '')} — tercatat.`)
+    const cut = stop.kind === 'barang' && stop.loading_id ? cutDraft[stop.id] : undefined
+    if (cut?.yes && stop.loading_id) {
+      const ok = await saveCut(stop.loading_id, cut)
+      if (!ok) setCutRetry(r => ({ ...r, [stop.id]: { loadingId: stop.loading_id!, title: stopTitle(stop), draft: cut } }))
+    }
+    setCutDraft(d => { const n = { ...d }; delete n[stop.id]; return n })
+    showMessage('success', stop.kind === 'barang' ? `Sampai di ${stopTitle(stop)} tercatat.${cut?.yes ? ' Potong nota menunggu persetujuan Finance.' : ''}` : `${stopTitle(stop).replace('🐱 ', '')} — tercatat.`)
     await refresh()
+  }
+
+  async function saveCut(loadingId: string, d: CutDraft): Promise<boolean> {
+    const { error } = await supabase.rpc('set_loading_cuts', { p_loading_id: loadingId, p_items: cutPayload(d.items), p_photo_url: d.photoUrl ?? null })
+    if (error) { showMessage('error', 'Sampai tercatat, tapi POTONG NOTA gagal disimpan: ' + error.message + '. Tekan "Simpan Ulang Potong Nota".'); return false }
+    return true
+  }
+
+  async function retryCut(stopId: string) {
+    const r = cutRetry[stopId]
+    if (!r) return
+    setBusy(true)
+    const ok = await saveCut(r.loadingId, r.draft)
+    setBusy(false)
+    if (ok) { setCutRetry(c => { const n = { ...c }; delete n[stopId]; return n }); showMessage('success', 'Potong nota tersimpan, menunggu persetujuan Finance.') }
   }
 
   // ── FOTO 3 ──
@@ -643,6 +687,13 @@ export default function KirimBarangPage() {
         {stale && <p className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 font-semibold">⚠️ Sudah lebih dari 6 jam sejak foto terakhir — segera selesaikan. Tugas ini sudah muncul di Owner.</p>}
 
         {renderStopsTimeline(t)}
+        {Object.entries(cutRetry).map(([stopId, r]) => (
+          <div key={stopId} className="bg-red-50 border border-red-200 rounded-lg p-2.5 flex items-center justify-between gap-2">
+            <p className="text-xs text-red-700">Potong nota {r.title} belum tersimpan.</p>
+            <button type="button" disabled={busy} onClick={() => retryCut(stopId)}
+              className="text-xs px-2.5 py-1.5 bg-red-600 text-white rounded-lg font-semibold disabled:opacity-50 shrink-0">Simpan Ulang Potong Nota</button>
+          </div>
+        ))}
 
         {notArrived.length > 0 && (
           <div className="space-y-3">
@@ -751,8 +802,74 @@ export default function KirimBarangPage() {
                       )}
                     </div>
                   )}
+                  {nota != null && (() => {
+                    const cd = cutDraft[s.id] ?? { yes: false, items: [emptyCut()] }
+                    const setCd = (patch: Partial<CutDraft>) => setCutDraft(c => ({ ...c, [s.id]: { ...(c[s.id] ?? { yes: false, items: [emptyCut()] }), ...patch } }))
+                    const setItem = (idx: number, patch: Partial<CutItem>) => setCd({ items: cd.items.map((it, i) => i === idx ? { ...it, ...patch } : it) })
+                    return (
+                      <div className="bg-white border border-rose-200 rounded-lg p-2.5 space-y-2">
+                        <p className="text-sm font-semibold text-rose-800">Apakah ini POTONG NOTA?</p>
+                        <p className="text-[11px] text-slate-500">Toko bayar kurang dari nota karena barang salah / rusak / kurang / harga beda.</p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button type="button" onClick={() => setCd({ yes: false })}
+                            className={`py-1.5 rounded-lg text-xs font-medium border ${!cd.yes ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}>Tidak</button>
+                          <button type="button" onClick={() => setCd({ yes: true })}
+                            className={`py-1.5 rounded-lg text-xs font-medium border ${cd.yes ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>✂️ Ya, potong nota</button>
+                        </div>
+                        {cd.yes && (
+                          <div className="space-y-2">
+                            {cd.items.map((it, idx) => (
+                              <div key={idx} className="border border-rose-100 bg-rose-50/50 rounded-lg p-2 space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-semibold text-rose-800">Barang {idx + 1}</span>
+                                  {cd.items.length > 1 && <button type="button" onClick={() => setCd({ items: cd.items.filter((_, i) => i !== idx) })} className="text-xs text-red-600">Hapus</button>}
+                                </div>
+                                <input value={it.item_name} onChange={e => setItem(idx, { item_name: e.target.value })} placeholder="Nama produk"
+                                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
+                                <RupiahInput value={it.amount} onChange={v => setItem(idx, { amount: v })} placeholder="Nominal potongan (Rp)"
+                                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
+                                <select value={it.reason} onChange={e => setItem(idx, { reason: e.target.value as CutReason })}
+                                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white">
+                                  <option value="">— Alasan potongan —</option>
+                                  {(Object.keys(CUT_REASON_LABEL) as CutReason[]).map(r => <option key={r} value={r}>{CUT_REASON_LABEL[r]}</option>)}
+                                </select>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <button type="button" onClick={() => setItem(idx, { goods: 'dibawa_kembali' })}
+                                    className={`px-2 py-1.5 rounded-lg text-xs border text-left ${it.goods === 'dibawa_kembali' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+                                    <b>↩️ Dibawa kembali</b><span className="block opacity-80">Ikut pulang ke cabang</span>
+                                  </button>
+                                  <button type="button" onClick={() => setItem(idx, { goods: 'tidak_ada' })}
+                                    className={`px-2 py-1.5 rounded-lg text-xs border text-left ${it.goods === 'tidak_ada' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+                                    <b>🚫 Memang tidak ada</b><span className="block opacity-80">Mis. pesan 10, terkirim 9</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                            <button type="button" onClick={() => setCd({ items: [...cd.items, emptyCut()] })} className="text-xs text-blue-600 font-medium">+ Tambah barang</button>
+                            <p className="text-sm font-semibold text-rose-800">Total potongan: {fmtRp(cutTotalOf(cd.items))}</p>
+                            {cd.photoUrl ? (
+                              <div className="space-y-1">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={cd.photoUrl} alt="Foto potong nota" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                                <button type="button" onClick={() => setCd({ photoUrl: undefined })} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                              </div>
+                            ) : (
+                              <LogisticsCameraCapture label="Foto Barang / Nota yang Dipotong *" employeeName={myName}
+                                onCaptured={async blob => {
+                                  const url = await upload(stopFolder(s), blob, 'potong')
+                                  if (url) setCd({ photoUrl: url })
+                                }} />
+                            )}
+                            <p className="text-[11px] text-rose-800">Menunggu persetujuan Finance; selama belum disetujui tetap dihitung kurang bayar. Barang yang dibawa kembali diserahkan ke cabang saat Foto 3 (kembali di cabang).</p>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                   {blocked ? (
                     <p className="text-xs text-slate-500 text-center py-2">Foto jemput kucing di pelanggan dulu.</p>
+                  ) : nota != null && cutProblem(cutDraft[s.id], nota) ? (
+                    <p className="text-xs text-slate-500 text-center py-2">{cutProblem(cutDraft[s.id], nota)}</p>
                   ) : nota != null && !payValid(pay) ? (
                     <p className="text-xs text-slate-500 text-center py-2">
                       {!pay?.method ? 'Pilih cara bayar dulu, baru foto sampai.'

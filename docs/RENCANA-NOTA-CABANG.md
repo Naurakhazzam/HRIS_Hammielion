@@ -94,7 +94,7 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   Surat Jalan" di Rencana Pengiriman, badge "perlu keputusan" (`get_failed_decision_count`).
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)
 - [x] **Potong nota — jalur driver** (migrasi 092–092d, belum di-push) — lihat bagian 8.
-- [ ] Potong nota — jalur antar sendiri (menyusul)
+- [x] Potong nota — jalur antar sendiri (migrasi 095, belum di-push) — lihat bagian 8.
 
 ---
 
@@ -358,4 +358,11 @@ Keputusan user 9 Okt 2026:
     pemilik; harga lebih murah → isi potong nota alasan "Harga beda"; lebih mahal → nominal nota sesuai
     barang yang dibeli). Wajib untuk Salah Muat & Barang Lebih kecuali sudah dicatat lewat potong nota.
     Tampil di Riwayat Toko driver & Laporan Pengiriman.
-- Menyusul: jalur antar sendiri.
+- **Antar sendiri SELESAI (migrasi 095):** di Foto 2 (Kirim Barang) PJ menjawab "Apakah ini POTONG
+  NOTA?" (barang, nominal, alasan, dibawa kembali / memang tidak ada, foto). Pemilik = cabang asal kiriman
+  (tidak dipilih). Data di `logistics_visit_cuts.loading_id` + kolom `logistics_central_loadings.nota_cut_*`;
+  RPC `set_loading_cuts` (dipanggil setelah `arrive_tp_stop`; gagal → tombol "Simpan Ulang Potong
+  Nota"), `decide_loading_cut`; `apply_loading_payment` menghitung ulang bayar/lebih bayar (dipakai juga
+  verify/unverify_nota_payment). Barang dibawa kembali → retur `potong_nota` (`cut_loading_id`) yang
+  otomatis selesai dengan Foto 3 "kembali di cabang" (`finish_tp_trip`) atau tutup paksa Owner, lalu
+  cabang konfirmasi di Penerimaan Retur. Finance memutuskan di sub-tab ✂️ Potong Nota yang sama.
