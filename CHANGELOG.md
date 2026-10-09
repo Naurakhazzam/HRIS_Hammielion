@@ -2283,6 +2283,15 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 | `app/(dashboard)/portal/page.tsx` | Kartu Selisih Kasir |
 | `app/(dashboard)/laporan-kasir/page.tsx` | Hasil verifikasi di riwayat |
 
+### 138. "Omzet Harian" → Input Kasir Darurat (Laporan Kasir Tahap 3)
+
+**Logika:** Halaman `keuangan/kas-masuk` tetap ada sebagai cadangan kalau kasir lupa lapor, tapi menu & judulnya kini **Input Kasir Darurat**. Saat cabang + tanggal yang dipilih sudah punya Laporan Kasir, muncul **kotak peringatan** di form dan **konfirmasi** sebelum simpan (tidak memblokir). Entri Kas Masuk yang dibuat otomatis diberi tanda **🧾 Otomatis** di riwayat (tidak bisa diedit/dihapus — dijaga trigger migrasi 097).
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/kas-masuk/page.tsx` | Judul, peringatan & konfirmasi dobel, tanda entri otomatis |
+| `components/sidebar.tsx` | Menu "Omzet Harian" → "Input Kasir Darurat" |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

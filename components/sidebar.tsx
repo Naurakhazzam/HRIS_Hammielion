@@ -181,7 +181,7 @@ const adminNavItems: NavNode[] = [
         href: '/keuangan/kas-masuk',
         submenu: [
           { name: 'Laporan Kasir', href: '/laporan-kasir' },
-          { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
+          { name: 'Input Kasir Darurat', href: '/keuangan/kas-masuk' },
           { name: 'HPP & Omset (Sistem)', href: '/keuangan/hpp' },
         ]
       },

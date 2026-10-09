@@ -19,6 +19,7 @@ type CashIn = {
   status: string
   rejection_reason: string | null
   account_id: string | null
+  source_type?: string | null
   branches?: { name: string } | null
   fin_bank_accounts?: { bank_name: string; account_number: string | null; account_holder_name: string | null; account_type: string } | null
 }
@@ -87,7 +88,7 @@ export default function KasMasukPage() {
 
     let query = supabase
       .from('fin_cash_in')
-      .select('id, branch_id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, rejection_reason, account_id, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
+      .select('id, branch_id, transaction_date, amount, expense_amount, cash_adjustment, payment_method, description, status, rejection_reason, account_id, source_type, branches(name), fin_bank_accounts(bank_name, account_number, account_holder_name, account_type)')
       .gte('transaction_date', startDate)
       .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
@@ -183,11 +184,25 @@ export default function KasMasukPage() {
     setTimeout(() => setMessage(null), 5000)
   }
 
+  // Input Kasir Darurat: cabang + tanggal yang sudah punya Laporan Kasir (dari kasir) kemungkinan
+  // besar akan tercatat dobel kalau diinput lagi di sini.
+  const [existingCashierReports, setExistingCashierReports] = useState<{ shift: number; status: string }[]>([])
+  const formBranchForCheck = isSupervisor ? myBranchId : form.branch_id
+  useEffect(() => {
+    if (!formBranchForCheck || !form.transaction_date) return
+    let cancelled = false
+    supabase.from('cashier_reports').select('shift, status').eq('branch_id', formBranchForCheck).eq('report_date', form.transaction_date)
+      .then(({ data }) => { if (!cancelled) setExistingCashierReports((data as { shift: number; status: string }[]) || []) })
+    return () => { cancelled = true }
+  }, [supabase, formBranchForCheck, form.transaction_date])
+  const dupReports = formBranchForCheck && form.transaction_date ? existingCashierReports : []
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!myUserId) return
     const branchId = isSupervisor ? myBranchId : form.branch_id
     if (!branchId) { showMessage('error', 'Cabang wajib dipilih.'); return }
+    if (dupReports.length > 0 && !window.confirm(`Cabang ini sudah punya Laporan Kasir (shift ${dupReports.map(r => r.shift).join(' & ')}) untuk tanggal tersebut.\nLaporan kasir yang disetujui finance sudah otomatis masuk Kas Masuk — input di sini bisa tercatat DOBEL.\n\nTetap simpan?`)) return
     const amountNum = parseFloat(form.amount)
     if (isNaN(amountNum) || amountNum <= 0) { showMessage('error', 'Jumlah tidak valid.'); return }
 
@@ -313,8 +328,8 @@ export default function KasMasukPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">Kas Masuk (Omzet Harian)</h1>
-        <p className="text-sm text-slate-500">Input omzet penjualan per cabang. Bisa lebih dari satu entri per cabang per hari (mis. tunai dan transfer dicatat terpisah). Menunggu verifikasi tim finance pusat sebelum masuk laporan resmi.</p>
+        <h1 className="text-2xl font-bold text-slate-800 mb-1">Input Kasir Darurat</h1>
+        <p className="text-sm text-slate-500">Cadangan kalau kasir lupa mengirim <a href="/laporan-kasir" className="text-blue-600 hover:underline">Laporan Kasir</a>. Omzet toko sekarang dilaporkan kasir sendiri dan otomatis masuk Kas Masuk setelah diverifikasi di Verifikasi Keuangan → Laporan Kasir. Entri bertanda 🧾 dibuat otomatis dan tidak bisa diubah di sini.</p>
       </div>
 
       {message && (
@@ -325,7 +340,12 @@ export default function KasMasukPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-slate-200 h-fit">
-          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Input Omzet Harian</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Input Omzet (Darurat)</h2>
+          {dupReports.length > 0 && (
+            <div className="mb-4 p-3 rounded-lg border border-amber-300 bg-amber-50 text-xs text-amber-800">
+              ⚠️ Cabang ini sudah punya <strong>Laporan Kasir shift {dupReports.map(r => r.shift).join(' & ')}</strong> untuk tanggal ini. Jangan input lagi di sini kecuali memang ada yang belum dilaporkan — bisa tercatat dobel.
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -813,7 +833,10 @@ export default function KasMasukPage() {
                         {editingRowId === r.id ? (
                           <input value={editRowDescription} onChange={e => setEditRowDescription(e.target.value)}
                             className="w-full px-2 py-1 border border-slate-300 rounded text-sm" />
-                        ) : (r.description || '—')}
+                        ) : (<>
+                          {r.source_type && <span className="mr-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">🧾 Otomatis</span>}
+                          {r.description || '—'}
+                        </>)}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {statusBadge(r.status)}

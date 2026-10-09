@@ -29,7 +29,8 @@ terverifikasi masuk Kas Masuk otomatis (lihat Tahap 4 di bawah).
   otomatis dibebankan ke kasir); (c) potongan = 1 entri otomatis per karyawan/cabang/bulan kalender
   tanggal laporan (sama dengan entri manual), `max(−minus manual, minus − plus)`; (d) titipan disimpan
   di laporan, dicatat ke Buku Piutang di Tahap 5.
-- [ ] **Tahap 3** — "Omzet Harian" diganti nama jadi **Input Kasir Darurat** + peringatan dobel
+- [x] **Tahap 3** — "Omzet Harian" diganti nama jadi **Input Kasir Darurat** + peringatan dobel
+  (tanpa migrasi; peringatan = kotak kuning + konfirmasi, tidak memblokir).
 - [ ] **Tahap 4** — Uang pengiriman terverifikasi → Kas Masuk toko asal (tanggal nota)
 - [ ] **Tahap 5** — Pelunasan Buku Piutang → Kas Masuk (tanggal lunas)
 - [ ] **Tahap 6** — Tanda bantu finance (piutang vs nota kiriman, kiriman gagal setelah lapor)
