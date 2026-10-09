@@ -2259,6 +2259,30 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 | `lib/meeting.ts` | `resizeImage` diekspor untuk dipakai ulang |
 | `components/sidebar.tsx` | Menu Laporan Kasir (karyawan toko & admin) |
 
+### 137. Laporan Kasir — Verifikasi Finance, Kas Masuk Otomatis, Selisih ke Potongan Gaji (Tahap 2, migrasi 097)
+
+**Logika:**
+- Tab baru **Laporan Kasir** di Verifikasi Keuangan. Per laporan: foto struk (bisa diperbesar), Cash/non-tunai/piutang, pengeluaran, keterangan kasir. Finance mengisi **cash yang benar-benar diterima** (terisi otomatis = yang harus disetor), memilih rekening tiap metode, dan centang **titipan pelunasan piutang** kalau ada (nominal + nama konsumen; tidak dihitung plus kasir). Non-tunai yang tidak cocok dengan mutasi → **Tolak** dengan alasan (kasir melihatnya & memperbaiki).
+- **Pengaturan** (di tab yang sama): **tanggal mulai** Kas Masuk otomatis (default kosong = nonaktif) dan **rekening per metode per cabang** (juga diingat otomatis setiap kali menyetujui).
+- **Setujui** (laporan ≥ tanggal mulai): `fin_cash_in` status approved dibuat otomatis — 1 baris cash (`amount`=Cash, `expense_amount`=pengeluaran, `cash_adjustment`=selisih final) + 1 baris per metode non-tunai. Kolom baru `fin_cash_in.source_type/source_id` (= `cashier_report`). Sebelum tanggal mulai, laporan hanya ditandai terverifikasi ("tanpa Kas Masuk") — tidak dobel dengan input manual.
+- **Selisih final** = (cash diterima − titipan) − (Cash − Pengeluaran) = selisih kasir yang dilaporkan + selisih setoran, atas nama **pelapor** (yang menutup kasir).
+- **Potongan gaji**: 1 entri otomatis per karyawan/cabang/bulan di `cashier_loss_entries` (`auto_source='laporan_kasir'`), nilainya `max(−minus manual, total minus − total plus)` → plus hanya menutup minus (termasuk minus manual bulan itu), total per karyawan tidak pernah < 0. Dihitung ulang otomatis saat laporan disetujui/dibatalkan dan saat minus manual diubah (trigger).
+- Penjaga: baris Kas Masuk & Kerugian Kasir otomatis tidak bisa diubah/dihapus manual (trigger `guard_auto_rows`); ubah lewat **Batalkan** di riwayat tab Laporan Kasir (Kas Masuk dihapus, potongan dihitung ulang, laporan kembali menunggu).
+- Penggajian Bulanan & Preview Kerugian Kasir: potongan kasir per karyawan di-clamp ≥ 0; Preview kini juga menghitung entri yang ditujukan ke karyawan non-kasir (mis. Kepala Toko/Pramuniaga yang menutup shift) — sebelumnya dilewati.
+- **Dashboard Saya** karyawan: kartu **Selisih Kasir** bulan berjalan (minus, plus, potongan gaji, laporan ditolak yang perlu diperbaiki). Riwayat Laporan Kasir menampilkan cash diterima & selisih final setelah diverifikasi.
+- RPC: `approve_cashier_report`, `reject_cashier_report`, `unapprove_cashier_report`, `set_cashier_report_start_date`, `set_cashier_method_account`, `recompute_cashier_report_loss` (internal).
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/097_cashier_report_verification.sql` | Pengaturan, kolom verifikasi, sumber Kas Masuk, potongan otomatis, penjaga, RPC |
+| `components/VerifikasiLaporanKasir.tsx` | Tab verifikasi + pengaturan (baru) |
+| `components/SelisihKasirCard.tsx` | Kartu selisih kasir di Dashboard Saya (baru) |
+| `app/(dashboard)/keuangan/approval/page.tsx` | Tab Laporan Kasir |
+| `app/(dashboard)/penggajian/kehilangan/kasir/page.tsx` | Label & kunci entri otomatis, tanda +/−, preview karyawan non-kasir |
+| `app/(dashboard)/penggajian/bulanan/page.tsx` | Potongan kasir di-clamp ≥ 0 |
+| `app/(dashboard)/portal/page.tsx` | Kartu Selisih Kasir |
+| `app/(dashboard)/laporan-kasir/page.tsx` | Hasil verifikasi di riwayat |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

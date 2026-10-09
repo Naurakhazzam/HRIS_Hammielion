@@ -810,7 +810,8 @@ export default function PenggajianBulananPage() {
     const kasirUnassigned   = allCashierEntries.filter((e: any) => !e.employee_id).reduce((s: number, e: any) => s + Number(e.amount), 0)
     const kasirCount        = kasirCountRes.count ?? 1
     const kasirSplit        = isKasir && kasirCount > 0 ? kasirUnassigned / kasirCount : 0
-    const cashLoss          = flatSalaryForEmp ? 0 : Math.round(kasirAssigned + kasirSplit)
+    // Tidak pernah < 0: plus Laporan Kasir hanya menutup minus (migrasi 097).
+    const cashLoss          = flatSalaryForEmp ? 0 : Math.max(0, Math.round(kasirAssigned + kasirSplit))
 
     const baseRaw  = Number(sc.base_salary ?? 0)
     const posRaw   = Number(sc.position_allowance ?? 0)

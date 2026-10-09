@@ -4,7 +4,7 @@ import { resizeImage } from '@/lib/meeting'
 type Supabase = ReturnType<typeof createClient>
 
 // Laporan Kasir (settlement shift) -- lihat docs/RENCANA-LAPORAN-KASIR.md & migrasi 096.
-export type CashierReportPayment = { id: string; method_label: string; amount: number; sort_order: number }
+export type CashierReportPayment = { id: string; method_label: string; amount: number; sort_order: number; account_id: string | null }
 export type CashierReportExpense = { id: string; description: string; amount: number; sort_order: number }
 export type CashierReport = {
   id: string
@@ -24,6 +24,13 @@ export type CashierReport = {
   verified_by: string | null
   verifier_name: string | null
   verified_at: string | null
+  // Diisi finance saat verifikasi (migrasi 097).
+  cash_received: number | null
+  titipan_amount: number
+  titipan_note: string | null
+  cash_account_id: string | null
+  final_diff: number | null
+  posted: boolean
   created_at: string
   updated_at: string
   payments: CashierReportPayment[]

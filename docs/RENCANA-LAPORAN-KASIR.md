@@ -21,7 +21,14 @@ terverifikasi masuk Kas Masuk otomatis (lihat Tahap 4 di bawah).
   096_cashier_reports + 096b_cashier_report_branches_admin + 096c_list_cashier_reports). Halaman
   `/laporan-kasir`. Keputusan Claude: non-admin hanya bisa mengisi s/d 7 hari ke belakang; foto boleh
   dari galeri/screenshot (bukan wajib kamera) karena struk POS bisa berupa screenshot; maks 6 foto.
-- [ ] **Tahap 2** — Verifikasi finance → Kas Masuk otomatis
+- [x] **Tahap 2** — Verifikasi finance → Kas Masuk otomatis (migrasi `097_cashier_report_verification.sql`).
+  Tab "Laporan Kasir" di Verifikasi Keuangan + Pengaturan (tanggal mulai, rekening per metode).
+  Keputusan Claude: (a) tanggal mulai **dibiarkan kosong** → sampai finance mengisinya, Setujui hanya
+  menandai terverifikasi (tanpa Kas Masuk & tanpa potongan) supaya tidak dobel dengan input manual;
+  (b) non-tunai tidak cocok = Tolak (tidak ada "angka koreksi" non-tunai, supaya selisih QRIS tidak
+  otomatis dibebankan ke kasir); (c) potongan = 1 entri otomatis per karyawan/cabang/bulan kalender
+  tanggal laporan (sama dengan entri manual), `max(−minus manual, minus − plus)`; (d) titipan disimpan
+  di laporan, dicatat ke Buku Piutang di Tahap 5.
 - [ ] **Tahap 3** — "Omzet Harian" diganti nama jadi **Input Kasir Darurat** + peringatan dobel
 - [ ] **Tahap 4** — Uang pengiriman terverifikasi → Kas Masuk toko asal (tanggal nota)
 - [ ] **Tahap 5** — Pelunasan Buku Piutang → Kas Masuk (tanggal lunas)

@@ -514,6 +514,20 @@ export default function LaporanKasirPage() {
                       {r.verified_at && (
                         <p className="text-xs text-slate-500">Diverifikasi {r.verifier_name ?? ''} — {new Date(r.verified_at).toLocaleString('id-ID')}</p>
                       )}
+                      {r.status === 'approved' && r.cash_received != null && (
+                        <div className="text-xs bg-green-50 border border-green-100 rounded-lg p-2 space-y-0.5">
+                          <div className="flex justify-between"><span>Cash diterima finance</span><span className="font-semibold">{fmtRp(Number(r.cash_received))}</span></div>
+                          {Number(r.titipan_amount) > 0 && (
+                            <div className="flex justify-between text-slate-500"><span>termasuk titipan pelunasan ({r.titipan_note})</span><span>{fmtRp(Number(r.titipan_amount))}</span></div>
+                          )}
+                          <div className="flex justify-between font-semibold">
+                            <span>Selisih kasir final</span>
+                            <span className={Number(r.final_diff) > 0 ? 'text-green-700' : Number(r.final_diff) < 0 ? 'text-red-600' : ''}>
+                              {Number(r.final_diff) > 0 ? '(+) ' : Number(r.final_diff) < 0 ? '(−) ' : ''}{fmtRp(Math.abs(Number(r.final_diff ?? 0)))}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                       {canModify(r) && (
                         <div className="flex gap-3 pt-1">
                           <button type="button" onClick={() => startEdit(r)} className="text-xs font-medium text-blue-600 hover:underline">

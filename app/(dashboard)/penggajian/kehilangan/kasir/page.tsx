@@ -10,10 +10,12 @@ type Branch = { id: string; name: string }
 type Position = { id: string; name: string }
 type Employee = { id: string; full_name: string; employee_code: string; branch_id: string; position_id: string; positions: { name: string } | null }
 type CashierLossConfig = { id: string; branch_id: string; position_id: string; is_active: boolean; positions?: { name: string } }
-type CashierLossEntry = { id: string; branch_id: string; entry_date: string; amount: number; period_month: number; period_year: number; notes: string | null; employee_id: string | null; employees?: { full_name: string; employee_code: string } | null }
+type CashierLossEntry = { id: string; branch_id: string; entry_date: string; amount: number; period_month: number; period_year: number; notes: string | null; employee_id: string | null; employees?: { full_name: string; employee_code: string } | null; auto_source?: string | null }
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
+// Minus kas tampil "-Rp"; entri otomatis Laporan Kasir bisa negatif (plus yang menutup minus manual) -> "+Rp".
+const fmtLoss = (v: number) => (Number(v) < 0 ? '+' : '-') + fmtRp(Math.abs(Number(v)))
 
 export default function KerugianKasirPage() {
   const supabase = createClient()
@@ -170,12 +172,19 @@ export default function KerugianKasirPage() {
     const assignedByEmp: Record<string, number> = {}
     assignedEntries.forEach((e: any) => { assignedByEmp[e.employee_id] = (assignedByEmp[e.employee_id] ?? 0) + Number(e.amount) })
 
+    // Entri yang ditujukan langsung ke karyawan non-kasir (mis. Kepala Toko / Pramuniaga yang menutup
+    // shift di Laporan Kasir) tetap dihitung -- ambil data karyawannya juga.
+    const extraIds = Object.keys(assignedByEmp).filter(id => !(kasirEmps || []).some((e: any) => e.id === id))
+    const { data: extraEmps } = extraIds.length > 0
+      ? await supabase.from('employees').select('id, full_name, employee_code, position_id, positions(name)').in('id', extraIds)
+      : { data: [] }
+    const allEmps: any[] = [...(kasirEmps || []), ...(extraEmps || [])]
     const empIds = [...new Set([...(kasirEmps || []).map((e: any) => e.id), ...Object.keys(assignedByEmp)])]
     const results: any[] = []
     const kasirCount = (kasirEmps || []).length
 
     for (const empId of empIds) {
-      const emp: any = (kasirEmps || []).find((e: any) => e.id === empId)
+      const emp: any = allEmps.find((e: any) => e.id === empId)
       if (!emp) continue
 
       const { data: empCheck } = await supabase.from('employees').select('id,is_active,branch_id').eq('id', empId).single()
@@ -184,7 +193,8 @@ export default function KerugianKasirPage() {
       const kasirAssignedLoss = assignedByEmp[empId] ?? 0
       const isKasir = kasirPositionIds.includes(emp.position_id)
       const kasirSplitLoss = isKasir && kasirCount > 0 ? totalKasirUnassigned / kasirCount : 0
-      const kasirLoss = kasirAssignedLoss + kasirSplitLoss
+      // Total per karyawan tidak pernah < 0 (plus Laporan Kasir hanya menutup minus, migrasi 097).
+      const kasirLoss = Math.max(0, kasirAssignedLoss + kasirSplitLoss)
 
       results.push({
         empId, name: emp.full_name, code: emp.employee_code, position: emp.positions?.name,
@@ -313,14 +323,19 @@ export default function KerugianKasirPage() {
                     {ent.employees
                       ? <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">{ent.employees.full_name}</span>
                       : <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">Bagi rata</span>}
+                    {ent.auto_source && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">🧾 Laporan Kasir</span>}
                   </div>
                   {ent.notes && <p className="text-xs text-slate-400 mt-0.5 truncate">{ent.notes}</p>}
                 </div>
                 <div className="flex items-center gap-2 ml-2 shrink-0">
-                  <span className="font-bold text-red-600">-{fmtRp(ent.amount)}</span>
+                  <span className={`font-bold ${Number(ent.amount) < 0 ? 'text-green-700' : 'text-red-600'}`}>{fmtLoss(ent.amount)}</span>
+                  {ent.auto_source ? (
+                    <span className="text-[10px] text-slate-400" title="Dihitung otomatis dari laporan kasir yang disetujui (minus − plus per bulan). Ubah lewat Verifikasi Keuangan → Laporan Kasir.">otomatis</span>
+                  ) : (<>
                   <button onClick={() => { setEditEntry(ent); setEditForm({ date: ent.entry_date, amount: String(ent.amount), notes: ent.notes || '', employee_id: ent.employee_id || '' }) }}
                     className="px-2 py-0.5 text-xs border border-blue-200 text-blue-600 hover:bg-blue-50 rounded transition">Edit</button>
                   <button onClick={() => handleDeleteEntry(ent.id)} className="px-2 py-0.5 text-xs border border-red-200 text-red-600 hover:bg-red-50 rounded transition">Hapus</button>
+                  </>)}
                 </div>
               </div>
             ))}
@@ -391,7 +406,7 @@ export default function KerugianKasirPage() {
                       <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${mismatch ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{MONTHS[h.period_month - 1]} {h.period_year}</span>
                       {mismatch && <span className="ml-1 text-[10px] text-amber-600">⚠ beda dari filter di atas</span>}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-red-600">-{fmtRp(h.amount)}</td>
+                    <td className={`px-4 py-2.5 text-right font-semibold ${Number(h.amount) < 0 ? 'text-green-700' : 'text-red-600'}`}>{fmtLoss(h.amount)}{h.auto_source && <div className="text-[10px] font-normal text-purple-600">🧾 Laporan Kasir</div>}</td>
                     <td className="px-4 py-2.5">
                       {h.employees
                         ? <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">{h.employees.full_name}</span>

@@ -13,6 +13,7 @@ import { calcDailyAccrual, type AccrualAttendanceDay } from '@/lib/salaryAccrual
 import { fetchIncompleteCheckouts as fetchIncompleteCheckoutsShared, type IncompleteCheckoutItem } from '@/lib/checkoutClarification'
 import AlphaKlarifikasiPanel from '@/components/AlphaKlarifikasiPanel'
 import OvertimeKlaimPanel from '@/components/OvertimeKlaimPanel'
+import SelisihKasirCard from '@/components/SelisihKasirCard'
 import { fetchLateClarificationAlerts as fetchLateClarificationAlertsShared, LATE_CLARIFICATION_THRESHOLD_MINUTES, type LateClarificationAlertItem } from '@/lib/lateClarification'
 
 const MONTHS = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
@@ -505,6 +506,7 @@ export default function PortalDashboardPage() {
       )}
 
       {myEmployeeId && <OvertimeKlaimPanel employeeId={myEmployeeId} hideWhenEmpty compact />}
+      {myEmployeeId && <SelisihKasirCard employeeId={myEmployeeId} />}
 
       {lateAlerts.filter(a => a.actionable).length > 0 && (
         <div className="bg-orange-50 border-2 border-orange-400 rounded-xl p-4">
