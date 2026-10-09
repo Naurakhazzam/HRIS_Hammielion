@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import LogisticsCameraCapture from '@/components/LogisticsCameraCapture'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
@@ -67,6 +67,68 @@ type PackageSummary = { total: number; diambil: number; takers: string[]; lastTa
 // Status kiriman jalur "Diantar Sendiri" (dari stop trip yang masih hidup).
 type TpInfo = { pjName: string; pickupAt: string; arrivedAt: string | null; tripStatus: string; returnAt: string | null }
 
+type NameRel = { full_name: string } | { full_name: string }[] | null
+const relName = (r: NameRel) => (Array.isArray(r) ? r[0]?.full_name : r?.full_name) ?? null
+
+// Baris daftar + ringkasan anak-anaknya dalam SATU query (tanpa URL foto) -- data makin besar,
+// jadi tidak lagi .in() berisi semua id laporan ke 3 tabel terpisah.
+type LoadingRow = Loading & {
+  items: { count: number }[]
+  packages: { status: string; taken_at: string | null; taken: NameRel }[]
+  stops: {
+    arrived_at: string | null
+    cancelled_at: string | null
+    logistics_tp_trips: { status: string; pickup_at: string; return_at: string | null; pj: NameRel } | null
+  }[]
+}
+
+const LOADING_SELECT = `
+  id, store_id, status, delivery_method, ongkir, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
+  logistics_stores(name, address, kind),
+  origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
+  creator:employees!logistics_central_loadings_created_by_fkey(full_name),
+  completer:employees!logistics_central_loadings_completed_by_fkey(full_name),
+  canceller:employees!logistics_central_loadings_cancelled_by_fkey(full_name),
+  assignee:employees!logistics_central_loadings_assigned_to_fkey(full_name),
+  items:logistics_central_loading_items(count),
+  packages:logistics_central_loading_packages(status, taken_at, taken:employees!logistics_central_loading_packages_taken_by_fkey(full_name)),
+  stops:logistics_tp_trip_stops(arrived_at, cancelled_at, logistics_tp_trips(status, pickup_at, return_at, pj:employees!logistics_tp_trips_pj_id_fkey(full_name)))
+`
+
+// Riwayat dimuat per halaman; yang masih Proses / Belum Diambil selalu dimuat semua.
+const PAGE_SIZE = 30
+
+function summarize(rows: LoadingRow[]) {
+  const itemCounts: Record<string, number> = {}
+  const packageCounts: Record<string, PackageSummary> = {}
+  const tpInfo: Record<string, TpInfo> = {}
+  for (const r of rows) {
+    itemCounts[r.id] = r.items?.[0]?.count ?? 0
+    const s: PackageSummary = { total: 0, diambil: 0, takers: [], lastTakenAt: null }
+    for (const p of r.packages || []) {
+      s.total++
+      if (p.status !== 'diambil') continue
+      s.diambil++
+      const name = relName(p.taken)
+      if (name && !s.takers.includes(name)) s.takers.push(name)
+      if (p.taken_at && (!s.lastTakenAt || p.taken_at > s.lastTakenAt)) s.lastTakenAt = p.taken_at
+    }
+    packageCounts[r.id] = s
+    if (r.delivery_method === 'antar_sendiri') {
+      const stop = (r.stops || []).find(st => !st.cancelled_at && st.logistics_tp_trips)
+      const t = stop?.logistics_tp_trips
+      if (stop && t) tpInfo[r.id] = { pjName: relName(t.pj) ?? '-', pickupAt: t.pickup_at, arrivedAt: stop.arrived_at, tripStatus: t.status, returnAt: t.return_at }
+    }
+  }
+  return { itemCounts, packageCounts, tpInfo }
+}
+
+function mergeRows(prev: LoadingRow[], incoming: LoadingRow[]) {
+  const map = new Map(prev.map(r => [r.id, r]))
+  for (const r of incoming) map.set(r.id, r)
+  return Array.from(map.values()).sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
 const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
 
 type PickupFilter = 'semua' | 'belum' | 'sudah' | 'proses'
@@ -102,10 +164,12 @@ export default function LaporanMuatPage() {
   const [canView, setCanView] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
-  const [loadings, setLoadings] = useState<Loading[]>([])
-  const [itemCounts, setItemCounts] = useState<Record<string, number>>({})
-  const [packageCounts, setPackageCounts] = useState<Record<string, PackageSummary>>({})
-  const [tpInfo, setTpInfo] = useState<Record<string, TpInfo>>({})
+  const [loadings, setLoadings] = useState<LoadingRow[]>([])
+  const { itemCounts, packageCounts, tpInfo } = useMemo(() => summarize(loadings), [loadings])
+  // created_at baris paling tua di halaman riwayat -- titik lanjut "Muat lebih banyak".
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
   const [myBranchId, setMyBranchId] = useState('')
   // Cabang toko (Toko Pusat/Toko Depan/Markas/Raja) -- Owner yang bukan karyawan cabang toko
@@ -157,66 +221,65 @@ export default function LaporanMuatPage() {
   }
 
   const fetchLoadings = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('logistics_central_loadings')
-      .select(`
-        id, store_id, status, delivery_method, ongkir, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
-        logistics_stores(name, address, kind),
-        origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
-        creator:employees!logistics_central_loadings_created_by_fkey(full_name),
-        completer:employees!logistics_central_loadings_completed_by_fkey(full_name),
-        canceller:employees!logistics_central_loadings_cancelled_by_fkey(full_name),
-        assignee:employees!logistics_central_loadings_assigned_to_fkey(full_name)
-      `)
-      .order('created_at', { ascending: false })
-    if (error) { showMessage('error', 'Gagal memuat laporan muat: ' + error.message); return }
-    const rows = (data as unknown as Loading[]) || []
-    setLoadings(rows)
+    const [pageRes, prosesRes, pendingPkgRes, tpWaitRes] = await Promise.all([
+      // Halaman riwayat pertama (terbaru).
+      supabase.from('logistics_central_loadings').select(LOADING_SELECT)
+        .order('created_at', { ascending: false }).limit(PAGE_SIZE),
+      // Selalu tampil walau lama: masih proses...
+      supabase.from('logistics_central_loadings').select(LOADING_SELECT).eq('status', 'proses'),
+      // ...jalur driver yang masih ada paket belum diambil...
+      supabase.from('logistics_central_loading_packages')
+        .select('loading_id, logistics_central_loadings!inner(status, delivery_method)')
+        .eq('status', 'pending')
+        .eq('logistics_central_loadings.status', 'selesai')
+        .eq('logistics_central_loadings.delivery_method', 'driver'),
+      // ...dan jalur antar sendiri yang belum foto 1 (tidak punya stop trip yang masih hidup).
+      supabase.from('logistics_central_loadings').select('id, logistics_tp_trip_stops(id)')
+        .eq('status', 'selesai').eq('delivery_method', 'antar_sendiri')
+        .is('logistics_tp_trip_stops.cancelled_at', null)
+        .is('logistics_tp_trip_stops', null),
+    ])
+    const err = pageRes.error || prosesRes.error || pendingPkgRes.error || tpWaitRes.error
+    if (err) { showMessage('error', 'Gagal memuat laporan muat: ' + err.message); return }
 
-    if (rows.length > 0) {
-      const ids = rows.map(r => r.id)
-      const { data: itemRows } = await supabase.from('logistics_central_loading_items').select('loading_id').in('loading_id', ids)
-      const iCounts: Record<string, number> = {}
-      ;(itemRows as { loading_id: string }[] || []).forEach(r => { iCounts[r.loading_id] = (iCounts[r.loading_id] || 0) + 1 })
-      setItemCounts(iCounts)
-
-      const { data: pkgRows } = await supabase.from('logistics_central_loading_packages')
-        .select('loading_id, status, taken_at, taken:employees!logistics_central_loading_packages_taken_by_fkey(full_name)')
-        .in('loading_id', ids)
-      const pCounts: Record<string, PackageSummary> = {}
-      type PkgRow = { loading_id: string; status: string; taken_at: string | null; taken: { full_name: string } | { full_name: string }[] | null }
-      ;(pkgRows as unknown as PkgRow[] || []).forEach(r => {
-        const s = pCounts[r.loading_id] ??= { total: 0, diambil: 0, takers: [], lastTakenAt: null }
-        s.total++
-        if (r.status === 'diambil') {
-          s.diambil++
-          const name = Array.isArray(r.taken) ? r.taken[0]?.full_name : r.taken?.full_name
-          if (name && !s.takers.includes(name)) s.takers.push(name)
-          if (r.taken_at && (!s.lastTakenAt || r.taken_at > s.lastTakenAt)) s.lastTakenAt = r.taken_at
-        }
-      })
-      setPackageCounts(pCounts)
-
-      const tpIds = rows.filter(r => r.delivery_method === 'antar_sendiri').map(r => r.id)
-      const tMap: Record<string, TpInfo> = {}
-      if (tpIds.length > 0) {
-        const { data: stopRows } = await supabase.from('logistics_tp_trip_stops')
-          .select('loading_id, arrived_at, logistics_tp_trips(status, pickup_at, return_at, pj:employees!logistics_tp_trips_pj_id_fkey(full_name))')
-          .in('loading_id', tpIds).is('cancelled_at', null)
-        type StopRow = { loading_id: string; arrived_at: string | null; logistics_tp_trips: { status: string; pickup_at: string; return_at: string | null; pj: { full_name: string } | null } | null }
-        ;(stopRows as unknown as StopRow[] || []).forEach(s => {
-          const t = s.logistics_tp_trips
-          if (!t) return
-          tMap[s.loading_id] = { pjName: t.pj?.full_name ?? '-', pickupAt: t.pickup_at, arrivedAt: s.arrived_at, tripStatus: t.status, returnAt: t.return_at }
-        })
-      }
-      setTpInfo(tMap)
-    } else {
-      setItemCounts({})
-      setPackageCounts({})
-      setTpInfo({})
+    const page = (pageRes.data as unknown as LoadingRow[]) || []
+    let rows = mergeRows(page, (prosesRes.data as unknown as LoadingRow[]) || [])
+    const have = new Set(rows.map(r => r.id))
+    const waitingIds = [...new Set([
+      ...((pendingPkgRes.data as { loading_id: string }[]) || []).map(r => r.loading_id),
+      ...((tpWaitRes.data as { id: string }[]) || []).map(r => r.id),
+    ])].filter(id => !have.has(id))
+    for (let i = 0; i < waitingIds.length; i += 100) {
+      const { data, error } = await supabase.from('logistics_central_loadings').select(LOADING_SELECT).in('id', waitingIds.slice(i, i + 100))
+      if (error) { showMessage('error', 'Gagal memuat laporan muat: ' + error.message); return }
+      rows = mergeRows(rows, (data as unknown as LoadingRow[]) || [])
     }
+
+    setLoadings(rows)
+    setCursor(page.length > 0 ? page[page.length - 1].created_at : null)
+    setHasMore(page.length === PAGE_SIZE)
   }, [supabase])
+
+  async function loadMore() {
+    if (!cursor) return
+    setLoadingMore(true)
+    const { data, error } = await supabase.from('logistics_central_loadings').select(LOADING_SELECT)
+      .lt('created_at', cursor).order('created_at', { ascending: false }).limit(PAGE_SIZE)
+    setLoadingMore(false)
+    if (error) { showMessage('error', 'Gagal memuat riwayat: ' + error.message); return }
+    const page = (data as unknown as LoadingRow[]) || []
+    setLoadings(prev => mergeRows(prev, page))
+    if (page.length > 0) setCursor(page[page.length - 1].created_at)
+    setHasMore(page.length === PAGE_SIZE)
+  }
+
+  // Habis aksi pada satu laporan cukup muat ulang laporan itu saja, bukan seluruh daftar.
+  async function refreshOne(id: string) {
+    const { data, error } = await supabase.from('logistics_central_loadings').select(LOADING_SELECT).eq('id', id).maybeSingle()
+    if (error) { showMessage('error', 'Gagal memuat ulang laporan: ' + error.message); return }
+    if (!data) { setLoadings(prev => prev.filter(r => r.id !== id)); return }
+    setLoadings(prev => mergeRows(prev, [data as unknown as LoadingRow]))
+  }
 
   useEffect(() => {
     async function init() {
@@ -359,7 +422,7 @@ export default function LaporanMuatPage() {
     setNewStoreKind('toko')
     setShowCreateForm(false)
     resetFinishForm()
-    await fetchLoadings()
+    await refreshOne(data.id)
     setSelectedLoadingId(data.id)
     setItemCaptionDraft('')
     setPackageCaptionDraft('')
@@ -384,7 +447,7 @@ export default function LaporanMuatPage() {
     if (error) { showMessage('error', 'Gagal menyimpan foto: ' + error.message); return }
     setItemCaptionDraft('')
     await fetchDetail(selectedLoadingId)
-    await fetchLoadings()
+    await refreshOne(selectedLoadingId)
   }
 
   async function handleDeleteItem(itemId: string) {
@@ -392,7 +455,7 @@ export default function LaporanMuatPage() {
     const { error } = await supabase.from('logistics_central_loading_items').delete().eq('id', itemId)
     if (error) { showMessage('error', 'Gagal menghapus: ' + error.message); return }
     await fetchDetail(selectedLoadingId)
-    await fetchLoadings()
+    await refreshOne(selectedLoadingId)
   }
 
   async function handleAddPackagePhoto(blob: Blob) {
@@ -405,7 +468,7 @@ export default function LaporanMuatPage() {
     if (error) { showMessage('error', 'Gagal menyimpan foto: ' + error.message); return }
     setPackageCaptionDraft('')
     await fetchDetail(selectedLoadingId)
-    await fetchLoadings()
+    await refreshOne(selectedLoadingId)
   }
 
   async function handleDeletePackage(packageId: string) {
@@ -413,7 +476,7 @@ export default function LaporanMuatPage() {
     const { error } = await supabase.from('logistics_central_loading_packages').delete().eq('id', packageId)
     if (error) { showMessage('error', 'Gagal menghapus: ' + error.message); return }
     await fetchDetail(selectedLoadingId)
-    await fetchLoadings()
+    await refreshOne(selectedLoadingId)
   }
 
   async function handleBatalkan() {
@@ -426,7 +489,7 @@ export default function LaporanMuatPage() {
     setCancelling(false)
     if (error) { showMessage('error', 'Gagal membatalkan: ' + error.message); return }
     showMessage('success', 'Laporan muat dibatalkan.')
-    await fetchLoadings()
+    await refreshOne(selectedLoadingId)
     await fetchDetail(selectedLoadingId)
   }
 
@@ -452,7 +515,7 @@ export default function LaporanMuatPage() {
       : `Laporan muat ditandai selesai. Tugas antar muncul di menu Kirim Barang milik ${assignee?.full_name}.`)
     resetFinishForm()
     window.dispatchEvent(new Event('kirim-barang-badge-refresh'))
-    await fetchLoadings()
+    await refreshOne(selectedLoadingId)
     await fetchDetail(selectedLoadingId)
   }
 
@@ -485,7 +548,7 @@ export default function LaporanMuatPage() {
       : editMode === 'assignee' ? 'Penerima tugas berhasil diganti.' : 'Ongkir berhasil diubah.')
     resetFinishForm()
     window.dispatchEvent(new Event('kirim-barang-badge-refresh'))
-    await fetchLoadings()
+    await refreshOne(l.id)
     await fetchDetail(l.id)
   }
 
@@ -635,14 +698,15 @@ export default function LaporanMuatPage() {
       )}
 
       {(() => {
-        const cards: { key: PickupFilter; label: string; count: number; tone: string; active: string }[] = [
+        // Proses & Belum Diambil selalu lengkap; Sudah Diambil & Semua cuma sejauh riwayat yang dimuat.
+        const cards: { key: PickupFilter; label: string; count: number; partial?: boolean; tone: string; active: string }[] = [
           { key: 'belum', label: 'Belum Diambil', count: loadings.filter(l => pickupGroup(l) === 'belum').length,
             tone: 'border-orange-200 text-orange-700', active: 'bg-orange-50 ring-2 ring-orange-400' },
-          { key: 'sudah', label: 'Sudah Diambil', count: loadings.filter(l => pickupGroup(l) === 'sudah').length,
+          { key: 'sudah', label: 'Sudah Diambil', count: loadings.filter(l => pickupGroup(l) === 'sudah').length, partial: hasMore,
             tone: 'border-blue-200 text-blue-700', active: 'bg-blue-50 ring-2 ring-blue-400' },
           { key: 'proses', label: 'Masih Proses', count: loadings.filter(l => pickupGroup(l) === 'proses').length,
             tone: 'border-amber-200 text-amber-700', active: 'bg-amber-50 ring-2 ring-amber-400' },
-          { key: 'semua', label: 'Semua', count: loadings.length,
+          { key: 'semua', label: 'Semua', count: loadings.length, partial: hasMore,
             tone: 'border-slate-200 text-slate-700', active: 'bg-slate-50 ring-2 ring-slate-400' },
         ]
         return (
@@ -650,7 +714,7 @@ export default function LaporanMuatPage() {
             {cards.map(c => (
               <button key={c.key} onClick={() => setPickupFilter(c.key)}
                 className={`text-left bg-white border rounded-xl px-4 py-3 transition hover:shadow-sm ${c.tone} ${pickupFilter === c.key ? c.active : ''}`}>
-                <p className="text-2xl font-bold">{c.count}</p>
+                <p className="text-2xl font-bold">{c.count}{c.partial ? '+' : ''}</p>
                 <p className="text-xs font-medium">{c.label}</p>
               </button>
             ))}
@@ -963,6 +1027,13 @@ export default function LaporanMuatPage() {
           )
         })}
       </div>
+
+      {hasMore && (pickupFilter === 'semua' || pickupFilter === 'sudah') && (
+        <button onClick={loadMore} disabled={loadingMore}
+          className="w-full mt-4 py-2.5 border border-slate-300 bg-white hover:bg-slate-50 text-sm font-medium text-slate-600 rounded-lg transition disabled:opacity-50">
+          {loadingMore ? 'Memuat...' : 'Muat lebih banyak riwayat'}
+        </button>
+      )}
     </div>
   )
 }
