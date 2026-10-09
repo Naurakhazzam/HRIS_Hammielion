@@ -42,6 +42,7 @@ type PlanStore = {
   payment_method: PaymentMethod | null
   invoice_amount: number | null
   payment_amount: number | null
+  received_total: number | null
   payment_photo_url: string | null
   payment_due_date: string | null
   incident_type: 'tidak_ada' | 'salah_muat' | 'retur' | 'barang_lebih'
@@ -93,10 +94,16 @@ const RECEIVED_LABEL: Record<string, string> = { cash: 'Cash yang diterima', dep
 const INCIDENT_TYPES = ['tidak_ada', 'salah_muat', 'retur', 'barang_lebih'] as const
 type IncidentType = typeof INCIDENT_TYPES[number]
 
-// Nominal nota wajib untuk semua metode; uang diterima wajib untuk cash/deposit/transfer.
-// Tempo selalu diterima 0 -- seluruh nota jadi piutang konsumen (lihat migration 075).
-function isPaymentValid(method: PaymentMethod, invoice: string, received: string) {
-  if (!method || !(Number(invoice) > 0)) return false
+// Nota cabang (Laporan Muat) yang paketnya dibawa ke kunjungan toko ini -- nominalnya sudah
+// diisi cabang, driver tidak mengetik ulang (migrasi 082/083).
+type BranchNota = { loading_id: string; amount: number; origin: string }
+
+// Nota Gudang wajib, kecuali kunjungan ini cuma membawa nota cabang (driver centang "tidak ada
+// barang gudang"). Uang diterima wajib diketik untuk cash/deposit/transfer -- satu angka untuk
+// SEMUA nota, server yang membagi (nota terbesar dulu). Tempo selalu diterima 0.
+function isPaymentValid(method: PaymentMethod, invoice: string, received: string, noGudang: boolean, branchCount: number) {
+  if (!method) return false
+  if (noGudang ? branchCount === 0 : !(Number(invoice) > 0)) return false
   return method === 'tempo' || Number(received) > 0
 }
 
@@ -106,6 +113,46 @@ function receivedFor(method: PaymentMethod, received: string): number | null {
 }
 
 // Selisih nota vs uang diterima -- dasar pencatatan hutang-piutang konsumen.
+// Total semua nota kunjungan (Nota Gudang + nota cabang) -- dasar Kurang/Lebih bayar.
+const visitNotaTotal = (invoice: string, noGudang: boolean, notas: BranchNota[]) =>
+  (noGudang ? 0 : Number(invoice) || 0) + notas.reduce((s, n) => s + n.amount, 0)
+
+const receivedLabel = (method: string, notas: BranchNota[]) =>
+  notas.length > 0 ? `${RECEIVED_LABEL[method]} — total untuk semua nota` : RECEIVED_LABEL[method]
+
+// Nota kunjungan: Nota Gudang diketik driver, nota cabang sudah terisi dari Laporan Muat.
+function NotaInputs({ notas, noGudang, onNoGudang, invoice, onInvoice }: {
+  notas: BranchNota[]; noGudang: boolean; onNoGudang: (v: boolean) => void; invoice: string; onInvoice: (v: string) => void
+}) {
+  const hasBranch = notas.length > 0
+  return (
+    <div className="mb-3 space-y-2">
+      {!noGudang && (
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">{hasBranch ? 'Nota Gudang (Rp) *' : 'Nominal Sesuai Nota (Rp) *'}</label>
+          <RupiahInput value={invoice} onChange={onInvoice} placeholder="Total di nota"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+        </div>
+      )}
+      {hasBranch && (
+        <>
+          {notas.map(n => (
+            <div key={n.loading_id} className="flex items-center justify-between text-sm bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              <span className="text-emerald-800">🧾 Nota {n.origin}</span>
+              <b className="text-emerald-800">{fmtRp(n.amount)}</b>
+            </div>
+          ))}
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={noGudang} onChange={e => onNoGudang(e.target.checked)} />
+            Tidak ada barang gudang untuk toko ini
+          </label>
+          <p className="text-sm font-semibold text-slate-700">Total semua nota: {fmtRp(visitNotaTotal(invoice, noGudang, notas))}</p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function BalanceNote({ invoice, received }: { invoice: number; received: number }) {
   if (!(invoice > 0)) return null
   const diff = invoice - received
@@ -181,6 +228,9 @@ export default function JalanPengirimanPage() {
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentPhotoUrl, setPaymentPhotoUrl] = useState('')
   const [paymentDueDate, setPaymentDueDate] = useState('')
+  // Kunjungan yang cuma membawa nota cabang (tidak ada barang gudang) -- Nota Gudang dikosongkan.
+  const [noGudang, setNoGudang] = useState(false)
+  const [branchNotas, setBranchNotas] = useState<Record<string, BranchNota[]>>({})
   const [incidentType, setIncidentType] = useState<'tidak_ada' | 'salah_muat' | 'retur' | 'barang_lebih'>('tidak_ada')
   const [incidentPhotoUrl, setIncidentPhotoUrl] = useState('')
   const [incidentDescription, setIncidentDescription] = useState('')
@@ -202,6 +252,7 @@ export default function JalanPengirimanPage() {
   const [editInvoiceAmount, setEditInvoiceAmount] = useState('')
   const [editPaymentAmount, setEditPaymentAmount] = useState('')
   const [editPaymentDueDate, setEditPaymentDueDate] = useState('')
+  const [editNoGudang, setEditNoGudang] = useState(false)
   // Kejadian juga bisa dikoreksi dari Riwayat Toko -- kasus nyata: driver lupa isi kejadian
   // (atau kepencet "Pengiriman Selesai" karena double-tap) padahal ada retur/salah muat.
   const [editIncidentType, setEditIncidentType] = useState<IncidentType>('tidak_ada')
@@ -250,6 +301,8 @@ export default function JalanPengirimanPage() {
   const selectedPlan = plans.find(p => p.id === selectedPlanId) || null
   const pendingStores = planStores.filter(ps => ps.status === 'pending').sort((a, b) => a.sequence_order - b.sequence_order)
   const selectedStore = pendingStores.find(ps => ps.id === selectedStoreId) || null
+  const selectedNotas = selectedStore ? (branchNotas[selectedStore.id] ?? []) : []
+  const editNotas = editHistoryStore ? (branchNotas[editHistoryStore.id] ?? []) : []
   const pendingSupplierTasks = supplierTasks.filter(t => t.status === 'pending')
   const selectedSupplierTask = pendingSupplierTasks.find(t => t.id === selectedSupplierTaskId) || null
   // Belum 'selesai' = masih boleh ditambah barang & masih wajib dilaporkan posisi akhirnya di
@@ -313,11 +366,30 @@ export default function JalanPengirimanPage() {
   async function fetchPlanStores(planId: string) {
     const { data } = await supabase.from('logistics_plan_stores')
       .select(`id, store_id, sequence_order, status, delivery_photo_urls,
-        payment_method, invoice_amount, payment_amount, payment_photo_url, payment_due_date,
+        payment_method, invoice_amount, payment_amount, received_total, payment_photo_url, payment_due_date,
         incident_type, incident_photo_url, incident_description, failed_reason,
         logistics_stores(name, address, phone)`)
       .eq('plan_id', planId).order('sequence_order')
-    setPlanStores((data as unknown as PlanStore[]) || [])
+    const rows = (data as unknown as PlanStore[]) || []
+    setPlanStores(rows)
+
+    // Nota cabang per kunjungan: dari paket Laporan Muat yang diambil ke kunjungan itu.
+    const map: Record<string, BranchNota[]> = {}
+    if (rows.length > 0) {
+      const { data: pkgs } = await supabase.from('logistics_central_loading_packages')
+        .select('plan_store_id, loading_id, logistics_central_loadings(nota_amount, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name))')
+        .in('plan_store_id', rows.map(r => r.id)).eq('status', 'diambil')
+      type PkgRow = { plan_store_id: string; loading_id: string; logistics_central_loadings: { nota_amount: number | null; origin: { name: string } | null } | null }
+      for (const p of (pkgs as unknown as PkgRow[]) || []) {
+        const amount = p.logistics_central_loadings?.nota_amount
+        if (amount == null) continue
+        const list = map[p.plan_store_id] ??= []
+        if (!list.some(n => n.loading_id === p.loading_id)) {
+          list.push({ loading_id: p.loading_id, amount: Number(amount), origin: p.logistics_central_loadings?.origin?.name ?? 'Cabang' })
+        }
+      }
+    }
+    setBranchNotas(map)
   }
 
   async function fetchSupplierTasks(planId: string) {
@@ -382,8 +454,9 @@ export default function JalanPengirimanPage() {
     setDeliveryPhotoUrls(store?.delivery_photo_urls || []); setAddingDeliveryPhoto(false)
     setPaymentMethod(store?.payment_method || '')
     setInvoiceAmount(store?.invoice_amount != null ? String(store.invoice_amount) : '')
-    setPaymentAmount(store?.payment_amount != null ? String(store.payment_amount) : '')
+    setPaymentAmount(store?.received_total != null ? String(store.received_total) : store?.payment_amount != null ? String(store.payment_amount) : '')
     setPaymentPhotoUrl(store?.payment_photo_url || ''); setPaymentDueDate(store?.payment_due_date || '')
+    setNoGudang(false)
     setIncidentType(store?.incident_type || 'tidak_ada')
     setIncidentPhotoUrl(store?.incident_photo_url || ''); setIncidentDescription(store?.incident_description || '')
   }
@@ -598,7 +671,7 @@ export default function JalanPengirimanPage() {
   // Gerbang per-langkah wizard -- dipisah dari canSubmitKirim (gerbang akhir) supaya tiap
   // langkah bisa divalidasi & dikonfirmasi sendiri sebelum lanjut ke langkah berikutnya.
   const canProceedStep1 = deliveryPhotoUrls.length > 0
-  const canProceedStep2 = isPaymentValid(paymentMethod, invoiceAmount, paymentAmount) && (
+  const canProceedStep2 = isPaymentValid(paymentMethod, invoiceAmount, paymentAmount, noGudang, selectedNotas.length) && (
     paymentMethod === 'transfer' ? !!paymentPhotoUrl :
     paymentMethod === 'tempo' ? !!paymentDueDate : true
   )
@@ -619,23 +692,24 @@ export default function JalanPengirimanPage() {
     if (!selectedStore || !canSubmitKirim || clickLocked || submitLockRef.current) return
     submitLockRef.current = true
     setSubmitting(true)
-    const { data, error } = await supabase.from('logistics_plan_stores').update({
-      status: 'delivered',
-      delivery_photo_urls: deliveryPhotoUrls,
-      payment_method: paymentMethod || null,
-      invoice_amount: Number(invoiceAmount),
-      payment_amount: receivedFor(paymentMethod, paymentAmount),
-      payment_photo_url: paymentMethod === 'transfer' ? paymentPhotoUrl : null,
-      payment_due_date: paymentMethod === 'tempo' ? paymentDueDate : null,
-      incident_type: incidentType,
-      incident_photo_url: incidentType !== 'tidak_ada' ? incidentPhotoUrl : null,
-      incident_description: incidentType !== 'tidak_ada' ? incidentDescription.trim() : null,
-      resolved_by: myEmployeeId,
-      resolved_at: new Date().toISOString(),
-    }).eq('id', selectedStore.id).eq('status', 'pending').select('id')
+    // Server yang menyimpan & membagi uang diterima ke Nota Gudang + nota cabang (migrasi 083).
+    const { error } = await supabase.rpc('submit_plan_store_delivery', {
+      p_plan_store_id: selectedStore.id,
+      p_photo_urls: deliveryPhotoUrls,
+      p_method: paymentMethod,
+      p_gudang_invoice: noGudang ? 0 : Number(invoiceAmount),
+      p_received: receivedFor(paymentMethod, paymentAmount),
+      p_payment_photo_url: paymentMethod === 'transfer' ? paymentPhotoUrl : null,
+      p_due_date: paymentMethod === 'tempo' ? paymentDueDate : null,
+      p_incident_type: incidentType,
+      p_incident_photo_url: incidentType !== 'tidak_ada' ? incidentPhotoUrl : null,
+      p_incident_description: incidentType !== 'tidak_ada' ? incidentDescription.trim() : null,
+    })
 
-    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); submitLockRef.current = false; return }
-    if (!data || data.length === 0) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
+    // "Sudah diproses rekan" tetap lanjut bersih-bersih seperti sukses (tokonya memang sudah beres).
+    const alreadyDone = !!error && /sudah lebih dulu diproses/.test(error.message)
+    if (error && !alreadyDone) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); submitLockRef.current = false; return }
+    if (alreadyDone) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
     else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" selesai dikirim.`)
     await clearTargetStore()
     resetKirimForm()
@@ -678,15 +752,19 @@ export default function JalanPengirimanPage() {
   function openEditHistory(ps: PlanStore) {
     setEditHistoryStore(ps)
     setEditPaymentMethod(ps.payment_method || '')
-    setEditInvoiceAmount(ps.invoice_amount != null ? String(ps.invoice_amount) : '')
-    setEditPaymentAmount(ps.payment_amount ? String(ps.payment_amount) : '')
+    const hasBranch = (branchNotas[ps.id] ?? []).length > 0
+    setEditNoGudang(hasBranch && Number(ps.invoice_amount) === 0)
+    setEditInvoiceAmount(ps.invoice_amount ? String(ps.invoice_amount) : '')
+    // Angka asli yang diketik driver; data lama (sebelum migrasi 083) cuma punya payment_amount.
+    const received = ps.received_total ?? ps.payment_amount
+    setEditPaymentAmount(received ? String(received) : '')
     setEditPaymentDueDate(ps.payment_due_date || '')
     setEditIncidentType(ps.incident_type || 'tidak_ada')
     setEditIncidentPhotoUrl(ps.incident_photo_url || '')
     setEditIncidentDescription(ps.incident_description || '')
   }
 
-  const canSubmitEditHistory = isPaymentValid(editPaymentMethod, editInvoiceAmount, editPaymentAmount) &&
+  const canSubmitEditHistory = isPaymentValid(editPaymentMethod, editInvoiceAmount, editPaymentAmount, editNoGudang, editNotas.length) &&
     (editPaymentMethod !== 'tempo' || !!editPaymentDueDate) &&
     (editIncidentType === 'tidak_ada' || (!!editIncidentPhotoUrl && editIncidentDescription.trim().length > 0))
 
@@ -699,15 +777,16 @@ export default function JalanPengirimanPage() {
   async function submitEditHistory() {
     if (!editHistoryStore || !canSubmitEditHistory || clickLocked) return
     setEditSaving(true)
-    const { error } = await supabase.from('logistics_plan_stores').update({
-      payment_method: editPaymentMethod || null,
-      invoice_amount: Number(editInvoiceAmount),
-      payment_amount: receivedFor(editPaymentMethod, editPaymentAmount),
-      payment_due_date: editPaymentMethod === 'tempo' ? editPaymentDueDate : null,
-      incident_type: editIncidentType,
-      incident_photo_url: editIncidentType !== 'tidak_ada' ? editIncidentPhotoUrl : null,
-      incident_description: editIncidentType !== 'tidak_ada' ? editIncidentDescription.trim() : null,
-    }).eq('id', editHistoryStore.id).eq('status', 'delivered')
+    const { error } = await supabase.rpc('update_plan_store_payment', {
+      p_plan_store_id: editHistoryStore.id,
+      p_method: editPaymentMethod,
+      p_gudang_invoice: editNoGudang ? 0 : Number(editInvoiceAmount),
+      p_received: receivedFor(editPaymentMethod, editPaymentAmount),
+      p_due_date: editPaymentMethod === 'tempo' ? editPaymentDueDate : null,
+      p_incident_type: editIncidentType,
+      p_incident_photo_url: editIncidentType !== 'tidak_ada' ? editIncidentPhotoUrl : null,
+      p_incident_description: editIncidentType !== 'tidak_ada' ? editIncidentDescription.trim() : null,
+    })
     if (error) showMessage('error', 'Gagal menyimpan perubahan: ' + error.message)
     else showMessage('success', 'Data toko berhasil diperbarui.')
     setEditHistoryStore(null)
@@ -1131,9 +1210,7 @@ export default function JalanPengirimanPage() {
                   {kirimStep === 2 && (
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Langkah 2 — Pembayaran</p>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Sesuai Nota (Rp) *</label>
-                      <RupiahInput value={invoiceAmount} onChange={setInvoiceAmount} placeholder="Total di nota"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none mb-3" />
+                      <NotaInputs notas={selectedNotas} noGudang={noGudang} onNoGudang={setNoGudang} invoice={invoiceAmount} onInvoice={setInvoiceAmount} />
                       <label className="block text-xs font-medium text-slate-600 mb-1">Metode Pembayaran *</label>
                       <div className="grid grid-cols-2 gap-2 mb-3">
                         {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
@@ -1145,7 +1222,7 @@ export default function JalanPengirimanPage() {
                       </div>
                       {paymentMethod && paymentMethod !== 'tempo' && (
                         <div className="mb-3">
-                          <label className="block text-xs font-medium text-slate-600 mb-1">{RECEIVED_LABEL[paymentMethod]} (Rp) *</label>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">{receivedLabel(paymentMethod, selectedNotas)} (Rp) *</label>
                           <RupiahInput value={paymentAmount} onChange={setPaymentAmount} placeholder={RECEIVED_LABEL[paymentMethod]}
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                         </div>
@@ -1158,7 +1235,7 @@ export default function JalanPengirimanPage() {
                         </div>
                       )}
                       {paymentMethod && (
-                        <div className="mb-3"><BalanceNote invoice={Number(invoiceAmount)} received={receivedFor(paymentMethod, paymentAmount) || 0} /></div>
+                        <div className="mb-3"><BalanceNote invoice={visitNotaTotal(invoiceAmount, noGudang, selectedNotas)} received={receivedFor(paymentMethod, paymentAmount) || 0} /></div>
                       )}
                       {paymentMethod === 'transfer' && (
                         paymentPhotoUrl ? (
@@ -1435,8 +1512,9 @@ export default function JalanPengirimanPage() {
                     {ps.status === 'delivered' && ps.payment_method && (
                       <p className="text-xs text-slate-500 mt-1">
                         {PAYMENT_LABEL[ps.payment_method]}
-                        {ps.invoice_amount != null ? ` — nota ${fmtRp(Number(ps.invoice_amount))}` : ''}
-                        {ps.payment_amount ? ` — diterima ${fmtRp(Number(ps.payment_amount))}` : ''}
+                        {ps.invoice_amount ? ` — nota gudang ${fmtRp(Number(ps.invoice_amount))}` : ''}
+                        {(branchNotas[ps.id] ?? []).map(n => ` — nota ${n.origin} ${fmtRp(n.amount)}`).join('')}
+                        {(ps.received_total ?? ps.payment_amount) ? ` — diterima ${fmtRp(Number(ps.received_total ?? ps.payment_amount))}` : ''}
                         {ps.payment_due_date ? ` — jatuh tempo ${new Date(ps.payment_due_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}` : ''}
                         {ps.invoice_amount == null && <span className="text-amber-600"> — nominal nota belum diisi</span>}
                       </p>
@@ -1553,11 +1631,7 @@ export default function JalanPengirimanPage() {
             <p className="text-xs text-slate-500 mb-4">{editHistoryStore.logistics_stores?.name}</p>
             <div className="space-y-3">
               <p className="text-xs font-semibold text-slate-500 uppercase">Pembayaran</p>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Nominal Sesuai Nota (Rp) *</label>
-                <RupiahInput value={editInvoiceAmount} onChange={setEditInvoiceAmount} placeholder="Total di nota"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-              </div>
+              <NotaInputs notas={editNotas} noGudang={editNoGudang} onNoGudang={setEditNoGudang} invoice={editInvoiceAmount} onInvoice={setEditInvoiceAmount} />
               <div className="grid grid-cols-2 gap-2">
                 {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
                   <button key={m} type="button" onClick={() => setEditPaymentMethod(m)}
@@ -1568,7 +1642,7 @@ export default function JalanPengirimanPage() {
               </div>
               {editPaymentMethod && editPaymentMethod !== 'tempo' && (
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">{RECEIVED_LABEL[editPaymentMethod]} (Rp) *</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{receivedLabel(editPaymentMethod, editNotas)} (Rp) *</label>
                   <RupiahInput value={editPaymentAmount} onChange={setEditPaymentAmount} placeholder={RECEIVED_LABEL[editPaymentMethod]}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
@@ -1580,7 +1654,7 @@ export default function JalanPengirimanPage() {
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </div>
               )}
-              {editPaymentMethod && <BalanceNote invoice={Number(editInvoiceAmount)} received={receivedFor(editPaymentMethod, editPaymentAmount) || 0} />}
+              {editPaymentMethod && <BalanceNote invoice={visitNotaTotal(editInvoiceAmount, editNoGudang, editNotas)} received={receivedFor(editPaymentMethod, editPaymentAmount) || 0} />}
               {editPaymentMethod === 'transfer' && (
                 <p className="text-xs text-slate-400">Foto bukti transfer yang sudah diunggah tidak berubah — cuma metode/nominal/tanggalnya yang bisa dikoreksi di sini.</p>
               )}

@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import LogisticsCameraCapture from '@/components/LogisticsCameraCapture'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
 import { fetchDeliveryCandidates, type DeliveryCandidate } from '@/components/DeliveryAssigneePicker'
+import RupiahInput from '@/components/RupiahInput'
 
 // Menu "Kirim Barang" -- kiriman Laporan Muat jalur "Diantar Sendiri" (4 cabang toko).
 // Alur 3 foto (semua waktu dari jam SERVER, lihat migrasi 067 & 068):
@@ -68,7 +69,7 @@ type TripStop = {
   arrival_order: number | null
   cancelled_at: string | null
   cancel_reason: string | null
-  logistics_central_loadings: { ongkir: number; logistics_stores: StoreRel } | null
+  logistics_central_loadings: { ongkir: number; nota_amount: number | null; logistics_stores: StoreRel } | null
   grooming_orders: GroomRel | null
 }
 
@@ -107,6 +108,13 @@ type Trip = {
 
 const fmtDateTime = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
+
+type PayMethod = 'cash' | 'transfer' | 'deposit' | 'tempo'
+const PAY_LABEL: Record<PayMethod, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit (DP)', tempo: 'Tempo' }
+// Kiriman barang bernota wajib isi cara bayar di Foto 2; tempo tidak ada uang diterima.
+const stopNota = (s: TripStop) => s.kind === 'barang' ? s.logistics_central_loadings?.nota_amount ?? null : null
+const payValid = (d?: { method: PayMethod | ''; received: string }) =>
+  !!d?.method && (d.method === 'tempo' || Number(d.received) > 0)
 const ms = (s: string) => new Date(s).getTime()
 
 function fmtDur(msVal: number) {
@@ -204,6 +212,8 @@ export default function KirimBarangPage() {
 
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
+  // Pembayaran nota per tujuan (Foto 2), lihat migrasi 083. Uang diterima wajib diketik.
+  const [payDraft, setPayDraft] = useState<Record<string, { method: PayMethod | ''; received: string }>>({})
   // Foto yang sudah diambil tapi gagal terkirim (sinyal jelek) -- disimpan supaya bisa dicoba
   // lagi tanpa foto ulang.
   const [pending, setPending] = useState<{ kind: 'start' | 'arrive' | 'finish'; blob: Blob; url?: string; stopId?: string; loadingIds?: string[]; groomKeys?: string[] } | null>(null)
@@ -225,7 +235,7 @@ export default function KirimBarangPage() {
     pj:employees!logistics_tp_trips_pj_id_fkey(full_name, branches(name)),
     prev_pj:employees!logistics_tp_trips_reassigned_from_fkey(full_name),
     logistics_tp_trip_stops(id, kind, loading_id, grooming_order_id, auto_on_return, arrived_at, arrived_photo_url, arrival_order, cancelled_at, cancel_reason,
-      logistics_central_loadings(ongkir, logistics_stores(name, address, phone)),
+      logistics_central_loadings(ongkir, nota_amount, logistics_stores(name, address, phone)),
       grooming_orders(${GROOM_REL}))
   `
 
@@ -391,7 +401,12 @@ export default function KirimBarangPage() {
     setBusy(true)
     const url = existingUrl ?? await upload(stopFolder(stop), blob, 'sampai')
     if (!url) { setBusy(false); setPending({ kind: 'arrive', blob, stopId: stop.id }); showMessage('error', 'Foto gagal terkirim (cek sinyal). Tekan "Coba Kirim Lagi" — tidak perlu foto ulang.'); return }
-    const { error } = await supabase.rpc('arrive_tp_stop', { p_stop_id: stop.id, p_photo_url: url })
+    const pay = stopNota(stop) != null ? payDraft[stop.id] : undefined
+    const { error } = await supabase.rpc('arrive_tp_stop', {
+      p_stop_id: stop.id, p_photo_url: url,
+      p_method: pay?.method || null,
+      p_received: pay ? (pay.method === 'tempo' ? 0 : Number(pay.received)) : null,
+    })
     setBusy(false)
     if (error) {
       if (/fetch|network/i.test(error.message)) { setPending({ kind: 'arrive', blob, url, stopId: stop.id }); showMessage('error', 'Gagal terhubung ke server. Tekan "Coba Kirim Lagi".'); return }
@@ -613,6 +628,8 @@ export default function KirimBarangPage() {
               const place = stopPlace(s)
               const blocked = s.kind === 'serah_kucing' && !jemputDone(s)
               const title = stopTitle(s)
+              const nota = stopNota(s)
+              const pay = payDraft[s.id]
               return (
                 <div key={s.id} className={`border rounded-lg p-3 space-y-2 ${s.kind === 'barang' ? 'bg-purple-50 border-purple-200' : 'bg-pink-50 border-pink-200'}`}>
                   <div className="flex items-start justify-between gap-2">
@@ -626,8 +643,31 @@ export default function KirimBarangPage() {
                         className="shrink-0 text-[11px] px-2 py-1 border border-slate-300 bg-white rounded-lg text-slate-600 disabled:opacity-50">Lepas</button>
                     )}
                   </div>
+                  {nota != null && (
+                    <div className="bg-white border border-emerald-200 rounded-lg p-2.5 space-y-2">
+                      <p className="text-sm font-semibold text-emerald-800">🧾 Nota {fmtRp(nota)} — toko bayar pakai apa?</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(Object.keys(PAY_LABEL) as PayMethod[]).map(m => (
+                          <button key={m} type="button" onClick={() => setPayDraft(p => ({ ...p, [s.id]: { method: m, received: p[s.id]?.received ?? '' } }))}
+                            className={`py-1.5 rounded-lg text-sm font-medium border ${pay?.method === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+                            {PAY_LABEL[m]}
+                          </button>
+                        ))}
+                      </div>
+                      {pay?.method && pay.method !== 'tempo' && (
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Uang yang diterima (Rp) *</label>
+                          <RupiahInput value={pay.received} onChange={v => setPayDraft(p => ({ ...p, [s.id]: { method: p[s.id]?.method ?? '', received: v } }))}
+                            placeholder="Ketik jumlah uang"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {blocked ? (
                     <p className="text-xs text-slate-500 text-center py-2">Foto jemput kucing di pelanggan dulu.</p>
+                  ) : nota != null && !payValid(pay) ? (
+                    <p className="text-xs text-slate-500 text-center py-2">Pilih cara bayar{pay?.method && pay.method !== 'tempo' ? ' & isi uang yang diterima' : ''} dulu, baru foto sampai.</p>
                   ) : waitLeft > 0 ? (
                     <p className="text-xs text-slate-500 text-center py-2">⏳ Foto sampai bisa diambil {Math.ceil(waitLeft / 60000)} menit lagi (minimal 2 menit per tahap).</p>
                   ) : busy ? (

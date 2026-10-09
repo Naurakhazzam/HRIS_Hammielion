@@ -18,7 +18,17 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   (migrasi `082_central_loading_nota.sql`, commit `f529d2c`). Keputusan: laporan yang sudah Selesai
   tapi belum diambil saat rilis **tidak wajib** diisi nota (boleh diisi lewat tombol "Isi Nota").
   Aturan "1 laporan = 1 driver" hanya berlaku untuk laporan yang punya nota.
-- [ ] **Tahap 2** — Pembayaran di lapangan (driver isi 1 angka → dibagi otomatis; pengantar antar sendiri isi di Foto 2)
+- [x] **Tahap 2** — Pembayaran di lapangan (driver isi 1 angka → dibagi otomatis; pengantar antar sendiri isi di Foto 2)
+  (migrasi `083_visit_payment_allocation.sql`, commit lihat git log "Nota cabang Tahap 2"). Catatan implementasi:
+  - Server membagi lewat `apply_visit_payment`; driver kirim/edit lewat RPC `submit_plan_store_delivery`
+    / `update_plan_store_payment` (bukan update langsung lagi). Edit terkunci kalau sudah diverifikasi finance.
+  - `payment_amount` = bagian Nota Gudang **+ lebih bayar** (kalau ada Nota Gudang) supaya Laporan
+    Pengiriman lama tetap menampilkan "lebih bayar"; angka asli ada di `received_total`, lebihnya di `overpay_amount`.
+  - Nota Gudang boleh 0 hanya kalau kunjungan membawa nota cabang (centang "Tidak ada barang gudang").
+  - Antar sendiri: tidak minta foto bukti transfer / tanggal jatuh tempo (cukup cara bayar + uang diterima).
+  - Klaim paket kini hanya digabung ke kunjungan toko yang masih **pending** (dulu bisa menempel ke
+    kunjungan yang sudah terkirim → nota tidak tertagih).
+  - Belum: Laporan Pengiriman (finance) belum menampilkan nota cabang — masuk Tahap 3.
 - [ ] **Tahap 3** — Tab verifikasi finance (Cocok / Tidak Cocok + pemberitahuan kurang bayar)
 - [ ] **Tahap 4** — Gagal / Kirim Besok + tab Tertunda (berlaku nota gudang & nota cabang)
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)

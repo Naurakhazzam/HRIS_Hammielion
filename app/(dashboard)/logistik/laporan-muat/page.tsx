@@ -14,6 +14,9 @@ type Loading = {
   delivery_method: 'driver' | 'antar_sendiri'
   ongkir: number
   nota_amount: number | null
+  nota_paid_amount: number | null
+  nota_overpay_amount: number
+  nota_payment_method: 'cash' | 'transfer' | 'deposit' | 'tempo' | null
   created_by: string
   origin_branch_id: string
   assigned_to: string | null
@@ -92,7 +95,7 @@ type LoadingRow = Loading & {
 }
 
 const LOADING_SELECT = `
-  id, store_id, status, delivery_method, ongkir, nota_amount, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
+  id, store_id, status, delivery_method, ongkir, nota_amount, nota_paid_amount, nota_overpay_amount, nota_payment_method, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
   logistics_stores(name, address, kind),
   origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
   creator:employees!logistics_central_loadings_created_by_fkey(full_name),
@@ -139,6 +142,7 @@ function mergeRows(prev: LoadingRow[], incoming: LoadingRow[]) {
 }
 
 const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
+const PAY_LABEL = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit', tempo: 'Tempo' } as const
 
 type PickupFilter = 'semua' | 'belum' | 'sudah' | 'proses'
 
@@ -784,7 +788,20 @@ export default function LaporanMuatPage() {
                     {itemCounts[l.id] || 0} foto barang · {pkg.total} paket{pkg.total > 0 ? ` (${pkg.diambil} diambil)` : ''}
                   </p>
                   {l.nota_amount != null ? (
-                    <p className="text-xs font-semibold text-emerald-700 mt-0.5">🧾 Nota {fmtRp(l.nota_amount)}</p>
+                    <p className="text-xs font-semibold text-emerald-700 mt-0.5">
+                      🧾 Nota {fmtRp(l.nota_amount)}
+                      {l.nota_payment_method && (() => {
+                        const paid = Number(l.nota_paid_amount ?? 0)
+                        const short = l.nota_amount - paid
+                        return (
+                          <span className="font-normal text-slate-600">
+                            {' '}· 💰 {PAY_LABEL[l.nota_payment_method]}{l.nota_payment_method !== 'tempo' ? ` ${fmtRp(paid)}` : ''}
+                            {short > 0 && <span className="text-amber-700"> · {l.nota_payment_method === 'tempo' ? 'piutang' : 'kurang'} {fmtRp(short)}</span>}
+                            {l.nota_overpay_amount > 0 && <span className="text-blue-700"> · lebih {fmtRp(l.nota_overpay_amount)}</span>}
+                          </span>
+                        )
+                      })()}
+                    </p>
                   ) : l.status === 'selesai' && (
                     <p className="text-xs text-slate-400 mt-0.5">🧾 Nota belum diisi</p>
                   )}
