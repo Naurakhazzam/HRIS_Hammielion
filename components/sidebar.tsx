@@ -90,6 +90,7 @@ const PEKERJAAN_SUBMENU: NavNode[] = [
 // salah satu ketinggalan diupdate kalau ada perubahan di lain waktu.
 const LOGISTIK_SUBMENU: NavNode[] = [
   { name: 'Dashboard Pengiriman', href: '/logistik/dashboard' },
+  { name: 'Surat Jalan', href: '/logistik/surat-jalan' },
   { name: 'Rencana Pengiriman', href: '/logistik/rencana' },
   { name: 'Jalankan Pengiriman', href: '/logistik/jalan' },
   { name: 'Laporan Pengiriman', href: '/logistik/laporan' },
@@ -276,7 +277,7 @@ const adminNavItems: NavNode[] = [
 // menampilkan menunya di sini cuma bikin karyawan buka halaman kosong tanpa penjelasan.
 // Grup "Logistik" disusun per karyawan (jabatan/cabang, bukan role — Driver/Kenek & staf toko
 // di tabel users tetap ber-role 'employee' biasa) dan cuma muncul kalau ada isinya.
-function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isReturRecipient: boolean, isStoreBranchStaff: boolean): NavNode[] {
+function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isReturRecipient: boolean, isStoreBranchStaff: boolean, canManageSuratJalan = false): NavNode[] {
   const items: NavNode[] = [
     { name: 'Dashboard Saya', href: '/portal', icon: '🏠' },
     { name: 'Portal Saya', href: '/portal/profil', icon: '👤', submenu: EMPLOYEE_PORTAL_SAYA },
@@ -309,6 +310,10 @@ function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, 
       logistik.push({ name: 'Kirim Barang', href: '/logistik/kirim-barang' })
       logistik.push({ name: 'Order Grooming', href: '/logistik/grooming' })
     }
+    // Surat Jalan: karyawan Back Office (migrasi 090).
+    if (canManageSuratJalan) {
+      logistik.push({ name: 'Surat Jalan', href: '/logistik/surat-jalan' })
+    }
     // Penerimaan Retur: cuma karyawan yang cabangnya jadi tujuan retur (migrasi 081).
     if (isReturRecipient) {
       logistik.push({ name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur' })
@@ -339,6 +344,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [isKepalaGudang, setIsKepalaGudang] = useState(false)
   const [isReturRecipient, setIsReturRecipient] = useState(false)
   const [isStoreBranchStaff, setIsStoreBranchStaff] = useState(false)
+  const [canManageSuratJalan, setCanManageSuratJalan] = useState(false)
   const [meetingBadge, setMeetingBadge] = useState(0)
   const [dailyTaskBadge, setDailyTaskBadge] = useState(0)
   // Angka merah di submenu Klarifikasi Alpha / Klaim Lembur / Ajukan Libur -- berapa banyak
@@ -355,21 +361,25 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [groomingBadge, setGroomingBadge] = useState(0)
   // Kiriman Tertunda: Kirim Besok yang lewat 3 hari -- hanya untuk Owner (migrasi 088).
   const [tertundaBadge, setTertundaBadge] = useState(0)
+  // Kiriman Gagal yang menunggu keputusan kantor / cabang asal (migrasi 090).
+  const [keputusanBadge, setKeputusanBadge] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
-      const [kirim, jemput, groom, tunda] = await Promise.all([
+      const [kirim, jemput, groom, tunda, keputusan] = await Promise.all([
         supabase.rpc('get_tp_delivery_badge_count'),
         supabase.rpc('get_central_pickup_badge_count'),
         supabase.rpc('get_grooming_badge_count'),
         supabase.rpc('get_postponed_overdue_count'),
+        supabase.rpc('get_failed_decision_count'),
       ])
       if (cancelled) return
       setKirimBarangBadge(Number(kirim.data) || 0)
       setJemputBadge(Number(jemput.data) || 0)
       setGroomingBadge(Number(groom.data) || 0)
       setTertundaBadge(Number(tunda.data) || 0)
+      setKeputusanBadge(Number(keputusan.data) || 0)
     }
     load()
     const timer = setInterval(load, 60000)
@@ -461,6 +471,8 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                 const dept = Array.isArray((emp as any).departments) ? (emp as any).departments[0] : (emp as any).departments
                 setIsDriverOrKenek(emp.employee_type === 'driver' || !!emp.can_drive || !!emp.can_help || dept?.name === 'Team Gudang')
                 setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
+                // Surat Jalan: semua karyawan Back Office (+ Kepala Gudang/Owner), migrasi 090.
+                supabase.rpc('can_manage_delivery_notes').then(({ data: ok }) => setCanManageSuratJalan(!!ok))
                 if (emp.branch_id) {
                   supabase.from('logistics_store_branches').select('branch_id').eq('branch_id', emp.branch_id).maybeSingle()
                     .then(({ data: sb }) => setIsStoreBranchStaff(!!sb))
@@ -483,7 +495,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // tombol toggle preview itu sendiri, supaya karyawan asli tidak bisa iseng balik ke menu admin.
   const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
   const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
-  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isReturRecipient, isStoreBranchStaff) : adminNavItems
+  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isReturRecipient, isStoreBranchStaff, canManageSuratJalan) : adminNavItems
 
   // Angka merah di submenu (beda dari meetingBadge/dailyTaskBadge yang nempel di item
   // top-level) -- dicocokkan lewat href, bukan nama, supaya tetap ketemu walau labelnya
@@ -498,6 +510,9 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     '/logistik/grooming': groomingBadge,
     '/logistik/jemput-toko-pusat': jemputBadge,
     '/logistik/tertunda': tertundaBadge,
+    // Kantor melihatnya di Surat Jalan; staf cabang di Laporan Muat (hanya cabangnya).
+    '/logistik/surat-jalan': keputusanBadge,
+    '/logistik/laporan-muat': isStoreBranchStaff ? keputusanBadge : 0,
     '/catatan-meeting': meetingBadge,
     '/tugas-harian': dailyTaskBadge,
   }

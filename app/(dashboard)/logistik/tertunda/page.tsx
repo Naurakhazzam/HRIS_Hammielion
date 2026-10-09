@@ -33,6 +33,16 @@ type Loading = {
   packages: { count: number }[]
 }
 
+type SjNote = {
+  id: string
+  note_number: string | null
+  amount: number
+  postponed_at: string
+  postpone_count: number
+  last_postpone_reason: string | null
+  logistics_stores: { name: string; address: string | null } | null
+}
+
 const LIMIT_MS = 3 * 24 * 3600 * 1000
 const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
 const fmtDT = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -48,6 +58,8 @@ export default function TertundaPage() {
   const [loading, setLoading] = useState(true)
   const [visits, setVisits] = useState<Visit[]>([])
   const [loadings, setLoadings] = useState<Loading[]>([])
+  // Surat jalan gudang yang Kirim Besok -> kembali menunggu (migrasi 090).
+  const [sjNotes, setSjNotes] = useState<SjNote[]>([])
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [now] = useState(() => Date.now())
 
@@ -91,10 +103,14 @@ export default function TertundaPage() {
         .eq('status', 'selesai').not('postponed_at', 'is', null)
         .order('postponed_at', { ascending: true }),
     ])
-    const err = vRes.error || lRes.error
+    const { data: sjData, error: sjErr } = await supabase.from('logistics_delivery_notes')
+      .select('id, note_number, amount, postponed_at, postpone_count, last_postpone_reason, logistics_stores(name, address)')
+      .eq('status', 'menunggu').not('postponed_at', 'is', null).order('postponed_at', { ascending: true })
+    const err = vRes.error || lRes.error || sjErr
     if (err) { showMessage('error', 'Gagal memuat: ' + err.message); setLoading(false); return }
     setVisits((vRes.data as unknown as Visit[]) || [])
     setLoadings((lRes.data as unknown as Loading[]) || [])
+    setSjNotes((sjData as unknown as SjNote[]) || [])
     setLoading(false)
   }, [supabase])
 
@@ -136,6 +152,7 @@ export default function TertundaPage() {
 
   const overdue = (s: string) => now - new Date(s).getTime() > LIMIT_MS
   const overdueCount = visits.filter(v => overdue(v.resolved_at)).length + loadings.filter(l => overdue(l.postponed_at)).length
+    + sjNotes.filter(n => overdue(n.postponed_at)).length
 
   return (
     <div className="max-w-3xl">
@@ -162,7 +179,34 @@ export default function TertundaPage() {
         <div className="space-y-6">
           <section>
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-bold text-slate-700">🚚 Barang Gudang ({visits.length})</h2>
+              <h2 className="text-sm font-bold text-slate-700">📄 Surat Jalan Tertunda ({sjNotes.length})</h2>
+              <Link href="/logistik/surat-jalan" className="text-xs text-blue-600 hover:underline">Buka Surat Jalan →</Link>
+            </div>
+            <p className="text-xs text-slate-500 mb-2">Sudah kembali ke daftar &quot;menunggu&quot; dan muncul paling atas saat membuat rencana. Tertutup otomatis begitu terkirim.</p>
+            {sjNotes.length === 0 ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-6 text-center text-sm text-slate-500">Tidak ada.</div>
+            ) : sjNotes.map(n => {
+              const late = overdue(n.postponed_at)
+              return (
+                <div key={n.id} className={`bg-white rounded-xl border p-4 mb-2 ${late ? 'border-red-300' : 'border-slate-200'}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-slate-800">{n.logistics_stores?.name ?? '-'}</p>
+                      <p className="text-xs text-slate-500">{n.note_number ? `📄 ${n.note_number} · ` : ''}{fmtRp(n.amount)} · ditunda {n.postpone_count}×</p>
+                    </div>
+                    <span className={`text-xs px-2 py-1 rounded-full font-semibold ${late ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                      ⏱ {age(n.postponed_at, now)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-700 mt-2">📅 {n.last_postpone_reason ?? '-'}</p>
+                </div>
+              )
+            })}
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-bold text-slate-700">🚚 Barang Gudang tanpa Surat Jalan ({visits.length})</h2>
               <Link href="/logistik/rencana" className="text-xs text-blue-600 hover:underline">Buat / ubah Rencana Pengiriman →</Link>
             </div>
             <p className="text-xs text-slate-500 mb-2">Masukkan toko ini ke Rencana Pengiriman berikutnya. Tertutup otomatis begitu toko menerima kiriman lagi.</p>

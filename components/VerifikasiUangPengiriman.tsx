@@ -115,6 +115,15 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
 
     // Nota cabang yang ditagih di tiap kunjungan.
     const notaByVisit: Record<string, { label: string; amount: number }[]> = {}
+    // Surat jalan gudang per kunjungan (migrasi 090) -- tiap surat jalan satu nota.
+    const sjByVisit: Record<string, { label: string; amount: number }[]> = {}
+    if (visits.length > 0) {
+      const { data: sjRows } = await supabase.from('logistics_delivery_notes')
+        .select('plan_store_id, note_number, amount').in('plan_store_id', visits.map(v => v.id)).order('created_at')
+      for (const n of (sjRows as { plan_store_id: string; note_number: string | null; amount: number }[]) || []) {
+        ;(sjByVisit[n.plan_store_id] ??= []).push({ label: `Nota Gudang${n.note_number ? ` ${n.note_number}` : ''}`, amount: Number(n.amount) })
+      }
+    }
     if (visits.length > 0) {
       const { data: notaRows } = await supabase.from('logistics_central_loadings')
         .select('nota_amount, nota_plan_store_id, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name)')
@@ -136,7 +145,7 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
         kind: 'visit' as const, id: v.id, date: v.resolved_at, storeName: v.logistics_stores?.name ?? '-',
         person: `🚚 ${v.plan?.driver?.full_name ?? 'Driver'}`, method: v.payment_method,
         notas: [
-          ...(Number(v.invoice_amount) > 0 ? [{ label: 'Nota Gudang', amount: Number(v.invoice_amount) }] : []),
+          ...(sjByVisit[v.id] ?? (Number(v.invoice_amount) > 0 ? [{ label: 'Nota Gudang', amount: Number(v.invoice_amount) }] : [])),
           ...(notaByVisit[v.id] ?? []),
         ],
         reported: Number(v.received_total), verified: v.office_verified_amount != null ? Number(v.office_verified_amount) : null,

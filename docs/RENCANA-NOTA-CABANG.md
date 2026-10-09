@@ -75,6 +75,23 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   `089_tp_stop_fail.sql`, kolom `fail_photo_url`); "Lepas" tetap = dikirim lain waktu. (b) Laporan
   Pengiriman: toko per trip **diurutkan otomatis menurut jam terkirim/dikunjungi** (nomor 1 = pertama
   diturunkan), yang belum diproses menyusul sesuai rencana; label "(rencana #n)" bila beda urutan.
+- [x] **Surat Jalan gudang** (keputusan 9 Okt, **belum di-push**) — migrasi `090_delivery_notes.sql`
+  + `090b`..`090d` (DB: 090a_delivery_notes_tables, 090b_delivery_notes_rpcs,
+  090c_delivery_notes_outcome_allocation, 090c2_visit_invoice_from_notes,
+  090d_delivery_notes_receivables_badges). Tabel `logistics_delivery_notes` (+ riwayat nominal
+  `logistics_delivery_note_changes`). Dibuat oleh Back Office (semua karyawan cabang Back Office) /
+  Kepala Gudang / Owner (`can_manage_delivery_notes`). Persiapan tarik data kasir: `note_number`
+  (opsional, unik bila diisi), `source`, `kasir_amount`, `match_status`, `logistics_stores.kasir_code`.
+  Rencana Pengiriman: toko masuk lewat **centang surat jalan** (`add_notes_to_plan` /
+  `remove_note_from_plan`), hanya sebelum berangkat; banyak surat jalan satu toko = satu kunjungan,
+  tiap surat jalan satu nota. Nota Gudang kunjungan = jumlah surat jalan (driver tidak mengetik; angka
+  dari aplikasi lama diabaikan). Ubah nominal setelah berangkat hanya Owner. Kirim Besok → surat jalan
+  kembali `menunggu` (tertunda, paling atas saat menyusun rencana); Gagal → `perlu_keputusan`, kantor
+  pilih jadwal ulang / batal (`decide_failed_note`). Barang cabang Gagal juga `perlu_keputusan`
+  (bukan langsung batal), diputuskan kantor atau cabang asal (`decide_failed_loading`). Rencana
+  dibatalkan / toko dihapus → surat jalan kembali menunggu. Pembagian uang & Buku Piutang per surat
+  jalan (`source_type = 'surat_jalan'`). Halaman `logistik/surat-jalan` (5 tab), tombol "+ Tambahkan
+  Surat Jalan" di Rencana Pengiriman, badge "perlu keputusan" (`get_failed_decision_count`).
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)
 - [ ] **Ditunda** — Potong nota (salah muat / kejadian lain) — dibahas setelah semua tahap di atas
 

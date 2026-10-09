@@ -142,13 +142,19 @@ export default function RencanaPengirimanPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Rencana Pengiriman</h1>
-          <p className="text-sm text-slate-500">Susun rencana kirim harian: mobil, ritase, driver, kenek, dan daftar toko.</p>
+          <p className="text-sm text-slate-500">Susun rencana kirim harian: mobil, ritase, driver, kenek, lalu centang surat jalan yang dibawa.</p>
         </div>
         {canManage && (
-          <button onClick={() => setShowForm(!showForm)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
-            {showForm ? 'Batal' : '+ Buat Rencana Baru'}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/logistik/surat-jalan?baru=1"
+              className="border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
+              + Tambahkan Surat Jalan
+            </Link>
+            <button onClick={() => setShowForm(!showForm)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
+              {showForm ? 'Batal' : '+ Buat Rencana Baru'}
+            </button>
+          </div>
         )}
       </div>
 

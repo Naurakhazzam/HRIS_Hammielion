@@ -99,6 +99,8 @@ type IncidentType = typeof INCIDENT_TYPES[number]
 // Nota cabang (Laporan Muat) yang paketnya dibawa ke kunjungan toko ini -- nominalnya sudah
 // diisi cabang, driver tidak mengetik ulang (migrasi 082/083).
 type BranchNota = { loading_id: string; amount: number; origin: string }
+// Surat jalan gudang yang dibawa kunjungan (dicatat kantor, migrasi 090).
+type SjNote = { id: string; plan_store_id: string; note_number: string | null; amount: number; notes: string | null }
 
 // Nota Gudang wajib, kecuali kunjungan ini cuma membawa nota cabang (driver centang "tidak ada
 // barang gudang"). Uang diterima wajib diketik untuk cash/deposit/transfer -- satu angka untuk
@@ -123,10 +125,31 @@ const receivedLabel = (method: string, notas: BranchNota[]) =>
   notas.length > 0 ? `${RECEIVED_LABEL[method]} — total untuk semua nota` : RECEIVED_LABEL[method]
 
 // Nota kunjungan: Nota Gudang diketik driver, nota cabang sudah terisi dari Laporan Muat.
-function NotaInputs({ notas, noGudang, onNoGudang, invoice, onInvoice }: {
+function NotaInputs({ notas, noGudang, onNoGudang, invoice, onInvoice, sj = [] }: {
   notas: BranchNota[]; noGudang: boolean; onNoGudang: (v: boolean) => void; invoice: string; onInvoice: (v: string) => void
+  sj?: SjNote[]
 }) {
   const hasBranch = notas.length > 0
+  // Kunjungan dari surat jalan (migrasi 090): Nota Gudang sudah diisi kantor, driver tidak mengetik.
+  if (sj.length > 0) {
+    return (
+      <div className="mb-3 space-y-2">
+        {sj.map(n => (
+          <div key={n.id} className="flex items-center justify-between text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+            <span className="text-slate-700">📄 Nota Gudang{n.note_number ? ` ${n.note_number}` : ''}{n.notes ? ` · ${n.notes}` : ''}</span>
+            <b className="text-slate-800">{fmtRp(Number(n.amount))}</b>
+          </div>
+        ))}
+        {notas.map(n => (
+          <div key={n.loading_id} className="flex items-center justify-between text-sm bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+            <span className="text-emerald-800">🧾 Nota {n.origin}</span>
+            <b className="text-emerald-800">{fmtRp(n.amount)}</b>
+          </div>
+        ))}
+        <p className="text-sm font-semibold text-slate-700">Total semua nota: {fmtRp(visitNotaTotal(invoice, false, notas))}</p>
+      </div>
+    )
+  }
   return (
     <div className="mb-3 space-y-2">
       {!noGudang && (
@@ -233,6 +256,7 @@ export default function JalanPengirimanPage() {
   // Kunjungan yang cuma membawa nota cabang (tidak ada barang gudang) -- Nota Gudang dikosongkan.
   const [noGudang, setNoGudang] = useState(false)
   const [branchNotas, setBranchNotas] = useState<Record<string, BranchNota[]>>({})
+  const [visitSj, setVisitSj] = useState<Record<string, SjNote[]>>({})
   const [incidentType, setIncidentType] = useState<'tidak_ada' | 'salah_muat' | 'retur' | 'barang_lebih'>('tidak_ada')
   const [incidentPhotoUrl, setIncidentPhotoUrl] = useState('')
   const [incidentDescription, setIncidentDescription] = useState('')
@@ -398,6 +422,14 @@ export default function JalanPengirimanPage() {
       }
     }
     setBranchNotas(map)
+
+    const sjMap: Record<string, SjNote[]> = {}
+    if (rows.length > 0) {
+      const { data: sjData } = await supabase.from('logistics_delivery_notes')
+        .select('id, plan_store_id, note_number, amount, notes').in('plan_store_id', rows.map(r => r.id)).order('created_at')
+      for (const n of (sjData as SjNote[]) || []) (sjMap[n.plan_store_id] ??= []).push(n)
+    }
+    setVisitSj(sjMap)
   }
 
   async function fetchSupplierTasks(planId: string) {
@@ -1222,7 +1254,8 @@ export default function JalanPengirimanPage() {
                   {kirimStep === 2 && (
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Langkah 2 — Pembayaran</p>
-                      <NotaInputs notas={selectedNotas} noGudang={noGudang} onNoGudang={setNoGudang} invoice={invoiceAmount} onInvoice={setInvoiceAmount} />
+                      <NotaInputs notas={selectedNotas} noGudang={noGudang} onNoGudang={setNoGudang} invoice={invoiceAmount} onInvoice={setInvoiceAmount}
+                        sj={selectedStore ? visitSj[selectedStore.id] : []} />
                       <label className="block text-xs font-medium text-slate-600 mb-1">Metode Pembayaran *</label>
                       <div className="grid grid-cols-2 gap-2 mb-3">
                         {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
@@ -1677,7 +1710,8 @@ export default function JalanPengirimanPage() {
             <p className="text-xs text-slate-500 mb-4">{editHistoryStore.logistics_stores?.name}</p>
             <div className="space-y-3">
               <p className="text-xs font-semibold text-slate-500 uppercase">Pembayaran</p>
-              <NotaInputs notas={editNotas} noGudang={editNoGudang} onNoGudang={setEditNoGudang} invoice={editInvoiceAmount} onInvoice={setEditInvoiceAmount} />
+              <NotaInputs notas={editNotas} noGudang={editNoGudang} onNoGudang={setEditNoGudang} invoice={editInvoiceAmount} onInvoice={setEditInvoiceAmount}
+                sj={visitSj[editHistoryStore.id]} />
               <div className="grid grid-cols-2 gap-2">
                 {(['cash', 'transfer', 'deposit', 'tempo'] as const).map(m => (
                   <button key={m} type="button" onClick={() => setEditPaymentMethod(m)}

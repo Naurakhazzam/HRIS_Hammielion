@@ -33,9 +33,6 @@ type PlanStore = {
 
 type Store = { id: string; name: string; address: string | null; kind: 'toko' | 'pelanggan'; phone: string | null }
 
-// Toko & Pelanggan satu sumber (Master Toko), pelanggan boleh diantar driver (migrasi 079).
-// Nama pelanggan wajar kembar, jadi teks pilihannya ikut nomor HP (unik antar pelanggan).
-const storeLabel = (s: Store) => s.kind === 'pelanggan' ? `${s.name} · Pelanggan ${s.phone ?? ''}`.trim() : s.name
 
 type PlanSupplierTask = {
   id: string
@@ -60,6 +57,24 @@ type StoreReturn = {
 
 type Branch = { id: string; name: string }
 
+// Surat jalan gudang (migrasi 090): toko hanya masuk rencana lewat surat jalan yang dicentang.
+type DeliveryNote = {
+  id: string
+  store_id: string
+  plan_store_id: string | null
+  note_number: string | null
+  note_date: string
+  amount: number
+  notes: string | null
+  postponed_at: string | null
+  postpone_count: number
+  last_postpone_reason: string | null
+  created_at: string
+  logistics_stores: { name: string; address: string | null } | null
+}
+const NOTE_SELECT = 'id, store_id, plan_store_id, note_number, note_date, amount, notes, postponed_at, postpone_count, last_postpone_reason, created_at, logistics_stores(name, address)'
+const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
+
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Draft', ready: 'Siap Kirim', departed: 'Berjalan',
   closing: 'Menuju Garasi', completed: 'Selesai', cancelled: 'Dibatalkan',
@@ -76,7 +91,10 @@ export default function RencanaDetailPage() {
   const [plan, setPlan] = useState<Plan | null>(null)
   const [planStores, setPlanStores] = useState<PlanStore[]>([])
   const [allStores, setAllStores] = useState<Store[]>([])
-  const [storeSearchText, setStoreSearchText] = useState('')
+  const [planNotes, setPlanNotes] = useState<DeliveryNote[]>([])
+  const [waitingNotes, setWaitingNotes] = useState<DeliveryNote[]>([])
+  const [pickedNotes, setPickedNotes] = useState<Set<string>>(new Set())
+  const [noteSearch, setNoteSearch] = useState('')
   const [supplierTasks, setSupplierTasks] = useState<PlanSupplierTask[]>([])
   const [supplierRoutes, setSupplierRoutes] = useState<SupplierRoute[]>([])
   const [supplierRouteSearchText, setSupplierRouteSearchText] = useState('')
@@ -133,7 +151,18 @@ export default function RencanaDetailPage() {
     const { data: psData } = await supabase.from('logistics_plan_stores')
       .select('id, store_id, sequence_order, status, logistics_stores(name, address)')
       .eq('plan_id', params.id).order('sequence_order')
-    setPlanStores((psData as unknown as PlanStore[]) || [])
+    const visits = (psData as unknown as PlanStore[]) || []
+    setPlanStores(visits)
+
+    // Surat jalan: yang sudah dibawa rencana ini + yang menunggu dijadwalkan (migrasi 090).
+    const [{ data: planNoteData }, { data: waitingData }] = await Promise.all([
+      visits.length > 0
+        ? supabase.from('logistics_delivery_notes').select(NOTE_SELECT).in('plan_store_id', visits.map(v => v.id))
+        : Promise.resolve({ data: [] }),
+      supabase.from('logistics_delivery_notes').select(NOTE_SELECT).eq('status', 'menunggu').order('note_date'),
+    ])
+    setPlanNotes((planNoteData as unknown as DeliveryNote[]) || [])
+    setWaitingNotes((waitingData as unknown as DeliveryNote[]) || [])
 
     const { data: storeData } = await supabase.from('logistics_stores').select('id, name, address, kind, phone').eq('is_active', true).order('name')
     setAllStores(storeData || [])
@@ -224,21 +253,51 @@ export default function RencanaDetailPage() {
     setAssignmentSaving(false)
   }
 
-  const availableStores = allStores.filter(s => !planStores.some(ps => ps.store_id === s.id))
   const availableSupplierRoutes = supplierRoutes.filter(r => !supplierTasks.some(t => t.route_id === r.id && t.status === 'pending'))
-  // Ketik nama toko, cocokkan persis (case-insensitive) ke saran yang muncul dari datalist —
-  // supaya Kepala Gudang tidak perlu scroll dropdown ratusan toko satu-satu.
-  const matchedStore = availableStores.find(s => storeLabel(s).trim().toLowerCase() === storeSearchText.trim().toLowerCase())
 
-  async function handleAddStore(e: React.FormEvent) {
-    e.preventDefault()
-    if (!matchedStore) { showMessage('error', 'Toko tidak ditemukan. Ketik nama toko lalu pilih dari saran yang muncul.'); return }
-    const nextOrder = planStores.length > 0 ? Math.max(...planStores.map(ps => ps.sequence_order)) + 1 : 1
-    const { error } = await supabase.from('logistics_plan_stores').insert({
-      plan_id: params.id, store_id: matchedStore.id, sequence_order: nextOrder,
+  // Surat jalan menunggu, dikelompokkan per toko; yang tertunda (pernah Kirim Besok) paling atas.
+  const waitingGroups = (() => {
+    const q = noteSearch.trim().toLowerCase()
+    const map = new Map<string, { storeId: string; name: string; address: string | null; items: DeliveryNote[] }>()
+    for (const n of waitingNotes) {
+      const name = n.logistics_stores?.name ?? '-'
+      if (q && !name.toLowerCase().includes(q) && !(n.note_number ?? '').toLowerCase().includes(q)) continue
+      const g = map.get(n.store_id) ?? { storeId: n.store_id, name, address: n.logistics_stores?.address ?? null, items: [] }
+      g.items.push(n); map.set(n.store_id, g)
+    }
+    const oldest = (g: { items: DeliveryNote[] }) => g.items.reduce((m, n) => (n.postponed_at && (!m || n.postponed_at < m) ? n.postponed_at : m), '' as string)
+    return [...map.values()].sort((a, b) => {
+      const pa = oldest(a), pb = oldest(b)
+      if (!!pa !== !!pb) return pa ? -1 : 1
+      return pa && pb ? pa.localeCompare(pb) : a.name.localeCompare(b.name)
     })
-    if (error) showMessage('error', 'Gagal menambah toko: ' + error.message)
-    else { setStoreSearchText(''); fetchAll() }
+  })()
+  const pickedTotal = waitingNotes.filter(n => pickedNotes.has(n.id)).reduce((s, n) => s + Number(n.amount), 0)
+
+  function togglePick(ids: string[], on: boolean) {
+    setPickedNotes(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => on ? next.add(id) : next.delete(id))
+      return next
+    })
+  }
+
+  async function handleAddNotes() {
+    if (pickedNotes.size === 0) return
+    setSubmitting(true)
+    const { error } = await supabase.rpc('add_notes_to_plan', { p_plan_id: params.id, p_note_ids: [...pickedNotes] })
+    setSubmitting(false)
+    if (error) { showMessage('error', 'Gagal memasukkan surat jalan: ' + error.message); return }
+    showMessage('success', `${pickedNotes.size} surat jalan masuk rencana.`)
+    setPickedNotes(new Set())
+    fetchAll()
+  }
+
+  async function handleRemoveNote(n: DeliveryNote) {
+    if (!confirm(`Keluarkan surat jalan ${n.note_number ?? ''} ${fmtRp(n.amount)} dari rencana ini? Kembali ke daftar menunggu.`)) return
+    const { error } = await supabase.rpc('remove_note_from_plan', { p_note_id: n.id })
+    if (error) showMessage('error', error.message)
+    else fetchAll()
   }
 
   async function handleRemoveStore(ps: PlanStore) {
@@ -429,6 +488,14 @@ export default function RencanaDetailPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-800 truncate">{ps.logistics_stores?.name}</p>
                   {ps.logistics_stores?.address && <p className="text-xs text-slate-400 truncate">{ps.logistics_stores.address}</p>}
+                  {planNotes.filter(n => n.plan_store_id === ps.id).map(n => (
+                    <p key={n.id} className="text-xs text-slate-600 flex items-center gap-1.5">
+                      📄 {n.note_number ?? 'tanpa nomor'} · <b>{fmtRp(n.amount)}</b>{n.notes ? ` · ${n.notes}` : ''}
+                      {editable && canManage && (
+                        <button onClick={() => handleRemoveNote(n)} className="text-red-500 hover:underline">keluarkan</button>
+                      )}
+                    </p>
+                  ))}
                 </div>
                 {ps.status !== 'pending' && (
                   <span className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${ps.status === 'delivered' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
@@ -454,23 +521,53 @@ export default function RencanaDetailPage() {
         )}
       </div>
 
-      {(editable || canEditActive) && canManage && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
-          {canEditActive && <p className="text-xs text-amber-600 mb-2">⚠ Trip sudah berjalan — toko baru langsung ikut jadi bagian trip ini, driver/kenek bisa langsung memprosesnya.</p>}
-          <form onSubmit={handleAddStore} className="flex gap-2">
-            <input type="text" list="available-stores-datalist" value={storeSearchText}
-              onChange={e => setStoreSearchText(e.target.value)}
-              placeholder="Ketik nama toko untuk ditambahkan..."
-              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-            <datalist id="available-stores-datalist">
-              {availableStores.map(s => <option key={s.id} value={storeLabel(s)} />)}
-            </datalist>
-            <button type="submit" disabled={!matchedStore}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">+ Tambah</button>
-          </form>
-          {availableStores.length === 0 && allStores.length === 0 && (
-            <p className="text-xs text-slate-400 mt-2">Belum ada toko di Master Toko. <Link href="/logistik/toko" className="text-blue-600 hover:underline">Tambah dulu di sini</Link>.</p>
-          )}
+      {canEditActive && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-6">
+          Truk sudah berangkat — surat jalan tambahan masuk ke rencana berikutnya.
+        </p>
+      )}
+      {editable && canManage && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+          <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-bold text-slate-700">📄 Pilih Surat Jalan yang Dibawa ({waitingNotes.length} menunggu)</span>
+            <Link href="/logistik/surat-jalan?baru=1" className="text-xs text-blue-600 hover:underline">+ Tambahkan Surat Jalan</Link>
+          </div>
+          <div className="p-4 space-y-3">
+            <input value={noteSearch} onChange={e => setNoteSearch(e.target.value)} placeholder="Cari nama toko / nomor surat jalan..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
+            {waitingGroups.length === 0 ? (
+              <p className="text-sm text-slate-500 text-center py-3">Tidak ada surat jalan yang menunggu. Tambahkan dulu lewat tombol di atas.</p>
+            ) : (
+              <div className="max-h-96 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg">
+                {waitingGroups.map(g => {
+                  const ids = g.items.map(n => n.id)
+                  const all = ids.every(id => pickedNotes.has(id))
+                  return (
+                    <div key={g.storeId} className="px-3 py-2">
+                      <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                        <input type="checkbox" checked={all} onChange={e => togglePick(ids, e.target.checked)} />
+                        {g.name}
+                        <span className="font-normal text-slate-500">· {g.items.length} SJ · {fmtRp(g.items.reduce((s, n) => s + Number(n.amount), 0))}</span>
+                      </label>
+                      <div className="ml-6 space-y-0.5 mt-1">
+                        {g.items.map(n => (
+                          <label key={n.id} className="flex items-center gap-2 text-xs text-slate-600">
+                            <input type="checkbox" checked={pickedNotes.has(n.id)} onChange={e => togglePick([n.id], e.target.checked)} />
+                            📄 {n.note_number ?? 'tanpa nomor'} · {fmtRp(n.amount)}{n.notes ? ` · ${n.notes}` : ''}
+                            {n.postponed_at && <span className="text-amber-700 font-medium">· 📅 tertunda {n.postpone_count}× ({n.last_postpone_reason ?? '-'})</span>}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            <button onClick={handleAddNotes} disabled={pickedNotes.size === 0 || submitting}
+              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">
+              {pickedNotes.size === 0 ? 'Centang surat jalan yang dibawa' : `Masukkan ${pickedNotes.size} surat jalan (${fmtRp(pickedTotal)}) ke rencana`}
+            </button>
+          </div>
         </div>
       )}
 

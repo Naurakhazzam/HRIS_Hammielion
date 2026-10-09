@@ -10,7 +10,7 @@ import DeliveryAssigneePicker, { fetchDeliveryCandidates, type DeliveryCandidate
 type Loading = {
   id: string
   store_id: string
-  status: 'proses' | 'selesai' | 'dibatalkan'
+  status: 'proses' | 'selesai' | 'dibatalkan' | 'perlu_keputusan'
   delivery_method: 'driver' | 'antar_sendiri'
   ongkir: number
   nota_amount: number | null
@@ -22,6 +22,7 @@ type Loading = {
   postpone_count: number
   last_postpone_reason: string | null
   fail_reason: string | null
+  fail_photo_url: string | null
   created_by: string
   origin_branch_id: string
   assigned_to: string | null
@@ -100,7 +101,7 @@ type LoadingRow = Loading & {
 }
 
 const LOADING_SELECT = `
-  id, store_id, status, delivery_method, ongkir, nota_amount, nota_paid_amount, nota_overpay_amount, nota_payment_method, postponed_at, postpone_count, last_postpone_reason, fail_reason, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
+  id, store_id, status, delivery_method, ongkir, nota_amount, nota_paid_amount, nota_overpay_amount, nota_payment_method, postponed_at, postpone_count, last_postpone_reason, fail_reason, fail_photo_url, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
   logistics_stores(name, address, kind),
   origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
   creator:employees!logistics_central_loadings_created_by_fkey(full_name),
@@ -189,6 +190,8 @@ export default function LaporanMuatPage() {
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
+  // Kepala Gudang ikut "kantor": boleh memutuskan kiriman yang Gagal (migrasi 090).
+  const [isKepalaGudang, setIsKepalaGudang] = useState(false)
   const [myBranchId, setMyBranchId] = useState('')
   // Cabang toko (Toko Pusat/Toko Depan/Markas/Raja) -- Owner yang bukan karyawan cabang toko
   // memilih cabang asal saat membuat laporan.
@@ -247,7 +250,7 @@ export default function LaporanMuatPage() {
       supabase.from('logistics_central_loadings').select(LOADING_SELECT)
         .order('created_at', { ascending: false }).limit(PAGE_SIZE),
       // Selalu tampil walau lama: masih proses...
-      supabase.from('logistics_central_loadings').select(LOADING_SELECT).eq('status', 'proses'),
+      supabase.from('logistics_central_loadings').select(LOADING_SELECT).in('status', ['proses', 'perlu_keputusan']),
       // ...jalur driver yang masih ada paket belum diambil...
       supabase.from('logistics_central_loading_packages')
         .select('loading_id, logistics_central_loadings!inner(status, delivery_method)')
@@ -335,6 +338,7 @@ export default function LaporanMuatPage() {
           else {
             setCanEdit(isStoreStaff)
             setCanView(isStoreStaff || position === 'Kepala Gudang')
+            setIsKepalaGudang(position === 'Kepala Gudang')
           }
           if (userData.role === 'owner' || isStoreStaff) setCandidates(await fetchDeliveryCandidates(supabase))
         }
@@ -594,8 +598,21 @@ export default function LaporanMuatPage() {
     await fetchDetail(l.id)
   }
 
+  // Kiriman yang Gagal (toko menolak / batal pesan): kirim lagi atau batalkan -- cabang asal / kantor.
+  async function decideFailed(l: Loading, decision: 'jadwal_ulang' | 'batal') {
+    const text = window.prompt(decision === 'batal' ? 'Batalkan kiriman ini? Alasan:' : 'Kirim ulang kiriman ini? Catatan (opsional):')
+    if (text === null) return
+    if (decision === 'batal' && text.trim().length < 3) { showMessage('error', 'Alasan wajib diisi (minimal 3 huruf).'); return }
+    const { error } = await supabase.rpc('decide_failed_loading', { p_id: l.id, p_decision: decision, p_note: text.trim() })
+    if (error) { showMessage('error', error.message); return }
+    showMessage('success', decision === 'batal' ? 'Kiriman dibatalkan.' : 'Kiriman dijadwalkan ulang — paket kembali menunggu dijemput.')
+    window.dispatchEvent(new Event('kirim-barang-badge-refresh'))
+    await refreshOne(l.id)
+  }
+
   function pickupGroup(l: Loading): 'belum' | 'sudah' | 'proses' | 'batal' {
     if (l.status === 'dibatalkan') return 'batal'
+    if (l.status === 'perlu_keputusan') return 'belum'
     if (l.status === 'proses') return 'proses'
     if (l.delivery_method === 'antar_sendiri') return tpInfo[l.id] ? 'sudah' : 'belum'
     const pkg = packageCounts[l.id]
@@ -818,7 +835,10 @@ export default function LaporanMuatPage() {
                   {l.status === 'dibatalkan' && l.fail_reason && (
                     <p className="text-xs text-red-600 mt-0.5">❌ Gagal kirim: {l.fail_reason}</p>
                   )}
-                  {group === 'belum' && l.completed_at && (
+                  {l.status === 'perlu_keputusan' && (
+                    <p className="text-xs text-red-700 font-semibold mt-0.5">❌ Gagal kirim: {l.fail_reason ?? '-'} — menunggu keputusan (buka untuk jadwalkan ulang / batalkan)</p>
+                  )}
+                  {group === 'belum' && l.completed_at && l.status === 'selesai' && (
                     <p className={`inline-block mt-1.5 text-xs font-semibold px-2 py-1 rounded-md border ${waitingTone(waitingMs)}`}>
                       ⏱ Sudah {fmtDuration(waitingMs)} belum diambil
                       {!isTp && pkg.diambil > 0 ? ` · sisa ${pkg.total - pkg.diambil} dari ${pkg.total} paket` : ''}
@@ -844,9 +864,9 @@ export default function LaporanMuatPage() {
                 </div>
                 <div className="shrink-0 flex items-center gap-1.5">
                   <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
-                    l.status === 'selesai' ? 'bg-green-100 text-green-700' : l.status === 'dibatalkan' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'
+                    l.status === 'selesai' ? 'bg-green-100 text-green-700' : l.status === 'dibatalkan' || l.status === 'perlu_keputusan' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'
                   }`}>
-                    {l.status === 'selesai' ? 'Selesai' : l.status === 'dibatalkan' ? 'Dibatalkan' : 'Proses'}
+                    {l.status === 'selesai' ? 'Selesai' : l.status === 'dibatalkan' ? 'Dibatalkan' : l.status === 'perlu_keputusan' ? 'Perlu Keputusan' : 'Proses'}
                   </span>
                   {isTp ? (
                     !tp ? (
@@ -872,6 +892,28 @@ export default function LaporanMuatPage() {
                 <div className="border-t border-slate-100 p-5 space-y-6">
                   {l.status === 'selesai' && (
                     <p className="text-xs text-slate-400">Diselesaikan oleh {l.completer?.full_name ?? '-'} · {l.completed_at ? fmtDateTime(l.completed_at) : '-'}</p>
+                  )}
+                  {l.status === 'perlu_keputusan' && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+                      <p className="text-sm font-semibold text-red-700">❌ Gagal kirim: {l.fail_reason ?? '-'}</p>
+                      {l.fail_photo_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={l.fail_photo_url} alt="Foto toko" onClick={() => openLightbox(l.fail_photo_url!, 'Foto toko')}
+                          className="w-40 rounded-lg border border-red-200 cursor-zoom-in" />
+                      )}
+                      {(manage || isOwner || isKepalaGudang) ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => decideFailed(l, 'jadwal_ulang')} className="px-3 py-1.5 text-xs font-semibold border border-blue-300 text-blue-700 bg-white rounded-lg">
+                            🔁 Jadwalkan ulang (kirim lagi)
+                          </button>
+                          <button onClick={() => decideFailed(l, 'batal')} className="px-3 py-1.5 text-xs font-semibold border border-red-300 text-red-700 bg-white rounded-lg">
+                            🗑️ Batalkan kiriman
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500">Menunggu keputusan cabang asal / kantor.</p>
+                      )}
+                    </div>
                   )}
                   {l.status === 'dibatalkan' && (
                     <p className="text-xs text-red-500">Dibatalkan oleh {l.canceller?.full_name ?? '-'} · {l.cancelled_at ? fmtDateTime(l.cancelled_at) : '-'}</p>
