@@ -17,7 +17,10 @@ terverifikasi masuk Kas Masuk otomatis (lihat Tahap 4 di bawah).
 
 ## Status
 
-- [ ] **Tahap 1** — Form Laporan Kasir (sisi kasir)
+- [x] **Tahap 1** — Form Laporan Kasir (sisi kasir) (migrasi `096_cashier_reports.sql`; DB:
+  096_cashier_reports + 096b_cashier_report_branches_admin + 096c_list_cashier_reports). Halaman
+  `/laporan-kasir`. Keputusan Claude: non-admin hanya bisa mengisi s/d 7 hari ke belakang; foto boleh
+  dari galeri/screenshot (bukan wajib kamera) karena struk POS bisa berupa screenshot; maks 6 foto.
 - [ ] **Tahap 2** — Verifikasi finance → Kas Masuk otomatis
 - [ ] **Tahap 3** — "Omzet Harian" diganti nama jadi **Input Kasir Darurat** + peringatan dobel
 - [ ] **Tahap 4** — Uang pengiriman terverifikasi → Kas Masuk toko asal (tanggal nota)

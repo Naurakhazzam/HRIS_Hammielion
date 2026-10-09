@@ -180,6 +180,7 @@ const adminNavItems: NavNode[] = [
         name: 'Kas Masuk',
         href: '/keuangan/kas-masuk',
         submenu: [
+          { name: 'Laporan Kasir', href: '/laporan-kasir' },
           { name: 'Omzet Harian', href: '/keuangan/kas-masuk' },
           { name: 'HPP & Omset (Sistem)', href: '/keuangan/hpp' },
         ]
@@ -277,9 +278,11 @@ const adminNavItems: NavNode[] = [
 // menampilkan menunya di sini cuma bikin karyawan buka halaman kosong tanpa penjelasan.
 // Grup "Logistik" disusun per karyawan (jabatan/cabang, bukan role — Driver/Kenek & staf toko
 // di tabel users tetap ber-role 'employee' biasa) dan cuma muncul kalau ada isinya.
-function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isReturRecipient: boolean, isStoreBranchStaff: boolean, canManageSuratJalan = false): NavNode[] {
+function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isReturRecipient: boolean, isStoreBranchStaff: boolean, canManageSuratJalan = false, canCashierReport = false): NavNode[] {
   const items: NavNode[] = [
     { name: 'Dashboard Saya', href: '/portal', icon: '🏠' },
+    // Laporan Kasir: karyawan cabang toko selain Driver/Kepala Gudang/Helper (migrasi 096).
+    ...(canCashierReport ? [{ name: 'Laporan Kasir', href: '/laporan-kasir', icon: '🧾' }] : []),
     { name: 'Portal Saya', href: '/portal/profil', icon: '👤', submenu: EMPLOYEE_PORTAL_SAYA },
     { name: 'Kinerja Saya', href: '/portal/kpi-saya', icon: '📊' },
     { name: 'Kalender Libur', href: '/absensi/kalender-libur', icon: '📅' },
@@ -345,6 +348,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   const [isReturRecipient, setIsReturRecipient] = useState(false)
   const [isStoreBranchStaff, setIsStoreBranchStaff] = useState(false)
   const [canManageSuratJalan, setCanManageSuratJalan] = useState(false)
+  const [canCashierReport, setCanCashierReport] = useState(false)
   const [meetingBadge, setMeetingBadge] = useState(0)
   const [dailyTaskBadge, setDailyTaskBadge] = useState(0)
   // Angka merah di submenu Klarifikasi Alpha / Klaim Lembur / Ajukan Libur -- berapa banyak
@@ -473,6 +477,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                 setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
                 // Surat Jalan: semua karyawan Back Office (+ Kepala Gudang/Owner), migrasi 090.
                 supabase.rpc('can_manage_delivery_notes').then(({ data: ok }) => setCanManageSuratJalan(!!ok))
+                supabase.rpc('get_my_cashier_report_branches').then(({ data: br }) => setCanCashierReport(Array.isArray(br) && br.length > 0))
                 if (emp.branch_id) {
                   supabase.from('logistics_store_branches').select('branch_id').eq('branch_id', emp.branch_id).maybeSingle()
                     .then(({ data: sb }) => setIsStoreBranchStaff(!!sb))
@@ -495,7 +500,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // tombol toggle preview itu sendiri, supaya karyawan asli tidak bisa iseng balik ke menu admin.
   const realIsAdmin = !['employee', 'supervisor'].includes(userRole)
   const isEmployee = ['employee', 'supervisor'].includes(userRole) || (realIsAdmin && previewMode)
-  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isReturRecipient, isStoreBranchStaff, canManageSuratJalan) : adminNavItems
+  const navItems = isEmployee ? getEmployeeNavItems(isDriverOrKenek, isKepalaGudang, isReturRecipient, isStoreBranchStaff, canManageSuratJalan, canCashierReport) : adminNavItems
 
   // Angka merah di submenu (beda dari meetingBadge/dailyTaskBadge yang nempel di item
   // top-level) -- dicocokkan lewat href, bukan nama, supaya tetap ketemu walau labelnya
@@ -549,8 +554,8 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     'KPI':        pathname.startsWith('/kpi'),
     'Setup Cabang & Jabatan': pathname.startsWith('/cabang') || pathname.startsWith('/jabatan'),
 
-    'Operasional': pathname.startsWith('/keuangan') && !inKeuanganGroup,
-    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
+    'Operasional': (pathname.startsWith('/keuangan') && !inKeuanganGroup) || pathname.startsWith('/laporan-kasir'),
+    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp') || pathname.startsWith('/laporan-kasir'),
     'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
     'Setup Kas & Supplier': pathname.startsWith('/keuangan/rekening') || pathname.startsWith('/keuangan/pembelian/supplier'),

@@ -2233,6 +2233,34 @@ Sekaligus menambahkan fitur baru yang diminta: **toleransi 5 menit khusus absen 
 
 ---
 
+## Sesi 9 (2026-10-10) — Laporan Kasir (Settlement Shift)
+
+Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
+
+### 136. Laporan Kasir — Form Kasir (Tahap 1, migrasi 096)
+
+**Latar belakang:** Omzet toko dilaporkan lewat grup WA per shift, lalu finance mengetik ulang ke Kas Masuk. Sekarang kasir mengisi sendiri di aplikasi dengan bentuk yang sama dengan format WA, plus foto struk.
+
+**Logika:**
+- Menu **🧾 Laporan Kasir** (`/laporan-kasir`) untuk karyawan 4 cabang toko kecuali Driver/Kepala Gudang/Helper; owner/hr/finance bisa mengisi semua cabang termasuk **Gudang** (menu Operasional → Kas Masuk → Laporan Kasir).
+- 1 laporan = 1 shift, **maks 2 per cabang per hari** (UNIQUE cabang+tanggal+shift). Shift yang sudah dilaporkan dicoret, form otomatis memilih shift lainnya.
+- Isi: foto struk (boleh >1 — masa peralihan 2 POS), Cash, non-tunai per metode (QRIS, Trf BCA, … bisa tambah), Piutang → **Total omset dihitung otomatis**; daftar pengeluaran; selisih kasir (+/−); keterangan. Pelapor = akun yang login.
+- Uang cash disetor = Cash − Pengeluaran ± Selisih kasir (ditampilkan sebagai ringkasan).
+- Edit/hapus hanya oleh pelapor (atau admin) selama belum disetujui; laporan ditolak yang diedit berstatus "Sudah Diperbaiki". Karyawan non-admin hanya bisa mengisi sampai 7 hari ke belakang.
+- Foto disimpan di bucket privat `documents` (`cashier_reports/<cabang>/…`), ditampilkan lewat signed URL.
+- RPC: `save_cashier_report`, `delete_cashier_report`, `list_cashier_reports` (sekalian nama pelapor — karyawan toko tidak bisa membaca nama rekan di tabel `employees`), `get_my_cashier_report_branches`. Tabel `cashier_reports`, `cashier_report_payments`, `cashier_report_expenses` hanya bisa ditulis lewat RPC.
+- Belum ada verifikasi finance & Kas Masuk otomatis (Tahap 2).
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/096_cashier_reports.sql` | Tabel, hak akses, RPC simpan/hapus/daftar |
+| `app/(dashboard)/laporan-kasir/page.tsx` | Halaman form + riwayat laporan (baru) |
+| `lib/cashierReport.ts` | Tipe, hitungan omzet/setoran, upload & signed URL foto (baru) |
+| `lib/meeting.ts` | `resizeImage` diekspor untuk dipakai ulang |
+| `components/sidebar.tsx` | Menu Laporan Kasir (karyawan toko & admin) |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).

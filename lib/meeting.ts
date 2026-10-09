@@ -88,7 +88,7 @@ export function lateInfo(dueDate: string | null, firstFinalAt: string | null): {
 // jangan diam-diam nyimpen file mentah yang nanti muncul sebagai foto rusak di laporan.
 const BROWSER_SAFE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
-async function resizeImage(file: File, maxSide = 1600): Promise<Blob> {
+export async function resizeImage(file: File, maxSide = 1600): Promise<Blob> {
   if (!file.type.startsWith('image/')) return file
   let bmp: ImageBitmap | null = null
   try {
