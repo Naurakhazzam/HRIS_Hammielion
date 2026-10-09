@@ -54,6 +54,7 @@ type PlanStore = {
   logistics_stores: { name: string } | null
   // Nota cabang (Laporan Muat) yang ditagih di kunjungan ini -- diisi setelah fetch (migrasi 083).
   branch_notas?: { origin: string; amount: number }[]
+  incident_items?: string[]
 }
 
 type PlanSupplierTask = {
@@ -173,6 +174,19 @@ export default function LaporanPengirimanPage() {
           ;(byStore[n.nota_plan_store_id] ??= []).push({ origin: n.origin?.name ?? 'Cabang', amount: Number(n.nota_amount) })
         }
         storeRows.forEach(s => { s.branch_notas = byStore[s.id] ?? [] })
+
+        // Barang kejadian (migrasi 094) -- "dibeli toko" = salah varian, perlu koreksi stok pemilik.
+        const incIds = storeRows.filter(s => s.incident_type !== 'tidak_ada').map(s => s.id)
+        if (incIds.length > 0) {
+          const { data: incRows } = await supabase.from('logistics_visit_incident_items')
+            .select('plan_store_id, item_name, ordered_item_name, disposition, owner:branches(name)').in('plan_store_id', incIds).order('created_at')
+          type IncRow = { plan_store_id: string; item_name: string; ordered_item_name: string | null; disposition: string; owner: { name: string } | null }
+          const incBy: Record<string, string[]> = {}
+          for (const r of (incRows as unknown as IncRow[]) || []) {
+            ;(incBy[r.plan_store_id] ??= []).push(`${r.item_name}${r.ordered_item_name ? ` (seharusnya ${r.ordered_item_name})` : ''} · milik ${r.owner?.name ?? '-'} · ${r.disposition === 'dibawa_pulang' ? '↩️ dibawa pulang' : '🛒 dibeli toko'}`)
+          }
+          storeRows.forEach(s => { s.incident_items = incBy[s.id] ?? [] })
+        }
       }
       const grouped: Record<string, PlanStore[]> = {}
       storeRows.forEach(s => {
@@ -646,6 +660,9 @@ export default function LaporanPengirimanPage() {
                             {s.incident_description && (
                               <p className="text-xs text-amber-600 mt-1 ml-8">{s.incident_description}</p>
                             )}
+                            {(s.incident_items ?? []).map((t, i) => (
+                              <p key={i} className="text-xs text-amber-700 mt-0.5 ml-8">• {t}</p>
+                            ))}
                             {Number(s.cut_total) > 0 && (
                               <p className="text-xs text-rose-700 mt-1 ml-8">
                                 ✂️ Potong nota {fmtRp(Number(s.cut_total))} — {s.cut_status === "disetujui" ? "disetujui" : s.cut_status === "ditolak" ? "ditolak (tetap piutang)" : "menunggu persetujuan Finance"}

@@ -80,6 +80,9 @@ type PlanReturn = {
   no_items_reason: string | null
   // Terisi = barang potong nota yang wajib diantar driver ke pemiliknya (migrasi 093).
   cut_plan_store_id: string | null
+  recipient_branch_id: string | null
+  // kantor = Tugas Retur kantor; lainnya = barang yang wajib diantar driver ke pemiliknya (093/094).
+  return_source: 'kantor' | 'potong_nota' | 'kejadian' | 'pecahan'
   branches: { name: string } | null
   logistics_stores: { name: string; address: string | null } | null
 }
@@ -90,6 +93,7 @@ type ReturnItem = {
   photo_url: string
   item_name: string
   reason: string
+  owner_branch_id: string | null
 }
 
 type ActionMode = null | 'kirim' | 'gagal'
@@ -274,8 +278,58 @@ function CutItemsEditor({ items, onChange, owners }: { items: CutItem[]; onChang
   )
 }
 
+// Barang kejadian (Salah Muat / Retur / Barang Lebih, migrasi 094): dibawa pulang = wajib diantar ke
+// pemiliknya + foto; dibeli toko = salah varian tetap dibeli (dicatat "seharusnya" untuk koreksi stok).
+type IncDisposition = 'dibawa_pulang' | 'dibeli_toko'
+type IncItem = { item_name: string; ordered_item_name: string; disposition: IncDisposition | ''; owner: string }
+type SavedIncItem = { plan_store_id: string; item_name: string; ordered_item_name: string | null; disposition: IncDisposition; owner_branch_id: string }
+const emptyInc = (): IncItem => ({ item_name: '', ordered_item_name: '', disposition: '', owner: '' })
+const incItemsValid = (items: IncItem[]) => items.every(i => i.item_name.trim() && i.disposition && i.owner)
+const incPayload = (items: IncItem[]) => items.map(i => ({
+  item_name: i.item_name.trim(), ordered_item_name: i.ordered_item_name.trim() || null, disposition: i.disposition, owner_branch_id: i.owner,
+}))
+
+function IncidentItemsEditor({ items, onChange, branches }: { items: IncItem[]; onChange: (v: IncItem[]) => void; branches: { id: string; name: string }[] }) {
+  const set = (idx: number, patch: Partial<IncItem>) => onChange(items.map((it, i) => i === idx ? { ...it, ...patch } : it))
+  return (
+    <div className="space-y-2">
+      {items.map((it, idx) => (
+        <div key={idx} className="border border-amber-200 bg-amber-50/50 rounded-lg p-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-amber-800">Barang {idx + 1}</span>
+            <button type="button" onClick={() => onChange(items.filter((_, i) => i !== idx))} className="text-xs text-red-600 hover:underline">Hapus</button>
+          </div>
+          <input value={it.item_name} onChange={e => set(idx, { item_name: e.target.value })} placeholder="Barang yang terkirim (mis. Sabun B)"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          <input value={it.ordered_item_name} onChange={e => set(idx, { ordered_item_name: e.target.value })} placeholder="Seharusnya barang apa? (opsional, mis. Sabun A)"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          <select value={it.owner} onChange={e => set(idx, { owner: e.target.value })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+            <option value="">— Barang ini punya siapa? —</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => set(idx, { disposition: 'dibawa_pulang' })}
+              className={`px-2 py-2 rounded-lg text-xs border text-left ${it.disposition === 'dibawa_pulang' ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+              <b>↩️ Dibawa pulang</b><span className="block opacity-80">Wajib diantar ke pemiliknya</span>
+            </button>
+            <button type="button" onClick={() => set(idx, { disposition: 'dibeli_toko' })}
+              className={`px-2 py-2 rounded-lg text-xs border text-left ${it.disposition === 'dibeli_toko' ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+              <b>🛒 Dibeli toko</b><span className="block opacity-80">Salah varian tapi tetap dibeli</span>
+            </button>
+          </div>
+          {it.disposition === 'dibeli_toko' && (
+            <p className="text-[11px] text-slate-500">Harga lebih murah? Isi juga POTONG NOTA (alasan &quot;Harga beda&quot;). Lebih mahal? Pastikan nominal nota sesuai harga barang yang dibeli.</p>
+          )}
+        </div>
+      ))}
+      <button type="button" onClick={() => onChange([...items, emptyInc()])} className="text-xs text-blue-600 hover:underline font-medium">+ Tambah barang</button>
+    </div>
+  )
+}
+
 const STATUS_LABEL: Record<string, string> = {
-  ready:'Siap Berangkat', departed: 'Sedang Jalan', closing: 'Menuju Garasi',
+  ready: 'Siap Berangkat', departed: 'Sedang Jalan', closing: 'Menuju Garasi',
 }
 
 export default function JalanPengirimanPage() {
@@ -304,6 +358,7 @@ export default function JalanPengirimanPage() {
   const [newItemPhotoUrl, setNewItemPhotoUrl] = useState('')
   const [newItemName, setNewItemName] = useState('')
   const [newItemReason, setNewItemReason] = useState('')
+  const [newItemOwner, setNewItemOwner] = useState('')
   const [returnItemSubmitting, setReturnItemSubmitting] = useState(false)
   const [deletingReturnItemId, setDeletingReturnItemId] = useState<string | null>(null)
   // "Toko tidak ada barang retur" -- foto toko + keterangan, retur langsung ditutup tanpa barang.
@@ -350,7 +405,10 @@ export default function JalanPengirimanPage() {
   const [cutItems, setCutItems] = useState<CutItem[]>([emptyCut()])
   const [cutPhotoUrl, setCutPhotoUrl] = useState('')
   const [visitCuts, setVisitCuts] = useState<Record<string, SavedCut[]>>({})
+  const [incItems, setIncItems] = useState<IncItem[]>([])
+  const [visitIncItems, setVisitIncItems] = useState<Record<string, SavedIncItem[]>>({})
   const [gudangBranchId, setGudangBranchId] = useState('')
+  const [allBranches, setAllBranches] = useState<{ id: string; name: string }[]>([])
 
   // Form Gagal Kirim: Kirim Besok (toko tutup, barang kembali & dijadwalkan lagi) atau Gagal
   // (ditolak / batal pesan) -- wajib alasan + foto (migrasi 088).
@@ -381,6 +439,7 @@ export default function JalanPengirimanPage() {
   const [editCutYes, setEditCutYes] = useState(false)
   const [editCutItems, setEditCutItems] = useState<CutItem[]>([emptyCut()])
   const [editCutPhotoUrl, setEditCutPhotoUrl] = useState('')
+  const [editIncItems, setEditIncItems] = useState<IncItem[]>([])
   const [editSaving, setEditSaving] = useState(false)
 
   // Jeda klik: tiap kali layar/langkah berganti, tombol dikunci sebentar. Laporan driver:
@@ -450,9 +509,9 @@ export default function JalanPengirimanPage() {
   // Lapor Sampai Garasi -- sengaja TIDAK ikut hitungan allResolved (lihat catatan di migration
   // 058: proses ambil retur jalan independen dari toko/belanja, baru jadi syarat wajib di
   // tahap penutupan trip, bareng foto amper bensin).
-  const activeReturns = planReturns.filter(r => r.status === 'diambil' && !r.cut_plan_store_id)
+  const activeReturns = planReturns.filter(r => r.status === 'diambil' && r.return_source === 'kantor')
   // Barang potong nota yang belum diantar ke pemiliknya -- trip tidak bisa selesai sebelum ini kosong.
-  const cutDeliveries = planReturns.filter(r => r.status === 'diambil' && !!r.cut_plan_store_id)
+  const cutDeliveries = planReturns.filter(r => r.status === 'diambil' && r.return_source !== 'kantor')
   const selectedReturn = activeReturns.find(r => r.id === selectedReturnId) || null
   // planReturns ikut dihitung sbg "ada tugas" -- trip yang isinya cuma ambil retur (tanpa toko
   // kirim/belanja) tetap harus bisa lanjut ke foto box & Lapor Sampai Garasi.
@@ -489,8 +548,10 @@ export default function JalanPengirimanPage() {
     const empId = userData?.employee_id || ''
     setMyEmployeeId(empId)
     setMyName((userData as any)?.employees?.full_name || '')
-    const { data: gud } = await supabase.from('branches').select('id').eq('name', 'Gudang').maybeSingle()
-    setGudangBranchId(gud?.id ?? '')
+    const { data: brs } = await supabase.from('branches').select('id, name').order('name')
+    const branchList = (brs as { id: string; name: string }[]) || []
+    setAllBranches(branchList)
+    setGudangBranchId(branchList.find(b => b.name === 'Gudang')?.id ?? '')
     if (empId) await fetchPlans(empId)
     const { data: settings } = await supabase.from('logistics_settings').select('garage_gap_active').eq('id', true).maybeSingle()
     setGarageGapMinutes(settings?.garage_gap_active === false ? 0 : GARAGE_GAP_MINUTES_DEFAULT)
@@ -557,6 +618,15 @@ export default function JalanPengirimanPage() {
     }
     setVisitCuts(cutMap)
 
+    const incMap: Record<string, SavedIncItem[]> = {}
+    const incIds = rows.filter(r => r.incident_type !== 'tidak_ada').map(r => r.id)
+    if (incIds.length > 0) {
+      const { data: incData } = await supabase.from('logistics_visit_incident_items')
+        .select('plan_store_id, item_name, ordered_item_name, disposition, owner_branch_id').in('plan_store_id', incIds).order('created_at')
+      for (const c of (incData as SavedIncItem[]) || []) (incMap[c.plan_store_id] ??= []).push(c)
+    }
+    setVisitIncItems(incMap)
+
     const { data: unf } = await supabase.rpc('get_unfinished_loadings_for_plan', { p_plan_id: planId })
     setUnfinishedLoadings((unf as { loading_id: string; store_name: string; origin_name: string; package_count: number }[]) || [])
   }
@@ -570,13 +640,13 @@ export default function JalanPengirimanPage() {
 
   async function fetchPlanReturns(planId: string) {
     const { data } = await supabase.from('logistics_store_returns')
-      .select('id, store_id, status, note, final_photo_url, final_location_note, no_items_reason, cut_plan_store_id, branches(name), logistics_stores(name, address)')
+      .select('id, store_id, status, note, final_photo_url, final_location_note, no_items_reason, cut_plan_store_id, recipient_branch_id, return_source, branches(name), logistics_stores(name, address)')
       .eq('plan_id', planId).order('claimed_at')
     const returns = (data as unknown as PlanReturn[]) || []
     setPlanReturns(returns)
     if (returns.length === 0) { setReturnItemsByReturn({}); return }
     const { data: items } = await supabase.from('logistics_store_return_items')
-      .select('id, return_id, photo_url, item_name, reason')
+      .select('id, return_id, photo_url, item_name, reason, owner_branch_id')
       .in('return_id', returns.map(r => r.id)).order('captured_at')
     const grouped: Record<string, ReturnItem[]> = {}
     ;(items as ReturnItem[] || []).forEach(it => {
@@ -629,6 +699,7 @@ export default function JalanPengirimanPage() {
     setIncidentType(store?.incident_type || 'tidak_ada')
     setIncidentPhotoUrl(store?.incident_photo_url || ''); setIncidentDescription(store?.incident_description || '')
     setCutYes(false); setCutItems([emptyCut()]); setCutPhotoUrl(store?.cut_photo_url || '')
+    setIncItems([])
   }
 
   function openAction(mode: ActionMode) {
@@ -768,11 +839,12 @@ export default function JalanPengirimanPage() {
     setReturnItemSubmitting(true)
     const { error } = await supabase.rpc('add_store_return_item', {
       p_return_id: selectedReturn.id, p_photo_url: newItemPhotoUrl, p_item_name: newItemName.trim(), p_reason: newItemReason.trim(),
+      p_owner_branch_id: newItemOwner || selectedReturn.recipient_branch_id,
     })
     if (error) { showMessage('error', 'Gagal menyimpan barang: ' + error.message); setReturnItemSubmitting(false); return }
     showMessage('success', `Barang "${newItemName.trim()}" berhasil dicatat.`)
     setAddingNewReturnItem(false)
-    setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('')
+    setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason(''); setNewItemOwner('')
     if (selectedPlanId) await fetchPlanReturns(selectedPlanId)
     setReturnItemSubmitting(false)
   }
@@ -805,7 +877,7 @@ export default function JalanPengirimanPage() {
       p_final_location_note: `Diserahkan ke ${ret.branches?.name ?? 'pemilik'}${who ? ` (diterima ${who})` : ''}`,
     })
     if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setFinishingReturnId(null); return }
-    showMessage('success', `Barang potong nota sudah diantar ke ${ret.branches?.name ?? 'pemilik'}.`)
+    showMessage('success', `Barang sudah diantar ke ${ret.branches?.name ?? 'pemilik'}.`)
     if (selectedPlanId) await fetchPlanReturns(selectedPlanId)
     setFinishingReturnId(null)
   }
@@ -866,9 +938,14 @@ export default function JalanPengirimanPage() {
     paymentMethod === 'tempo' ? !!paymentDueDate : true
   )
   const cutOverNota = cutYes ? cutOwnerError(cutItems, selectedOwners) : null
+  // Retur yang sudah ada Tugas Retur kantornya dicatat di kartu Tugas Retur, bukan di sini.
+  const incHasOfficeReturn = incidentType === 'retur' && !!selectedStore && activeReturns.some(r => r.store_id === selectedStore.store_id)
+  // Salah muat / barang lebih wajib mencatat barangnya, kecuali sudah dicatat lewat potong nota.
+  const incNeedsItems = (incidentType === 'salah_muat' || incidentType === 'barang_lebih') && !cutYes
   const canSubmitKirim = canProceedStep1 && canProceedStep2 &&
     (incidentType === 'tidak_ada' || (!!incidentPhotoUrl && incidentDescription.trim().length > 0)) &&
-    (!cutYes || (cutItemsValid(cutItems, selectedOwners) && !!cutPhotoUrl && !cutOverNota))
+    (!cutYes || (cutItemsValid(cutItems, selectedOwners) && !!cutPhotoUrl && !cutOverNota)) &&
+    (incidentType === 'tidak_ada' || (incItemsValid(incItems) && (!incNeedsItems || incItems.length > 0)))
 
   // Kunci tombol 1 detik setiap kali tampilan tombol berganti (pindah langkah, kotak konfirmasi
   // muncul/hilang, pilih toko, buka modal) -- tap kedua dari double-tap jadi tidak "tembus".
@@ -908,8 +985,14 @@ export default function JalanPengirimanPage() {
       })
       if (cErr) cutError = cErr.message
     }
+    if (!alreadyDone && !cutError && incidentType !== 'tidak_ada' && incItems.length > 0) {
+      const { error: iErr } = await supabase.rpc('set_visit_incident_items', {
+        p_plan_store_id: selectedStore.id, p_items: incPayload(incItems), p_photo_url: incidentPhotoUrl,
+      })
+      if (iErr) cutError = 'barang kejadian: ' + iErr.message
+    }
     if (alreadyDone) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
-    else if (cutError) showMessage('error', `Pengiriman tersimpan, tapi POTONG NOTA gagal disimpan: ${cutError}. Isi ulang lewat tombol Edit di Riwayat Toko.`)
+    else if (cutError) showMessage('error', `Pengiriman tersimpan, tapi POTONG NOTA / barang kejadian gagal disimpan: ${cutError}. Isi ulang lewat tombol Edit di Riwayat Toko.`)
     else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" selesai dikirim.${cutYes ? ' Potong nota menunggu persetujuan Finance.' : ''}`)
     await clearTargetStore()
     resetKirimForm()
@@ -970,6 +1053,7 @@ export default function JalanPengirimanPage() {
     setEditCutYes(saved.length > 0)
     setEditCutItems(saved.length > 0 ? saved.map(c => ({ item_name: c.item_name, amount: String(c.amount), reason: c.reason, goods: c.goods, owner: c.owner_branch_id ?? '' })) : [emptyCut()])
     setEditCutPhotoUrl(ps.cut_photo_url || '')
+    setEditIncItems((visitIncItems[ps.id] ?? []).map(c => ({ item_name: c.item_name, ordered_item_name: c.ordered_item_name ?? '', disposition: c.disposition, owner: c.owner_branch_id })))
   }
 
   // Potongan yang sudah diputuskan Finance tidak bisa diubah driver lagi (server juga menolak).
@@ -978,7 +1062,8 @@ export default function JalanPengirimanPage() {
   const canSubmitEditHistory = isPaymentValid(editPaymentMethod, editInvoiceAmount, editPaymentAmount, editNoGudang, editNotas.length) &&
     (editPaymentMethod !== 'tempo' || !!editPaymentDueDate) &&
     (editIncidentType === 'tidak_ada' || (!!editIncidentPhotoUrl && editIncidentDescription.trim().length > 0)) &&
-    (editCutLocked || !editCutYes || (cutItemsValid(editCutItems, editOwners) && !!editCutPhotoUrl && !editCutOverNota))
+    (editCutLocked || !editCutYes || (cutItemsValid(editCutItems, editOwners) && !!editCutPhotoUrl && !editCutOverNota)) &&
+    (editIncidentType === 'tidak_ada' || incItemsValid(editIncItems))
 
   // Foto bukti transfer TIDAK diminta ulang di sini (fitur ini cuma untuk betulkan salah
   // ketik nominal/metode/tanggal, bukan mengulang seluruh alur foto) — kalau metode diubah
@@ -1007,8 +1092,16 @@ export default function JalanPengirimanPage() {
       })
       if (cErr) cutError = cErr.message
     }
+    const hadInc = (visitIncItems[editHistoryStore.id] ?? []).length > 0
+    const incNow = editIncidentType === 'tidak_ada' ? [] : editIncItems
+    if (!error && !cutError && (incNow.length > 0 || hadInc)) {
+      const { error: iErr } = await supabase.rpc('set_visit_incident_items', {
+        p_plan_store_id: editHistoryStore.id, p_items: incPayload(incNow), p_photo_url: editIncidentPhotoUrl || null,
+      })
+      if (iErr) cutError = 'barang kejadian: ' + iErr.message
+    }
     if (error) showMessage('error', 'Gagal menyimpan perubahan: ' + error.message)
-    else if (cutError) showMessage('error', 'Pembayaran tersimpan, tapi potong nota gagal: ' + cutError)
+    else if (cutError) showMessage('error', 'Pembayaran tersimpan, tapi potong nota / ' + cutError)
     else showMessage('success', 'Data toko berhasil diperbarui.')
     setEditHistoryStore(null)
     await refresh()
@@ -1152,14 +1245,14 @@ export default function JalanPengirimanPage() {
           {(selectedPlan?.status === 'departed' || selectedPlan?.status === 'closing') && !selectedStore && !selectedSupplierTask && !selectedReturn && cutDeliveries.length > 0 && (
             <div className="bg-white rounded-xl border border-rose-200 overflow-hidden mt-4">
               <div className="px-4 py-3 bg-rose-50 border-b border-rose-100">
-                <p className="text-sm font-bold text-rose-800">📦 Antar Barang Potong Nota ({cutDeliveries.length})</p>
+                <p className="text-sm font-bold text-rose-800">📦 Antar Barang ke Pemiliknya ({cutDeliveries.length})</p>
                 <p className="text-xs text-rose-600 mt-0.5">Wajib diantar ke pemilik barang & difoto saat diserahkan. Trip belum bisa selesai sebelum semua diantar.</p>
               </div>
               <div className="divide-y divide-slate-100">
                 {cutDeliveries.map(r => (
                   <div key={r.id} className="px-4 py-3 space-y-2">
                     <p className="text-sm font-semibold text-slate-800">Antar ke: {r.branches?.name ?? '-'}</p>
-                    <p className="text-xs text-slate-500">Dari toko {r.logistics_stores?.name} · {(returnItemsByReturn[r.id] ?? []).map(it => it.item_name).join(', ') || '-'}</p>
+                    <p className="text-xs text-slate-500">{r.return_source === 'potong_nota' ? 'Potong nota' : r.return_source === 'kejadian' ? 'Kejadian' : 'Tugas Retur'} · dari toko {r.logistics_stores?.name} · {(returnItemsByReturn[r.id] ?? []).map(it => it.item_name).join(', ') || '-'}</p>
                     {closingReturnPhotos[r.id] ? (
                       <div className="space-y-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1239,7 +1332,7 @@ export default function JalanPengirimanPage() {
                         className="w-14 h-14 object-cover rounded-lg border border-slate-200 shrink-0 cursor-zoom-in" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-slate-800 truncate">{it.item_name}</p>
-                        <p className="text-xs text-slate-500 truncate">{it.reason}</p>
+                        <p className="text-xs text-slate-500 truncate">{it.reason}{it.owner_branch_id ? ` · milik ${allBranches.find(b => b.id === it.owner_branch_id)?.name ?? '-'}` : ''}</p>
                       </div>
                       <button onClick={() => deleteReturnItem(it)} disabled={deletingReturnItemId === it.id}
                         className="px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 shrink-0 disabled:opacity-50">
@@ -1310,8 +1403,16 @@ export default function JalanPengirimanPage() {
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" />
                       <input type="text" value={newItemReason} onChange={e => setNewItemReason(e.target.value)} placeholder="Alasan retur"
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" />
+                      <label className="block text-xs font-medium text-slate-600">Barang ini punya siapa?</label>
+                      <select value={newItemOwner || selectedReturn.recipient_branch_id || ''} onChange={e => setNewItemOwner(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-purple-500 outline-none">
+                        {allBranches.map(b => <option key={b.id} value={b.id}>{b.name}{b.id === selectedReturn.recipient_branch_id ? ' (pilihan kantor)' : ''}</option>)}
+                      </select>
+                      {(newItemOwner || selectedReturn.recipient_branch_id) !== selectedReturn.recipient_branch_id && (
+                        <p className="text-xs text-rose-700">Barang ini nanti wajib Anda antar ke pemiliknya & difoto saat diserahkan.</p>
+                      )}
                       <div className="flex gap-2">
-                        <button onClick={() => { setAddingNewReturnItem(false); setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason('') }}
+                        <button onClick={() => { setAddingNewReturnItem(false); setNewItemPhotoUrl(''); setNewItemName(''); setNewItemReason(''); setNewItemOwner('') }}
                           className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
                         <button onClick={submitNewReturnItem} disabled={!newItemName.trim() || !newItemReason.trim() || returnItemSubmitting}
                           className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
@@ -1587,6 +1688,13 @@ export default function JalanPengirimanPage() {
                           <textarea value={incidentDescription} onChange={e => setIncidentDescription(e.target.value)}
                             placeholder="Keterangan kejadian..." rows={3}
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
+                          {!incHasOfficeReturn && (
+                            <div className="space-y-1">
+                              <p className="text-xs font-semibold text-slate-600">Barang yang terlibat{incNeedsItems ? ' *' : ' (opsional)'}</p>
+                              <p className="text-[11px] text-slate-400">Barang yang sudah diisi di POTONG NOTA tidak perlu dicatat lagi di sini.</p>
+                              <IncidentItemsEditor items={incItems} onChange={setIncItems} branches={allBranches} />
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1618,7 +1726,7 @@ export default function JalanPengirimanPage() {
                             )}
                             <p className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
                               Potongan menunggu persetujuan Finance. Selama belum disetujui, tetap dihitung kurang bayar.
-                              {cutItems.some(i => i.goods === 'dibawa_kembali') && ' Barang yang dibawa kembali WAJIB Anda antar ke pemiliknya dan difoto saat diserahkan (muncul di kartu "Antar Barang Potong Nota").'}
+                              {cutItems.some(i => i.goods === 'dibawa_kembali') && ' Barang yang dibawa kembali WAJIB Anda antar ke pemiliknya dan difoto saat diserahkan (muncul di kartu "Antar Barang ke Pemiliknya").'}
                             </p>
                           </div>
                         )}
@@ -1781,7 +1889,7 @@ export default function JalanPengirimanPage() {
                     )}
                     {cutDeliveries.length > 0 && (
                       <p className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
-                        ⚠ Masih ada {cutDeliveries.length} barang potong nota yang belum diantar ke pemiliknya (lihat kartu 📦 di atas).
+                        ⚠ Masih ada {cutDeliveries.length} barang yang belum diantar ke pemiliknya (lihat kartu 📦 di atas).
                       </p>
                     )}
                     <div>
@@ -1867,6 +1975,11 @@ export default function JalanPengirimanPage() {
                     {ps.incident_type !== 'tidak_ada' && (
                       <p className="text-xs text-amber-600 mt-1">
                         {INCIDENT_LABEL[ps.incident_type]}{ps.incident_description ? `: ${ps.incident_description}` : ''}
+                      </p>
+                    )}
+                    {(visitIncItems[ps.id] ?? []).length > 0 && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        {(visitIncItems[ps.id] ?? []).map(c => `${c.item_name}${c.ordered_item_name ? ` (seharusnya ${c.ordered_item_name})` : ''} · milik ${allBranches.find(b => b.id === c.owner_branch_id)?.name ?? '-'} · ${c.disposition === 'dibawa_pulang' ? '↩️ dibawa pulang' : '🛒 dibeli toko'}`).join(' | ')}
                       </p>
                     )}
                     {Number(ps.cut_total) > 0 && (
@@ -2044,6 +2157,8 @@ export default function JalanPengirimanPage() {
                   <textarea value={editIncidentDescription} onChange={e => setEditIncidentDescription(e.target.value)}
                     placeholder="Keterangan kejadian..." rows={3}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
+                  <p className="text-xs font-semibold text-slate-600">Barang yang terlibat</p>
+                  <IncidentItemsEditor items={editIncItems} onChange={setEditIncItems} branches={allBranches} />
                 </div>
               )}
 

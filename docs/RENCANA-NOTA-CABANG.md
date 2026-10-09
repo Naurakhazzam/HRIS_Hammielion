@@ -344,5 +344,18 @@ Keputusan user 9 Okt 2026:
   driver: wajib foto saat menyerahkan ke pemilik (`finish_store_return`), trip tidak bisa selesai
   sebelum semua diantar, lalu cabang pemilik konfirmasi di Penerimaan Retur. Retur potong nota tidak
   ikut aturan "satu retur aktif per toko" dan tidak bisa dilepas dari trip.
-- Menyusul: jalur antar sendiri; **B** pemilik per barang di Tugas Retur kantor; **C** kejadian
-  Retur/Salah Muat driver yang barangnya dibawa pulang (catat barang + pemilik → antar + foto).
+- **B & C SELESAI (migrasi 094):** kolom `logistics_store_returns.return_source`
+  (`kantor` / `potong_nota` / `kejadian` / `pecahan`); aturan "satu retur aktif per toko", lepas &
+  batal trip hanya untuk `kantor`. Semua selain `kantor` = kartu **"📦 Antar Barang ke Pemiliknya"**
+  (wajib foto saat diserahkan; trip tertahan sampai selesai).
+  - **B** Tugas Retur kantor: tiap barang ada pilihan pemilik (`add_store_return_item` +
+    `p_owner_branch_id`, bawaan = cabang pilihan kantor). Saat lapor selesai, barang milik cabang lain
+    dipindah ke retur `pecahan` → diantar driver ke pemiliknya.
+  - **C** Kejadian Salah Muat / Retur / Barang Lebih: daftar barang (`logistics_visit_incident_items`,
+    RPC `set_visit_incident_items`) — nama barang terkirim, "seharusnya barang apa" (opsional), pemilik
+    (semua cabang), dan nasib: **↩️ Dibawa pulang** (retur `kejadian` → antar + foto) atau
+    **🛒 Dibeli toko** (salah varian tetap dibeli: tidak ada barang kembali, dicatat untuk koreksi stok
+    pemilik; harga lebih murah → isi potong nota alasan "Harga beda"; lebih mahal → nominal nota sesuai
+    barang yang dibeli). Wajib untuk Salah Muat & Barang Lebih kecuali sudah dicatat lewat potong nota.
+    Tampil di Riwayat Toko driver & Laporan Pengiriman.
+- Menyusul: jalur antar sendiri.
