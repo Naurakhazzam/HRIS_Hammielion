@@ -68,8 +68,13 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   kelola; HR/Finance lihat) + RPC `close_postponed_visit` / `cancel_postponed_loading`. Badge merah
   Owner `get_postponed_overdue_count` (> 3 hari). Jalur antar sendiri tidak diubah (tombol "Lepas"
   yang sudah ada = mengembalikan kiriman ke daftar menunggu).
-  Catatan data: 1 paket lama (1 Okt, toko "Denz Ps", alasan "ada 2 nama toko yang sama") masih
-  tersangkut di kunjungan gagal lama — tidak diubah otomatis, tunggu keputusan user.
+  Paket lama 1 Okt (toko "Denz Ps", kunjungan gagal lama karena nama toko kembar): user konfirmasi
+  **sudah terkirim** — dibiarkan apa adanya (tampil "Sudah Diambil", tidak muncul di Tertunda).
+- [x] **Tambahan 9 Okt** (belum di-push): (a) Kirim Barang (antar sendiri): tombol **Gagal** per
+  tujuan barang — alasan + foto, tujuan dilepas, Laporan Muat dibatalkan (`fail_tp_stop`, migrasi
+  `089_tp_stop_fail.sql`, kolom `fail_photo_url`); "Lepas" tetap = dikirim lain waktu. (b) Laporan
+  Pengiriman: toko per trip **diurutkan otomatis menurut jam terkirim/dikunjungi** (nomor 1 = pertama
+  diturunkan), yang belum diproses menyusul sesuai rencana; label "(rencana #n)" bila beda urutan.
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)
 - [ ] **Ditunda** — Potong nota (salah muat / kejadian lain) — dibahas setelah semua tahap di atas
 

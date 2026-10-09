@@ -216,6 +216,22 @@ export default function KirimBarangPage() {
   const [busy, setBusy] = useState(false)
   // Pembayaran nota per tujuan (Foto 2), lihat migrasi 083. Uang diterima wajib diketik.
   const [payDraft, setPayDraft] = useState<Record<string, PayDraft>>({})
+  // Gagal kirim per tujuan barang (toko menolak / batal pesan) -- alasan + foto (migrasi 089).
+  const [failDraft, setFailDraft] = useState<Record<string, { reason: string; photoUrl?: string }>>({})
+
+  async function submitFailStop(stop: TripStop) {
+    const d = failDraft[stop.id]
+    if (!d || d.reason.trim().length < 3 || !d.photoUrl) return
+    if (!confirm(`Tandai "${stopTitle(stop)}" GAGAL? Laporan Muat-nya dibatalkan dan barang kembali ke cabang.`)) return
+    setBusy(true)
+    const { error } = await supabase.rpc('fail_tp_stop', { p_stop_id: stop.id, p_reason: d.reason.trim(), p_photo_url: d.photoUrl })
+    setBusy(false)
+    if (error) { showMessage('error', error.message); return }
+    setFailDraft(f => { const n = { ...f }; delete n[stop.id]; return n })
+    showMessage('success', `${stopTitle(stop)} ditandai Gagal.`)
+    window.dispatchEvent(new Event('kirim-barang-badge-refresh'))
+    await refresh()
+  }
   // Foto yang sudah diambil tapi gagal terkirim (sinyal jelek) -- disimpan supaya bisa dicoba
   // lagi tanpa foto ulang.
   const [pending, setPending] = useState<{ kind: 'start' | 'arrive' | 'finish'; blob: Blob; url?: string; stopId?: string; loadingIds?: string[]; groomKeys?: string[] } | null>(null)
@@ -373,6 +389,8 @@ export default function KirimBarangPage() {
   const homeOf = (t: Trip) => t.pj?.branches?.name ?? 'cabang'
 
   async function upload(folder: string, blob: Blob, tag: string): Promise<string | null> {
+    // Hanya dipanggil dari handler foto (bukan saat render) -- linter salah menganggapnya render.
+    // eslint-disable-next-line react-hooks/purity
     const path = `${folder}/tp-${tag}-${Date.now()}.jpg`
     const { error } = await supabase.storage.from('logistics-photos').upload(path, blob, { contentType: 'image/jpeg' })
     if (error) return null
@@ -642,11 +660,49 @@ export default function KirimBarangPage() {
                       {place?.address && <p className="text-xs text-slate-500">{place.address}</p>}
                       {place?.phone && <a href={`tel:${place.phone}`} className="text-xs text-blue-600">📞 {place.phone}</a>}
                     </div>
-                    {s.kind !== 'serah_kucing' && (
-                      <button disabled={busy} onClick={() => rpcWithReason('release_tp_stop', { p_stop_id: s.id }, `Lepas "${title}" dari tugas ini (kembali ke daftar menunggu). Alasan:`, 'Tujuan dilepas dari tugas.')}
-                        className="shrink-0 text-[11px] px-2 py-1 border border-slate-300 bg-white rounded-lg text-slate-600 disabled:opacity-50">Lepas</button>
-                    )}
+                    <div className="shrink-0 flex gap-1">
+                      {s.kind !== 'serah_kucing' && (
+                        <button disabled={busy} onClick={() => rpcWithReason('release_tp_stop', { p_stop_id: s.id }, `Lepas "${title}" dari tugas ini (kembali ke daftar menunggu, dikirim lain waktu). Alasan:`, 'Tujuan dilepas dari tugas.')}
+                          className="text-[11px] px-2 py-1 border border-slate-300 bg-white rounded-lg text-slate-600 disabled:opacity-50">Lepas</button>
+                      )}
+                      {s.kind === 'barang' && !failDraft[s.id] && (
+                        <button disabled={busy} onClick={() => setFailDraft(f => ({ ...f, [s.id]: { reason: '' } }))}
+                          className="text-[11px] px-2 py-1 border border-red-300 bg-white rounded-lg text-red-600 disabled:opacity-50">Gagal</button>
+                      )}
+                    </div>
                   </div>
+                  {s.kind === 'barang' && failDraft[s.id] && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 space-y-2">
+                      <p className="text-sm font-semibold text-red-700">❌ Gagal — toko menolak / batal pesan</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {['Toko Menolak Barang', 'Batal Pesan'].map(r => (
+                          <button key={r} type="button" onClick={() => setFailDraft(f => ({ ...f, [s.id]: { ...f[s.id], reason: r } }))}
+                            className={`py-1.5 rounded-lg text-xs font-medium border ${failDraft[s.id].reason === r ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-300'}`}>{r}</button>
+                        ))}
+                      </div>
+                      <input value={failDraft[s.id].reason} onChange={e => setFailDraft(f => ({ ...f, [s.id]: { ...f[s.id], reason: e.target.value } }))}
+                        placeholder="Atau tulis alasan lain..." className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
+                      {failDraft[s.id].photoUrl ? (
+                        <div className="space-y-1">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={failDraft[s.id].photoUrl} alt="Foto toko" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                          <button type="button" onClick={() => setFailDraft(f => ({ ...f, [s.id]: { ...f[s.id], photoUrl: undefined } }))} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                        </div>
+                      ) : (
+                        <LogisticsCameraCapture label="Foto Toko (wajib)" employeeName={myName}
+                          onCaptured={async blob => {
+                            const url = await upload(stopFolder(s), blob, 'gagal')
+                            if (url) setFailDraft(f => ({ ...f, [s.id]: { ...f[s.id], photoUrl: url } }))
+                          }} />
+                      )}
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setFailDraft(f => { const n = { ...f }; delete n[s.id]; return n })}
+                          className="flex-1 py-1.5 text-xs border border-slate-300 bg-white rounded-lg">Batal</button>
+                        <button type="button" disabled={busy || failDraft[s.id].reason.trim().length < 3 || !failDraft[s.id].photoUrl} onClick={() => submitFailStop(s)}
+                          className="flex-1 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg disabled:opacity-50">Konfirmasi Gagal</button>
+                      </div>
+                    </div>
+                  )}
                   {nota != null && (
                     <div className="bg-white border border-emerald-200 rounded-lg p-2.5 space-y-2">
                       <p className="text-sm font-semibold text-emerald-800">🧾 Nota {fmtRp(nota)} — toko bayar pakai apa?</p>

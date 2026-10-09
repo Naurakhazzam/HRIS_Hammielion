@@ -449,7 +449,13 @@ export default function LaporanPengirimanPage() {
           ) : (
             <div className="space-y-3">
               {visiblePlans.map(p => {
-                const stores = storesByPlan[p.id] || []
+                // Urutan nyata: toko yang sudah diproses diurutkan menurut jam terkirim/dikunjungi
+                // (nomor 1 = pertama kali diturunkan), sisanya menyusul sesuai urutan rencana.
+                const planned = storesByPlan[p.id] || []
+                const plannedRank = new Map(planned.map((s, idx) => [s.id, idx + 1]))
+                const stores = [...planned].sort((a, b) =>
+                  a.resolved_at && b.resolved_at ? a.resolved_at.localeCompare(b.resolved_at)
+                    : a.resolved_at ? -1 : b.resolved_at ? 1 : a.sequence_order - b.sequence_order)
                 const planCash = stores.filter(s => s.payment_method === 'cash' || s.payment_method === 'deposit')
                 const planUnverified = planCash.filter(s => s.office_verified_amount == null)
                 const planVerified = planCash.filter(s => s.office_verified_amount != null)
@@ -591,7 +597,12 @@ export default function LaporanPengirimanPage() {
                           <div key={s.id} className="px-4 py-2.5 text-sm">
                             <div className="flex items-center gap-3">
                               <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 shrink-0">{i + 1}</span>
-                              <span className="flex-1 text-slate-700">{s.logistics_stores?.name}</span>
+                              <span className="flex-1 text-slate-700">
+                                {s.logistics_stores?.name}
+                                {s.resolved_at && plannedRank.get(s.id) !== i + 1 && (
+                                  <span className="ml-1.5 text-[10px] text-slate-400">(rencana #{plannedRank.get(s.id)})</span>
+                                )}
+                              </span>
                               {s.resolved_at && (
                                 <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">
                                   🕐 {s.status === 'delivered' ? 'Terkirim jam ' : 'jam '}{fmtJam(s.resolved_at)}
