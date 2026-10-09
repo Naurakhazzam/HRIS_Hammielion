@@ -1,0 +1,225 @@
+# Rencana: Nota Cabang di Laporan Muat + Verifikasi Finance
+
+Dokumen kerja hasil diskusi dengan user (9 Oktober 2026). Dikerjakan **per tahap**. Cara pakai:
+
+> Baca `hris-app/docs/RENCANA-NOTA-CABANG.md`, kerjakan Tahap N.
+
+Setiap tahap selesai: centang checklist di **Status**, catat nomor migrasi & commit, lalu push
+(user selalu tes di app yang sudah di-deploy, bukan localhost). Bahasa ke user: **Bahasa Indonesia,
+sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
+
+**Jangan mulai tahap yang masih punya pertanyaan terbuka di bagian 6 tanpa konfirmasi user.**
+
+---
+
+## Status
+
+- [ ] **Tahap 1** — Nota cabang di Laporan Muat (nominal wajib, aturan koreksi, 1 laporan = 1 driver)
+- [ ] **Tahap 2** — Pembayaran di lapangan (driver isi 1 angka → dibagi otomatis; pengantar antar sendiri isi di Foto 2)
+- [ ] **Tahap 3** — Tab verifikasi finance (Cocok / Tidak Cocok + pemberitahuan kurang bayar)
+- [ ] **Tahap 4** — Gagal / Kirim Besok + tab Tertunda (berlaku nota gudang & nota cabang)
+- [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)
+- [ ] **Ditunda** — Potong nota (salah muat / kejadian lain) — dibahas setelah semua tahap di atas
+
+---
+
+## 1. Masalah yang mau diselesaikan
+
+Di lapangan, satu kunjungan driver ke sebuah toko bisa membawa **2 nota atau lebih**:
+
+- **Nota Gudang** — barang dari gudang (sudah tercatat di Laporan Pengiriman, diisi driver).
+- **Nota cabang** — barang dari Laporan Muat cabang (Toko Pusat / Toko Depan / Markas / Raja) yang
+  diambil driver di Jemput Barang Cabang, atau diantar sendiri oleh karyawan cabang.
+  **Nominal nota ini sekarang tidak tercatat di mana pun** → uangnya tidak bisa dilacak/diverifikasi.
+
+Catatan istilah: user menyebutnya "nota Toko Pusat", tapi Laporan Muat dipakai 4 cabang toko, jadi
+di sistem namanya **nota cabang** dan selalu ditampilkan dengan nama cabang asalnya. Satu kunjungan
+bisa punya Nota Gudang + beberapa nota cabang sekaligus.
+
+---
+
+## 2. Kondisi sekarang (dicek langsung ke database, 9 Okt 2026)
+
+- `logistics_plan_stores` (1 baris = 1 kunjungan driver ke 1 toko) punya **satu set** kolom bayar:
+  `invoice_amount`, `payment_method` (`cash|transfer|deposit|tempo`), `payment_amount`,
+  `payment_photo_url`, `payment_due_date`, `office_verified_amount/_by/_at`. Diisi driver di
+  `logistik/jalan/page.tsx` (`submitKirim`). Ini = **Nota Gudang**.
+- `verify_cash_payment(p_plan_store_id, p_verified_amount)` — hanya Owner/HR/Finance, hanya untuk
+  `cash`/`deposit`, cuma mengisi `office_verified_*`. **Tidak menulis ke `fin_cash_in`.**
+  Trigger `trg_guard_logistics_office_verification` menjaga kolom verifikasi.
+- **Tidak ada trigger** dari logistik ke `fin_cash_in`. Satu-satunya penulis `fin_cash_in` di kode
+  adalah halaman input manual `keuangan/kas-masuk`. → Saat ini **tidak ada** uang pengiriman yang
+  otomatis masuk Keuangan (baik nota gudang maupun cabang).
+- **Tidak ada tabel piutang / saldo konsumen.** "Sisa piutang" & "lebih bayar jadi saldo konsumen"
+  di layar driver (`BalanceNote`) cuma tampilan hitungan `invoice − payment`, tidak disimpan.
+  (User menyebut "fitur utang piutang dalam penjualan" — kemungkinan di sistem kasir di luar HRIS.
+  Perlu dikonfirmasi sebelum Tahap 3/5.)
+- `fin_cash_in` tidak punya kolom sumber (`source_table/source_id`) — beda dengan `fin_cash_out`.
+- Semua cabang (termasuk **Gudang**, rata-rata ±Rp 57 jt/hari) menginput omzet harian manual ke
+  `fin_cash_in`. Relevan untuk risiko dobel di Tahap 5.
+- `logistics_central_loadings`: 1 laporan = 1 tujuan (`store_id`), punya `ongkir` + jejak
+  `logistics_ongkir_changes`. Belum ada kolom nota.
+- Paket diambil driver per paket lewat `claim_central_loading_package` → paket dapat
+  `plan_store_id` (kunjungan driver ke toko tujuan). **Ini penghubung nota cabang ↔ kunjungan
+  driver.** Saat ini paket dari 1 laporan boleh diambil driver berbeda-beda.
+- Catatan repo: migrasi `075_logistics_invoice_amount` sudah jalan di DB tapi **file-nya tidak ada**
+  di `database/migrations/`. Jangan pakai nomor 075 untuk migrasi baru.
+
+---
+
+## 3. Aturan yang SUDAH DISEPAKATI
+
+### Nota cabang (Laporan Muat)
+1. **Wajib diisi staf cabang asal**, nominal **> 0**. Tidak ada konsep "titipan tanpa nota" di
+   sistem — semua Laporan Muat pasti punya nominal.
+2. Diisi saat **Tandai Selesai** (bersama pilihan jalur). Hanya **nominal nota**; metode bayar &
+   uang diterima diisi di lapangan.
+3. **Koreksi nominal** (pola sama dengan ongkir): staf cabang asal boleh ubah selama barang belum
+   diambil; setelah diambil hanya Owner. Semua perubahan tercatat (siapa, kapan, dari → ke).
+4. **1 laporan = 1 driver (opsi 2A):** paket pertama diambil driver/rencana X → paket lain dari
+   laporan yang sama hanya bisa diambil oleh rencana X. Nota pindah tanggung jawab ke driver itu
+   saat paket pertama diambil.
+5. Data Laporan Muat lama (sebelum fitur ini) **dibiarkan** tanpa nota — tidak di-backfill.
+   Aturan wajib hanya untuk laporan baru.
+6. Semua barang cabang yang dibawa driver **wajib lewat Laporan Muat** (driver harus tekan ambil di
+   Jemput Barang Cabang).
+
+### Pembayaran di lapangan — jalur driver
+7. Di layar kunjungan, driver melihat **semua nota** kunjungan itu:
+   - Nota Gudang → driver ketik nominal nota (seperti sekarang).
+   - Nota cabang → nominal **sudah terisi otomatis** dari Laporan Muat, driver tidak mengetik ulang.
+8. **Satu metode bayar per kunjungan.** Kalau di lapangan kasusnya campur, pakai **deposit**.
+9. Driver mengetik **satu angka: total uang diterima** (cash / transfer / deposit). **Wajib
+   diketik, tidak boleh terisi otomatis.** Tempo: tidak ada uang diterima (0).
+10. **Kurang bayar tidak menghambat driver** — tetap bisa diproses. Selisihnya muncul sebagai
+    **pemberitahuan di halaman finance**.
+11. **Pembagian otomatis ke tiap nota:** nota **nominal terbesar dilunasi dulu**, sisanya ke nota
+    berikutnya, dst. Kalau nominal sama → **Nota Gudang didahulukan**.
+12. **Lebih bayar** (uang > total nota) → dicatat sebagai **saldo konsumen**; finance yang
+    menentukan (bisa jadi pelunasan nota sebelumnya).
+
+### Pembayaran di lapangan — jalur antar sendiri
+13. Nominal nota sudah ada dari Laporan Muat. Pengantar cukup **pilih metode bayar** dan **ketik
+    uang diterima** (aturan sama dengan driver: wajib diketik, tempo = 0, kurang tetap lolos).
+    Dilakukan di langkah **Foto 2 (sampai di toko)**.
+
+### Verifikasi finance
+14. Ada **tab khusus verifikasi**. Per kunjungan finance cukup pilih:
+    - **Cocok** → langsung tervalidasi.
+    - **Tidak Cocok** → finance ketik angka yang benar → sistem **membagi ulang** dengan aturan 11.
+15. **Rekening tujuan** (untuk transfer) dipilih oleh **finance**, bukan driver.
+16. **Tempo adalah bagian dari omzet** (bukan uang masuk) — sisa nota tempo/kurang bayar = piutang.
+
+### Gagal / Kirim Besok (Tahap 4)
+17. Dua status berbeda, berlaku untuk Nota Gudang **dan** nota cabang:
+
+| Status | Arti | Barang | Nota |
+|---|---|---|---|
+| **Kirim Besok** (tutup / tidak ada orang) | Ditunda | Muncul lagi sebagai pengingat sampai terkirim | Tetap aktif, belum ditagih |
+| **Gagal** (ditolak / batal pesan) | Tidak jadi | Kembali ke cabang asal | Dibatalkan, tidak masuk laporan |
+
+18. Ada **tab "Tertunda"** berisi semua yang Kirim Besok sampai benar-benar terkirim.
+
+---
+
+## 4. Contoh pembagian otomatis (aturan 11)
+
+Nota 1 = Rp 1.200.000 (terbesar), Nota 2 = Rp 800.000. Total Rp 2.000.000.
+
+| Uang diterima | Nota 1 | Nota 2 | Kurang | Lebih |
+|---|---|---|---|---|
+| 2.000.000 | 1.200.000 lunas | 800.000 lunas | 0 | 0 |
+| 1.900.000 | 1.200.000 lunas | 700.000 | 100.000 (nota 2) | 0 |
+| 1.000.000 | 1.000.000 | 0 | 200.000 + 800.000 | 0 |
+| 2.100.000 | 1.200.000 lunas | 800.000 lunas | 0 | 100.000 → saldo konsumen |
+| 0 (tempo) | 0 | 0 | semua → piutang | 0 |
+
+Nominal sama (mis. 1.000.000 gudang & 1.000.000 cabang): Nota Gudang diisi dulu.
+
+---
+
+## 5. Rancangan per tahap (usulan teknis — boleh disesuaikan saat dikerjakan)
+
+### Tahap 1 — Nota cabang di Laporan Muat
+- `logistics_central_loadings`: kolom baru `nota_amount numeric` (+ `nota_set_by`, `nota_set_at`).
+  Constraint: laporan **baru** yang `status = 'selesai'` wajib `nota_amount > 0` (laporan lama
+  dikecualikan, mis. lewat tanggal cutoff atau constraint `NOT VALID`).
+- Tabel jejak `logistics_nota_changes` (pola `logistics_ongkir_changes`).
+- RPC: `finish_central_loading` terima `p_nota_amount`; RPC baru `set_central_loading_nota`
+  (aturan koreksi sama dengan `set_central_loading_ongkir`).
+- `claim_central_loading_package`: kalau paket lain dari laporan yang sama sudah diambil rencana
+  lain → tolak (aturan 4).
+- UI `laporan-muat/page.tsx`: input nominal nota di form Tandai Selesai (kedua jalur), tampil di
+  kartu & detail, tombol Ubah Nota. Jemput Barang: tampilkan nominal nota per paket/laporan.
+
+### Tahap 2 — Pembayaran di lapangan
+- Simpan pembagian per nota:
+  - Nota Gudang: tetap di `logistics_plan_stores` (`invoice_amount`, `payment_amount` = **hasil
+    pembagian untuk nota gudang**, supaya Laporan Pengiriman lama tetap benar).
+  - Kolom baru di `logistics_plan_stores`: `received_total` (angka asli yang diketik driver untuk
+    semua nota), `overpay_amount` (lebih bayar).
+  - Nota cabang: kolom baru di `logistics_central_loadings`: `nota_paid_amount` (hasil pembagian),
+    `nota_payment_method`, `nota_payment_photo_url`, `nota_due_date`, `nota_paid_at`.
+- Pembagian dihitung **di server** (RPC baru, mis. `submit_plan_store_delivery`) — bukan di klien —
+  supaya aturan 11 satu sumber dan bisa dipakai ulang oleh verifikasi finance (aturan 14).
+  `submitKirim` di `jalan/page.tsx` pindah memanggil RPC ini.
+- Layar driver: daftar nota (Gudang + tiap nota cabang dengan nama cabang asal), 1 metode bayar,
+  1 kolom "Uang diterima" (kosong, wajib diketik), ringkasan Kurang/Lebih (informasi saja).
+- Antar sendiri: `arrive_tp_stop` (Foto 2) ditambah metode + uang diterima untuk stop `barang`
+  → isi kolom `nota_*` di laporan itu (satu nota, tanpa pembagian).
+- Edit pembayaran setelah terkirim (fitur yang sudah ada) ikut memakai RPC yang sama.
+
+### Tahap 3 — Tab verifikasi finance
+- Halaman/tab baru (Owner/HR/Finance). Satu baris = satu kunjungan driver (semua notanya) atau
+  satu kiriman antar sendiri.
+- Tombol **Cocok** / **Tidak Cocok** (ketik angka benar → pembagian ulang via fungsi yang sama).
+- Penanda: kurang bayar, lebih bayar (saldo konsumen), tempo (piutang).
+- Finance memilih **rekening** untuk transfer.
+- Menggantikan/memperluas `verify_cash_payment` (yang sekarang cuma cash/deposit & cuma nota gudang).
+
+### Tahap 4 — Gagal / Kirim Besok
+- Status baru di kunjungan (`logistics_plan_stores`) & kiriman antar sendiri: `kirim_besok` vs
+  `failed`. Kirim Besok → kiriman kembali muncul untuk dijadwalkan ulang; Gagal → nota cabang
+  dibatalkan, barang kembali ke cabang asal.
+- Tab **Tertunda** (pengingat). Detail dibahas lagi sebelum dikerjakan (lihat bagian 6).
+
+---
+
+## 6. Pertanyaan yang MASIH TERBUKA
+
+Tanyakan ke user sebelum mengerjakan tahap terkait:
+
+- **(Tahap 3)** Metode **transfer** ikut diverifikasi finance? Usulan: **ya**, semua kecuali tempo
+  (karena finance yang memilih rekening transfer). Sekarang yang diverifikasi hanya cash & deposit.
+- **(Tahap 3)** "Saldo konsumen" & "piutang" disimpan di mana? HRIS belum punya tabelnya. Apakah
+  cukup ditandai di tab verifikasi, atau perlu buku piutang/saldo per toko di HRIS?
+- **(Tahap 4)** Berapa lama kiriman boleh "Kirim Besok"? Siapa yang memutuskan status "Gagal"
+  (driver langsung, atau perlu persetujuan)? Barang "Kirim Besok" dibawa pulang driver atau
+  dikembalikan ke cabang/gudang?
+- **(Tahap 1)** Laporan Muat yang sudah Selesai tapi **belum diambil** saat fitur rilis — wajib
+  diisi notanya, atau ikut dibiarkan seperti data lama?
+
+---
+
+## 7. DITUNDA — Tahap 5: masuk Kas Masuk otomatis
+
+Tujuan akhir (goal) user: nota yang sudah diverifikasi finance **otomatis masuk Kas Masuk**.
+Dibahas **terakhir**, setelah data Tahap 1–4 rapi.
+
+Catatan dari diskusi supaya konteks tidak hilang:
+- Risiko **dobel**: cabang (termasuk Gudang) sudah input omzet harian manual. Kalau omzet itu sudah
+  termasuk penjualan yang dikirim, lalu verifikasi ikut menambah Kas Masuk → tercatat dua kali.
+- User mengusulkan "omzet 10 jt − 3 jt yang dikirim = omzet asli". Pendapat Claude: **omzet tetap
+  10 jt** (yang dikirim tetap penjualan cabang itu, termasuk tempo). Yang berkurang adalah **uang
+  fisik di laci** (7 jt); yang 3 jt datang belakangan lewat pengiriman → dicatat sebagai **uang
+  masuk dari pengiriman** (bukan omzet baru), tempo = piutang sampai dibayar. Belum diputuskan.
+- `fin_cash_in` perlu kolom sumber (`source_table`/`source_id`) agar entri otomatis bisa dibedakan
+  dari input manual & tidak dobel.
+- Rekening: cash → "Kas Tunai"; transfer → dipilih finance (aturan 15).
+
+## 8. DITUNDA — Potong nota
+
+User: kadang konsumen **memotong nota** (mis. nota 1 jt, ada barang salah muat / kejadian lain),
+driver wajib mencantumkan nominal yang dipotong. User menyebut ini **fatal** dan minta dibahas
+**setelah semua tahap selesai**. Akan memengaruhi aturan pembagian (bagian 4) dan kejadian
+(`incident_type`: `salah_muat`, `retur`, `barang_lebih`) yang sudah ada di layar driver.
