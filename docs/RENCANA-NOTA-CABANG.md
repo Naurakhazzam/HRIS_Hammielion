@@ -93,7 +93,8 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   jalan (`source_type = 'surat_jalan'`). Halaman `logistik/surat-jalan` (5 tab), tombol "+ Tambahkan
   Surat Jalan" di Rencana Pengiriman, badge "perlu keputusan" (`get_failed_decision_count`).
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)
-- [ ] **Ditunda** — Potong nota (salah muat / kejadian lain) — dibahas setelah semua tahap di atas
+- [x] **Potong nota — jalur driver** (migrasi 092–092d, belum di-push) — lihat bagian 8.
+- [ ] Potong nota — jalur antar sendiri (menyusul)
 
 ---
 
@@ -314,9 +315,25 @@ Catatan dari diskusi supaya konteks tidak hilang:
   dari input manual & tidak dobel.
 - Rekening: cash → "Kas Tunai"; transfer → dipilih finance (aturan 15).
 
-## 8. DITUNDA — Potong nota
+## 8. Potong nota (jalur driver SELESAI — migrasi 092, 092b/c/d)
 
-User: kadang konsumen **memotong nota** (mis. nota 1 jt, ada barang salah muat / kejadian lain),
-driver wajib mencantumkan nominal yang dipotong. User menyebut ini **fatal** dan minta dibahas
-**setelah semua tahap selesai**. Akan memengaruhi aturan pembagian (bagian 4) dan kejadian
-(`incident_type`: `salah_muat`, `retur`, `barang_lebih`) yang sudah ada di layar driver.
+Keputusan user 9 Okt 2026:
+- Driver, di Langkah 3 (Kejadian), menjawab **"Apakah ini POTONG NOTA?"**. Kalau ya: daftar barang
+  (nama produk, nominal potongan, alasan: salah muat / rusak-kedaluwarsa / kurang jumlah / harga beda /
+  lainnya) + pilihan **"Dibawa kembali driver"** atau **"Memang tidak ada barangnya"** (mis. pesan 10
+  terkirim 9). Satu foto wajib. Driver tidak memilih nota.
+- Potongan dibagi ke **nota terbesar dulu** (sama besar → gudang dulu), sama seperti uang
+  (`apply_visit_payment`; kolom `gudang_cut_amount`, `logistics_delivery_notes.cut_amount`,
+  `logistics_central_loadings.nota_cut_amount`). Potongan dihitung dulu, sisa nota baru dibayar uang.
+- Perlu **persetujuan Finance/Owner** (Verifikasi Keuangan → Uang Pengiriman → sub-tab ✂️ Potong Nota,
+  RPC `decide_visit_cut`). Sebelum disetujui / bila ditolak (alasan wajib), potongan tetap dihitung
+  **kurang bayar (piutang)**. Keputusan bisa diubah selama nota belum punya pelunasan.
+- Barang "dibawa kembali" otomatis jadi catatan retur (`logistics_store_returns` status `selesai`,
+  penerima Gudang, catatan "Potong nota") → tinggal dikonfirmasi di **Penerimaan Retur**.
+- Data: tabel `logistics_visit_cuts`; kolom `logistics_plan_stores.cut_total/cut_status/cut_photo_url/
+  cut_decided_*/cut_return_id`. RPC `set_visit_cuts(plan_store, items jsonb, foto)` dipanggil aplikasi
+  tepat setelah submit/edit pembayaran (signature RPC lama tidak berubah → aplikasi lama tetap jalan).
+  Driver bisa ubah selama belum diputuskan & trip belum selesai; kalau barang sudah diterima gudang,
+  potongan terkunci. Buku Piutang: kolom `cut_amount` di `fin_receivables`, sisa = nota − potongan −
+  bayar − pelunasan. Badge: `get_pending_cut_count`.
+- Menyusul: jalur antar sendiri.

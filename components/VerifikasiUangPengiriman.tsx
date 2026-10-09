@@ -28,7 +28,19 @@ type Item = {
   verifier: string | null
   accountId: string | null
   photoUrl: string | null
+  // Potong nota (migrasi 092) -- hanya kunjungan driver; cutApproved = yang sudah disetujui.
+  cutTotal: number
+  cutStatus: string | null
 }
+
+const CUT_REASON_LABEL: Record<string, string> = {
+  salah_muat: 'Salah muat', rusak: 'Rusak / kedaluwarsa', kurang_jumlah: 'Kurang jumlah', harga_beda: 'Harga beda', lainnya: 'Lainnya',
+}
+const CUT_STATUS_LABEL: Record<string, string> = { menunggu: 'Menunggu', disetujui: 'Disetujui', ditolak: 'Ditolak' }
+const CUT_SELECT: string = `id, cut_total, cut_status, cut_photo_url, cut_decided_at, cut_decision_note, resolved_at, payment_method,
+        invoice_amount, logistics_stores(name),
+        plan:logistics_delivery_plans!logistics_plan_stores_plan_id_fkey(driver:employees!logistics_delivery_plans_driver_id_fkey(full_name)),
+        decider:employees!logistics_plan_stores_cut_decided_by_fkey(full_name)`
 
 type Account = { id: string; bank_name: string; account_number: string | null; account_type: string }
 
@@ -38,7 +50,7 @@ const fmtDate = (s: string | null) => s ? new Date(s).toLocaleString('id-ID', { 
 
 // Tipe string biasa (bukan literal) supaya TypeScript tidak mem-parse select yang panjang (TS2589).
 const VISIT_SELECT: string = `id, payment_method, invoice_amount, received_total, payment_photo_url, resolved_at,
-        office_verified_amount, office_verified_at, office_account_id,
+        office_verified_amount, office_verified_at, office_account_id, cut_total, cut_status,
         logistics_stores(name),
         plan:logistics_delivery_plans!logistics_plan_stores_plan_id_fkey(driver:employees!logistics_delivery_plans_driver_id_fkey(full_name)),
         verifier:employees!logistics_plan_stores_office_verified_by_fkey(full_name)`
@@ -54,7 +66,8 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState<Item[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
-  const [view, setView] = useState<'belum' | 'sudah'>('belum')
+  const [view, setView] = useState<'belum' | 'sudah' | 'potong'>('belum')
+  const [cutPending, setCutPending] = useState(0)
   const [month, setMonth] = useState(() => todayLocalStr().slice(0, 7))
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   // Per item: rekening terpilih, mode "tidak cocok" + nominal ketikan finance.
@@ -91,7 +104,7 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
       .filter('nota_verified_at', verifiedFilter ? 'not.is' : 'is', null)
       .order('nota_received_at', { ascending: true })
 
-    const [vRes, aRes, accRes, cntV, cntA] = await Promise.all([
+    const [vRes, aRes, accRes, cntV, cntA, cntCut] = await Promise.all([
       vq, aq,
       supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('bank_name'),
       // Jumlah yang belum diverifikasi (semua bulan) untuk angka di tab.
@@ -100,15 +113,19 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
         .not('received_total', 'is', null).is('office_verified_at', null),
       supabase.from('logistics_central_loadings').select('id', { count: 'exact', head: true })
         .is('nota_plan_store_id', null).in('nota_payment_method', ['cash', 'transfer', 'deposit']).is('nota_verified_at', null),
+      supabase.rpc('get_pending_cut_count'),
     ])
     const err = vRes.error || aRes.error || accRes.error
     if (err) { showMessage('error', 'Gagal memuat: ' + err.message); setLoading(false); return }
-    onCount?.((cntV.count ?? 0) + (cntA.count ?? 0))
+    const nCut = Number(cntCut.data ?? 0)
+    setCutPending(nCut)
+    onCount?.((cntV.count ?? 0) + (cntA.count ?? 0) + nCut)
     setAccounts((accRes.data as Account[]) || [])
 
     type VisitRow = {
       id: string; payment_method: Method; invoice_amount: number | null; received_total: number; payment_photo_url: string | null
       resolved_at: string | null; office_verified_amount: number | null; office_verified_at: string | null; office_account_id: string | null
+      cut_total: number | null; cut_status: string | null
       logistics_stores: { name: string } | null; plan: { driver: NameRel } | null; verifier: NameRel
     }
     const visits = (vRes.data as unknown as VisitRow[]) || []
@@ -150,6 +167,7 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
         ],
         reported: Number(v.received_total), verified: v.office_verified_amount != null ? Number(v.office_verified_amount) : null,
         verifiedAt: v.office_verified_at, verifier: v.verifier?.full_name ?? null, accountId: v.office_account_id, photoUrl: v.payment_photo_url,
+        cutTotal: Number(v.cut_total ?? 0), cutStatus: v.cut_status,
       })),
       ...((aRes.data as unknown as AntarRow[]) || []).map(l => ({
         kind: 'antar' as const, id: l.id, date: l.nota_received_at, storeName: l.logistics_stores?.name ?? '-',
@@ -157,6 +175,7 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
         notas: [{ label: `Nota ${l.origin?.name ?? 'Cabang'}`, amount: Number(l.nota_amount) }],
         reported: Number(l.nota_reported_amount ?? 0), verified: l.nota_verified_amount != null ? Number(l.nota_verified_amount) : null,
         verifiedAt: l.nota_verified_at, verifier: l.verifier?.full_name ?? null, accountId: l.nota_account_id, photoUrl: l.nota_payment_photo_url,
+        cutTotal: 0, cutStatus: null,
       })),
     ].sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''))
     setItems(list)
@@ -213,20 +232,24 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-wrap items-center gap-3">
         <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
-          {(['belum', 'sudah'] as const).map(v => (
+          {(['belum', 'sudah', 'potong'] as const).map(v => (
             <button key={v} onClick={() => setView(v)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium ${view === v ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}>
-              {v === 'belum' ? 'Belum diverifikasi' : 'Sudah diverifikasi'}
+              {v === 'belum' ? 'Belum diverifikasi' : v === 'sudah' ? 'Sudah diverifikasi' : '✂️ Potong Nota'}
+              {v === 'potong' && cutPending > 0 && <span className="ml-1.5 px-1.5 py-0.5 text-xs rounded-full bg-rose-600 text-white">{cutPending}</span>}
             </button>
           ))}
         </div>
         <input type="month" value={month} onChange={e => setMonth(e.target.value)}
           className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white" />
-        <p className="text-sm text-slate-600">
+        {view !== 'potong' && <p className="text-sm text-slate-600">
           {items.length} setoran · dilaporkan {fmtRp(totalReported)}
           {kurangCount > 0 && <span className="text-amber-700 font-semibold"> · ⚠️ {kurangCount} kurang bayar</span>}
-        </p>
+        </p>}
       </div>
+      {view === 'potong' ? (
+        <PotongNotaList month={month} onChanged={fetchAll} />
+      ) : (<>
       <p className="text-xs text-slate-500">
         Uang cash / transfer / deposit dari driver dan pengantar. Tempo tidak perlu diverifikasi (belum ada uang).
         Pengiriman lama (sebelum sistem nota cabang) tetap diverifikasi di Logistik → Laporan Pengiriman.
@@ -241,7 +264,8 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
       ) : items.map(it => {
         const total = it.notas.reduce((s, n) => s + n.amount, 0)
         const basis = it.verified ?? it.reported
-        const short = total - basis
+        const cutApproved = it.cutStatus === 'disetujui' ? it.cutTotal : 0
+        const short = total - cutApproved - basis
         const wrong = wrongDraft[it.id]
         const busy = busyId === it.id
         return (
@@ -266,7 +290,12 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {short > 0 && <span className="text-xs px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium">⚠️ Kurang bayar {fmtRp(short)} (jadi piutang)</span>}
+              {it.cutTotal > 0 && (
+                <span className={`text-xs px-2 py-1 rounded font-medium ${it.cutStatus === 'disetujui' ? 'bg-green-100 text-green-700' : it.cutStatus === 'ditolak' ? 'bg-red-100 text-red-700' : 'bg-rose-100 text-rose-700'}`}>
+                  ✂️ Potong nota {fmtRp(it.cutTotal)} — {CUT_STATUS_LABEL[it.cutStatus ?? 'menunggu']}{it.cutStatus === 'menunggu' ? ' (lihat tab Potong Nota)' : ''}
+                </span>
+              )}
+              {short > 0 &&<span className="text-xs px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium">⚠️ Kurang bayar {fmtRp(short)} (jadi piutang)</span>}
               {short < 0 && <span className="text-xs px-2 py-1 rounded bg-sky-100 text-sky-800 font-medium">Lebih bayar {fmtRp(-short)} (saldo konsumen)</span>}
               {it.verified != null && it.verified !== it.reported && (
                 <span className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 font-medium">Selisih dari laporan: {fmtRp(it.verified - it.reported)}</span>
@@ -316,6 +345,143 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                 <span>✓ Diverifikasi {it.verifier ? `oleh ${it.verifier} ` : ''}· {fmtDate(it.verifiedAt)} · masuk {accountName(it.accountId)}</span>
                 <button disabled={busy} onClick={() => unverify(it)} className="text-red-600 hover:underline disabled:opacity-50">Batalkan verifikasi</button>
+              </div>
+            )}
+          </div>
+        )
+      })}
+      </>)}
+    </div>
+  )
+}
+
+type CutRow = {
+  id: string; cut_total: number; cut_status: 'menunggu' | 'disetujui' | 'ditolak'; cut_photo_url: string | null
+  cut_decided_at: string | null; cut_decision_note: string | null; resolved_at: string | null; payment_method: string | null
+  invoice_amount: number | null; logistics_stores: { name: string } | null; plan: { driver: NameRel } | null; decider: NameRel
+}
+type CutLine = { plan_store_id: string; item_name: string; amount: number; reason: string; goods: string }
+
+// Persetujuan potong nota (migrasi 092). Yang menunggu tampil semua bulan; yang sudah
+// diputuskan per bulan pengiriman. Keputusan boleh diubah selama nota belum ada pelunasan.
+function PotongNotaList({ month, onChanged }: { month: string; onChanged: () => void }) {
+  const supabase = createClient()
+  const [rows, setRows] = useState<CutRow[]>([])
+  const [lines, setLines] = useState<Record<string, CutLine[]>>({})
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [rejectDraft, setRejectDraft] = useState<Record<string, string>>({})
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  const fetchRows = useCallback(async () => {
+    setLoading(true)
+    const [y, m] = month.split('-').map(Number)
+    const start = new Date(y, m - 1, 1).toISOString()
+    const end = new Date(y, m, 1).toISOString()
+    const [pend, done] = await Promise.all([
+      supabase.from('logistics_plan_stores').select(CUT_SELECT).eq('cut_status', 'menunggu').order('resolved_at'),
+      supabase.from('logistics_plan_stores').select(CUT_SELECT).in('cut_status', ['disetujui', 'ditolak'])
+        .gte('resolved_at', start).lt('resolved_at', end).order('resolved_at', { ascending: false }),
+    ])
+    const err = pend.error || done.error
+    if (err) { setMessage({ type: 'error', text: 'Gagal memuat: ' + err.message }); setLoading(false); return }
+    const all = [...((pend.data as unknown as CutRow[]) || []), ...((done.data as unknown as CutRow[]) || [])]
+    const map: Record<string, CutLine[]> = {}
+    if (all.length > 0) {
+      const { data } = await supabase.from('logistics_visit_cuts')
+        .select('plan_store_id, item_name, amount, reason, goods').in('plan_store_id', all.map(r => r.id)).order('created_at')
+      for (const c of (data as CutLine[]) || []) (map[c.plan_store_id] ??= []).push(c)
+    }
+    setRows(all)
+    setLines(map)
+    setLoading(false)
+  }, [supabase, month])
+
+  useEffect(() => {
+    async function run() { await fetchRows() }
+    run()
+  }, [fetchRows])
+
+  async function decide(r: CutRow, decision: 'disetujui' | 'ditolak') {
+    const note = rejectDraft[r.id]?.trim() ?? ''
+    if (decision === 'ditolak' && note.length < 3) { setMessage({ type: 'error', text: 'Tulis alasan penolakan.' }); return }
+    setBusyId(r.id)
+    const { error } = await supabase.rpc('decide_visit_cut', { p_plan_store_id: r.id, p_decision: decision, p_note: decision === 'ditolak' ? note : null })
+    setBusyId(null)
+    if (error) { setMessage({ type: 'error', text: 'Gagal: ' + error.message }); return }
+    setMessage({ type: 'success', text: `Potongan ${r.logistics_stores?.name ?? ''} ${decision}.` })
+    setRejectDraft(d => { const n = { ...d }; delete n[r.id]; return n })
+    await fetchRows()
+    onChanged()
+  }
+
+  return (
+    <div className="space-y-3">
+      {message && (
+        <div className={`p-3 rounded-lg border text-sm ${message.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+          {message.text}
+        </div>
+      )}
+      <p className="text-xs text-slate-500">
+        Potongan nota dari driver (barang salah / rusak / kurang / harga beda). Selama belum disetujui atau bila ditolak,
+        potongan tetap dihitung kurang bayar (piutang). Disetujui = nota dikurangi, nota terbesar dulu.
+        Barang yang dibawa kembali dikonfirmasi Gudang di Penerimaan Retur.
+      </p>
+      {loading ? (
+        <div className="text-center py-10 text-slate-500 text-sm">Memuat...</div>
+      ) : rows.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">Tidak ada potong nota.</div>
+      ) : rows.map(r => {
+        const busy = busyId === r.id
+        const rej = rejectDraft[r.id]
+        return (
+          <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="font-semibold text-slate-800">{r.logistics_stores?.name ?? '-'}</p>
+                <p className="text-xs text-slate-500">🚚 {r.plan?.driver?.full_name ?? 'Driver'} · {fmtDate(r.resolved_at)}{r.payment_method ? ` · ${r.payment_method}` : ''}</p>
+              </div>
+              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${r.cut_status === 'menunggu' ? 'bg-rose-100 text-rose-700' : r.cut_status === 'disetujui' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {CUT_STATUS_LABEL[r.cut_status]}
+              </span>
+            </div>
+            <div className="text-sm space-y-1">
+              {(lines[r.id] ?? []).map((c, i) => (
+                <div key={i} className="flex justify-between gap-2">
+                  <span className="text-slate-600">✂️ {c.item_name} <span className="text-xs text-slate-400">· {CUT_REASON_LABEL[c.reason] ?? c.reason} · {c.goods === 'dibawa_kembali' ? '↩️ dibawa kembali' : '🚫 memang tidak ada'}</span></span>
+                  <span>{fmtRp(Number(c.amount))}</span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t border-slate-100 pt-1 font-semibold"><span>Total potongan</span><span>{fmtRp(Number(r.cut_total))}</span></div>
+            </div>
+            {r.cut_photo_url && (
+              <a href={r.cut_photo_url} target="_blank" rel="noreferrer" className="inline-block text-xs px-2 py-1 rounded bg-slate-100 text-blue-700 font-medium hover:underline">📎 Foto potong nota</a>
+            )}
+            {r.cut_status !== 'menunggu' && (
+              <p className="text-xs text-slate-500">
+                {CUT_STATUS_LABEL[r.cut_status]}{r.decider?.full_name ? ` oleh ${r.decider.full_name}` : ''} · {fmtDate(r.cut_decided_at)}
+                {r.cut_decision_note ? ` — ${r.cut_decision_note}` : ''}
+              </p>
+            )}
+            {rej === undefined ? (
+              <div className="flex flex-wrap gap-2">
+                {r.cut_status !== 'disetujui' && (
+                  <button disabled={busy} onClick={() => decide(r, 'disetujui')}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">✓ Setujui</button>
+                )}
+                {r.cut_status !== 'ditolak' && (
+                  <button disabled={busy} onClick={() => setRejectDraft(d => ({ ...d, [r.id]: '' }))}
+                    className="px-4 py-2 border border-red-300 text-red-700 bg-white hover:bg-red-50 text-sm font-semibold rounded-lg disabled:opacity-50">✗ Tolak</button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <input value={rej} onChange={e => setRejectDraft(d => ({ ...d, [r.id]: e.target.value }))} placeholder="Alasan penolakan"
+                  className="flex-1 min-w-[180px] px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
+                <button disabled={busy} onClick={() => decide(r, 'ditolak')}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">Tolak</button>
+                <button onClick={() => setRejectDraft(d => { const n = { ...d }; delete n[r.id]; return n })}
+                  className="px-3 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg bg-white">Batal</button>
               </div>
             )}
           </div>

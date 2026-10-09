@@ -51,6 +51,10 @@ type PlanStore = {
   failed_reason: string | null
   fail_kind: 'kirim_besok' | 'gagal' | null
   failed_photo_url: string | null
+  cut_total: number | null
+  cut_status: 'menunggu' | 'disetujui' | 'ditolak' | null
+  cut_decision_note: string | null
+  cut_photo_url: string | null
   logistics_stores: { name: string; address: string | null; phone: string | null } | null
 }
 
@@ -188,8 +192,65 @@ function BalanceNote({ invoice, received }: { invoice: number; received: number 
   )
 }
 
+// Potong nota (migrasi 092): nota dikurangi karena barang salah/rusak/kurang. Driver cuma
+// menyebut barang & nominal; server membagi potongan ke nota terbesar dulu. Perlu disetujui
+// Finance/Owner -- selama belum disetujui (atau ditolak) tetap dihitung kurang bayar.
+type CutReason = 'salah_muat' | 'rusak' | 'kurang_jumlah' | 'harga_beda' | 'lainnya'
+type CutGoods = 'dibawa_kembali' | 'tidak_ada'
+type CutItem = { item_name: string; amount: string; reason: CutReason | ''; goods: CutGoods | '' }
+type SavedCut = { id: string; plan_store_id: string; item_name: string; amount: number; reason: CutReason; goods: CutGoods }
+const CUT_REASON_LABEL: Record<CutReason, string> = {
+  salah_muat: 'Salah muat', rusak: 'Rusak / kedaluwarsa', kurang_jumlah: 'Kurang jumlah', harga_beda: 'Harga beda', lainnya: 'Lainnya',
+}
+const CUT_STATUS_LABEL: Record<string, string> = { menunggu: 'menunggu persetujuan Finance', disetujui: 'disetujui', ditolak: 'ditolak' }
+const emptyCut = (): CutItem => ({ item_name: '', amount: '', reason: '', goods: '' })
+const cutTotalOf = (items: CutItem[]) => items.reduce((s, i) => s + (Number(i.amount) || 0), 0)
+const cutItemsValid = (items: CutItem[]) =>
+  items.length > 0 && items.every(i => i.item_name.trim() && Number(i.amount) > 0 && i.reason && i.goods)
+const cutPayload = (items: CutItem[]) =>
+  items.map(i => ({ item_name: i.item_name.trim(), amount: Number(i.amount), reason: i.reason, goods: i.goods }))
+
+function CutItemsEditor({ items, onChange }: { items: CutItem[]; onChange: (v: CutItem[]) => void }) {
+  const set = (idx: number, patch: Partial<CutItem>) => onChange(items.map((it, i) => i === idx ? { ...it, ...patch } : it))
+  return (
+    <div className="space-y-2">
+      {items.map((it, idx) => (
+        <div key={idx} className="border border-rose-200 bg-rose-50/50 rounded-lg p-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-rose-800">Barang {idx + 1}</span>
+            {items.length > 1 && (
+              <button type="button" onClick={() => onChange(items.filter((_, i) => i !== idx))} className="text-xs text-red-600 hover:underline">Hapus</button>
+            )}
+          </div>
+          <input value={it.item_name} onChange={e => set(idx, { item_name: e.target.value })} placeholder="Nama produk"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          <RupiahInput value={it.amount} onChange={v => set(idx, { amount: v })} placeholder="Nominal potongan (Rp)"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          <select value={it.reason} onChange={e => set(idx, { reason: e.target.value as CutReason })}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+            <option value="">— Alasan potongan —</option>
+            {(Object.keys(CUT_REASON_LABEL) as CutReason[]).map(r => <option key={r} value={r}>{CUT_REASON_LABEL[r]}</option>)}
+          </select>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => set(idx, { goods: 'dibawa_kembali' })}
+              className={`px-2 py-2 rounded-lg text-xs border text-left ${it.goods === 'dibawa_kembali' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+              <b>↩️ Dibawa kembali</b><span className="block opacity-80">Barangnya ikut driver ke gudang</span>
+            </button>
+            <button type="button" onClick={() => set(idx, { goods: 'tidak_ada' })}
+              className={`px-2 py-2 rounded-lg text-xs border text-left ${it.goods === 'tidak_ada' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>
+              <b>🚫 Memang tidak ada</b><span className="block opacity-80">Mis. pesan 10, terkirim 9</span>
+            </button>
+          </div>
+        </div>
+      ))}
+      <button type="button" onClick={() => onChange([...items, emptyCut()])} className="text-xs text-blue-600 hover:underline font-medium">+ Tambah barang</button>
+      <p className="text-sm font-semibold text-rose-800">Total potongan: {fmtRp(cutTotalOf(items))}</p>
+    </div>
+  )
+}
+
 const STATUS_LABEL: Record<string, string> = {
-  ready: 'Siap Berangkat', departed: 'Sedang Jalan', closing: 'Menuju Garasi',
+  ready:'Siap Berangkat', departed: 'Sedang Jalan', closing: 'Menuju Garasi',
 }
 
 export default function JalanPengirimanPage() {
@@ -260,6 +321,10 @@ export default function JalanPengirimanPage() {
   const [incidentType, setIncidentType] = useState<'tidak_ada' | 'salah_muat' | 'retur' | 'barang_lebih'>('tidak_ada')
   const [incidentPhotoUrl, setIncidentPhotoUrl] = useState('')
   const [incidentDescription, setIncidentDescription] = useState('')
+  const [cutYes, setCutYes] = useState(false)
+  const [cutItems, setCutItems] = useState<CutItem[]>([emptyCut()])
+  const [cutPhotoUrl, setCutPhotoUrl] = useState('')
+  const [visitCuts, setVisitCuts] = useState<Record<string, SavedCut[]>>({})
 
   // Form Gagal Kirim: Kirim Besok (toko tutup, barang kembali & dijadwalkan lagi) atau Gagal
   // (ditolak / batal pesan) -- wajib alasan + foto (migrasi 088).
@@ -287,6 +352,9 @@ export default function JalanPengirimanPage() {
   const [editIncidentType, setEditIncidentType] = useState<IncidentType>('tidak_ada')
   const [editIncidentPhotoUrl, setEditIncidentPhotoUrl] = useState('')
   const [editIncidentDescription, setEditIncidentDescription] = useState('')
+  const [editCutYes, setEditCutYes] = useState(false)
+  const [editCutItems, setEditCutItems] = useState<CutItem[]>([emptyCut()])
+  const [editCutPhotoUrl, setEditCutPhotoUrl] = useState('')
   const [editSaving, setEditSaving] = useState(false)
 
   // Jeda klik: tiap kali layar/langkah berganti, tombol dikunci sebentar. Laporan driver:
@@ -400,6 +468,7 @@ export default function JalanPengirimanPage() {
       .select(`id, store_id, sequence_order, status, delivery_photo_urls,
         payment_method, invoice_amount, payment_amount, received_total, payment_photo_url, payment_due_date,
         incident_type, incident_photo_url, incident_description, failed_reason, fail_kind, failed_photo_url,
+        cut_total, cut_status, cut_decision_note, cut_photo_url,
         logistics_stores(name, address, phone)`)
       .eq('plan_id', planId).order('sequence_order')
     const rows = (data as unknown as PlanStore[]) || []
@@ -433,6 +502,15 @@ export default function JalanPengirimanPage() {
       for (const n of (sjData as SjNote[]) || []) (sjMap[n.plan_store_id] ??= []).push(n)
     }
     setVisitSj(sjMap)
+
+    const cutMap: Record<string, SavedCut[]> = {}
+    const cutIds = rows.filter(r => Number(r.cut_total) > 0).map(r => r.id)
+    if (cutIds.length > 0) {
+      const { data: cutData } = await supabase.from('logistics_visit_cuts')
+        .select('id, plan_store_id, item_name, amount, reason, goods').in('plan_store_id', cutIds).order('created_at')
+      for (const c of (cutData as SavedCut[]) || []) (cutMap[c.plan_store_id] ??= []).push(c)
+    }
+    setVisitCuts(cutMap)
 
     const { data: unf } = await supabase.rpc('get_unfinished_loadings_for_plan', { p_plan_id: planId })
     setUnfinishedLoadings((unf as { loading_id: string; store_name: string; origin_name: string; package_count: number }[]) || [])
@@ -505,6 +583,7 @@ export default function JalanPengirimanPage() {
     setNoGudang(false)
     setIncidentType(store?.incident_type || 'tidak_ada')
     setIncidentPhotoUrl(store?.incident_photo_url || ''); setIncidentDescription(store?.incident_description || '')
+    setCutYes(false); setCutItems([emptyCut()]); setCutPhotoUrl(store?.cut_photo_url || '')
   }
 
   function openAction(mode: ActionMode) {
@@ -525,7 +604,7 @@ export default function JalanPengirimanPage() {
   // menekan "Kirim". File-nya sendiri sebenarnya sudah aman di storage sejak diunggah, yang
   // hilang cuma REFERENSI-nya di state lokal HP -- jadi begitu path-nya juga langsung ditulis
   // ke baris toko ini, referensinya tidak hilang lagi walau state lokal reset.
-  async function persistStorePhotoField(field: 'delivery_photo_urls' | 'payment_photo_url' | 'incident_photo_url', value: string[] | string | null) {
+  async function persistStorePhotoField(field: 'delivery_photo_urls' | 'payment_photo_url' | 'incident_photo_url' | 'cut_photo_url', value: string[] | string | null) {
     if (!selectedStore) return
     const { error } = await supabase.from('logistics_plan_stores').update({ [field]: value }).eq('id', selectedStore.id)
     if (error) { showMessage('error', 'Foto sudah diunggah tapi gagal disimpan ke rencana: ' + error.message); return }
@@ -725,8 +804,10 @@ export default function JalanPengirimanPage() {
     paymentMethod === 'transfer' ? !!paymentPhotoUrl :
     paymentMethod === 'tempo' ? !!paymentDueDate : true
   )
+  const cutOverNota = cutYes && cutTotalOf(cutItems) > visitNotaTotal(invoiceAmount, noGudang, selectedNotas)
   const canSubmitKirim = canProceedStep1 && canProceedStep2 &&
-    (incidentType === 'tidak_ada' || (!!incidentPhotoUrl && incidentDescription.trim().length > 0))
+    (incidentType === 'tidak_ada' || (!!incidentPhotoUrl && incidentDescription.trim().length > 0)) &&
+    (!cutYes || (cutItemsValid(cutItems) && !!cutPhotoUrl && !cutOverNota))
 
   // Kunci tombol 1 detik setiap kali tampilan tombol berganti (pindah langkah, kotak konfirmasi
   // muncul/hilang, pilih toko, buka modal) -- tap kedua dari double-tap jadi tidak "tembus".
@@ -759,8 +840,16 @@ export default function JalanPengirimanPage() {
     // "Sudah diproses rekan" tetap lanjut bersih-bersih seperti sukses (tokonya memang sudah beres).
     const alreadyDone = !!error && /sudah lebih dulu diproses/.test(error.message)
     if (error && !alreadyDone) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); submitLockRef.current = false; return }
+    let cutError: string | null = null
+    if (!alreadyDone && cutYes) {
+      const { error: cErr } = await supabase.rpc('set_visit_cuts', {
+        p_plan_store_id: selectedStore.id, p_items: cutPayload(cutItems), p_photo_url: cutPhotoUrl,
+      })
+      if (cErr) cutError = cErr.message
+    }
     if (alreadyDone) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
-    else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" selesai dikirim.`)
+    else if (cutError) showMessage('error', `Pengiriman tersimpan, tapi POTONG NOTA gagal disimpan: ${cutError}. Isi ulang lewat tombol Edit di Riwayat Toko.`)
+    else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" selesai dikirim.${cutYes ? ' Potong nota menunggu persetujuan Finance.' : ''}`)
     await clearTargetStore()
     resetKirimForm()
     await refresh()
@@ -816,11 +905,19 @@ export default function JalanPengirimanPage() {
     setEditIncidentType(ps.incident_type || 'tidak_ada')
     setEditIncidentPhotoUrl(ps.incident_photo_url || '')
     setEditIncidentDescription(ps.incident_description || '')
+    const saved = visitCuts[ps.id] ?? []
+    setEditCutYes(saved.length > 0)
+    setEditCutItems(saved.length > 0 ? saved.map(c => ({ item_name: c.item_name, amount: String(c.amount), reason: c.reason, goods: c.goods })) : [emptyCut()])
+    setEditCutPhotoUrl(ps.cut_photo_url || '')
   }
 
+  // Potongan yang sudah diputuskan Finance tidak bisa diubah driver lagi (server juga menolak).
+  const editCutLocked = !!editHistoryStore && (editHistoryStore.cut_status === 'disetujui' || editHistoryStore.cut_status === 'ditolak')
+  const editCutOverNota = editCutYes && cutTotalOf(editCutItems) > visitNotaTotal(editInvoiceAmount, editNoGudang, editNotas)
   const canSubmitEditHistory = isPaymentValid(editPaymentMethod, editInvoiceAmount, editPaymentAmount, editNoGudang, editNotas.length) &&
     (editPaymentMethod !== 'tempo' || !!editPaymentDueDate) &&
-    (editIncidentType === 'tidak_ada' || (!!editIncidentPhotoUrl && editIncidentDescription.trim().length > 0))
+    (editIncidentType === 'tidak_ada' || (!!editIncidentPhotoUrl && editIncidentDescription.trim().length > 0)) &&
+    (editCutLocked || !editCutYes || (cutItemsValid(editCutItems) && !!editCutPhotoUrl && !editCutOverNota))
 
   // Foto bukti transfer TIDAK diminta ulang di sini (fitur ini cuma untuk betulkan salah
   // ketik nominal/metode/tanggal, bukan mengulang seluruh alur foto) — kalau metode diubah
@@ -841,7 +938,16 @@ export default function JalanPengirimanPage() {
       p_incident_photo_url: editIncidentType !== 'tidak_ada' ? editIncidentPhotoUrl : null,
       p_incident_description: editIncidentType !== 'tidak_ada' ? editIncidentDescription.trim() : null,
     })
+    let cutError: string | null = null
+    const hadCuts = (visitCuts[editHistoryStore.id] ?? []).length > 0
+    if (!error && !editCutLocked && (editCutYes || hadCuts)) {
+      const { error: cErr } = await supabase.rpc('set_visit_cuts', {
+        p_plan_store_id: editHistoryStore.id, p_items: editCutYes ? cutPayload(editCutItems) : [], p_photo_url: editCutYes ? editCutPhotoUrl : null,
+      })
+      if (cErr) cutError = cErr.message
+    }
     if (error) showMessage('error', 'Gagal menyimpan perubahan: ' + error.message)
+    else if (cutError) showMessage('error', 'Pembayaran tersimpan, tapi potong nota gagal: ' + cutError)
     else showMessage('success', 'Data toko berhasil diperbarui.')
     setEditHistoryStore(null)
     await refresh()
@@ -1385,6 +1491,40 @@ export default function JalanPengirimanPage() {
                         </div>
                       )}
 
+                      <div className="mt-3 pt-3 border-t border-slate-100">
+                        <p className="text-xs font-semibold text-slate-600 mb-1">Apakah ini POTONG NOTA?</p>
+                        <p className="text-xs text-slate-400 mb-2">Toko membayar kurang dari nota karena barang salah / rusak / kurang / harga beda.</p>
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <button type="button" onClick={() => setCutYes(false)}
+                            className={`py-2 rounded-lg text-xs font-medium border ${!cutYes ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}>Tidak</button>
+                          <button type="button" onClick={() => setCutYes(true)}
+                            className={`py-2 rounded-lg text-xs font-medium border ${cutYes ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>✂️ Ya, potong nota</button>
+                        </div>
+                        {cutYes && (
+                          <div className="space-y-2">
+                            <CutItemsEditor items={cutItems} onChange={setCutItems} />
+                            {cutOverNota && <p className="text-xs text-red-600">Total potongan melebihi total nota.</p>}
+                            {cutPhotoUrl ? (
+                              <div className="space-y-2">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={cutPhotoUrl} alt="Foto potong nota" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                                <button onClick={async () => { setCutPhotoUrl(''); await persistStorePhotoField('cut_photo_url', null) }} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                              </div>
+                            ) : (
+                              <LogisticsCameraCapture label="Foto Barang / Nota yang Dipotong *" employeeName={myName}
+                                onCaptured={async blob => {
+                                  const url = await uploadPhoto(blob, 'potong')
+                                  if (url) { setCutPhotoUrl(url); await persistStorePhotoField('cut_photo_url', url) }
+                                }} />
+                            )}
+                            <p className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                              Potongan menunggu persetujuan Finance. Selama belum disetujui, tetap dihitung kurang bayar.
+                              {cutItems.some(i => i.goods === 'dibawa_kembali') && ' Barang yang dibawa kembali diserahkan ke Gudang (Penerimaan Retur).'}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="flex gap-2 pt-3">
                         <button onClick={() => setKirimStep(2)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">← Kembali</button>
                         <button onClick={submitKirim} disabled={!canSubmitKirim || submitting || clickLocked}
@@ -1625,6 +1765,14 @@ export default function JalanPengirimanPage() {
                         {INCIDENT_LABEL[ps.incident_type]}{ps.incident_description ? `: ${ps.incident_description}` : ''}
                       </p>
                     )}
+                    {Number(ps.cut_total) > 0 && (
+                      <p className={`text-xs mt-1 ${ps.cut_status === 'ditolak' ? 'text-red-600' : ps.cut_status === 'disetujui' ? 'text-green-700' : 'text-rose-700'}`}>
+                        ✂️ Potong nota {fmtRp(Number(ps.cut_total))} — {CUT_STATUS_LABEL[ps.cut_status ?? 'menunggu']}
+                        {ps.cut_decision_note ? ` (${ps.cut_decision_note})` : ''}
+                        {(visitCuts[ps.id] ?? []).map(c => ` · ${c.item_name} ${fmtRp(Number(c.amount))}${c.goods === 'dibawa_kembali' ? ' ↩️' : ''}`).join('')}
+                        {ps.cut_photo_url && <> · <button type="button" onClick={() => openLightbox(ps.cut_photo_url!, 'Foto potong nota')} className="underline">foto</button></>}
+                      </p>
+                    )}
 
                     {((ps.delivery_photo_urls && ps.delivery_photo_urls.length > 0) || ps.payment_photo_url || ps.incident_photo_url) && (
                       <div className="flex gap-3 mt-2 flex-wrap">
@@ -1790,6 +1938,41 @@ export default function JalanPengirimanPage() {
                     placeholder="Keterangan kejadian..." rows={3}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
                 </div>
+              )}
+
+              <p className="text-xs font-semibold text-slate-500 uppercase pt-2 border-t border-slate-100">Potong Nota</p>
+              {editCutLocked ? (
+                <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  Potongan {fmtRp(Number(editHistoryStore.cut_total))} sudah {CUT_STATUS_LABEL[editHistoryStore.cut_status!]} Finance — tidak bisa diubah lagi.
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setEditCutYes(false)}
+                      className={`py-2 rounded-lg text-xs font-medium border ${!editCutYes ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300'}`}>Tidak ada</button>
+                    <button type="button" onClick={() => setEditCutYes(true)}
+                      className={`py-2 rounded-lg text-xs font-medium border ${editCutYes ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-300'}`}>✂️ Ya, potong nota</button>
+                  </div>
+                  {editCutYes && (
+                    <div className="space-y-2">
+                      <CutItemsEditor items={editCutItems} onChange={setEditCutItems} />
+                      {editCutOverNota && <p className="text-xs text-red-600">Total potongan melebihi total nota.</p>}
+                      {editCutPhotoUrl ? (
+                        <div className="space-y-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={editCutPhotoUrl} alt="Foto potong nota" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                          <button type="button" onClick={() => setEditCutPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                        </div>
+                      ) : (
+                        <LogisticsCameraCapture label="Foto Barang / Nota yang Dipotong *" employeeName={myName}
+                          onCaptured={async blob => {
+                            const url = await uploadHistoryPhoto(editHistoryStore.id, blob)
+                            if (url) setEditCutPhotoUrl(url)
+                          }} />
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <div className="flex gap-3 pt-4">

@@ -23,6 +23,7 @@ type Receivable = {
   is_official: boolean
   allocated: number
   outstanding: number
+  cut_amount: number // potong nota yang disetujui Finance (migrasi 092)
 }
 type CreditEntry = { store_id: string; kind: 'lebih_bayar' | 'sisa_setoran' | 'dipakai'; ref_id: string; entry_date: string; amount: number }
 type Payment = {
@@ -300,7 +301,10 @@ export default function BukuPiutangPage() {
                                 <tr key={r.source_type + r.source_id}>
                                   <td className="py-1.5 pr-2">{fmtD(r.nota_date)}</td>
                                   <td className="py-1.5 pr-2">{r.branch_id ? branches[r.branch_id] ?? '-' : '-'}</td>
-                                  <td className="py-1.5 pr-2 text-right">{fmtRp(r.nota_amount)}</td>
+                                  <td className="py-1.5 pr-2 text-right">
+                                    {fmtRp(r.nota_amount)}
+                                    {Number(r.cut_amount) > 0 && <span className="block text-rose-700">✂️ −{fmtRp(Number(r.cut_amount))}</span>}
+                                  </td>
                                   <td className="py-1.5 pr-2 text-right">{r.paid_at_delivery > 0 ? `${fmtRp(r.paid_at_delivery)} (${METHOD[r.payment_method] ?? r.payment_method})` : METHOD[r.payment_method] ?? '-'}</td>
                                   <td className="py-1.5 pr-2 text-right">{r.allocated > 0 ? fmtRp(r.allocated) : '-'}</td>
                                   <td className="py-1.5 pr-2 text-right font-semibold">{fmtRp(r.outstanding)}</td>

@@ -43,6 +43,8 @@ type PlanStore = {
   incident_type: string
   incident_photo_url: string | null
   incident_description: string | null
+  cut_total: number | null
+  cut_status: string | null
   failed_reason: string | null
   fail_kind: 'kirim_besok' | 'gagal' | null
   resolved_at: string | null
@@ -156,6 +158,7 @@ export default function LaporanPengirimanPage() {
         .select(`id, plan_id, sequence_order, status, delivery_photo_urls,
           payment_method, invoice_amount, payment_amount, received_total, payment_photo_url, payment_due_date,
           incident_type, incident_photo_url, incident_description, failed_reason, fail_kind, resolved_at,
+          cut_total, cut_status,
           office_verified_amount, office_verified_by, office_verified_at,
           logistics_stores(name)`)
         .in('plan_id', list.map(p => p.id)).order('sequence_order')
@@ -642,6 +645,11 @@ export default function LaporanPengirimanPage() {
                             </div>
                             {s.incident_description && (
                               <p className="text-xs text-amber-600 mt-1 ml-8">{s.incident_description}</p>
+                            )}
+                            {Number(s.cut_total) > 0 && (
+                              <p className="text-xs text-rose-700 mt-1 ml-8">
+                                ✂️ Potong nota {fmtRp(Number(s.cut_total))} — {s.cut_status === "disetujui" ? "disetujui" : s.cut_status === "ditolak" ? "ditolak (tetap piutang)" : "menunggu persetujuan Finance"}
+                              </p>
                             )}
                             {((s.delivery_photo_urls && s.delivery_photo_urls.length > 0) || s.payment_photo_url || s.incident_photo_url) && (
                               <div className="flex gap-3 mt-2 ml-8 flex-wrap">
