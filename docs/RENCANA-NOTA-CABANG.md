@@ -14,7 +14,10 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
 
 ## Status
 
-- [ ] **Tahap 1** — Nota cabang di Laporan Muat (nominal wajib, aturan koreksi, 1 laporan = 1 driver)
+- [x] **Tahap 1** — Nota cabang di Laporan Muat (nominal wajib, aturan koreksi, 1 laporan = 1 driver)
+  (migrasi `082_central_loading_nota.sql`, commit `f529d2c`). Keputusan: laporan yang sudah Selesai
+  tapi belum diambil saat rilis **tidak wajib** diisi nota (boleh diisi lewat tombol "Isi Nota").
+  Aturan "1 laporan = 1 driver" hanya berlaku untuk laporan yang punya nota.
 - [ ] **Tahap 2** — Pembayaran di lapangan (driver isi 1 angka → dibagi otomatis; pengantar antar sendiri isi di Foto 2)
 - [ ] **Tahap 3** — Tab verifikasi finance (Cocok / Tidak Cocok + pemberitahuan kurang bayar)
 - [ ] **Tahap 4** — Gagal / Kirim Besok + tab Tertunda (berlaku nota gudang & nota cabang)
@@ -196,8 +199,6 @@ Tanyakan ke user sebelum mengerjakan tahap terkait:
 - **(Tahap 4)** Berapa lama kiriman boleh "Kirim Besok"? Siapa yang memutuskan status "Gagal"
   (driver langsung, atau perlu persetujuan)? Barang "Kirim Besok" dibawa pulang driver atau
   dikembalikan ke cabang/gudang?
-- **(Tahap 1)** Laporan Muat yang sudah Selesai tapi **belum diambil** saat fitur rilis — wajib
-  diisi notanya, atau ikut dibiarkan seperti data lama?
 
 ---
 
