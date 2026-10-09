@@ -222,6 +222,7 @@ const adminNavItems: NavNode[] = [
       { name: 'Detail Laporan per Cabang', href: '/keuangan/laporan/detail' },
       { name: 'Cash Flow per Rekening', href: '/keuangan/cashflow' },
       { name: 'Laporan Resmi', href: '/keuangan/laporan' },
+      { name: 'Buku Piutang', href: '/keuangan/piutang' },
       { name: 'Ringkasan Supplier', href: '/keuangan/pembelian' },
       { name: 'Riwayat Kas Keluar', href: '/keuangan/riwayat' },
       { name: 'Kasbon', href: '/kasbon' },
@@ -510,7 +511,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // supplier di grup Keuangan, /input & /supplier = catat di grup Operasional) — jadi keduanya
   // harus saling mengecualikan rute satu sama lain, supaya cuma satu yang auto-expand.
   const inKeuanganGroup = pathname.startsWith('/keuangan/dashboard') || pathname.startsWith('/keuangan/laporan')
-    || pathname.startsWith('/keuangan/cashflow') || pathname.startsWith('/keuangan/riwayat')
+    || pathname.startsWith('/keuangan/cashflow') || pathname.startsWith('/keuangan/riwayat') || pathname.startsWith('/keuangan/piutang')
     || pathname === '/keuangan/pembelian' || pathname.startsWith('/kasbon')
 
   // Kalender Libur secara URL ada di bawah /absensi/*, tapi menunya sengaja dipindah ke

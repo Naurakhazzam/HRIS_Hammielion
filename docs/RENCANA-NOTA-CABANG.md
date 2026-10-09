@@ -47,6 +47,16 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   Pengiriman) diarahkan ke logika yang sama. Driver tidak bisa edit setelah diverifikasi.
   Foto 2 antar sendiri: tempo wajib tanggal jatuh tempo (di aplikasi), angka asli disimpan di
   `nota_reported_amount`. Pengiriman lama (tanpa `received_total`) tetap diverifikasi di Laporan Pengiriman.
+- [x] **Buku Piutang** — migrasi `087_receivables_ledger.sql`, halaman `keuangan/piutang` (menu
+  Keuangan → Buku Piutang), **belum di-push**. Nota tidak disalin: view `fin_receivable_notas` /
+  `fin_receivables` menghitung langsung dari kunjungan driver (Nota Gudang, cabang Gudang) & Laporan
+  Muat (nota cabang) sejak 10 Okt 2026; resmi = sudah diverifikasi atau tempo. Pelunasan disimpan di
+  `fin_receivable_payments` + `fin_receivable_allocations` lewat RPC `record_receivable_payment`
+  (paling lama dulu, tanggal sama → gudang dulu; kind `setoran` masuk rekening / `saldo` pakai saldo
+  konsumen) & `cancel_receivable_payment`. Saldo konsumen = view `fin_customer_credit_entries`
+  (lebih bayar terverifikasi + sisa setoran − saldo dipakai). Trigger `guard_receivable_locked`
+  mengunci nota yang sudah punya pelunasan dari edit driver / verifikasi ulang / ubah nota.
+  Akses: `can_access_receivables()` = owner/hr/finance (Nisa ber-role hr).
 - [ ] **Tahap 4** — Gagal / Kirim Besok + tab Tertunda (berlaku nota gudang & nota cabang)
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)
 - [ ] **Ditunda** — Potong nota (salah muat / kejadian lain) — dibahas setelah semua tahap di atas
