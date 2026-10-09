@@ -114,9 +114,9 @@ const PAY_LABEL: Record<PayMethod, string> = { cash: 'Cash', transfer: 'Transfer
 // Kiriman barang bernota wajib isi cara bayar di Foto 2; tempo tidak ada uang diterima.
 const stopNota = (s: TripStop) => s.kind === 'barang' ? s.logistics_central_loadings?.nota_amount ?? null : null
 // Transfer wajib foto bukti -- belum ada bukti berarti dicatat tempo.
-type PayDraft = { method: PayMethod | ''; received: string; photoUrl?: string }
+type PayDraft = { method: PayMethod | ''; received: string; photoUrl?: string; dueDate?: string }
 const payValid = (d?: PayDraft) =>
-  !!d?.method && (d.method === 'tempo' || Number(d.received) > 0) && (d.method !== 'transfer' || !!d.photoUrl)
+  !!d?.method && (d.method === 'tempo' ? !!d.dueDate : Number(d.received) > 0) && (d.method !== 'transfer' || !!d.photoUrl)
 const ms = (s: string) => new Date(s).getTime()
 
 function fmtDur(msVal: number) {
@@ -409,6 +409,7 @@ export default function KirimBarangPage() {
       p_method: pay?.method || null,
       p_received: pay ? (pay.method === 'tempo' ? 0 : Number(pay.received)) : null,
       p_payment_photo_url: pay?.method === 'transfer' ? pay.photoUrl ?? null : null,
+      p_due_date: pay?.method === 'tempo' ? pay.dueDate ?? null : null,
     })
     setBusy(false)
     if (error) {
@@ -665,6 +666,13 @@ export default function KirimBarangPage() {
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
                         </div>
                       )}
+                      {pay?.method === 'tempo' && (
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">Tanggal jatuh tempo *</label>
+                          <input type="date" value={pay.dueDate ?? ''} onChange={e => setPayDraft(p => ({ ...p, [s.id]: { ...p[s.id], method: 'tempo', received: p[s.id]?.received ?? '', dueDate: e.target.value } }))}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                      )}
                       {pay?.method === 'transfer' && (
                         pay.photoUrl ? (
                           <div className="space-y-1">
@@ -692,7 +700,8 @@ export default function KirimBarangPage() {
                   ) : nota != null && !payValid(pay) ? (
                     <p className="text-xs text-slate-500 text-center py-2">
                       {!pay?.method ? 'Pilih cara bayar dulu, baru foto sampai.'
-                        : pay.method !== 'tempo' && !(Number(pay.received) > 0) ? 'Isi uang yang diterima dulu, baru foto sampai.'
+                        : pay.method === 'tempo' ? 'Isi tanggal jatuh tempo dulu, baru foto sampai.'
+                        : !(Number(pay.received) > 0) ? 'Isi uang yang diterima dulu, baru foto sampai.'
                         : 'Foto bukti transfer dulu, baru foto sampai.'}
                     </p>
                   ) : waitLeft > 0 ? (

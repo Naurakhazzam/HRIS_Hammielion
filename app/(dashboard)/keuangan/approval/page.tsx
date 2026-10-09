@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
+import VerifikasiUangPengiriman from '@/components/VerifikasiUangPengiriman'
 
 type PendingCashOut = {
   id: string
@@ -89,7 +90,7 @@ type PendingDriverHelperKasbon = {
   employees: { full_name: string; employee_code: string } | null
 }
 
-type Tab = 'kas_keluar' | 'kas_masuk' | 'hpp' | 'modal_cabang' | 'aset' | 'kasbon' | 'kasbon_driver_kenek'
+type Tab = 'kas_keluar' | 'kas_masuk' | 'hpp' | 'modal_cabang' | 'aset' | 'kasbon' | 'kasbon_driver_kenek' | 'uang_pengiriman'
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Tunai', transfer: 'Transfer', campuran: 'Campuran' }
 const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni',
@@ -103,6 +104,7 @@ export default function ApprovalKasKeluarPage() {
   const [roleLoading, setRoleLoading] = useState(true)
 
   const [tab, setTab] = useState<Tab>('kas_keluar')
+  const [uangCount, setUangCount] = useState(0)
   const [cashOut, setCashOut] = useState<PendingCashOut[]>([])
   const [cashIn, setCashIn] = useState<PendingCashIn[]>([])
   const [hpp, setHpp] = useState<PendingHpp[]>([])
@@ -269,7 +271,7 @@ export default function ApprovalKasKeluarPage() {
     setSelectedIds([])
   }
 
-  const LABEL_BY_TAB: Record<Tab, string> = { kas_keluar: 'Kas Keluar', kas_masuk: 'Kas Masuk', hpp: 'HPP', modal_cabang: 'Modal Cabang', aset: 'Aset & Kontrak', kasbon: 'Kasbon', kasbon_driver_kenek: 'Kasbon Driver/Kenek' }
+  const LABEL_BY_TAB: Record<Tab, string> = { kas_keluar: 'Kas Keluar', kas_masuk: 'Kas Masuk', hpp: 'HPP', modal_cabang: 'Modal Cabang', aset: 'Aset & Kontrak', kasbon: 'Kasbon', kasbon_driver_kenek: 'Kasbon Driver/Kenek', uang_pengiriman: 'Uang Pengiriman' }
   // Tabel & kolom status per tab sederhana (single-table)
   const SIMPLE_TABLE_BY_TAB: Partial<Record<Tab, string>> = { kas_keluar: 'fin_cash_out', kas_masuk: 'fin_cash_in', hpp: 'fin_hpp_entries' }
 
@@ -511,7 +513,7 @@ export default function ApprovalKasKeluarPage() {
       )}
 
       <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit mb-6 flex-wrap">
-        {(['kas_keluar', 'kas_masuk', 'hpp', 'modal_cabang', 'aset', 'kasbon', 'kasbon_driver_kenek'] as Tab[]).map(t => (
+        {(['kas_keluar', 'kas_masuk', 'hpp', 'modal_cabang', 'aset', 'kasbon', 'kasbon_driver_kenek', 'uang_pengiriman'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab === t ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             {LABEL_BY_TAB[t]} ({
@@ -521,12 +523,18 @@ export default function ApprovalKasKeluarPage() {
               t === 'modal_cabang' ? modalItems.length :
               t === 'aset' ? asetItems.length :
               t === 'kasbon' ? kasbonItems.length :
+              t === 'uang_pengiriman' ? uangCount :
               driverHelperKasbonItems.length
             })
           </button>
         ))}
       </div>
 
+      {/* Selalu terpasang (cuma disembunyikan) supaya jumlah di tab langsung terisi. */}
+      <div className={tab === 'uang_pengiriman' ? '' : 'hidden'}>
+        <VerifikasiUangPengiriman onCount={setUangCount} />
+      </div>
+      {tab !== 'uang_pengiriman' && (
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-200 flex flex-wrap gap-3">
           <input
@@ -807,6 +815,7 @@ export default function ApprovalKasKeluarPage() {
           </table>
         </div>
       </div>
+      )}
 
       {rejectModal && (
         <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">

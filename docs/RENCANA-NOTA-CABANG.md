@@ -37,7 +37,16 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   wajibnya baru di aplikasi, server belum memaksa supaya versi lama tidak macet). Laporan Pengiriman:
   perbaikan sementara — tampil nota cabang, "diterima" = `received_total`, piutang dari semua nota.
   **Belum di-push** (permintaan user: dikumpulkan, push sekaligus nanti).
-- [ ] **Tahap 3** — Tab verifikasi finance (Cocok / Tidak Cocok + pemberitahuan kurang bayar)
+- [x] **Tahap 3** — Tab verifikasi finance (Cocok / Tidak Cocok + pemberitahuan kurang bayar)
+  (migrasi `086_finance_verify_delivery_money.sql`, **belum di-push**). Tab "Uang Pengiriman" di
+  `keuangan/approval` → komponen `components/VerifikasiUangPengiriman.tsx`. RPC `verify_visit_payment`
+  / `unverify_visit_payment` (kunjungan driver, semua nota sekaligus) dan `verify_nota_payment` /
+  `unverify_nota_payment` (antar sendiri). Rekening: cash/deposit default Kas Tunai, transfer wajib
+  dipilih. `apply_visit_payment` memakai angka finance bila sudah diverifikasi; nota cabang ikut
+  menyimpan `nota_verified_*` + `nota_account_id`. Tombol lama `verify_cash_payment` (Laporan
+  Pengiriman) diarahkan ke logika yang sama. Driver tidak bisa edit setelah diverifikasi.
+  Foto 2 antar sendiri: tempo wajib tanggal jatuh tempo (di aplikasi), angka asli disimpan di
+  `nota_reported_amount`. Pengiriman lama (tanpa `received_total`) tetap diverifikasi di Laporan Pengiriman.
 - [ ] **Tahap 4** — Gagal / Kirim Besok + tab Tertunda (berlaku nota gudang & nota cabang)
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)
 - [ ] **Ditunda** — Potong nota (salah muat / kejadian lain) — dibahas setelah semua tahap di atas
@@ -205,6 +214,31 @@ Nominal sama (mis. 1.000.000 gudang & 1.000.000 cabang): Nota Gudang diisi dulu.
 - Tab **Tertunda** (pengingat). Detail dibahas lagi sebelum dikerjakan (lihat bagian 6).
 
 ---
+
+## 5b. Keputusan user 9 Okt 2026 (jawaban atas daftar keputusan)
+
+**Tahap 3 — verifikasi finance**
+1. Tab baru **"Uang Pengiriman"** di menu Keuangan → Verifikasi Keuangan (`keuangan/approval`).
+2. Finance = **Nisa Hoerunisa** (akunnya saat ini ber-role `hr` dengan jabatan Finance — role tidak
+   diubah tanpa izin user; owner/hr/finance semuanya boleh verifikasi).
+3. Tempo di jalur antar sendiri **wajib tanggal jatuh tempo** (dibutuhkan buku piutang).
+   Transfer (semua jalur) wajib foto bukti; belum ada bukti = tempo. Finance juga memverifikasi transfer.
+
+**Buku piutang** (tahap tersendiri setelah Tahap 3)
+4. Mulai dihitung dari nota **10 Okt 2026** ("mulai besok"), tanpa saldo awal piutang lama.
+5. Piutang resmi **setelah finance verifikasi**; sebelumnya tampil "menunggu verifikasi".
+6. Pelunasan dicatat **finance saja** (bukan driver).
+7. Pelunasan dipakai ke **nota paling lama dulu**.
+8. Saldo konsumen (lebih bayar) dipakai finance untuk menutup piutang.
+9. Yang boleh melihat: **Owner & finance saja** (cabang tidak).
+
+**Tahap 4 — Gagal / Kirim Besok**
+10. Driver memilih Gagal / Kirim Besok di lapangan (alasan + foto).
+11. Barang Kirim Besok kembali ke gudang/cabang asal, lalu muncul lagi di daftar jemput.
+12. Batas Kirim Besok **3 hari**, lewat itu peringatan merah ke Owner.
+
+**Push:** jangan push apa pun sampai user bilang (commit lokal saja). Migrasi DB langsung aktif,
+jadi harus tetap cocok dengan aplikasi versi yang sedang ter-deploy.
 
 ## 6. Pertanyaan yang MASIH TERBUKA
 
