@@ -318,6 +318,9 @@ export default function JalanPengirimanPage() {
   // bisa saja cuma ada di Toko Pusat, tidak ada di rencana Gudang sama sekali). Sifatnya
   // pengingat (bisa ditutup), bukan penghalang -- ada tab permanen "Jemput Toko Pusat" buat
   // jaga-jaga kalau pop-up ini kelewat/ke-close tidak sengaja.
+  // Laporan Muat cabang ke toko di trip ini yang belum ditandai Selesai -- paketnya belum bisa
+  // diambil di sistem (kasus Yulia Poultry 9 Okt). Pengingat, bukan penghalang (migrasi 091).
+  const [unfinishedLoadings, setUnfinishedLoadings] = useState<{ loading_id: string; store_name: string; origin_name: string; package_count: number }[]>([])
   const [showCentralReminder, setShowCentralReminder] = useState(false)
   const [centralPendingCount, setCentralPendingCount] = useState(0)
   const [reminderDismissedFor, setReminderDismissedFor] = useState<string | null>(null)
@@ -430,6 +433,9 @@ export default function JalanPengirimanPage() {
       for (const n of (sjData as SjNote[]) || []) (sjMap[n.plan_store_id] ??= []).push(n)
     }
     setVisitSj(sjMap)
+
+    const { data: unf } = await supabase.rpc('get_unfinished_loadings_for_plan', { p_plan_id: planId })
+    setUnfinishedLoadings((unf as { loading_id: string; store_name: string; origin_name: string; package_count: number }[]) || [])
   }
 
   async function fetchSupplierTasks(planId: string) {
@@ -698,6 +704,10 @@ export default function JalanPengirimanPage() {
 
   async function handleBerangkat() {
     if (!selectedPlan) return
+    if (unfinishedLoadings.length > 0) {
+      const list = unfinishedLoadings.map(u => `• ${u.store_name} (dari ${u.origin_name})`).join('\n')
+      if (!confirm(`⚠️ Laporan Muat cabang ini BELUM ditandai Selesai:\n${list}\n\nPaketnya belum bisa diambil di aplikasi. Minta cabang menekan "Tandai Selesai" lalu ambil di Jemput Barang Cabang sebelum berangkat.\n\nTetap berangkat sekarang?`)) return
+    }
     setSubmitting(true)
     const { error } = await supabase.from('logistics_delivery_plans').update({
       status: 'departed', departed_by: myEmployeeId, departed_at: new Date().toISOString(),
@@ -882,6 +892,18 @@ export default function JalanPengirimanPage() {
               {planReturns.length > 0 && ` · ${planReturns.length} ambil retur`}
             </p>
           </div>
+
+          {unfinishedLoadings.length > 0 && selectedPlan && ['ready', 'departed'].includes(selectedPlan.status) && (
+            <div className="mb-4 bg-amber-50 border border-amber-300 rounded-xl p-3 text-sm text-amber-800">
+              <p className="font-semibold">⚠️ Ada barang cabang yang belum ditandai Selesai oleh cabang:</p>
+              <ul className="mt-1 list-disc ml-5">
+                {unfinishedLoadings.map(u => (
+                  <li key={u.loading_id}>{u.store_name} — dari {u.origin_name} ({u.package_count} paket)</li>
+                ))}
+              </ul>
+              <p className="text-xs mt-1">Minta cabang menekan &quot;Tandai Selesai&quot;, lalu ambil paketnya di <b>Jemput Barang Cabang</b>.</p>
+            </div>
+          )}
 
           {selectedPlan?.status === 'ready' && (
             <button onClick={handleBerangkat} disabled={submitting}

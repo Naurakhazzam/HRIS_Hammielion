@@ -184,6 +184,13 @@ export default function LaporanMuatPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   const [loadings, setLoadings] = useState<LoadingRow[]>([])
+  // Laporan "Proses" yang tokonya sudah masuk trip driver -- segera Tandai Selesai (migrasi 091).
+  const [onTrip, setOnTrip] = useState<Record<string, { vehicle_name: string | null; plan_status: string; driver_name: string | null }>>({})
+  const fetchOnTrip = useCallback(async () => {
+    const { data } = await supabase.rpc('get_proses_loadings_on_trips')
+    type Row = { loading_id: string; vehicle_name: string | null; plan_status: string; driver_name: string | null }
+    setOnTrip(Object.fromEntries(((data as Row[]) || []).map(r => [r.loading_id, r])))
+  }, [supabase])
   const { itemCounts, packageCounts, tpInfo } = useMemo(() => summarize(loadings), [loadings])
   // created_at baris paling tua di halaman riwayat -- titik lanjut "Muat lebih banyak".
   const [cursor, setCursor] = useState<string | null>(null)
@@ -280,9 +287,10 @@ export default function LaporanMuatPage() {
     }
 
     setLoadings(rows)
+    await fetchOnTrip()
     setCursor(page.length > 0 ? page[page.length - 1].created_at : null)
     setHasMore(page.length === PAGE_SIZE)
-  }, [supabase])
+  }, [supabase, fetchOnTrip])
 
   async function loadMore() {
     if (!cursor) return
@@ -303,6 +311,7 @@ export default function LaporanMuatPage() {
     if (error) { showMessage('error', 'Gagal memuat ulang laporan: ' + error.message); return }
     if (!data) { setLoadings(prev => prev.filter(r => r.id !== id)); return }
     setLoadings(prev => mergeRows(prev, [data as unknown as LoadingRow]))
+    await fetchOnTrip()
   }
 
   useEffect(() => {
@@ -826,6 +835,12 @@ export default function LaporanMuatPage() {
                     </p>
                   ) : l.status === 'selesai' && (
                     <p className="text-xs text-slate-400 mt-0.5">🧾 Nota belum diisi</p>
+                  )}
+                  {l.status === 'proses' && onTrip[l.id] && (
+                    <p className={`inline-block mt-1.5 text-xs font-semibold px-2 py-1 rounded-md border ${onTrip[l.id].plan_status === 'departed' ? 'bg-red-50 border-red-300 text-red-700' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
+                      🚚 Toko ini sudah ada di trip {onTrip[l.id].vehicle_name ?? ''}{onTrip[l.id].driver_name ? ` (${onTrip[l.id].driver_name})` : ''}
+                      {onTrip[l.id].plan_status === 'departed' ? ' yang SUDAH BERANGKAT' : ''} — segera Tandai Selesai supaya driver bisa mengambil paketnya
+                    </p>
                   )}
                   {l.postponed_at && l.status === 'selesai' && (
                     <p className="text-xs text-amber-700 mt-0.5">

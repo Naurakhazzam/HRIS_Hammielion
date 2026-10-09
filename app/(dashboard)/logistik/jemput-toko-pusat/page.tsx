@@ -48,6 +48,8 @@ export default function JemputBarangCabangPage() {
   const [pending, setPending] = useState<PendingPackage[]>([])
   const [taken, setTaken] = useState<TakenPackage[]>([])
   const [claimingId, setClaimingId] = useState<string | null>(null)
+  // Laporan Muat ke toko di trip ini yang belum ditandai Selesai cabang (migrasi 091).
+  const [unfinished, setUnfinished] = useState<{ loading_id: string; store_name: string; origin_name: string; creator_name: string | null; package_count: number }[]>([])
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -111,9 +113,15 @@ export default function JemputBarangCabangPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    async function run() { if (myEmployeeId && selectedPlanId) await fetchTaken(myEmployeeId, selectedPlanId) }
+    async function run() {
+      if (myEmployeeId && selectedPlanId) await fetchTaken(myEmployeeId, selectedPlanId)
+      if (selectedPlanId) {
+        const { data } = await supabase.rpc('get_unfinished_loadings_for_plan', { p_plan_id: selectedPlanId })
+        setUnfinished((data as typeof unfinished) || [])
+      } else setUnfinished([])
+    }
     run()
-  }, [myEmployeeId, selectedPlanId, fetchTaken])
+  }, [myEmployeeId, selectedPlanId, fetchTaken, supabase])
 
   async function handleClaim(pkg: PendingPackage) {
     if (!selectedPlanId) { showMessage('error', 'Pilih rencana/trip Anda dulu.'); return }
@@ -211,6 +219,23 @@ export default function JemputBarangCabangPage() {
           </div>
         )}
       </div>
+
+      {unfinished.length > 0 && (
+        <div className="bg-amber-50 rounded-xl border border-amber-300 overflow-hidden mb-6">
+          <div className="px-4 py-3 border-b border-amber-200">
+            <p className="text-sm font-bold text-amber-800">⏳ Menunggu cabang menyelesaikan ({unfinished.length})</p>
+            <p className="text-xs text-amber-700 mt-0.5">Toko ini ada di trip Anda, tapi Laporan Muat-nya belum ditandai Selesai — paketnya belum bisa diambil. Minta cabang menekan &quot;Tandai Selesai&quot;.</p>
+          </div>
+          <div className="divide-y divide-amber-200">
+            {unfinished.map(u => (
+              <div key={u.loading_id} className="px-4 py-2.5 text-sm">
+                <p className="font-semibold text-slate-800">{u.store_name}</p>
+                <p className="text-xs text-slate-600">📍 {u.origin_name}{u.creator_name ? ` · dibuat ${u.creator_name}` : ''} · {u.package_count} paket</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {selectedPlanId && taken.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
