@@ -49,6 +49,8 @@ type PlanStore = {
   incident_photo_url: string | null
   incident_description: string | null
   failed_reason: string | null
+  fail_kind: 'kirim_besok' | 'gagal' | null
+  failed_photo_url: string | null
   logistics_stores: { name: string; address: string | null; phone: string | null } | null
 }
 
@@ -235,8 +237,11 @@ export default function JalanPengirimanPage() {
   const [incidentPhotoUrl, setIncidentPhotoUrl] = useState('')
   const [incidentDescription, setIncidentDescription] = useState('')
 
-  // Form Gagal Kirim
+  // Form Gagal Kirim: Kirim Besok (toko tutup, barang kembali & dijadwalkan lagi) atau Gagal
+  // (ditolak / batal pesan) -- wajib alasan + foto (migrasi 088).
   const [failedReason, setFailedReason] = useState('')
+  const [failKind, setFailKind] = useState<'kirim_besok' | 'gagal' | ''>('')
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState('')
 
   // Edit nominal/metode bayar toko yang SUDAH terkirim — untuk perbaiki salah ketik tanpa
   // perlu ulang seluruh alur foto. Cuma boleh selama trip belum "Selesai Kirim" (completed).
@@ -367,7 +372,7 @@ export default function JalanPengirimanPage() {
     const { data } = await supabase.from('logistics_plan_stores')
       .select(`id, store_id, sequence_order, status, delivery_photo_urls,
         payment_method, invoice_amount, payment_amount, received_total, payment_photo_url, payment_due_date,
-        incident_type, incident_photo_url, incident_description, failed_reason,
+        incident_type, incident_photo_url, incident_description, failed_reason, fail_kind, failed_photo_url,
         logistics_stores(name, address, phone)`)
       .eq('plan_id', planId).order('sequence_order')
     const rows = (data as unknown as PlanStore[]) || []
@@ -466,7 +471,7 @@ export default function JalanPengirimanPage() {
 
   function openAction(mode: ActionMode) {
     resetKirimForm(mode === 'kirim' ? selectedStore : null)
-    setFailedReason('')
+    setFailedReason(''); setFailKind(''); setFailedPhotoUrl('')
     setActionMode(mode)
   }
 
@@ -722,17 +727,20 @@ export default function JalanPengirimanPage() {
   }
 
   async function submitGagal() {
-    if (!selectedStore || !failedReason.trim() || clickLocked || submitLockRef.current) return
+    if (!selectedStore || !failKind || !failedReason.trim() || !failedPhotoUrl || clickLocked || submitLockRef.current) return
     submitLockRef.current = true
     setSubmitting(true)
-    const { data, error } = await supabase.from('logistics_plan_stores').update({
-      status: 'failed', failed_reason: failedReason.trim(), resolved_by: myEmployeeId, resolved_at: new Date().toISOString(),
-    }).eq('id', selectedStore.id).eq('status', 'pending').select('id')
-    if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); submitLockRef.current = false; return }
-    if (!data || data.length === 0) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
-    else showMessage('success', `Toko "${selectedStore.logistics_stores?.name}" ditandai gagal kirim.`)
+    const { error } = await supabase.rpc('fail_plan_store', {
+      p_plan_store_id: selectedStore.id, p_kind: failKind, p_reason: failedReason.trim(), p_photo_url: failedPhotoUrl,
+    })
+    const alreadyDone = !!error && /sudah lebih dulu diproses/.test(error.message)
+    if (error && !alreadyDone) { showMessage('error', 'Gagal menyimpan: ' + error.message); setSubmitting(false); submitLockRef.current = false; return }
+    if (alreadyDone) showMessage('error', 'Toko ini sudah lebih dulu diproses oleh rekan Anda.')
+    else showMessage('success', failKind === 'kirim_besok'
+      ? `Toko "${selectedStore.logistics_stores?.name}" ditandai Kirim Besok — barang dibawa kembali.`
+      : `Toko "${selectedStore.logistics_stores?.name}" ditandai Gagal.`)
     await clearTargetStore()
-    setFailedReason('')
+    setFailedReason(''); setFailKind(''); setFailedPhotoUrl('')
     await refresh()
     setSubmitting(false)
     submitLockRef.current = false
@@ -741,11 +749,12 @@ export default function JalanPengirimanPage() {
   async function submitFinishEarly() {
     if (!selectedPlan || !finishReason.trim() || pendingStores.length === 0) return
     setFinishSaving(true)
+    // Toko yang tidak sempat didatangi = Kirim Besok (barang dibawa kembali & dijadwalkan lagi).
     const { error } = await supabase.from('logistics_plan_stores').update({
-      status: 'failed', failed_reason: finishReason.trim(), resolved_by: myEmployeeId, resolved_at: new Date().toISOString(),
+      status: 'failed', fail_kind: 'kirim_besok', failed_reason: finishReason.trim(), resolved_by: myEmployeeId, resolved_at: new Date().toISOString(),
     }).eq('plan_id', selectedPlan.id).eq('status', 'pending')
     if (error) { showMessage('error', 'Gagal menyimpan: ' + error.message); setFinishSaving(false); return }
-    showMessage('success', `${pendingStores.length} toko yang belum terkirim ditandai Gagal Kirim.`)
+    showMessage('success', `${pendingStores.length} toko yang belum terkirim ditandai Kirim Besok.`)
     setShowFinishConfirm(false)
     setFinishReason('')
     await refresh()
@@ -1093,7 +1102,7 @@ export default function JalanPengirimanPage() {
                   {pendingStores.map(ps => <li key={ps.id}>{ps.logistics_stores?.name}</li>)}
                 </ul>
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-                  Toko-toko di atas akan otomatis ditandai <strong>Gagal Kirim</strong> dengan alasan yang Anda isi di bawah. Pastikan ini benar sebelum lanjut.
+                  Toko-toko di atas akan otomatis ditandai <strong>Kirim Besok</strong> (barang dibawa kembali &amp; dijadwalkan lagi) dengan alasan yang Anda isi di bawah. Pastikan ini benar sebelum lanjut.
                 </p>
                 <input type="text" value={finishReason} onChange={e => setFinishReason(e.target.value)}
                   placeholder="Alasan (contoh: trip diakhiri, kehabisan waktu)"
@@ -1129,7 +1138,7 @@ export default function JalanPengirimanPage() {
               {!actionMode && (
                 <div className="grid grid-cols-2 gap-2 mt-4">
                   <button onClick={() => openAction('kirim')} disabled={clickLocked} className="py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">Kirim</button>
-                  <button onClick={() => openAction('gagal')} disabled={clickLocked} className="py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">Gagal Kirim</button>
+                  <button onClick={() => openAction('gagal')} disabled={clickLocked} className="py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">Tidak Terkirim</button>
                 </div>
               )}
 
@@ -1335,21 +1344,52 @@ export default function JalanPengirimanPage() {
 
               {actionMode === 'gagal' && (
                 <div className="space-y-3 mt-2">
+                  <p className="text-xs font-semibold text-slate-600">Kenapa tidak terkirim?</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {['Toko Tutup', 'Toko Tidak Memesan'].map(r => (
-                      <button key={r} type="button" onClick={() => setFailedReason(r)}
-                        className={`py-2 rounded-lg text-sm font-medium border transition ${failedReason === r ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
-                        {r}
-                      </button>
-                    ))}
+                    <button type="button" onClick={() => { setFailKind('kirim_besok'); setFailedReason('') }}
+                      className={`text-left px-3 py-2 rounded-lg text-sm border transition ${failKind === 'kirim_besok' ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-300' : 'bg-white border-slate-300'}`}>
+                      <span className="font-semibold">📅 Kirim Besok</span>
+                      <span className="block text-xs text-slate-500">Toko tutup / tidak ada orang. Barang dibawa kembali.</span>
+                    </button>
+                    <button type="button" onClick={() => { setFailKind('gagal'); setFailedReason('') }}
+                      className={`text-left px-3 py-2 rounded-lg text-sm border transition ${failKind === 'gagal' ? 'bg-red-50 border-red-500 ring-2 ring-red-300' : 'bg-white border-slate-300'}`}>
+                      <span className="font-semibold">❌ Gagal</span>
+                      <span className="block text-xs text-slate-500">Toko menolak / batal pesan. Tidak dikirim lagi.</span>
+                    </button>
                   </div>
-                  <input type="text" value={failedReason} onChange={e => setFailedReason(e.target.value)} placeholder="Atau isi alasan lain..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                  {failKind && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(failKind === 'kirim_besok' ? ['Toko Tutup', 'Tidak Ada Orang'] : ['Toko Menolak Barang', 'Batal Pesan']).map(r => (
+                          <button key={r} type="button" onClick={() => setFailedReason(r)}
+                            className={`py-2 rounded-lg text-sm font-medium border transition ${failedReason === r ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+                            {r}
+                          </button>
+                        ))}
+                      </div>
+                      <input type="text" value={failedReason} onChange={e => setFailedReason(e.target.value)} placeholder="Atau isi alasan lain..."
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                      {failedPhotoUrl ? (
+                        <div className="space-y-1">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={failedPhotoUrl} alt="Foto toko" className="w-full rounded-lg aspect-[4/3] object-cover" />
+                          <button type="button" onClick={() => setFailedPhotoUrl('')} className="text-xs text-blue-600 hover:underline">Ganti Foto</button>
+                        </div>
+                      ) : (
+                        <LogisticsCameraCapture label="Foto Toko (wajib)" employeeName={myName}
+                          onCaptured={async blob => { const url = await uploadPhoto(blob, 'gagal'); if (url) setFailedPhotoUrl(url) }} />
+                      )}
+                    </>
+                  )}
                   <div className="flex gap-2 pt-2">
                     <button onClick={() => setActionMode(null)} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                    <button onClick={submitGagal} disabled={!failedReason.trim() || submitting || clickLocked}
+                    <button onClick={submitGagal} disabled={!failKind || !failedReason.trim() || !failedPhotoUrl || submitting || clickLocked}
                       className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50">
-                      {submitting ? 'Menyimpan...' : 'Konfirmasi Gagal Kirim'}
+                      {submitting ? 'Menyimpan...'
+                        : !failKind ? 'Pilih Kirim Besok / Gagal'
+                        : !failedReason.trim() ? 'Isi alasan dulu'
+                        : !failedPhotoUrl ? 'Foto toko dulu'
+                        : failKind === 'kirim_besok' ? 'Konfirmasi Kirim Besok' : 'Konfirmasi Gagal'}
                     </button>
                   </div>
                 </div>
@@ -1509,7 +1549,10 @@ export default function JalanPengirimanPage() {
                     </div>
 
                     {ps.status === 'failed' && ps.failed_reason && (
-                      <p className="text-xs text-red-600 mt-1">Alasan: {ps.failed_reason}</p>
+                      <p className={`text-xs mt-1 ${ps.fail_kind === 'kirim_besok' ? 'text-amber-700' : 'text-red-600'}`}>
+                        {ps.fail_kind === 'kirim_besok' ? '📅 Kirim Besok' : ps.fail_kind === 'gagal' ? '❌ Gagal' : 'Alasan'}: {ps.failed_reason}
+                        {ps.failed_photo_url && <> · <button type="button" onClick={() => openLightbox(ps.failed_photo_url!, 'Foto toko')} className="underline">foto</button></>}
+                      </p>
                     )}
 
                     {ps.status === 'delivered' && ps.payment_method && (

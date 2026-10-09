@@ -44,6 +44,7 @@ type PlanStore = {
   incident_photo_url: string | null
   incident_description: string | null
   failed_reason: string | null
+  fail_kind: 'kirim_besok' | 'gagal' | null
   resolved_at: string | null
   office_verified_amount: number | null
   office_verified_by: string | null
@@ -154,7 +155,7 @@ export default function LaporanPengirimanPage() {
       const { data: storeData } = await supabase.from('logistics_plan_stores')
         .select(`id, plan_id, sequence_order, status, delivery_photo_urls,
           payment_method, invoice_amount, payment_amount, received_total, payment_photo_url, payment_due_date,
-          incident_type, incident_photo_url, incident_description, failed_reason, resolved_at,
+          incident_type, incident_photo_url, incident_description, failed_reason, fail_kind, resolved_at,
           office_verified_amount, office_verified_by, office_verified_at,
           logistics_stores(name)`)
         .in('plan_id', list.map(p => p.id)).order('sequence_order')
@@ -597,7 +598,7 @@ export default function LaporanPengirimanPage() {
                                 </span>
                               )}
                               {s.status === 'failed' ? (
-                                <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600 font-medium">Gagal: {s.failed_reason}</span>
+                                <span className={`text-xs px-2 py-0.5 rounded font-medium ${s.fail_kind === 'kirim_besok' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>{s.fail_kind === 'kirim_besok' ? 'Kirim Besok' : 'Gagal'}: {s.failed_reason}</span>
                               ) : s.status === 'pending' ? (
                                 s.id === p.current_target_store_id ? (
                                   <span className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-medium animate-pulse">🚗 Sedang dalam perjalanan menuju toko ini</span>

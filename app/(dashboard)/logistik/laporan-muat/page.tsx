@@ -17,6 +17,11 @@ type Loading = {
   nota_paid_amount: number | null
   nota_overpay_amount: number
   nota_payment_method: 'cash' | 'transfer' | 'deposit' | 'tempo' | null
+  // Kirim Besok / Gagal dari driver (migrasi 088)
+  postponed_at: string | null
+  postpone_count: number
+  last_postpone_reason: string | null
+  fail_reason: string | null
   created_by: string
   origin_branch_id: string
   assigned_to: string | null
@@ -95,7 +100,7 @@ type LoadingRow = Loading & {
 }
 
 const LOADING_SELECT = `
-  id, store_id, status, delivery_method, ongkir, nota_amount, nota_paid_amount, nota_overpay_amount, nota_payment_method, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
+  id, store_id, status, delivery_method, ongkir, nota_amount, nota_paid_amount, nota_overpay_amount, nota_payment_method, postponed_at, postpone_count, last_postpone_reason, fail_reason, created_by, origin_branch_id, assigned_to, created_at, completed_at, cancelled_at,
   logistics_stores(name, address, kind),
   origin:branches!logistics_central_loadings_origin_branch_id_fkey(name),
   creator:employees!logistics_central_loadings_created_by_fkey(full_name),
@@ -804,6 +809,14 @@ export default function LaporanMuatPage() {
                     </p>
                   ) : l.status === 'selesai' && (
                     <p className="text-xs text-slate-400 mt-0.5">🧾 Nota belum diisi</p>
+                  )}
+                  {l.postponed_at && l.status === 'selesai' && (
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      📅 Ditunda driver {l.postpone_count}× sejak {fmtDateTime(l.postponed_at)} — {l.last_postpone_reason ?? '-'} (paket kembali, menunggu dijemput lagi)
+                    </p>
+                  )}
+                  {l.status === 'dibatalkan' && l.fail_reason && (
+                    <p className="text-xs text-red-600 mt-0.5">❌ Gagal kirim: {l.fail_reason}</p>
                   )}
                   {group === 'belum' && l.completed_at && (
                     <p className={`inline-block mt-1.5 text-xs font-semibold px-2 py-1 rounded-md border ${waitingTone(waitingMs)}`}>

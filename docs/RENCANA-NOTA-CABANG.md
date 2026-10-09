@@ -57,7 +57,19 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   (lebih bayar terverifikasi + sisa setoran − saldo dipakai). Trigger `guard_receivable_locked`
   mengunci nota yang sudah punya pelunasan dari edit driver / verifikasi ulang / ubah nota.
   Akses: `can_access_receivables()` = owner/hr/finance (Nisa ber-role hr).
-- [ ] **Tahap 4** — Gagal / Kirim Besok + tab Tertunda (berlaku nota gudang & nota cabang)
+- [x] **Tahap 4** — Gagal / Kirim Besok + tab Tertunda (berlaku nota gudang & nota cabang)
+  (migrasi `088_postpone_or_fail_delivery.sql`, **belum di-push**). Status tetap `failed` + kolom
+  `fail_kind` (`kirim_besok`/`gagal`); trigger mengisi `kirim_besok` kalau kosong (aplikasi lama).
+  Trigger `handle_plan_store_outcome`: Kirim Besok → paket cabang kembali `pending` (muncul lagi di
+  Jemput Barang), laporan dicatat `postponed_at`/`postpone_count`/`last_postpone_reason`; Gagal →
+  laporan muat `dibatalkan` + `fail_reason`. Terkirim → kunjungan Kirim Besok lain ke toko yang sama
+  tertutup otomatis & tanda tunda laporan dihapus. Driver: RPC `fail_plan_store` (wajib alasan +
+  foto); "Selesai lebih awal" = Kirim Besok. Halaman `logistik/tertunda` (Owner/Kepala Gudang
+  kelola; HR/Finance lihat) + RPC `close_postponed_visit` / `cancel_postponed_loading`. Badge merah
+  Owner `get_postponed_overdue_count` (> 3 hari). Jalur antar sendiri tidak diubah (tombol "Lepas"
+  yang sudah ada = mengembalikan kiriman ke daftar menunggu).
+  Catatan data: 1 paket lama (1 Okt, toko "Denz Ps", alasan "ada 2 nama toko yang sama") masih
+  tersangkut di kunjungan gagal lama — tidak diubah otomatis, tunggu keputusan user.
 - [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7)
 - [ ] **Ditunda** — Potong nota (salah muat / kejadian lain) — dibahas setelah semua tahap di atas
 

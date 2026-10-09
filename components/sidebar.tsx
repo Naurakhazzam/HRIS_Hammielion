@@ -98,6 +98,7 @@ const LOGISTIK_SUBMENU: NavNode[] = [
   { name: 'Kirim Barang (Cabang)', href: '/logistik/kirim-barang' },
   { name: 'Order Grooming', href: '/logistik/grooming' },
   { name: 'Penerimaan Retur', href: '/logistik/penerimaan-retur' },
+  { name: 'Kiriman Tertunda', href: '/logistik/tertunda' },
 ]
 
 // Menu untuk HR, Owner, Finance, Supervisor — dikelompokkan jadi 4 kelompok besar (SDM/HR,
@@ -352,19 +353,23 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
   // Order Grooming: kucing yang saya groom & belum selesai + kucing groomer tanpa akun di order
   // buatan saya (perlu Paksa Lanjut) + order buatan saya yang siap diserahkan (migrasi 070).
   const [groomingBadge, setGroomingBadge] = useState(0)
+  // Kiriman Tertunda: Kirim Besok yang lewat 3 hari -- hanya untuk Owner (migrasi 088).
+  const [tertundaBadge, setTertundaBadge] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
-      const [kirim, jemput, groom] = await Promise.all([
+      const [kirim, jemput, groom, tunda] = await Promise.all([
         supabase.rpc('get_tp_delivery_badge_count'),
         supabase.rpc('get_central_pickup_badge_count'),
         supabase.rpc('get_grooming_badge_count'),
+        supabase.rpc('get_postponed_overdue_count'),
       ])
       if (cancelled) return
       setKirimBarangBadge(Number(kirim.data) || 0)
       setJemputBadge(Number(jemput.data) || 0)
       setGroomingBadge(Number(groom.data) || 0)
+      setTertundaBadge(Number(tunda.data) || 0)
     }
     load()
     const timer = setInterval(load, 60000)
@@ -492,6 +497,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     '/logistik/kirim-barang': kirimBarangBadge,
     '/logistik/grooming': groomingBadge,
     '/logistik/jemput-toko-pusat': jemputBadge,
+    '/logistik/tertunda': tertundaBadge,
     '/catatan-meeting': meetingBadge,
     '/tugas-harian': dailyTaskBadge,
   }

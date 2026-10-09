@@ -20,6 +20,7 @@ type PendingPackage = {
   logistics_central_loadings: {
     nota_amount: number | null; origin: { name: string } | null; logistics_stores: { name: string } | null
     siblings: { status: string; taken_by: string | null; taken: { full_name: string } | null }[]
+    postpone_count: number; last_postpone_reason: string | null
   } | null
 }
 
@@ -69,7 +70,7 @@ export default function JemputBarangCabangPage() {
   const fetchPending = useCallback(async () => {
     const { data } = await supabase
       .from('logistics_central_loading_packages')
-      .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, nota_amount, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name), logistics_stores(name), siblings:logistics_central_loading_packages(status, taken_by, taken:employees!logistics_central_loading_packages_taken_by_fkey(full_name)))')
+      .select('id, photo_url, caption, loading_id, logistics_central_loadings!inner(status, nota_amount, postpone_count, last_postpone_reason, origin:branches!logistics_central_loadings_origin_branch_id_fkey(name), logistics_stores(name), siblings:logistics_central_loading_packages(status, taken_by, taken:employees!logistics_central_loading_packages_taken_by_fkey(full_name)))')
       .eq('status', 'pending')
       .eq('logistics_central_loadings.status', 'selesai')
       // Kiriman jalur "Diantar Sendiri" tidak boleh terlihat/diklaim driver.
@@ -187,6 +188,11 @@ export default function JemputBarangCabangPage() {
                   {nota != null && (
                     <p className="text-xs text-emerald-700 font-semibold">
                       🧾 Nota {fmtRp(nota)}{sameNota > 1 ? ` · ${sameNota} paket satu nota, wajib dibawa semua` : ''}
+                    </p>
+                  )}
+                  {(pk.logistics_central_loadings?.postpone_count ?? 0) > 0 && (
+                    <p className="text-xs text-amber-700">
+                      📅 Pernah ditunda {pk.logistics_central_loadings?.postpone_count}× — {pk.logistics_central_loadings?.last_postpone_reason ?? '-'}
                     </p>
                   )}
                   {otherTakers.length > 0 && (
