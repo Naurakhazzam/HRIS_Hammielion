@@ -2092,4 +2092,152 @@ Sekaligus menambahkan fitur baru yang diminta: **toleransi 5 menit khusus absen 
 
 ---
 
-*Terakhir diupdate: Sesi 7 (2026-09-18 s/d 20) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera + cetak QR 2 per halaman lebih besar + cetak QR 1/halaman & pilih cabang + verifikasi Daftar Cepat via nama+tanggal lahir + jalur cadangan Kode Karyawan saja + edit data pribadi sendiri di Profil Saya + lihat akun baru daftar di Manajemen User + upload foto profil sendiri + fix RLS foto karyawan terbuka + tampilkan email login di Profil Saya + karyawan bisa merangkap jabatan Driver + rombak verifikasi Sudah Jadi Karyawan tanpa Kode Karyawan + fix foto absen tidak muncul di mode Semua Karyawan + konfirmasi eksplisit absen masuk/pulang + pengaman jarak waktu absen + kartu Tidak Absen di dashboard + fitur Pengajuan Jadwal Libur Awal + fix kasbon driver/kenek tidak muncul di Verifikasi Keuangan + fitur Pengajuan Ganti Hari Libur dengan tukar mutual + fix bug edit keterlambatan tidak tersimpan + toleransi 5 menit absen QR + auto-promosi training ke staff tetap + gaji standar staff/Team Toko & tunjangan khusus + fix pengajuan jadwal libur awal tidak muncul di persetujuan + batas 1 hari weekend per periode untuk pengajuan libur + konfirmasi sebelum batalkan pengajuan libur + tombol Batalkan merah solid + fitur Undang Karyawan Baru via link sekali pakai + wajib isi penuh 4/4 sebelum diajukan ke HR + wajib H-2 cuti/izin pilihan otomatis Alpha kalau dadakan + rombak potongan eskalasi per kejadian & tarif telat universal + halaman Aturan Potongan Gaji transparan ke semua karyawan + Preview Tampilan Karyawan pakai contoh nyata Rahmat Saleh (read-only) + filter Rekening di Riwayat Kas Masuk*
+## Sesi 8 (2026-10-09) — Nota Cabang, Pembayaran Lapangan, Piutang, Surat Jalan, Potong Nota
+
+> **Dokumen acuan lengkap (aturan & keputusan user):** `docs/RENCANA-NOTA-CABANG.md`. Bagian di bawah ini ringkasan perubahan per fitur. Migrasi DB ada di `database/migrations/082`–`095` (folder di luar repo `hris-app`) dan **sudah aktif di Supabase**. Kode di-push 2026-10-09 (commit `1e08e89` s/d `7dd7907`).
+>
+> **Aturan inti yang dipakai di semua fitur ini:**
+> - Satu angka "uang diterima" untuk semua nota satu kunjungan; server yang membagi: **nota terbesar dulu, kalau sama besar Nota Gudang dulu** (`apply_visit_payment`).
+> - Kurang bayar = **piutang**; lebih bayar = **saldo konsumen**. Piutang resmi kalau sudah diverifikasi Finance atau metode tempo. Buku Piutang mulai 10 Okt 2026.
+> - Transfer wajib foto bukti; tidak ada bukti → pilih **tempo** (wajib tanggal jatuh tempo).
+
+### 125. Laporan Muat: Muat Daftar Ringan & Bertahap
+
+**Konteks:** Data Laporan Muat cabang akan terus membesar; halaman memuat semua sekaligus.
+**Perubahan:** daftar dimuat ringan (kolom seperlunya) dan bertahap, detail dimuat saat dibuka.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/laporan-muat/page.tsx` | Query daftar dipangkas + muat bertahap |
+
+---
+
+### 126. Nota Cabang Tahap 1: Nominal Nota Wajib di Laporan Muat (migrasi 082)
+
+**Logika:** Staf cabang (mis. Toko Pusat) wajib mengisi **nominal nota** saat menandai Laporan Muat selesai (`finish_central_loading` + `p_nota_amount`, ubah lewat `set_central_loading_nota`, riwayat di `logistics_nota_changes`). Driver tidak mengetik ulang nota cabang — nominal ikut paket yang diambil. Satu nota hanya bisa diklaim satu driver selama trip aktif.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/laporan-muat/page.tsx` | Input & tampilan nota cabang |
+| `app/(dashboard)/logistik/jemput-toko-pusat/page.tsx` | Nota tampil saat jemput, info paket ditunda / menunggu cabang |
+
+---
+
+### 127. Nota Cabang Tahap 2: Pembayaran di Lapangan Dibagi Otomatis (migrasi 083–085)
+
+**Jalur driver:** Langkah 2 menampilkan Nota Gudang (diketik driver, atau dari surat jalan) + nota cabang (otomatis). Driver memilih metode (cash/transfer/deposit/tempo) dan mengetik **satu** angka uang diterima; server membagi (`submit_plan_store_delivery`, `update_plan_store_payment`, `apply_visit_payment`). Kolom baru `logistics_plan_stores.received_total`, `overpay_amount`.
+**Jalur antar sendiri (Kirim Barang):** Foto 2 wajib cara bayar + uang diterima; transfer wajib foto bukti, tempo wajib tanggal (`arrive_tp_stop` parameter baru).
+**Perbaikan terkait:** policy lihat peserta logistik yang timeout (fungsi `can_see_logistics_participant`, migrasi 084).
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/jalan/page.tsx` | `NotaInputs`, submit lewat RPC, info kurang/lebih bayar |
+| `app/(dashboard)/logistik/kirim-barang/page.tsx` | Cara bayar di Foto 2 |
+
+---
+
+### 128. Nota Cabang Tahap 3: Verifikasi Uang Pengiriman oleh Finance (migrasi 086)
+
+**Fitur:** Tab **Uang Pengiriman** di Keuangan → Verifikasi Keuangan. Per kunjungan driver / kiriman antar sendiri: **Cocok** (nominal laporan) atau **Tidak Cocok** (ketik nominal benar) + pilih rekening (cash → Kas Tunai). Server membagi ulang ke nota (`verify_visit_payment`, `verify_nota_payment`, batal: `unverify_*`). Hanya Owner/HR/Finance.
+
+| File | Perubahan |
+|---|---|
+| `components/VerifikasiUangPengiriman.tsx` | Komponen baru |
+| `app/(dashboard)/keuangan/approval/page.tsx` | Tab `uang_pengiriman` |
+
+---
+
+### 129. Buku Piutang Konsumen (migrasi 087)
+
+**Fitur:** Halaman **Keuangan → Buku Piutang**: piutang per toko per nota (gudang / cabang / surat jalan), jatuh tempo & lewat tempo, pelunasan (`record_receivable_payment`, batal `cancel_receivable_payment`) dibagi ke nota tertua, saldo konsumen dari lebih bayar. Nota yang sudah punya pelunasan **terkunci** (`guard_receivable_locked`) — batalkan pelunasan dulu kalau mau mengubah. View: `fin_receivable_notas`, `fin_receivables`, `fin_customer_credit_entries`.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/keuangan/piutang/page.tsx` | Halaman baru |
+| `components/sidebar.tsx` | Menu Buku Piutang |
+
+---
+
+### 130. Tahap 4: Kirim Besok / Gagal + Kiriman Tertunda (migrasi 088–089)
+
+**Logika:** Toko tidak terkirim dipilih **📅 Kirim Besok** (toko tutup; barang kembali & dijadwalkan lagi — surat jalan kembali menunggu / paket cabang kembali pending) atau **❌ Gagal** (ditolak / batal; masuk status **perlu keputusan** kantor atau cabang asal). Wajib alasan + foto. Antar sendiri punya tombol Gagal per tujuan (`fail_tp_stop`). Halaman **Kiriman Tertunda** + badge.
+**Juga:** Laporan Pengiriman mengurutkan toko menurut **jam terkirim** (nomor rencana tetap ditampilkan).
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/jalan/page.tsx` | Pilihan Kirim Besok / Gagal + foto |
+| `app/(dashboard)/logistik/kirim-barang/page.tsx` | Tombol Gagal per tujuan |
+| `app/(dashboard)/logistik/tertunda/page.tsx` | Halaman baru |
+| `app/(dashboard)/logistik/laporan/page.tsx` | Urutan jam terkirim, label Kirim Besok/Gagal |
+| `app/(dashboard)/logistik/laporan-muat/page.tsx` | Keputusan barang cabang yang Gagal |
+
+---
+
+### 131. Surat Jalan Gudang + Rencana dari Centang Surat Jalan (migrasi 090)
+
+**Logika:** Back Office / Kepala Gudang / Owner membuat **surat jalan** (nomor opsional, nominal). Rencana Pengiriman diisi dengan **centang surat jalan** ("+ Tambahkan Surat Jalan"); banyak surat jalan satu toko = satu kunjungan, tiap surat jalan satu nota. Nota Gudang kunjungan = jumlah surat jalan (driver tidak mengetik). Ubah nominal setelah berangkat hanya Owner. Gagal → perlu keputusan kantor (`decide_failed_note`).
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/surat-jalan/page.tsx` | Halaman baru (5 tab) |
+| `app/(dashboard)/logistik/rencana/page.tsx`, `rencana/[id]/page.tsx` | Tambah/keluarkan surat jalan |
+| `components/sidebar.tsx` | Menu Surat Jalan + badge perlu keputusan |
+
+---
+
+### 132. Pengingat Laporan Muat yang Belum "Tandai Selesai" (migrasi 091)
+
+**Konteks:** Kasus 9 Okt (Yulia Poultry, L300): cabang menandai Selesai setelah truk berangkat, paket tidak bisa diambil di sistem.
+**Fitur:** Driver diberi peringatan + konfirmasi sebelum berangkat kalau ada Laporan Muat "Proses" ke toko di rencananya; staf cabang melihat tanda bahwa tokonya sudah ada di trip. Hanya pengingat, tidak memblokir.
+
+---
+
+### 133. Potong Nota — Jalur Driver + Pemilik Barang (migrasi 092–093)
+
+**Logika:** Di Langkah 3 driver menjawab **"Apakah ini POTONG NOTA?"** → per barang: nama, nominal, alasan (salah muat / rusak-kedaluwarsa / kurang jumlah / harga beda / lainnya), **pemilik barang** (Gudang / cabang asal nota di kunjungan itu), dan **↩️ Dibawa kembali** / **🚫 Memang tidak ada** + 1 foto.
+- Potongan mengurangi **nota pemilik barangnya** (pemilik punya >1 nota → nota terbesarnya dulu); tidak boleh melebihi nota pemilik.
+- Perlu **persetujuan Finance/Owner** (Uang Pengiriman → sub-tab ✂️ Potong Nota). Belum disetujui / ditolak → tetap **piutang**.
+- Barang dibawa kembali → kartu **📦 Antar Barang ke Pemiliknya**: wajib foto saat diserahkan, **trip tidak bisa selesai** sebelum diantar, lalu cabang pemilik konfirmasi di **Penerimaan Retur**.
+- RPC: `set_visit_cuts`, `decide_visit_cut`, `get_pending_cut_count`. Tabel `logistics_visit_cuts`.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/jalan/page.tsx` | Form potong nota, edit di Riwayat Toko, kartu antar ke pemilik |
+| `components/VerifikasiUangPengiriman.tsx` | Sub-tab Potong Nota (setujui/tolak) |
+| `app/(dashboard)/keuangan/piutang/page.tsx`, `logistik/laporan/page.tsx` | Tampilkan potongan |
+
+---
+
+### 134. Retur & Kejadian: Pemilik Barang Per Item (migrasi 094)
+
+**Logika:** Kolom `logistics_store_returns.return_source` (`kantor` / `potong_nota` / `kejadian` / `pecahan`).
+- **Tugas Retur kantor:** saat memotret tiap barang, driver memilih **"Barang ini punya siapa?"** (bawaan = cabang pilihan kantor). Saat lapor selesai, barang milik cabang lain dipisah dan wajib diantar ke pemiliknya.
+- **Kejadian Salah Muat / Retur / Barang Lebih:** driver mencatat barang + pemilik + nasib: **↩️ Dibawa pulang** (wajib diantar + foto) atau **🛒 Dibeli toko** = salah varian tetap dibeli (dicatat "seharusnya barang apa" untuk koreksi stok pemilik; harga lebih murah → isi potong nota alasan Harga beda; lebih mahal → nominal nota sesuai barang yang dibeli). Wajib untuk Salah Muat & Barang Lebih kecuali sudah dicatat di potong nota.
+- Aplikasi lama tetap jalan: barang retur tanpa pilihan pemilik = cabang pilihan kantor.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/jalan/page.tsx` | Pilihan pemilik di Tugas Retur, daftar barang kejadian |
+| `app/(dashboard)/logistik/laporan/page.tsx` | Daftar barang kejadian per toko |
+
+---
+
+### 135. Potong Nota — Jalur Antar Sendiri (migrasi 095)
+
+**Logika:** Di Foto 2 (Kirim Barang) PJ menjawab "Apakah ini POTONG NOTA?". Pemilik = cabang pengirim (tidak dipilih). Barang dibawa kembali otomatis dianggap diserahkan saat **Foto 3 "kembali di cabang"**, lalu cabang konfirmasi di Penerimaan Retur. Persetujuan Finance di sub-tab yang sama. RPC `set_loading_cuts`, `decide_loading_cut`, `apply_loading_payment` (dipakai juga verifikasi uang antar sendiri).
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/kirim-barang/page.tsx` | Form potong nota di Foto 2 + tombol Simpan Ulang |
+| `components/VerifikasiUangPengiriman.tsx` | Potongan antar sendiri di daftar persetujuan |
+
+---
+
+### Masih Tertunda (per 2026-10-09)
+
+- **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).
+- **Kas Masuk otomatis** dari uang pengiriman yang sudah diverifikasi — dibahas setelah fitur di atas stabil.
+
+---
+
+*Terakhir diupdate: Sesi 8 (2026-10-09) — nota cabang di Laporan Muat + pembayaran lapangan dibagi otomatis + verifikasi Uang Pengiriman + Buku Piutang + Kirim Besok/Gagal + Surat Jalan + pengingat Laporan Muat + potong nota (driver & antar sendiri) + pemilik barang per item untuk retur & kejadian. Sebelumnya: Sesi 7 (2026-09-18 s/d 20) — fitur Lupa Password + fix 4 bug + redesain menu karyawan + undangan interview seragam + tutup akses data rekening + fix race condition cuti + panel filter pelamar + sort jarak & kesan tes + info lokasi training + tabel rekap konfirmasi interview + jalur kedua ke rekap + auto-advance status interview + form hasil interview + fix bug limit 1000 baris + peringatan pending + Saldo Real vs Proyeksi Cash Flow + rombak ledger Supplier + fix sticky header modal supplier + fitur Catatan Meeting + fix baris Kelola Pembelian + modal diperlebar & Aksi di tabel ledger + rombak sidebar 4 kelompok + hapus menu Laporan + tutup 2 jalur bocor Kas Keluar + approval wajib kasbon driver/kenek + fix RLS terbuka + fix /signup tidak bisa diakses + fitur Preview Tampilan Karyawan + penyempurnaan portal karyawan (keamanan RLS + fitur baru) + fitur tukar hari libur saat absen masuk + fitur Absen QR menggantikan sementara Absen HP GPS + fitur Daftar Cepat kode karyawan saja + fitur Perbarui Akun Saya (email standar + password mandiri) + Portal Saya untuk semua role + fix Absen QR gagal tersimpan + fix tombol Ambil Foto tidak berfungsi + fix layar kamera hitam + jalur cadangan kamera bawaan HP + fix Kode Karyawan case-sensitive + pesan error kamera lebih detail + fix macet di Menyiapkan Kamera + cetak QR 2 per halaman lebih besar + cetak QR 1/halaman & pilih cabang + verifikasi Daftar Cepat via nama+tanggal lahir + jalur cadangan Kode Karyawan saja + edit data pribadi sendiri di Profil Saya + lihat akun baru daftar di Manajemen User + upload foto profil sendiri + fix RLS foto karyawan terbuka + tampilkan email login di Profil Saya + karyawan bisa merangkap jabatan Driver + rombak verifikasi Sudah Jadi Karyawan tanpa Kode Karyawan + fix foto absen tidak muncul di mode Semua Karyawan + konfirmasi eksplisit absen masuk/pulang + pengaman jarak waktu absen + kartu Tidak Absen di dashboard + fitur Pengajuan Jadwal Libur Awal + fix kasbon driver/kenek tidak muncul di Verifikasi Keuangan + fitur Pengajuan Ganti Hari Libur dengan tukar mutual + fix bug edit keterlambatan tidak tersimpan + toleransi 5 menit absen QR + auto-promosi training ke staff tetap + gaji standar staff/Team Toko & tunjangan khusus + fix pengajuan jadwal libur awal tidak muncul di persetujuan + batas 1 hari weekend per periode untuk pengajuan libur + konfirmasi sebelum batalkan pengajuan libur + tombol Batalkan merah solid + fitur Undang Karyawan Baru via link sekali pakai + wajib isi penuh 4/4 sebelum diajukan ke HR + wajib H-2 cuti/izin pilihan otomatis Alpha kalau dadakan + rombak potongan eskalasi per kejadian & tarif telat universal + halaman Aturan Potongan Gaji transparan ke semua karyawan + Preview Tampilan Karyawan pakai contoh nyata Rahmat Saleh (read-only) + filter Rekening di Riwayat Kas Masuk*
