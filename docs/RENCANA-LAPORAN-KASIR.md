@@ -131,6 +131,28 @@ Satu shift bisa berisi lebih dari 1 kasir (contoh: irma + Iqbal), tapi ditutup o
 20. **Kiriman Gagal setelah kasir lapor** (nota batal) → finance mendapat **tanda untuk dicek**;
     laporan kasir tidak diubah otomatis.
 
+### Keputusan tambahan (jawaban pertanyaan terbuka, 9 Okt 2026)
+21. **Tanggal mulai berlaku**: user ingin "mulai besok" (10 Okt 2026). Karena fitur belum jadi besok,
+    tanggal mulai dibuat **pengaturan** yang diisi finance (default = hari pertama form dipakai kasir).
+    Kas Masuk otomatis (Tahap 2, 4, 5) hanya untuk transaksi **≥ tanggal mulai** → tidak dobel dengan
+    omzet yang diinput manual sebelumnya. Sebelum tanggal itu, cara lama (WA + input finance) tetap jalan.
+22. **Rekening per metode**: diatur di **halaman pengaturan** oleh finance (per cabang: Cash → Kas
+    Tunai, QRIS → rekening X, Trf BCA → rekening Y). Kasir hanya memilih nama metode.
+23. **Selisih kasir → potongan gaji**, tampil di **dashboard/portal karyawan** pelapor:
+    - Minus = potongan gaji (masuk Kerugian Kasir atas nama pelapor).
+    - **Plus hanya mengurangi minus, tidak pernah jadi milik karyawan.** Dihitung per karyawan per
+      bulan gaji: `potongan = max(0, total minus − total plus)`.
+      Contoh Syifa: minus 100.000, plus 150.000 → potongan **0**, sisa 50.000 **tidak** jadi uang
+      Syifa (tetap uang perusahaan, tercatat di Kas Masuk sebagai selisih lebih).
+    - Selisih yang dihitung = angka **final setelah verifikasi finance** (selisih kasir + selisih setoran).
+24. **Tempo ambil sendiri**: dicoba dulu tanpa fitur khusus — tanda bantu Tahap 6 (piutang vs nota
+    kiriman) yang menunjukkan seberapa sering terjadi. Dievaluasi setelah berjalan.
+25. **Uang titipan pelunasan** di kasir: dilunasi via **piutang di sistem POS** (muncul di bagian
+    Pelunasan Piutang struk, bukan di Tunai penjualan). Akibatnya cash fisik yang diterima finance
+    **lebih besar** dari cash laporan. Finance memisahkannya saat verifikasi: isi "termasuk pelunasan
+    piutang Rp X a.n. konsumen" → dicatat di Buku Piutang (Tahap 5), **bukan** dihitung sebagai plus
+    kasir.
+
 ---
 
 ## 4. Contoh 1 hari — Toko Pusat, tanggal 10 (disetujui user)
@@ -197,7 +219,15 @@ Total omzet ................................. 16.000.000   = settlement shift 1 
   1 baris cash (`amount`=Cash, `expense_amount`=pengeluaran, `cash_adjustment`=selisih kasir +
   selisih setoran) + 1 baris per metode non-tunai. Piutang tidak dibuat baris.
   Batal setujui → baris otomatis dihapus. Baris otomatis **tidak bisa diedit** dari Input Kasir Darurat.
-- Selisih (kasir + setoran) tercatat atas nama pelapor — lihat pertanyaan 7.3 soal Kerugian Kasir.
+- **Halaman pengaturan** (finance): tanggal mulai berlaku (aturan 21) + rekening per metode per
+  cabang (aturan 22).
+- Verifikasi baris cash punya isian opsional **"termasuk pelunasan piutang"** (nominal + konsumen)
+  → tidak dihitung plus kasir; dicatat ke Buku Piutang (aturan 25, butuh Tahap 5 — sebelum Tahap 5
+  jadi, cukup disimpan di laporan).
+- Selisih final per laporan → entri di `cashier_loss_entries` atas nama pelapor (+ kolom sumber
+  `cashier_report_id`; plus disimpan sebagai nilai negatif). Penggajian Bulanan diubah: total
+  kerugian kasir per karyawan **di-clamp ≥ 0** (aturan 23). Halaman Kerugian Kasir & portal karyawan
+  (mis. Slip Gaji / dashboard) menampilkan rincian minus, plus, dan potongan akhir bulan berjalan.
 
 ### Tahap 3 — Input Kasir Darurat
 - Label menu & judul halaman `keuangan/kas-masuk` → **Input Kasir Darurat**.
@@ -238,17 +268,9 @@ Settlement (Omzet) = Cash + Non-tunai + Piutang
 
 ## 7. Pertanyaan yang MASIH TERBUKA (tanyakan sebelum tahap terkait)
 
-1. **Tanggal mulai berlaku** (Tahap 2 & 4): mulai tanggal berapa laporan kasir dipakai, dan
-   mulai tanggal berapa uang pengiriman otomatis masuk Kas Masuk? Sebelum tanggal itu finance sudah
-   input omzet manual → kalau tidak dibatasi, bisa **dobel**.
-2. **Rekening per metode** (Tahap 2): QRIS & transfer tiap cabang masuk ke rekening mana? Perlu
-   daftar dari finance supaya default rekening bisa diisi otomatis.
-3. **Selisih kasir → Kerugian Kasir** (Tahap 2): selisih minus atas nama pelapor cukup tercatat
-   (info), atau otomatis masuk potongan gaji di halaman Kerugian Kasir (`cashier_loss_entries`)?
-4. **Tempo ambil sendiri** (Tahap 6): piutang konsumen yang ambil sendiri / diantar tim toko tanpa
-   Laporan Muat belum tercatat di Buku Piutang. Intensitasnya belum diketahui user — apakah perlu
-   cara mencatatnya (oleh finance) supaya bisa ditagih?
-5. **Uang titipan pelunasan di kasir** (Tahap 5): finance mencatatnya di Buku Piutang dengan rekening
-   Kas Tunai — pastikan uang itu tidak ikut terhitung lagi di baris cash laporan kasir (kasir
-   melaporkan cash sesuai struk, titipan di Keterangan → cash fisik akan lebih). Cara finance
-   memisahkannya perlu dicoba di Tahap 2/5.
+Semua pertanyaan awal sudah dijawab (aturan 21–25). Yang perlu dipastikan saat dikerjakan:
+
+1. (Tahap 2) Plus/minus dinetralkan **per bulan gaji** — konfirmasi ke user kalau ternyata
+   maksudnya per periode lain.
+2. (Tahap 2) Entri Kerugian Kasir manual yang sudah ada (tanpa laporan kasir) tetap dipotong seperti
+   biasa dan ikut dinetralkan dengan plus di bulan yang sama.
