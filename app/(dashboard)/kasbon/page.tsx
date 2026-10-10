@@ -167,10 +167,31 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
     if (data) setMyKasbonInfo(data as unknown as Employee)
   }
 
+  // Kasbon mingguan milik sendiri (Driver/Helper Team Gudang). Pengajuan mereka dialihkan DB ke
+  // driver_kasbon/helper_kasbon (migrasi 101), jadi tidak muncul di tabel kasbon_requests di bawah —
+  // ditampilkan terpisah supaya tidak dikira hilang lalu diajukan ulang (migrasi 101b: RLS baca sendiri).
+  const [myWeeklyKasbon, setMyWeeklyKasbon] = useState<{ id: string; total_amount: number; remaining_amount: number; status: string; notes: string | null; created_at: string }[]>([])
+
+  async function fetchMyWeeklyKasbon() {
+    if (!canSelfSubmit || !myEmployeeId) return
+    const cols = 'id, total_amount, remaining_amount, status, notes, created_at'
+    const [d, h] = await Promise.all([
+      supabase.from('driver_kasbon').select(cols).eq('driver_id', myEmployeeId),
+      supabase.from('helper_kasbon').select(cols).eq('helper_id', myEmployeeId),
+    ])
+    const rows = [...(d.data || []), ...(h.data || [])] as typeof myWeeklyKasbon
+    rows.sort((a, b) => b.created_at.localeCompare(a.created_at))
+    setMyWeeklyKasbon(rows)
+  }
+
   useEffect(() => {
     fetchRequests()
     fetchEmployees()
   }, [])
+
+  useEffect(() => {
+    fetchMyWeeklyKasbon()
+  }, [canSelfSubmit, myEmployeeId])
 
   async function fetchRequests() {
     setLoading(true)
@@ -220,6 +241,7 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
       setModalAjukan(false)
       setAjukanForm({ employee_id: '', amount_requested: '', reason: '' })
       fetchRequests()
+      fetchMyWeeklyKasbon()
     }
     setSubmitting(false)
   }
@@ -241,6 +263,38 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition">
             <span className="text-base leading-none">+</span> {canSelfSubmit ? 'Ajukan Kasbon' : 'Ajukan Kasbon Baru'}
           </button>
+        </div>
+      )}
+
+      {canSelfSubmit && myWeeklyKasbon.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100">
+            <p className="font-semibold text-slate-800 text-sm">🚛 Kasbon Mingguan Saya</p>
+            <p className="text-xs text-slate-500">Kasbon Anda dipotong dari gaji mingguan (ritase), bukan slip gaji bulanan.</p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {myWeeklyKasbon.map(k => {
+              const cfg = k.status === 'pending_approval'
+                ? { label: 'Menunggu Persetujuan', className: 'bg-yellow-100 text-yellow-700' }
+                : k.status === 'active'
+                  ? { label: 'Disetujui · Dipotong Mingguan', className: 'bg-blue-100 text-blue-700' }
+                  : { label: 'Lunas', className: 'bg-green-100 text-green-700' }
+              return (
+                <div key={k.id} className="px-4 py-3 flex items-center justify-between gap-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-800">{fmtRp(k.total_amount)}
+                      {k.status === 'active' && <span className="ml-2 text-xs font-normal text-slate-500">sisa {fmtRp(k.remaining_amount)}</span>}
+                    </p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {new Date(k.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      {k.notes ? ` · ${k.notes}` : ''}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${cfg.className}`}>{cfg.label}</span>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 

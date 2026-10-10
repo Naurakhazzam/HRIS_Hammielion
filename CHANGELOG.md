@@ -2366,6 +2366,20 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 | `database/migrations/101_kasbon_ritase_redirect.sql` | Trigger pengalihan + autopost Kas Keluar saat aktif |
 | `app/(dashboard)/kasbon/page.tsx` | Pesan sukses menyebut pengalihan otomatis |
 
+**Data tambahan (2026-10-10):** kasbon Yana Karyana Rp250.000 (cair 5 Okt, salah jalur) dipindah ke Kasbon Driver & dipotong minggu 2–8 Okt; kasbon Reza Rp50.000 dipotong minggu 2–8 Okt; pengajuan Edi Sunardi Rp100.000 (8 Okt, belum disetujui) dipindah ke Kasbon Driver menunggu persetujuan Owner.
+
+### 145. Kasbon Mingguan Terlihat oleh Driver/Kenek Sendiri
+
+Sejak #144 pengajuan Driver/Helper dialihkan ke `driver_kasbon`/`helper_kasbon`, yang tadinya hanya bisa dibaca admin — pengajuannya jadi "hilang" dari layar karyawan dan rawan diajukan ulang (dobel).
+
+- Migrasi 101b: RLS baca baris milik sendiri di `driver_kasbon` & `helper_kasbon`.
+- Halaman Kasbon (karyawan): kartu **🚛 Kasbon Mingguan Saya** — nominal, sisa, status (Menunggu Persetujuan / Dipotong Mingguan / Lunas).
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/101b_kasbon_ritase_own_select.sql` | Policy SELECT baris sendiri |
+| `app/(dashboard)/kasbon/page.tsx` | Kartu Kasbon Mingguan Saya |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)
