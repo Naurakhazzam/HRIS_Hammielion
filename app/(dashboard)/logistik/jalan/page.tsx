@@ -281,13 +281,17 @@ function CutItemsEditor({ items, onChange, owners }: { items: CutItem[]; onChang
 // Barang kejadian (Salah Muat / Retur / Barang Lebih, migrasi 094): dibawa pulang = wajib diantar ke
 // pemiliknya + foto; dibeli toko = salah varian tetap dibeli (dicatat "seharusnya" untuk koreksi stok).
 type IncDisposition = 'dibawa_pulang' | 'dibeli_toko'
-type IncItem = { item_name: string; ordered_item_name: string; disposition: IncDisposition | ''; owner: string }
-type SavedIncItem = { plan_store_id: string; item_name: string; ordered_item_name: string | null; disposition: IncDisposition; owner_branch_id: string }
-const emptyInc = (): IncItem => ({ item_name: '', ordered_item_name: '', disposition: '', owner: '' })
-const incItemsValid = (items: IncItem[]) => items.every(i => i.item_name.trim() && i.disposition && i.owner)
+// qty (migrasi 102) wajib di form supaya koreksi stok pemilik bisa dihitung; data lama tanpa qty = null.
+type IncItem = { item_name: string; ordered_item_name: string; qty: string; disposition: IncDisposition | ''; owner: string }
+type SavedIncItem = { plan_store_id: string; item_name: string; ordered_item_name: string | null; qty: number | null; disposition: IncDisposition; owner_branch_id: string }
+const emptyInc = (): IncItem => ({ item_name: '', ordered_item_name: '', qty: '', disposition: '', owner: '' })
+const incQtyOk = (q: string) => Number(q.replace(',', '.')) > 0
+const incItemsValid = (items: IncItem[]) => items.every(i => i.item_name.trim() && incQtyOk(i.qty) && i.disposition && i.owner)
 const incPayload = (items: IncItem[]) => items.map(i => ({
-  item_name: i.item_name.trim(), ordered_item_name: i.ordered_item_name.trim() || null, disposition: i.disposition, owner_branch_id: i.owner,
+  item_name: i.item_name.trim(), ordered_item_name: i.ordered_item_name.trim() || null, qty: Number(i.qty.replace(',', '.')),
+  disposition: i.disposition, owner_branch_id: i.owner,
 }))
+const fmtQty = (q: number | null) => q == null ? '' : ` ×${Number(q).toLocaleString('id-ID')}`
 
 function IncidentItemsEditor({ items, onChange, branches }: { items: IncItem[]; onChange: (v: IncItem[]) => void; branches: { id: string; name: string }[] }) {
   const set = (idx: number, patch: Partial<IncItem>) => onChange(items.map((it, i) => i === idx ? { ...it, ...patch } : it))
@@ -299,8 +303,13 @@ function IncidentItemsEditor({ items, onChange, branches }: { items: IncItem[]; 
             <span className="text-xs font-semibold text-amber-800">Barang {idx + 1}</span>
             <button type="button" onClick={() => onChange(items.filter((_, i) => i !== idx))} className="text-xs text-red-600 hover:underline">Hapus</button>
           </div>
-          <input value={it.item_name} onChange={e => set(idx, { item_name: e.target.value })} placeholder="Barang yang terkirim (mis. Sabun B)"
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          <div className="flex gap-2">
+            <input value={it.item_name} onChange={e => set(idx, { item_name: e.target.value })} placeholder="Barang yang terkirim (mis. Sabun B)"
+              className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            <input value={it.qty} onChange={e => set(idx, { qty: e.target.value.replace(/[^0-9.,]/g, '') })} inputMode="decimal" placeholder="Jumlah"
+              aria-label="Jumlah barang"
+              className={`w-20 shrink-0 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none ${it.qty && !incQtyOk(it.qty) ? 'border-red-400' : 'border-slate-300'}`} />
+          </div>
           <input value={it.ordered_item_name} onChange={e => set(idx, { ordered_item_name: e.target.value })} placeholder="Seharusnya barang apa? (opsional, mis. Sabun A)"
             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
           <select value={it.owner} onChange={e => set(idx, { owner: e.target.value })}
@@ -622,7 +631,7 @@ export default function JalanPengirimanPage() {
     const incIds = rows.filter(r => r.incident_type !== 'tidak_ada').map(r => r.id)
     if (incIds.length > 0) {
       const { data: incData } = await supabase.from('logistics_visit_incident_items')
-        .select('plan_store_id, item_name, ordered_item_name, disposition, owner_branch_id').in('plan_store_id', incIds).order('created_at')
+        .select('plan_store_id, item_name, ordered_item_name, qty, disposition, owner_branch_id').in('plan_store_id', incIds).order('created_at')
       for (const c of (incData as SavedIncItem[]) || []) (incMap[c.plan_store_id] ??= []).push(c)
     }
     setVisitIncItems(incMap)
@@ -1053,7 +1062,7 @@ export default function JalanPengirimanPage() {
     setEditCutYes(saved.length > 0)
     setEditCutItems(saved.length > 0 ? saved.map(c => ({ item_name: c.item_name, amount: String(c.amount), reason: c.reason, goods: c.goods, owner: c.owner_branch_id ?? '' })) : [emptyCut()])
     setEditCutPhotoUrl(ps.cut_photo_url || '')
-    setEditIncItems((visitIncItems[ps.id] ?? []).map(c => ({ item_name: c.item_name, ordered_item_name: c.ordered_item_name ?? '', disposition: c.disposition, owner: c.owner_branch_id })))
+    setEditIncItems((visitIncItems[ps.id] ?? []).map(c => ({ item_name: c.item_name, ordered_item_name: c.ordered_item_name ?? '', qty: c.qty != null ? String(Number(c.qty)) : '', disposition: c.disposition, owner: c.owner_branch_id })))
   }
 
   // Potongan yang sudah diputuskan Finance tidak bisa diubah driver lagi (server juga menolak).
@@ -1979,7 +1988,7 @@ export default function JalanPengirimanPage() {
                     )}
                     {(visitIncItems[ps.id] ?? []).length > 0 && (
                       <p className="text-xs text-amber-700 mt-1">
-                        {(visitIncItems[ps.id] ?? []).map(c => `${c.item_name}${c.ordered_item_name ? ` (seharusnya ${c.ordered_item_name})` : ''} · milik ${allBranches.find(b => b.id === c.owner_branch_id)?.name ?? '-'} · ${c.disposition === 'dibawa_pulang' ? '↩️ dibawa pulang' : '🛒 dibeli toko'}`).join(' | ')}
+                        {(visitIncItems[ps.id] ?? []).map(c => `${c.item_name}${fmtQty(c.qty)}${c.ordered_item_name ? ` (seharusnya ${c.ordered_item_name})` : ''} · milik ${allBranches.find(b => b.id === c.owner_branch_id)?.name ?? '-'} · ${c.disposition === 'dibawa_pulang' ? '↩️ dibawa pulang' : '🛒 dibeli toko'}`).join(' | ')}
                       </p>
                     )}
                     {Number(ps.cut_total) > 0 && (

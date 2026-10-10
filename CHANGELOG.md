@@ -2399,6 +2399,21 @@ Data satu kunjungan toko tersebar di 5 tabel (kunjungan, nota gudang, nota caban
 | `components/RincianKunjunganModal.tsx` | Komponen baru popup rincian kunjungan |
 | `app/(dashboard)/logistik/laporan/page.tsx` | Nama toko bisa diklik + barang kejadian di popup Kejadian |
 
+### 147. Jumlah Barang Kejadian (Salah Muat / Retur / Barang Lebih)
+
+Barang kejadian hanya mencatat nama, jadi pada kasus Dheran Ps tidak diketahui berapa karung Lezato Kitten yang terkirim salah, dan koreksi stok pemilik tidak bisa dihitung. (Usulan catatan "alasan bayar sebagian" sengaja tidak dibuat atas keputusan Owner.)
+
+- Migrasi 102: kolom `qty numeric(10,2)` (> 0) di `logistics_visit_incident_items`. RPC `set_visit_incident_items` menyimpan `qty`, dan untuk barang yang "dibawa pulang" jumlahnya ikut di nama barang retur (mis. "Lazato kiten ×2") supaya cabang pemilik tahu berapa yang harus diterima.
+- Server **belum mewajibkan** qty, supaya HP driver yang belum refresh aplikasi tidak error. Yang mewajibkan adalah form driver: kotak **Jumlah** di samping nama barang (boleh desimal, mis. 1,5 kg), dan tombol simpan terkunci sampai jumlahnya diisi. Ini berlaku untuk lapor kunjungan maupun edit riwayat.
+- Jumlah ditampilkan sebagai "×N" di riwayat driver dan di Laporan Pengiriman, serta sebagai kolom **Jumlah** di Rincian Kunjungan. Data lama tampil "tidak dicatat".
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/102_incident_item_qty.sql` | Kolom qty + RPC simpan qty |
+| `app/(dashboard)/logistik/jalan/page.tsx` | Input Jumlah wajib di editor barang kejadian |
+| `app/(dashboard)/logistik/laporan/page.tsx` | Tampilkan ×N |
+| `components/RincianKunjunganModal.tsx` | Kolom Jumlah |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

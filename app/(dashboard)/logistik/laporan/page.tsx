@@ -181,11 +181,11 @@ export default function LaporanPengirimanPage() {
         const incIds = storeRows.filter(s => s.incident_type !== 'tidak_ada').map(s => s.id)
         if (incIds.length > 0) {
           const { data: incRows } = await supabase.from('logistics_visit_incident_items')
-            .select('plan_store_id, item_name, ordered_item_name, disposition, owner:branches(name)').in('plan_store_id', incIds).order('created_at')
-          type IncRow = { plan_store_id: string; item_name: string; ordered_item_name: string | null; disposition: string; owner: { name: string } | null }
+            .select('plan_store_id, item_name, ordered_item_name, qty, disposition, owner:branches(name)').in('plan_store_id', incIds).order('created_at')
+          type IncRow = { plan_store_id: string; item_name: string; ordered_item_name: string | null; qty: number | null; disposition: string; owner: { name: string } | null }
           const incBy: Record<string, string[]> = {}
           for (const r of (incRows as unknown as IncRow[]) || []) {
-            ;(incBy[r.plan_store_id] ??= []).push(`${r.item_name}${r.ordered_item_name ? ` (seharusnya ${r.ordered_item_name})` : ''} · milik ${r.owner?.name ?? '-'} · ${r.disposition === 'dibawa_pulang' ? '↩️ dibawa pulang' : '🛒 dibeli toko'}`)
+            ;(incBy[r.plan_store_id] ??= []).push(`${r.item_name}${r.qty != null ? ` ×${Number(r.qty).toLocaleString('id-ID')}` : ''}${r.ordered_item_name ? ` (seharusnya ${r.ordered_item_name})` : ''} · milik ${r.owner?.name ?? '-'} · ${r.disposition === 'dibawa_pulang' ? '↩️ dibawa pulang' : '🛒 dibeli toko'}`)
           }
           storeRows.forEach(s => { s.incident_items = incBy[s.id] ?? [] })
         }

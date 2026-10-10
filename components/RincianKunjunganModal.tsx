@@ -78,7 +78,7 @@ type CabangNota = {
   packages: { id: string; photo_url: string; caption: string | null; status: string; taken_at: string | null; taker: { full_name: string } | null }[]
 }
 
-type IncidentItem = { id: string; item_name: string; ordered_item_name: string | null; disposition: string; created_at: string; owner: { name: string } | null }
+type IncidentItem = { id: string; item_name: string; ordered_item_name: string | null; qty: number | null; disposition: string; created_at: string; owner: { name: string } | null }
 type CutLine = { id: string; item_name: string; amount: number; reason: string | null; goods: string | null; owner: { name: string } | null }
 
 const PAYMENT_LABEL: Record<string, string> = { cash: 'Cash', transfer: 'Transfer', deposit: 'Deposit (DP)', tempo: 'Tempo' }
@@ -134,7 +134,7 @@ export default function RincianKunjunganModal({ planStoreId, trip, onClose }: { 
           items:logistics_central_loading_items(id, photo_url, caption, created_at),
           packages:logistics_central_loading_packages(id, photo_url, caption, status, taken_at, taker:employees!logistics_central_loading_packages_taken_by_fkey(full_name))`)
           .eq('nota_plan_store_id', planStoreId).order('created_at'),
-        supabase.from('logistics_visit_incident_items').select('id, item_name, ordered_item_name, disposition, created_at, owner:branches(name)')
+        supabase.from('logistics_visit_incident_items').select('id, item_name, ordered_item_name, qty, disposition, created_at, owner:branches(name)')
           .eq('plan_store_id', planStoreId).order('created_at'),
         supabase.from('logistics_visit_cuts').select('id, item_name, amount, reason, goods, owner:branches(name)')
           .eq('plan_store_id', planStoreId).order('created_at'),
@@ -330,6 +330,7 @@ export default function RincianKunjunganModal({ planStoreId, trip, onClose }: { 
                         <thead>
                           <tr className="text-slate-500 text-left">
                             <th className="px-1 py-1 font-medium">Barang dikirim</th>
+                            <th className="px-1 py-1 font-medium text-right">Jumlah</th>
                             <th className="px-1 py-1 font-medium">Seharusnya</th>
                             <th className="px-1 py-1 font-medium">Milik</th>
                             <th className="px-1 py-1 font-medium">Penyelesaian</th>
@@ -339,6 +340,9 @@ export default function RincianKunjunganModal({ planStoreId, trip, onClose }: { 
                           {incidentItems.map(it => (
                             <tr key={it.id}>
                               <td className="px-1 py-1.5 font-medium text-slate-800">{it.item_name}</td>
+                              <td className="px-1 py-1.5 text-right text-slate-800">
+                                {it.qty != null ? Number(it.qty).toLocaleString('id-ID') : <span className="italic text-slate-400" title="Dicatat sebelum kolom jumlah ada">tidak dicatat</span>}
+                              </td>
                               <td className="px-1 py-1.5 text-slate-700">{it.ordered_item_name ?? '-'}</td>
                               <td className="px-1 py-1.5 text-slate-700">{it.owner?.name ?? '-'}</td>
                               <td className="px-1 py-1.5 text-slate-700">{it.disposition === 'dibawa_pulang' ? '↩️ Dibawa pulang' : '🛒 Dibeli toko'}</td>
