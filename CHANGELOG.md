@@ -2341,6 +2341,16 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 |---|---|
 | `components/sidebar.tsx` | Laporan Kasir keluar dari Operasional → Kas Masuk, jadi menu tingkat atas |
 
+### 143. Fix: Preview Tampilan Karyawan Menampilkan Surat Jalan
+
+**Ditemukan Owner:** preview atas nama Rahmat Saleh (Groomer, Toko Pusat) menampilkan menu Surat Jalan. Penyebab: syarat menu Surat Jalan & Laporan Kasir di sidebar diambil dari RPC (`can_manage_delivery_notes`, `get_my_cashier_report_branches`) yang menilai **akun yang login** — saat preview itu akun Owner. Karyawan aslinya tidak terdampak (dicek: akun Rahmat → `can_manage_delivery_notes = false`).
+
+**Fix:** di mode preview, kedua syarat dihitung dari data karyawan yang di-preview (cabang Back Office / jabatan Kepala Gudang untuk Surat Jalan; cabang toko & bukan Driver/Kepala Gudang/Helper untuk Laporan Kasir).
+
+| File | Perubahan |
+|---|---|
+| `components/sidebar.tsx` | Syarat menu Surat Jalan & Laporan Kasir mengikuti karyawan yang di-preview |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

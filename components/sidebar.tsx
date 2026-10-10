@@ -463,7 +463,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
               const submitted = mine ? mine.approved_count + mine.pending_count : DAYOFF_QUOTA_PER_PERIOD
               setLiburBadge(Math.max(0, DAYOFF_QUOTA_PER_PERIOD - submitted))
             })
-            supabase.from('employees').select('employee_type, can_drive, can_help, branch_id, departments(name), positions(name)').eq('id', effectiveEmployeeId).single().then(({ data: emp }) => {
+            supabase.from('employees').select('employee_type, can_drive, can_help, branch_id, departments(name), positions(name), branches(name)').eq('id', effectiveEmployeeId).single().then(({ data: emp }) => {
               if (emp) {
                 // Driver "asli" (employee_type='driver') belum tentu punya can_drive=true —
                 // kolom itu dibuat belakangan khusus untuk menandai karyawan LAIN yang bisa
@@ -479,11 +479,25 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
                 setIsDriverOrKenek(emp.employee_type === 'driver' || !!emp.can_drive || !!emp.can_help || dept?.name === 'Team Gudang')
                 setIsKepalaGudang((emp as any).positions?.name === 'Kepala Gudang')
                 // Surat Jalan: semua karyawan Back Office (+ Kepala Gudang/Owner), migrasi 090.
-                supabase.rpc('can_manage_delivery_notes').then(({ data: ok }) => setCanManageSuratJalan(!!ok))
-                supabase.rpc('get_my_cashier_report_branches').then(({ data: br }) => setCanCashierReport(Array.isArray(br) && br.length > 0))
+                // Laporan Kasir: karyawan 4 cabang toko kecuali Driver/Kepala Gudang/Helper (migrasi 096).
+                // Dua RPC ini menilai AKUN YANG LOGIN -- saat Preview Tampilan Karyawan itu akun admin,
+                // jadi di mode preview syaratnya dihitung dari data karyawan yang di-preview (kasus
+                // nyata: preview Rahmat Saleh/Groomer sempat menampilkan Surat Jalan).
+                const previewingEmp = realIsAdminNow && previewOn
+                const empPosition = (emp as any).positions?.name as string | undefined
+                const empBranch = Array.isArray((emp as any).branches) ? (emp as any).branches[0]?.name : (emp as any).branches?.name
+                if (previewingEmp) {
+                  setCanManageSuratJalan(empBranch === 'Back Office' || empPosition === 'Kepala Gudang')
+                } else {
+                  supabase.rpc('can_manage_delivery_notes').then(({ data: ok }) => setCanManageSuratJalan(!!ok))
+                  supabase.rpc('get_my_cashier_report_branches').then(({ data: br }) => setCanCashierReport(Array.isArray(br) && br.length > 0))
+                }
                 if (emp.branch_id) {
                   supabase.from('logistics_store_branches').select('branch_id').eq('branch_id', emp.branch_id).maybeSingle()
-                    .then(({ data: sb }) => setIsStoreBranchStaff(!!sb))
+                    .then(({ data: sb }) => {
+                      setIsStoreBranchStaff(!!sb)
+                      if (previewingEmp) setCanCashierReport(!!sb && !['Driver', 'Kepala Gudang', 'Helper'].includes(empPosition ?? ''))
+                    })
                   // Penerimaan Retur cuma untuk cabang yang pernah/sedang jadi tujuan retur --
                   // syarat yang sama dipakai halaman /logistik/penerimaan-retur.
                   supabase.from('logistics_store_returns').select('id', { count: 'exact', head: true })
