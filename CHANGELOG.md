@@ -2335,7 +2335,7 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 
 ### 142. Menu Laporan Kasir Dipisah dari Operasional
 
-**Permintaan Owner:** Laporan Kasir adalah pekerjaan toko, jangan dicampur dengan menu Operasional kantor. Di menu admin, **🧾 Laporan Kasir** kini menu sendiri di tingkat atas (di bawah Dashboard) — sama seperti yang dilihat karyawan toko. Verifikasinya tetap di Operasional → Verifikasi Keuangan → tab Laporan Kasir.
+**Permintaan Owner:** Laporan Kasir adalah pekerjaan toko, jangan dicampur dengan menu Operasional kantor. **🧾 Laporan Kasir** kini menu sendiri di tingkat atas, **tepat di bawah Panduan Karyawan** — di menu karyawan toko maupun menu admin. Verifikasinya tetap di Operasional → Verifikasi Keuangan → tab Laporan Kasir.
 
 | File | Perubahan |
 |---|---|

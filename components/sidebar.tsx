@@ -108,9 +108,6 @@ const LOGISTIK_SUBMENU: NavNode[] = [
 // Catatan Meeting, Manajemen User) sengaja TIDAK dipaksa masuk salah satu kelompok.
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
-  // Laporan Kasir = pekerjaan toko (diisi kasir), sengaja menu sendiri -- bukan bagian Operasional
-  // kantor. Verifikasinya tetap di Operasional → Verifikasi Keuangan → Laporan Kasir.
-  { name: 'Laporan Kasir', href: '/laporan-kasir', icon: '🧾' },
   // Owner/HR/Finance juga karyawan (punya employee_id sendiri) — bukan cuma pengelola sistem.
   // Grup ini kasih mereka akses ke data pribadi sendiri (profil, slip gaji, absensi, jadwal),
   // sama seperti yang dilihat karyawan biasa di menu "Portal Saya".
@@ -122,6 +119,10 @@ const adminNavItems: NavNode[] = [
   },
   { name: 'Kinerja Saya', href: '/portal/kpi-saya', icon: '📊' },
   { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
+  // Laporan Kasir = pekerjaan toko (diisi kasir), sengaja menu sendiri -- bukan bagian Operasional
+  // kantor; posisinya sama dengan di menu karyawan (di bawah Panduan Karyawan). Verifikasinya
+  // tetap di Operasional → Verifikasi Keuangan → Laporan Kasir.
+  { name: 'Laporan Kasir', href: '/laporan-kasir', icon: '🧾' },
   {
     name: 'SDM / HR',
     href: '/karyawan',
@@ -283,12 +284,12 @@ const adminNavItems: NavNode[] = [
 function getEmployeeNavItems(isDriverOrKenek: boolean, isKepalaGudang: boolean, isReturRecipient: boolean, isStoreBranchStaff: boolean, canManageSuratJalan = false, canCashierReport = false): NavNode[] {
   const items: NavNode[] = [
     { name: 'Dashboard Saya', href: '/portal', icon: '🏠' },
-    // Laporan Kasir: karyawan cabang toko selain Driver/Kepala Gudang/Helper (migrasi 096).
-    ...(canCashierReport ? [{ name: 'Laporan Kasir', href: '/laporan-kasir', icon: '🧾' }] : []),
     { name: 'Portal Saya', href: '/portal/profil', icon: '👤', submenu: EMPLOYEE_PORTAL_SAYA },
     { name: 'Kinerja Saya', href: '/portal/kpi-saya', icon: '📊' },
     { name: 'Kalender Libur', href: '/absensi/kalender-libur', icon: '📅' },
     { name: 'Panduan Karyawan', href: '/panduan', icon: '📖' },
+    // Laporan Kasir: karyawan cabang toko selain Driver/Kepala Gudang/Helper (migrasi 096).
+    ...(canCashierReport ? [{ name: 'Laporan Kasir', href: '/laporan-kasir', icon: '🧾' }] : []),
     { name: 'Gaji & Kasbon', href: '/portal/slip-gaji', icon: '💰', submenu: buildGajiKasbonSubmenu(isDriverOrKenek) },
     { name: 'Cuti & Libur', href: '/cuti', icon: '🗓️', submenu: CUTI_LIBUR_SUBMENU },
     { name: 'Pekerjaan', href: '/tugas-harian', icon: '📋', submenu: PEKERJAAN_SUBMENU },
