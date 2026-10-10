@@ -41,7 +41,9 @@ terverifikasi masuk Kas Masuk otomatis (lihat Tahap 4 di bawah).
   099c_titipan_remainder_branch). Keputusan Claude: titipan dengan konsumen Buku Piutang = pelunasan
   setoran cash otomatis; tanpa konsumen = Kas Masuk "titipan pelunasan" di cabang laporan; sisa
   setoran (saldo konsumen) ikut Kas Masuk.
-- [ ] **Tahap 6** — Tanda bantu finance (piutang vs nota kiriman, kiriman gagal setelah lapor)
+- [x] **Tahap 6** — Tanda bantu finance (piutang vs nota kiriman, kiriman gagal setelah lapor)
+  (migrasi `100_cashier_day_checks.sql`). Sub-tab "📋 Cek Harian" + kotak di kartu verifikasi.
+  Keputusan Claude: "belum lapor" hanya ditandai mulai tanggal mulai / laporan kasir pertama.
 
 ---
 

@@ -2321,6 +2321,18 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 | `app/(dashboard)/keuangan/piutang/page.tsx` | Keterangan pelunasan = Kas Masuk otomatis |
 | `lib/cashierReport.ts` | Kolom titipan baru |
 
+### 141. Tanda Bantu Finance: Cek Harian Laporan Kasir (Laporan Kasir Tahap 6, migrasi 100)
+
+**Logika (hanya informasi, tidak mengubah data):**
+- RPC `get_cashier_day_checks(from, to)` (owner/hr/finance, maks 62 hari): per cabang per hari — shift yang sudah lapor, **piutang yang dilaporkan** (shift 1+2), dan **nota kiriman di sistem** beserta nama konsumennya (cabang toko: Laporan Muat bernota, tanggal dibuat; Gudang: surat jalan + Nota Gudang lama yang diketik driver).
+- Di kartu verifikasi: kotak biru "piutang dilaporkan vs nota kiriman" untuk cabang & tanggal laporan itu, dengan petunjuk (piutang lebih besar → kemungkinan tempo ambil sendiri / nota kiriman belum diinput; lebih kecil → shift lain belum lapor / salah tulis).
+- Sub-tab baru **📋 Cek Harian** (14 hari terakhir): cabang yang **belum lapor** (hanya dihitung mulai tanggal mulai / laporan kasir pertama, supaya hari sebelum fitur dipakai tidak ditandai), **selisih piutang vs nota kiriman**, dan **nota kiriman yang batal setelah kasir lapor** (omzet hari itu perlu dicek). Jumlah baris yang perlu dicek tampil di tab.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/100_cashier_day_checks.sql` | RPC `get_cashier_day_checks` |
+| `components/VerifikasiLaporanKasir.tsx` | Kotak cek per laporan + sub-tab Cek Harian |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

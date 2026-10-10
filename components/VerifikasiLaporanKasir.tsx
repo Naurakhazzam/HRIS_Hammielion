@@ -17,6 +17,19 @@ import {
 
 type Account = { id: string; bank_name: string; account_number: string | null; account_type: string }
 type MethodAccount = { branch_id: string; method_key: string; account_id: string }
+// Tanda bantu harian (migrasi 100): piutang dilaporkan vs nota kiriman, gagal setelah lapor, belum lapor.
+type DayNota = { kind: string; store: string; amount: number; cancelled: boolean; cancelled_at: string | null }
+type DayCheck = {
+  branch_id: string
+  branch_name: string
+  date: string
+  shifts: { shift: number; status: string }[]
+  piutang_reported: number
+  first_report_at: string | null
+  notas: DayNota[]
+}
+const activeNotaTotal = (c: DayCheck) => c.notas.filter(n => !n.cancelled).reduce((s, n) => s + Number(n.amount), 0)
+const cancelledAfterReport = (c: DayCheck) => c.notas.filter(n => n.cancelled && c.first_report_at && n.cancelled_at && n.cancelled_at > c.first_report_at)
 type Draft = {
   cashReceived: string
   cashAccount: string
@@ -38,7 +51,8 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
   const { openLightbox } = usePhotoLightbox()
 
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<'belum' | 'sudah'>('belum')
+  const [view, setView] = useState<'belum' | 'sudah' | 'cek'>('belum')
+  const [checks, setChecks] = useState<DayCheck[]>([])
   const [month, setMonth] = useState(() => todayLocalStr().slice(0, 7))
   const [pending, setPending] = useState<CashierReport[]>([])
   const [done, setDone] = useState<CashierReport[]>([])
@@ -73,7 +87,8 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
       supabase.from('cashier_method_accounts').select('branch_id, method_key, account_id'),
       supabase.from('cashier_report_settings').select('start_date').maybeSingle(),
       supabase.from('logistics_stores').select('id, name').order('name'),
-    ]).then(([pRes, mRes, accRes, mapRes, setRes, storeRes]) => {
+      supabase.rpc('get_cashier_day_checks', { p_from: localDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - 13)), p_to: today }),
+    ]).then(([pRes, mRes, accRes, mapRes, setRes, storeRes, chkRes]) => {
       if (cancelled) return
       if (pRes.error || mRes.error) {
         showMessage('error', 'Gagal memuat laporan kasir: ' + (pRes.error?.message || mRes.error?.message))
@@ -85,6 +100,7 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
       setAccounts((accRes.data as Account[]) || [])
       setMapping((mapRes.data as MethodAccount[]) || [])
       setStores((storeRes.data as { id: string; name: string }[]) || [])
+      setChecks((chkRes.data as DayCheck[]) || [])
       const sd = (setRes.data as { start_date: string | null } | null)?.start_date ?? null
       setStartDate(sd)
       setStartDraft(sd ?? '')
@@ -202,6 +218,17 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
   )
   const branchesForSettings = Array.from(new Map([...pending, ...done].map(r => [r.branch_id, r.branch_name])).entries())
   const selectCls = 'px-2 py-1.5 border border-slate-300 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-blue-500'
+  // Angka di tab Cek Harian: hari lalu tanpa laporan, nota batal setelah lapor, atau piutang ≠ nota kiriman.
+  const todayStr = todayLocalStr()
+  // "Belum ada laporan" baru dihitung mulai tanggal mulai / laporan kasir pertama -- sebelum fitur
+  // dipakai semua hari kosong, tidak perlu ditandai.
+  const trackFrom = startDate ?? checks.filter(c => c.shifts.length > 0).map(c => c.date).sort()[0] ?? null
+  const isMissingDay = (d: string) => !!trackFrom && d >= trackFrom && d < todayStr
+  const checkAlerts = checks.filter(c =>
+    (c.shifts.length === 0 && isMissingDay(c.date))
+    || cancelledAfterReport(c).length > 0
+    || (c.shifts.length > 0 && Number(c.piutang_reported) !== activeNotaTotal(c))
+  ).length
 
   return (
     <div className="space-y-4">
@@ -221,10 +248,10 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
-          {(['belum', 'sudah'] as const).map(v => (
+          {(['belum', 'sudah', 'cek'] as const).map(v => (
             <button key={v} onClick={() => setView(v)}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${view === v ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-              {v === 'belum' ? `Menunggu (${pending.length})` : 'Riwayat'}
+              {v === 'belum' ? `Menunggu (${pending.length})` : v === 'sudah' ? 'Riwayat' : `📋 Cek Harian${checkAlerts > 0 ? ` (${checkAlerts})` : ''}`}
             </button>
           ))}
         </div>
@@ -349,6 +376,21 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
                   </div>
                 )}
                 {r.notes && <p className="text-xs text-slate-600 bg-yellow-50 border border-yellow-100 rounded p-2">Keterangan kasir: {r.notes}</p>}
+                {(() => {
+                  const c = checks.find(x => x.branch_id === r.branch_id && x.date === r.report_date)
+                  if (!c || (c.notas.length === 0 && Number(c.piutang_reported) === 0)) return null
+                  const notaTotal = activeNotaTotal(c)
+                  const diff = Number(c.piutang_reported) - notaTotal
+                  return (
+                    <div className="text-xs bg-blue-50 border border-blue-100 rounded p-2 space-y-1">
+                      <p>📦 <strong>{r.branch_name} {fmtDay(r.report_date)}</strong> (semua shift): piutang dilaporkan <strong>{fmtRp(Number(c.piutang_reported))}</strong> · nota kiriman di sistem <strong>{fmtRp(notaTotal)}</strong>
+                        {diff !== 0 && <span className={diff > 0 ? 'text-amber-700' : 'text-red-600'}> · selisih {diff > 0 ? '+' : '−'}{fmtRp(Math.abs(diff))}</span>}</p>
+                      {c.notas.length > 0 && <p className="text-slate-500">{c.notas.map(n => `${n.store} ${fmtRp(Number(n.amount))}${n.cancelled ? ' (batal)' : ''}`).join(' · ')}</p>}
+                      {diff > 0 && <p className="text-amber-700">Piutang lebih besar dari nota kiriman → kemungkinan tempo ambil sendiri / nota kiriman belum diinput di Laporan Muat.</p>}
+                      {diff < 0 && <p className="text-red-600">Nota kiriman lebih besar dari piutang dilaporkan → cek apakah shift lain belum lapor atau kasir salah tulis piutang.</p>}
+                    </div>
+                  )
+                })()}
 
                 <div className="bg-slate-50 rounded-lg p-3 space-y-2">
                   <div className="flex justify-between text-xs text-slate-600">
@@ -416,6 +458,58 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
           </div>
         )
       }))}
+
+      {view === 'cek' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+          <p className="px-3 py-2 text-xs text-slate-500 border-b border-slate-100">14 hari terakhir. Piutang = total Piutang di laporan kasir (shift 1 + 2) dibandingkan nota kiriman di sistem (cabang: Laporan Muat; Gudang: surat jalan / Nota Gudang driver). Hanya bantuan — tidak mengubah data.</p>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 text-xs text-slate-500 uppercase">
+                <th className="px-3 py-2 text-left">Tanggal</th>
+                <th className="px-3 py-2 text-left">Cabang</th>
+                <th className="px-3 py-2 text-left">Laporan</th>
+                <th className="px-3 py-2 text-right">Piutang dilaporkan</th>
+                <th className="px-3 py-2 text-right">Nota kiriman</th>
+                <th className="px-3 py-2 text-left">Catatan</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {checks.map(c => {
+                const notaTotal = activeNotaTotal(c)
+                const diff = Number(c.piutang_reported) - notaTotal
+                const late = cancelledAfterReport(c)
+                const isPast = isMissingDay(c.date)
+                return (
+                  <tr key={c.branch_id + c.date} className={c.shifts.length === 0 && isPast ? 'bg-red-50/50' : ''}>
+                    <td className="px-3 py-2 whitespace-nowrap">{fmtDay(c.date)}</td>
+                    <td className="px-3 py-2">{c.branch_name}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {c.shifts.length === 0
+                        ? <span className={`text-xs ${isPast ? 'text-red-600 font-semibold' : 'text-slate-400'}`}>{isPast ? '⚠️ belum ada laporan' : 'belum'}</span>
+                        : c.shifts.map(s => (
+                          <span key={s.shift} className={`mr-1 text-[11px] px-1.5 py-0.5 rounded ${CASHIER_REPORT_STATUS[s.status as CashierReport['status']]?.cls ?? 'bg-slate-100'}`}>S{s.shift}</span>
+                        ))}
+                    </td>
+                    <td className="px-3 py-2 text-right">{fmtRp(Number(c.piutang_reported))}</td>
+                    <td className="px-3 py-2 text-right">
+                      {fmtRp(notaTotal)}
+                      {c.notas.length > 0 && <div className="text-[10px] text-slate-400 max-w-[240px] ml-auto">{c.notas.filter(n => !n.cancelled).map(n => n.store).join(', ')}</div>}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {c.shifts.length > 0 && diff !== 0 && (
+                        <div className={diff > 0 ? 'text-amber-700' : 'text-red-600'}>Selisih {diff > 0 ? '+' : '−'}{fmtRp(Math.abs(diff))}{diff > 0 ? ' (tempo ambil sendiri?)' : ''}</div>
+                      )}
+                      {late.map((n, i) => (
+                        <div key={i} className="text-red-600">⚠️ {n.store} {fmtRp(Number(n.amount))} batal setelah kasir lapor — cek omzet</div>
+                      ))}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {view === 'sudah' && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
