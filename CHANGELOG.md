@@ -2292,12 +2292,28 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 | `app/(dashboard)/keuangan/kas-masuk/page.tsx` | Judul, peringatan & konfirmasi dobel, tanda entri otomatis |
 | `components/sidebar.tsx` | Menu "Omzet Harian" → "Input Kasir Darurat" |
 
+### 139. Uang Pengiriman Terverifikasi → Kas Masuk Otomatis, Tanggal Nota (Laporan Kasir Tahap 4, migrasi 098)
+
+**Latar belakang:** Nota kiriman sudah termasuk di "Piutang" laporan kasir (uangnya tidak di laci), dan driver baru menyetor besok. Sebelumnya uang yang diverifikasi di tab Uang Pengiriman tidak pernah masuk Kas Masuk → omzet di laporan keuangan kurang. (Sekaligus menuntaskan Tahap 5 `RENCANA-NOTA-CABANG.md`.)
+
+**Logika:**
+- Trigger AFTER UPDATE di `logistics_plan_stores` (kunjungan driver) & `logistics_central_loadings` (antar sendiri) menyinkronkan ulang baris `fin_cash_in` sumbernya setiap status/angka verifikasi berubah (hapus lalu buat ulang). Fungsi verifikasi lama **tidak diubah**. `source_type` = `delivery_visit` / `delivery_antar`.
+- Pembagian per kunjungan mengikuti hasil `apply_visit_payment`: **nota cabang → cabang asal, tanggal Laporan Muat**; **surat jalan → Gudang, tanggal surat jalan**; Nota Gudang lama → Gudang, tanggal kunjungan (dihitung sebagai sisa dari total terverifikasi, supaya kunjungan sistem lama yang dikoreksi finance tetap pas); **lebih bayar** → Gudang (atau cabang nota terbesar kalau tanpa nota gudang), tanggal kunjungan. Tempo tidak membuat Kas Masuk. Metode: cash → cash, transfer → transfer, deposit → campuran; rekening = rekening verifikasi.
+- Hanya bagian bertanggal ≥ **tanggal mulai** (Pengaturan Laporan Kasir). Saat tanggal mulai disimpan/diubah, semua uang pengiriman terverifikasi disinkronkan ulang.
+- Diuji dengan data asli (tanpa disimpan): 94 kunjungan terverifikasi sejak 1 Sep — total Kas Masuk = total terverifikasi persis (Rp263.283.218); contoh kunjungan bernota cabang: Rp50.000 → Toko Pusat, Rp8.595.500 → Gudang, lebih bayar Rp54.500 → Gudang; batal verifikasi menghapus semuanya.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/098_delivery_money_cash_in.sql` | `sync_visit_cash_in`, `sync_loading_cash_in`, 2 trigger, sinkron ulang saat tanggal mulai diubah |
+| `components/VerifikasiUangPengiriman.tsx` | Keterangan bahwa verifikasi = Kas Masuk otomatis |
+| `components/VerifikasiLaporanKasir.tsx` | Keterangan tanggal mulai berlaku juga untuk uang pengiriman |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).
-- **Kas Masuk otomatis** dari uang pengiriman yang sudah diverifikasi — dibahas setelah fitur di atas stabil.
+- ~~**Kas Masuk otomatis** dari uang pengiriman yang sudah diverifikasi~~ — selesai di item #139 (Laporan Kasir Tahap 4).
 
 ---
 

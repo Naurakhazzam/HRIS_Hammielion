@@ -92,7 +92,7 @@ sederhana** — user bukan programmer, dan driver di lapangan gagap teknologi.
   dibatalkan / toko dihapus → surat jalan kembali menunggu. Pembagian uang & Buku Piutang per surat
   jalan (`source_type = 'surat_jalan'`). Halaman `logistik/surat-jalan` (5 tab), tombol "+ Tambahkan
   Surat Jalan" di Rencana Pengiriman, badge "perlu keputusan" (`get_failed_decision_count`).
-- [ ] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk (**DITUNDA**, dibahas terakhir — lihat bagian 7).
+- [x] **Tahap 5** — Nota terverifikasi otomatis masuk Kas Masuk — **selesai** sebagai Tahap 4 `RENCANA-LAPORAN-KASIR.md` (migrasi 098, trigger sinkron Kas Masuk per kunjungan / antar sendiri, tanggal nota).
   **Sudah diputuskan** lewat diskusi Laporan Kasir → dikerjakan sebagai Tahap 4 di `RENCANA-LAPORAN-KASIR.md`.
 - [x] **Potong nota — jalur driver** (migrasi 092–092d, belum di-push) — lihat bagian 8.
 - [x] Potong nota — jalur antar sendiri (migrasi 095, belum di-push) — lihat bagian 8.

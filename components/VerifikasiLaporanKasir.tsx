@@ -232,7 +232,7 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
         <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-4">
           <div>
             <h3 className="font-semibold text-slate-800 text-sm">Tanggal mulai Kas Masuk otomatis</h3>
-            <p className="text-xs text-slate-500 mb-2">Laporan kasir dengan tanggal ini atau sesudahnya yang disetujui otomatis masuk Kas Masuk & potongan selisih kasir. Sebelum tanggal ini, tetap input omzet manual seperti biasa.</p>
+            <p className="text-xs text-slate-500 mb-2">Laporan kasir dengan tanggal ini atau sesudahnya yang disetujui otomatis masuk Kas Masuk & potongan selisih kasir. Berlaku juga untuk <strong>uang pengiriman</strong> (nota kiriman / Nota Gudang) yang diverifikasi di tab Uang Pengiriman — saat tanggal ini disimpan, uang pengiriman yang sudah terverifikasi langsung disinkronkan. Sebelum tanggal ini, tetap input omzet manual seperti biasa (termasuk omzet Gudang).</p>
             <div className="flex flex-wrap gap-2 items-center">
               <input type="date" value={startDraft} onChange={e => setStartDraft(e.target.value)} className="px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
               <button onClick={saveStartDate} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">Simpan</button>

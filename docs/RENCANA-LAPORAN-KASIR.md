@@ -31,7 +31,11 @@ terverifikasi masuk Kas Masuk otomatis (lihat Tahap 4 di bawah).
   di laporan, dicatat ke Buku Piutang di Tahap 5.
 - [x] **Tahap 3** — "Omzet Harian" diganti nama jadi **Input Kasir Darurat** + peringatan dobel
   (tanpa migrasi; peringatan = kotak kuning + konfirmasi, tidak memblokir).
-- [ ] **Tahap 4** — Uang pengiriman terverifikasi → Kas Masuk toko asal (tanggal nota)
+- [x] **Tahap 4** — Uang pengiriman terverifikasi → Kas Masuk toko asal (tanggal nota) (migrasi
+  `098_delivery_money_cash_in.sql`; DB: 098 + 098b_delivery_cash_in_gudang_residual). Lewat trigger
+  sinkron, fungsi verifikasi lama tidak diubah. Keputusan Claude: "tanggal nota" nota cabang =
+  tanggal Laporan Muat dibuat (WIB); lebih bayar ikut Kas Masuk (uangnya diterima) ke Gudang / cabang
+  nota terbesar; deposit dicatat metode "campuran".
 - [ ] **Tahap 5** — Pelunasan Buku Piutang → Kas Masuk (tanggal lunas)
 - [ ] **Tahap 6** — Tanda bantu finance (piutang vs nota kiriman, kiriman gagal setelah lapor)
 

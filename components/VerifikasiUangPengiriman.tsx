@@ -231,6 +231,10 @@ export default function VerifikasiUangPengiriman({ onCount }: { onCount?: (n: nu
         </div>
       )}
 
+      <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+        🧾 Uang yang diverifikasi di sini otomatis masuk <strong>Kas Masuk</strong> cabang pemilik nota, bertanggal <strong>tanggal nota</strong> (bukan tanggal setor) — mulai tanggal yang diatur di Verifikasi Keuangan → Laporan Kasir → Pengaturan. Batal verifikasi = Kas Masuknya ikut terhapus.
+      </p>
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-wrap items-center gap-3">
         <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
           {(['belum', 'sudah', 'potong'] as const).map(v => (
