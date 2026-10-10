@@ -28,6 +28,8 @@ export type CashierReport = {
   cash_received: number | null
   titipan_amount: number
   titipan_note: string | null
+  titipan_store_id: string | null
+  titipan_payment_id: string | null
   cash_account_id: string | null
   final_diff: number | null
   posted: boolean

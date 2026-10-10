@@ -206,7 +206,7 @@ export default function BukuPiutangPage() {
     <div className="max-w-5xl">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Buku Piutang</h1>
-        <p className="text-sm text-slate-500">Piutang konsumen dari pengiriman (Nota Gudang & nota cabang) sejak 10 Okt 2026. Pelunasan dipakai ke nota paling lama dulu.</p>
+        <p className="text-sm text-slate-500">Piutang konsumen dari pengiriman (Nota Gudang & nota cabang) sejak 10 Okt 2026. Pelunasan dipakai ke nota paling lama dulu. Pelunasan jenis setoran otomatis masuk <strong>Kas Masuk</strong> cabang pemilik nota dengan tanggal lunas (mulai tanggal di Verifikasi Keuangan → Laporan Kasir → Pengaturan); batal pelunasan = Kas Masuknya ikut terhapus.</p>
       </div>
 
       {message && (

@@ -36,7 +36,11 @@ terverifikasi masuk Kas Masuk otomatis (lihat Tahap 4 di bawah).
   sinkron, fungsi verifikasi lama tidak diubah. Keputusan Claude: "tanggal nota" nota cabang =
   tanggal Laporan Muat dibuat (WIB); lebih bayar ikut Kas Masuk (uangnya diterima) ke Gudang / cabang
   nota terbesar; deposit dicatat metode "campuran".
-- [ ] **Tahap 5** — Pelunasan Buku Piutang → Kas Masuk (tanggal lunas)
+- [x] **Tahap 5** — Pelunasan Buku Piutang → Kas Masuk (tanggal lunas) (migrasi
+  `099_receivable_payment_cash_in.sql`; DB: 099 + 099b_cashier_report_titipan_receivable +
+  099c_titipan_remainder_branch). Keputusan Claude: titipan dengan konsumen Buku Piutang = pelunasan
+  setoran cash otomatis; tanpa konsumen = Kas Masuk "titipan pelunasan" di cabang laporan; sisa
+  setoran (saldo konsumen) ikut Kas Masuk.
 - [ ] **Tahap 6** — Tanda bantu finance (piutang vs nota kiriman, kiriman gagal setelah lapor)
 
 ---

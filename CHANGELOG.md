@@ -2308,6 +2308,19 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 | `components/VerifikasiUangPengiriman.tsx` | Keterangan bahwa verifikasi = Kas Masuk otomatis |
 | `components/VerifikasiLaporanKasir.tsx` | Keterangan tanggal mulai berlaku juga untuk uang pengiriman |
 
+### 140. Pelunasan Buku Piutang & Titipan Kasir → Kas Masuk (Laporan Kasir Tahap 5, migrasi 099)
+
+**Logika:**
+- Pelunasan **setoran** di Buku Piutang (biasanya transfer konsumen ke rekening kantor) otomatis membuat Kas Masuk per cabang pemilik nota yang dilunasi (Nota Gudang/surat jalan → Gudang, nota cabang → cabang asal), **tanggal lunas**, rekening pelunasan. Sisa setoran yang jadi saldo konsumen ikut dicatat (uangnya diterima). `source_type='receivable_payment'`. Pelunasan **pakai saldo** tidak membuat Kas Masuk. Batal pelunasan → Kas Masuknya terhapus (trigger). Hanya tanggal ≥ tanggal mulai; saat tanggal mulai diubah, pelunasan ikut disinkron ulang.
+- **Titipan pelunasan** di verifikasi Laporan Kasir: finance bisa memilih **konsumen Buku Piutang** → otomatis tercatat sebagai pelunasan setoran cash tanggal laporan (melunasi nota tertua; sisanya jadi saldo, dicatat di cabang tempat uang diterima). Tanpa konsumen (mis. ambil sendiri, tidak ada di Buku Piutang) → Kas Masuk "Titipan pelunasan piutang" di cabang laporan. Titipan tidak pernah dihitung plus kasir. Batalkan persetujuan laporan → pelunasan titipannya ikut dibatalkan.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/099_receivable_payment_cash_in.sql` | Sinkron pelunasan → Kas Masuk, trigger hapus, `record_receivable_payment` + sinkron, titipan di `approve`/`unapprove_cashier_report` |
+| `components/VerifikasiLaporanKasir.tsx` | Pilih konsumen Buku Piutang untuk titipan |
+| `app/(dashboard)/keuangan/piutang/page.tsx` | Keterangan pelunasan = Kas Masuk otomatis |
+| `lib/cashierReport.ts` | Kolom titipan baru |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

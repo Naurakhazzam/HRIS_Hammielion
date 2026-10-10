@@ -24,6 +24,7 @@ type Draft = {
   titipanOn: boolean
   titipanAmount: string
   titipanNote: string
+  titipanStore: string
   rejecting: boolean
   rejectReason: string
 }
@@ -43,6 +44,7 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
   const [done, setDone] = useState<CashierReport[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [mapping, setMapping] = useState<MethodAccount[]>([])
+  const [stores, setStores] = useState<{ id: string; name: string }[]>([])
   const [startDate, setStartDate] = useState<string | null>(null)
   const [startDraft, setStartDraft] = useState('')
   const [showSettings, setShowSettings] = useState(false)
@@ -70,7 +72,8 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
       supabase.from('fin_bank_accounts').select('id, bank_name, account_number, account_type').eq('is_active', true).order('account_type').order('bank_name'),
       supabase.from('cashier_method_accounts').select('branch_id, method_key, account_id'),
       supabase.from('cashier_report_settings').select('start_date').maybeSingle(),
-    ]).then(([pRes, mRes, accRes, mapRes, setRes]) => {
+      supabase.from('logistics_stores').select('id, name').order('name'),
+    ]).then(([pRes, mRes, accRes, mapRes, setRes, storeRes]) => {
       if (cancelled) return
       if (pRes.error || mRes.error) {
         showMessage('error', 'Gagal memuat laporan kasir: ' + (pRes.error?.message || mRes.error?.message))
@@ -81,6 +84,7 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
       setDone(((mRes.data as CashierReport[]) || []).filter(r => r.status === 'approved' || r.status === 'rejected'))
       setAccounts((accRes.data as Account[]) || [])
       setMapping((mapRes.data as MethodAccount[]) || [])
+      setStores((storeRes.data as { id: string; name: string }[]) || [])
       const sd = (setRes.data as { start_date: string | null } | null)?.start_date ?? null
       setStartDate(sd)
       setStartDraft(sd ?? '')
@@ -111,6 +115,7 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
       titipanOn: false,
       titipanAmount: '',
       titipanNote: '',
+      titipanStore: '',
       rejecting: false,
       rejectReason: '',
     }
@@ -126,7 +131,7 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
     if (Number(r.cash_amount) > 0 && !d.cashAccount) { showMessage('error', 'Pilih rekening/kas untuk cash.'); return }
     const missing = r.payments.find(p => !d.payAccounts[p.id])
     if (missing) { showMessage('error', `Pilih rekening untuk ${missing.method_label}.`); return }
-    if (d.titipanOn && (titipan <= 0 || !d.titipanNote.trim())) { showMessage('error', 'Isi nominal & nama konsumen titipan pelunasan.'); return }
+    if (d.titipanOn && (titipan <= 0 || (!d.titipanNote.trim() && !d.titipanStore))) { showMessage('error', 'Isi nominal titipan dan pilih konsumen Buku Piutang / tulis nama konsumen.'); return }
     const finalDiff = (received - titipan) - (Number(r.cash_amount) - reportExpenseTotal(r))
     const willPost = !!startDate && r.report_date >= startDate
     const lines = [
@@ -143,6 +148,7 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
       p_titipan_amount: titipan,
       p_titipan_note: d.titipanOn ? d.titipanNote : null,
       p_payments: r.payments.map(p => ({ id: p.id, account_id: d.payAccounts[p.id] })),
+      p_titipan_store_id: d.titipanOn && d.titipanStore ? d.titipanStore : null,
     })
     setBusyId(null)
     if (error) { showMessage('error', 'Gagal menyetujui: ' + error.message); return }
@@ -359,11 +365,20 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
                     Termasuk uang titipan pelunasan piutang (bukan bagian omzet hari ini)
                   </label>
                   {d.titipanOn && (
-                    <div className="flex flex-wrap gap-2">
-                      <RupiahInput value={d.titipanAmount} onChange={v => patchDraft(r, { titipanAmount: v })} placeholder="Nominal titipan"
-                        className="w-36 px-2 py-1.5 border border-slate-300 rounded-lg text-sm text-right bg-white" />
-                      <input value={d.titipanNote} onChange={e => patchDraft(r, { titipanNote: e.target.value })} placeholder="Nama konsumen"
-                        className="flex-1 min-w-[160px] px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white" />
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        <RupiahInput value={d.titipanAmount} onChange={v => patchDraft(r, { titipanAmount: v })} placeholder="Nominal titipan"
+                          className="w-36 px-2 py-1.5 border border-slate-300 rounded-lg text-sm text-right bg-white" />
+                        <select value={d.titipanStore} onChange={e => patchDraft(r, { titipanStore: e.target.value })}
+                          className="flex-1 min-w-[180px] px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white">
+                          <option value="">— Konsumen di Buku Piutang (opsional) —</option>
+                          {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      </div>
+                      <input value={d.titipanNote} onChange={e => patchDraft(r, { titipanNote: e.target.value })}
+                        placeholder={d.titipanStore ? 'Catatan (opsional)' : 'Nama konsumen (wajib kalau tidak ada di Buku Piutang)'}
+                        className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm bg-white" />
+                      <p className="text-[11px] text-slate-400">Pilih konsumen → otomatis tercatat sebagai pelunasan di Buku Piutang (melunasi nota tertua). Tidak dipilih → dicatat sebagai Kas Masuk &quot;titipan pelunasan&quot; cabang ini.</p>
                     </div>
                   )}
                   <div className="flex justify-between text-xs border-t border-slate-200 pt-2">
@@ -430,7 +445,7 @@ export default function VerifikasiLaporanKasir({ onCount }: { onCount?: (n: numb
                     <td className="px-3 py-2">{r.reporter_name}</td>
                     <td className="px-3 py-2 text-right">{fmtRp(reportOmzet(r))}</td>
                     <td className="px-3 py-2 text-right">{r.cash_received != null ? fmtRp(Number(r.cash_received)) : '—'}
-                      {Number(r.titipan_amount) > 0 && <div className="text-[10px] text-slate-400">titipan {fmtRp(Number(r.titipan_amount))} ({r.titipan_note})</div>}
+                      {Number(r.titipan_amount) > 0 && <div className="text-[10px] text-slate-400">titipan {fmtRp(Number(r.titipan_amount))} ({[stores.find(s => s.id === r.titipan_store_id)?.name, r.titipan_note].filter(Boolean).join(" — ")}){r.titipan_payment_id ? " → Buku Piutang" : ""}</div>}
                     </td>
                     <td className={`px-3 py-2 text-right ${diff > 0 ? 'text-green-700' : diff < 0 ? 'text-red-600' : 'text-slate-400'}`}>
                       {r.status === 'approved' ? `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${fmtRp(Math.abs(diff))}` : '—'}
