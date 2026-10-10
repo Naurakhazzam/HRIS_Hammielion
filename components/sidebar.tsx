@@ -108,6 +108,9 @@ const LOGISTIK_SUBMENU: NavNode[] = [
 // Catatan Meeting, Manajemen User) sengaja TIDAK dipaksa masuk salah satu kelompok.
 const adminNavItems: NavNode[] = [
   { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
+  // Laporan Kasir = pekerjaan toko (diisi kasir), sengaja menu sendiri -- bukan bagian Operasional
+  // kantor. Verifikasinya tetap di Operasional → Verifikasi Keuangan → Laporan Kasir.
+  { name: 'Laporan Kasir', href: '/laporan-kasir', icon: '🧾' },
   // Owner/HR/Finance juga karyawan (punya employee_id sendiri) — bukan cuma pengelola sistem.
   // Grup ini kasih mereka akses ke data pribadi sendiri (profil, slip gaji, absensi, jadwal),
   // sama seperti yang dilihat karyawan biasa di menu "Portal Saya".
@@ -180,7 +183,6 @@ const adminNavItems: NavNode[] = [
         name: 'Kas Masuk',
         href: '/keuangan/kas-masuk',
         submenu: [
-          { name: 'Laporan Kasir', href: '/laporan-kasir' },
           { name: 'Input Kasir Darurat', href: '/keuangan/kas-masuk' },
           { name: 'HPP & Omset (Sistem)', href: '/keuangan/hpp' },
         ]
@@ -554,8 +556,8 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
     'KPI':        pathname.startsWith('/kpi'),
     'Setup Cabang & Jabatan': pathname.startsWith('/cabang') || pathname.startsWith('/jabatan'),
 
-    'Operasional': (pathname.startsWith('/keuangan') && !inKeuanganGroup) || pathname.startsWith('/laporan-kasir'),
-    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp') || pathname.startsWith('/laporan-kasir'),
+    'Operasional': pathname.startsWith('/keuangan') && !inKeuanganGroup,
+    'Kas Masuk':  pathname.startsWith('/keuangan/kas-masuk') || pathname.startsWith('/keuangan/hpp'),
     'Kas Keluar': pathname.startsWith('/keuangan/kas-keluar') || pathname.startsWith('/keuangan/kategori') || pathname.startsWith('/keuangan/biaya-tetap'),
     'Modal & Aset': pathname.startsWith('/keuangan/modal') || pathname.startsWith('/keuangan/aset'),
     'Setup Kas & Supplier': pathname.startsWith('/keuangan/rekening') || pathname.startsWith('/keuangan/pembelian/supplier'),

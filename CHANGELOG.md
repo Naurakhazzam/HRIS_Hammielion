@@ -2333,6 +2333,14 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 | `database/migrations/100_cashier_day_checks.sql` | RPC `get_cashier_day_checks` |
 | `components/VerifikasiLaporanKasir.tsx` | Kotak cek per laporan + sub-tab Cek Harian |
 
+### 142. Menu Laporan Kasir Dipisah dari Operasional
+
+**Permintaan Owner:** Laporan Kasir adalah pekerjaan toko, jangan dicampur dengan menu Operasional kantor. Di menu admin, **🧾 Laporan Kasir** kini menu sendiri di tingkat atas (di bawah Dashboard) — sama seperti yang dilihat karyawan toko. Verifikasinya tetap di Operasional → Verifikasi Keuangan → tab Laporan Kasir.
+
+| File | Perubahan |
+|---|---|
+| `components/sidebar.tsx` | Laporan Kasir keluar dari Operasional → Kas Masuk, jadi menu tingkat atas |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)
