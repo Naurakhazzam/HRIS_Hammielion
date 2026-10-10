@@ -2380,6 +2380,25 @@ Sejak #144 pengajuan Driver/Helper dialihkan ke `driver_kasbon`/`helper_kasbon`,
 | `database/migrations/101b_kasbon_ritase_own_select.sql` | Policy SELECT baris sendiri |
 | `app/(dashboard)/kasbon/page.tsx` | Kartu Kasbon Mingguan Saya |
 
+### 146. Rincian Kunjungan di Laporan Pengiriman
+
+Data satu kunjungan toko tersebar di 5 tabel (kunjungan, nota gudang, nota cabang + titipan, barang kejadian, potong nota). Di Laporan Pengiriman semuanya cuma tampil sebagai badge satu baris, dan popup Kejadian bahkan tidak menampilkan daftar barang salah muat. Akibatnya kasus seperti Dheran Ps (10 Okt: Lezato Kitten terkirim, seharusnya Adult, lalu dibayar DP) tidak bisa dibaca utuh.
+
+- Nama toko di rincian trip dan di popup Kejadian/Gagal Kirim sekarang bisa diklik dan membuka **Rincian Kunjungan**:
+  - **Ringkasan**: driver/kenek, siapa yang melaporkan, jam selesai, urutan nyata vs rencana, alamat/telepon toko.
+  - **Nota & Pembayaran**: tabel per nota (Gudang + tiap cabang) berisi nominal, potong, dibayar, dan sisa; metode, jatuh tempo, verifikasi kantor (oleh siapa, kapan), nominal kasir, serta riwayat perubahan nominal nota gudang.
+  - **Titipan cabang**: foto dan keterangan isi barang, foto paket, dan siapa yang mengambil beserta jamnya.
+  - **Kejadian**: keterangan driver dan tabel barang (dikirim / seharusnya / milik / dibawa pulang atau dibeli toko), dengan pengingat koreksi stok untuk barang yang "dibeli toko".
+  - **Potong nota**: status, siapa yang memutuskan, dan rincian per barang.
+  - **Galeri foto** berurutan dengan jam pengambilan (dibaca dari epoch di nama file).
+- Popup Kejadian sekarang juga menampilkan daftar barang kejadian.
+- Hanya baca, tanpa migrasi; RLS yang ada sudah mengizinkan Owner/HR/Finance/Kepala Gudang.
+
+| File | Perubahan |
+|---|---|
+| `components/RincianKunjunganModal.tsx` | Komponen baru popup rincian kunjungan |
+| `app/(dashboard)/logistik/laporan/page.tsx` | Nama toko bisa diklik + barang kejadian di popup Kejadian |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

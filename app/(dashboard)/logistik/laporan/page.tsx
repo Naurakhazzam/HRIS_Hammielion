@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { localDateStr } from '@/lib/date'
 import RupiahInput from '@/components/RupiahInput'
 import { usePhotoLightbox } from '@/components/PhotoLightbox'
+import RincianKunjunganModal, { type KunjunganTrip } from '@/components/RincianKunjunganModal'
 
 type Plan = {
   id: string
@@ -127,6 +128,7 @@ export default function LaporanPengirimanPage() {
   const [verifySaving, setVerifySaving] = useState(false)
   const [onlyUnverified, setOnlyUnverified] = useState(false)
   const [detailModal, setDetailModal] = useState<'incident' | 'failed' | null>(null)
+  const [visitDetail, setVisitDetail] = useState<{ id: string; trip: KunjunganTrip } | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   const fetchData = useCallback(async () => {
@@ -321,6 +323,11 @@ export default function LaporanPengirimanPage() {
 
   // Rincian kartu Kejadian / Gagal Kirim: satu baris per toko, lengkap dengan trip, keterangan, dan foto.
   const planById = new Map(plans.map(p => [p.id, p]))
+  const tripOf = (p: Plan, ranks?: { planned?: number; actual?: number }): KunjunganTrip => ({
+    plan_date: p.plan_date, vehicle: p.vehicles?.name ?? null, route: p.delivery_routes?.name ?? null,
+    driver: p.driver?.full_name ?? null, helper: p.helper?.full_name ?? null,
+    plannedRank: ranks?.planned, actualRank: ranks?.actual,
+  })
   const detailStores = (detailModal === 'incident'
     ? allStores.filter(s => s.incident_type !== 'tidak_ada')
     : detailModal === 'failed' ? allStores.filter(s => s.status === 'failed') : []
@@ -615,7 +622,11 @@ export default function LaporanPengirimanPage() {
                             <div className="flex items-center gap-3">
                               <span className="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600 shrink-0">{i + 1}</span>
                               <span className="flex-1 text-slate-700">
-                                {s.logistics_stores?.name}
+                                <button type="button" title="Lihat rincian lengkap kunjungan"
+                                  onClick={() => setVisitDetail({ id: s.id, trip: tripOf(p, { planned: plannedRank.get(s.id), actual: s.resolved_at ? i + 1 : undefined }) })}
+                                  className="text-left text-blue-700 hover:underline font-medium">
+                                  {s.logistics_stores?.name} <span className="text-[10px] text-blue-500 font-normal">Rincian ›</span>
+                                </button>
                                 {s.resolved_at && plannedRank.get(s.id) !== i + 1 && (
                                   <span className="ml-1.5 text-[10px] text-slate-400">(rencana #{plannedRank.get(s.id)})</span>
                                 )}
@@ -768,7 +779,10 @@ export default function LaporanPengirimanPage() {
                 return (
                   <div key={s.id} className="px-5 py-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-slate-800">{s.logistics_stores?.name ?? '-'}</p>
+                      <button type="button" onClick={() => plan && setVisitDetail({ id: s.id, trip: tripOf(plan) })}
+                        className="text-sm font-semibold text-blue-700 hover:underline text-left">
+                        {s.logistics_stores?.name ?? '-'} <span className="text-[10px] font-normal text-blue-500">Rincian lengkap ›</span>
+                      </button>
                       {detailModal === 'incident' ? (
                         <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">
                           {INCIDENT_LABEL[s.incident_type] ?? s.incident_type}
@@ -790,6 +804,9 @@ export default function LaporanPengirimanPage() {
                     {detailModal === 'failed' && s.incident_description && (
                       <p className="text-xs text-amber-600 mt-1">{s.incident_description}</p>
                     )}
+                    {(s.incident_items ?? []).map((t, i) => (
+                      <p key={i} className="text-xs text-amber-700 mt-0.5">• {t}</p>
+                    ))}
                     {photos.length > 0 ? (
                       <div className="flex flex-wrap gap-3 mt-2">
                         {photos.map((ph, i) => (
@@ -809,6 +826,10 @@ export default function LaporanPengirimanPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {visitDetail && (
+        <RincianKunjunganModal planStoreId={visitDetail.id} trip={visitDetail.trip} onClose={() => setVisitDetail(null)} />
       )}
     </div>
   )
