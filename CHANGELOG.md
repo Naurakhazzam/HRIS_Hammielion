@@ -2351,6 +2351,21 @@ Rencana lengkap: `docs/RENCANA-LAPORAN-KASIR.md`.
 |---|---|
 | `components/sidebar.tsx` | Syarat menu Surat Jalan & Laporan Kasir mengikuti karyawan yang di-preview |
 
+### 144. Fix: Kasbon Driver/Helper Masuk Jalur Slip Gaji Bulanan (Berulang)
+
+**Ditemukan Owner (2026-10-10):** kasbon Reza Andriansyah Saputra (Helper Team Gudang) Rp50.000 tanggal 7 Okt sudah cair tapi tidak ada di potongan gajinya. Penyebab sama dengan kasus 2 Okt: diajukan lewat Pengajuan (`kasbon_requests`, dipotong di Slip Gaji bulanan), padahal ia digaji mingguan lewat Penggajian Driver yang hanya membaca `driver_kasbon`/`helper_kasbon`.
+
+**Data:** dipindah ke Kasbon Kenek (status aktif, Kas Keluar tetap tanggal 7 Okt); baris lama ditandai lunas & potongan bulanan yatimnya dihapus.
+
+**Pencegahan (migrasi 101):**
+- Trigger `kasbon_requests`: pengajuan dari karyawan `employee_type='driver'` otomatis dibuat di `driver_kasbon`; Team Gudang jabatan Helper → `helper_kasbon` (status menunggu persetujuan Owner). Kepala Gudang tetap jalur bulanan.
+- Kas Keluar otomatis kasbon driver/kenek sekarang baru dibuat saat kasbon **disetujui** (dulu langsung saat diajukan walau belum disetujui), sekali per kasbon.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/101_kasbon_ritase_redirect.sql` | Trigger pengalihan + autopost Kas Keluar saat aktif |
+| `app/(dashboard)/kasbon/page.tsx` | Pesan sukses menyebut pengalihan otomatis |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

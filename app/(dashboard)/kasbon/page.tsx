@@ -214,7 +214,9 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
     })
     if (error) { showMessage('error', 'Gagal mengajukan: ' + error.message) }
     else {
-      showMessage('success', 'Pengajuan kasbon berhasil dibuat, menunggu persetujuan.')
+      // Driver & Helper Team Gudang dialihkan DB ke driver_kasbon/helper_kasbon (migrasi 101) —
+      // supaya dipotong di Penggajian Driver, bukan Slip Gaji bulanan yang tidak mereka terima.
+      showMessage('success', 'Pengajuan kasbon berhasil dibuat, menunggu persetujuan. (Driver/Helper Team Gudang otomatis tercatat di tab Kasbon Driver/Kenek.)')
       setModalAjukan(false)
       setAjukanForm({ employee_id: '', amount_requested: '', reason: '' })
       fetchRequests()
