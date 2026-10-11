@@ -2416,6 +2416,20 @@ Barang kejadian hanya mencatat nama, jadi pada kasus Dheran Ps tidak diketahui b
 
 ---
 
+### 148. Tutup Celah: Akun Bisa Menaikkan Perannya Sendiri
+
+Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_update_self_login` mengizinkan setiap akun meng-update baris miliknya di tabel `users` (dipakai untuk `last_login` dan email), tetapi tidak membatasi kolom. Akibatnya akun berperan `employee` bisa mengirim permintaan buatan `UPDATE users SET role = 'owner'` untuk dirinya sendiri dan menjadi Owner, tanpa lewat layar. Tidak ada tanda celah ini pernah dipakai; yang diperiksa hanya strukturnya.
+
+- Migrasi 103: trigger `trg_guard_users_privileged_columns` (BEFORE UPDATE di `users`). Perubahan kolom `role`, `is_active`, `employee_id`, dan `id` ditolak kecuali pelakunya Owner/HR. Panggilan dari server (service role), cron, dan SQL editor tidak terpengaruh.
+- Tidak ada perubahan tampilan. Update `last_login` dan email milik sendiri tetap jalan.
+- Diuji di database (transaksi yang dibatalkan): akun `employee` mencoba menjadikan dirinya Owner → ditolak dengan pesan "Tidak diizinkan mengubah peran, status aktif, atau tautan karyawan pada akun."; update `last_login` sendiri → tetap berhasil.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/103_users_guard_self_escalation.sql` | Fungsi + trigger penjaga kolom hak di `users` |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).
