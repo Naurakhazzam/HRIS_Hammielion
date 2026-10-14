@@ -2430,6 +2430,16 @@ Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_updat
 
 ---
 
+### 149. Hapus Label "Sedang dalam perjalanan menuju toko ini" di Laporan Pengiriman
+
+**Perubahan:** Di Logistik → Laporan Pengiriman, label biru berkedip "🚗 Sedang dalam perjalanan menuju toko ini" pada toko tujuan saat ini dihapus. Label "Belum Diproses" untuk toko lain tetap ada.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/laporan/page.tsx` | Hapus badge toko tujuan saat ini |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).

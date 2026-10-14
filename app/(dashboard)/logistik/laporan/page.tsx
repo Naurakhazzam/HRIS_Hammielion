@@ -639,9 +639,7 @@ export default function LaporanPengirimanPage() {
                               {s.status === 'failed' ? (
                                 <span className={`text-xs px-2 py-0.5 rounded font-medium ${s.fail_kind === 'kirim_besok' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>{s.fail_kind === 'kirim_besok' ? 'Kirim Besok' : 'Gagal'}: {s.failed_reason}</span>
                               ) : s.status === 'pending' ? (
-                                s.id === p.current_target_store_id ? (
-                                  <span className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-medium animate-pulse">🚗 Sedang dalam perjalanan menuju toko ini</span>
-                                ) : (
+                                s.id !== p.current_target_store_id && (
                                   <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-medium">Belum Diproses</span>
                                 )
                               ) : (
