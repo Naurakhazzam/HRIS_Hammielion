@@ -40,8 +40,17 @@ export default function AjukanLiburPage() {
   // sempat dilengkapi sebelum periode itu mulai), periode itu yang diprioritaskan supaya masih
   // bisa dilengkapi selama tanggal penggantinya belum lewat. Ditentukan di init() lewat cek
   // jumlah dulu, baru fetchData() penuh untuk periode yang benar-benar dipakai.
-  const [period, setPeriod] = useState(() => getUpcomingRosterPeriod())
-  const [isCurrentPeriod, setIsCurrentPeriod] = useState(false)
+  // Dua periode yang relevan: yang SEDANG berjalan (untuk melengkapi jatah yang belum penuh) dan
+  // yang AKAN datang (pilihan normal di muka). Default tampilan = periode depan supaya karyawan
+  // tidak pernah terjebak di periode berjalan yang tanggalnya sudah hampir habis.
+  const [currentPeriod] = useState(() => getCurrentRosterPeriod())
+  const [upcomingPeriod] = useState(() => getUpcomingRosterPeriod())
+  const [view, setView] = useState<'upcoming' | 'current'>('upcoming')
+  // Periode berjalan masih bisa dilengkapi? (belum penuh 4 / ada draft lama, DAN masih ada tanggal
+  // di depan yang bisa dipilih). Kalau tidak, toggle ke periode berjalan tidak ditawarkan.
+  const [currentCompletable, setCurrentCompletable] = useState(false)
+  const period = view === 'current' ? currentPeriod : upcomingPeriod
+  const isCurrentPeriod = view === 'current'
   const periodStartStr = localDateStr(period.start)
   const periodEndStr = localDateStr(period.end)
 
@@ -64,7 +73,6 @@ export default function AjukanLiburPage() {
     const { data: emp } = await supabase.from('employees').select('branch_id').eq('id', effectiveId).single()
     setMyBranchId(emp?.branch_id ?? null)
 
-    const currentPeriod = getCurrentRosterPeriod()
     const currentStartStr = localDateStr(currentPeriod.start)
     const { data: currentRows } = await supabase.from('roster_pick_requests')
       .select('status')
@@ -72,14 +80,18 @@ export default function AjukanLiburPage() {
     const currentActiveCount = currentRows?.length ?? 0
     // Hitungan SAJA tidak cukup -- kalau salah satu pick itu masih 'draft' (peninggalan alur
     // lama), totalnya sudah penuh tapi draft itu belum pernah terkirim ke HR. Tanpa cek ini,
-    // karyawan langsung dilempar ke periode depan dan draft yang nyangkut tidak kelihatan lagi.
+    // draft yang nyangkut tidak pernah ditawarkan untuk dibereskan.
     const currentHasDraft = (currentRows ?? []).some(r => r.status === 'draft')
-    const useCurrentPeriod = currentActiveCount < MAX_PICKS || currentHasDraft
-    const activePeriod = useCurrentPeriod ? currentPeriod : getUpcomingRosterPeriod()
-    setPeriod(activePeriod)
-    setIsCurrentPeriod(useCurrentPeriod)
+    // Periode berjalan hanya layak dilengkapi kalau (a) jatahnya memang belum penuh / masih ada
+    // draft lama, DAN (b) masih tersisa tanggal di depan untuk dipilih (hari ini < akhir periode).
+    // Tanpa syarat (b), karyawan terjebak di periode yang tanggalnya sudah lewat & tidak pernah
+    // bisa pindah ke periode depan -- ini bug yang membuat mayoritas karyawan tidak bisa mengajukan.
+    const hasFutureDate = todayLocalStr() < localDateStr(currentPeriod.end)
+    setCurrentCompletable((currentActiveCount < MAX_PICKS || currentHasDraft) && hasFutureDate)
 
-    await fetchData(effectiveId, activePeriod)
+    // Default SELALU periode berikutnya; periode berjalan hanya dibuka lewat toggle (switchView).
+    setView('upcoming')
+    await fetchData(effectiveId, upcomingPeriod)
     setLoading(false)
   }
 
@@ -116,6 +128,17 @@ export default function AjukanLiburPage() {
   function showMessage(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
     setTimeout(() => setMessage(null), 6000)
+  }
+
+  // Pindah antara tampilan periode berikutnya & periode berjalan (lengkapi jatah). fetchData
+  // dipanggil dengan periode eksplisit karena state `view` baru berlaku di render berikutnya.
+  async function switchView(next: 'upcoming' | 'current') {
+    if (next === view || busyDate || previewReadOnly) return
+    setView(next)
+    setMessage(null)
+    setLoading(true)
+    await fetchData(employeeId, next === 'current' ? currentPeriod : upcomingPeriod)
+    setLoading(false)
   }
 
   const activeCount = ownRequests.filter(r => r.status !== 'rejected').length
@@ -217,11 +240,30 @@ export default function AjukanLiburPage() {
         <p className="text-sm text-slate-500">Klik tanggal di kalender untuk memilih maksimal {MAX_PICKS} tanggal libur periode <strong>{rosterPeriodLabel(period.start, period.end)}</strong>. Setiap tanggal yang dipilih <strong>langsung terkirim ke HR/Owner</strong>, dan masih bisa dibatalkan (klik lagi) selama belum diputuskan.</p>
       </div>
 
+      {currentCompletable && (
+        <div className="flex flex-col sm:flex-row gap-2 mb-6">
+          <button
+            type="button"
+            onClick={() => switchView('upcoming')}
+            className={`flex-1 text-left rounded-xl border px-4 py-3 transition ${view === 'upcoming' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+            <span className="block text-sm font-semibold text-slate-800">Periode Berikutnya</span>
+            <span className="block text-xs text-slate-500">{rosterPeriodLabel(upcomingPeriod.start, upcomingPeriod.end)} · tanpa denda</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => switchView('current')}
+            className={`flex-1 text-left rounded-xl border px-4 py-3 transition ${view === 'current' ? 'border-red-500 bg-red-50 ring-1 ring-red-500' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+            <span className="block text-sm font-semibold text-slate-800">Lengkapi Periode Berjalan</span>
+            <span className="block text-xs text-slate-500">{rosterPeriodLabel(currentPeriod.start, currentPeriod.end)} · kena denda Rp10.000/tanggal</span>
+          </button>
+        </div>
+      )}
+
       {isCurrentPeriod && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
           <p className="text-sm font-semibold text-red-800">📌 Periode ini sedang berjalan sekarang — kena denda disiplin</p>
           <p className="text-sm text-red-700 mt-0.5">
-            Jatah libur Anda untuk periode ini masih kurang dari {MAX_PICKS} (mungkin ada yang ditolak, atau belum sempat dilengkapi) — lengkapi dulu di sini sebelum bisa lanjut ke periode berikutnya. Tanggal yang sudah lewat otomatis terkunci.
+            Jatah libur Anda untuk periode ini masih kurang dari {MAX_PICKS} (mungkin ada yang ditolak, atau belum sempat dilengkapi) — Anda boleh melengkapinya di sini (opsional), atau pakai tombol <strong>Periode Berikutnya</strong> di atas untuk mengajukan libur bulan depan tanpa denda. Tanggal yang sudah lewat otomatis terkunci.
             Karena dipilih setelah periodenya berjalan, setiap tanggal yang Anda pilih sekarang kena <strong>denda disiplin Rp10.000/tanggal</strong>, dipotong otomatis dari gaji periode ini.
           </p>
         </div>
