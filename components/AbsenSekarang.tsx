@@ -555,18 +555,19 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     const perbantuanSuffix = isPerbantuanAction && qrBranchName ? ` (Perbantuan di ${qrBranchName})` : ''
 
     if (isCheckOut && today) {
-      // Perbantuan: telat/lembur dievaluasi dari shift CABANG TEMPAT SCAN, bukan jadwal
-      // departemen dia — kalau cabang itu belum ada jadwal shift-nya, anggap tidak ada
-      // lembur/potongan sampai HR setup (bukan nebak/error).
-      // PENTING: shift untuk cabang SENDIRI harus dideteksi dari jam ABSEN MASUK tadi
-      // (today.check_in), BUKAN dari jam sekarang/pulang -- detect_until itu konsepnya "jam
-      // masuk paling lambat untuk shift ini", tidak ada artinya dicocokkan ke jam pulang (yang
-      // hampir selalu sudah lewat detect_until shift manapun). Kalau dicocokkan ke jam pulang,
-      // hasilnya selalu jatuh ke shift TERAKHIR yang detect_until-nya null, salah shift.
+      // LEMBUR selalu ikut jadwal kerja KARYAWAN SENDIRI — termasuk saat perbantuan di cabang
+      // lain. Lembur artinya "kerja melewati jam normal ORANGNYA", jadi jam tutup & hak lembur
+      // (allow_overtime) melekat ke karyawan, bukan ke cabang tempat dia membantu. Contoh nyata:
+      // Markas Petshop tutup 21:00, tapi orang yang jam kerjanya sampai 17:00 kalau bantu di sana
+      // sampai 19:00 tetap dihitung lembur 2 jam — dihitung dari jam tutupnya SENDIRI (17:00),
+      // bukan dari jam tutup Markas (21:00) yang akan menghapus lemburnya. TELAT beda aturannya:
+      // telat tetap ikut cabang host (branchShifts), dihitung di jalur absen MASUK di bawah.
+      // PENTING: shift dideteksi dari jam ABSEN MASUK tadi (today.check_in), BUKAN jam sekarang/
+      // pulang -- detect_until itu konsepnya "jam masuk paling lambat untuk shift ini", tidak ada
+      // artinya dicocokkan ke jam pulang (hampir selalu sudah lewat detect_until shift manapun,
+      // hasilnya selalu jatuh ke shift TERAKHIR yang detect_until-nya null, salah shift).
       const checkInTimeStr = new Date(today.check_in!).toTimeString().substring(0, 5)
-      const sched = isPerbantuanAction
-        ? matchSchedule(nowTimeStr, branchShifts)
-        : resolveHomeSchedule(checkInTimeStr, schedules, homeBranchShifts, customCheckIn, customCheckOut)
+      const sched = resolveHomeSchedule(checkInTimeStr, schedules, homeBranchShifts, customCheckIn, customCheckOut)
       // Sama seperti trigger DB: Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang
       // juga tidak (dicek dari cabang PENEMPATAN karyawan, bukan cabang tempat scan/perbantuan).
       const otExcluded = deptName === 'Team Gudang' || (posName === 'Helper' && branch?.name === 'Gudang')
