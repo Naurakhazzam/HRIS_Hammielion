@@ -2440,6 +2440,22 @@ Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_updat
 
 ---
 
+### 150. Edit Darurat Rute di Laporan Pengiriman (migrasi 104)
+
+**Kebutuhan:** trip kadang jalan ke rute lain dari yang tertulis di rencana. Untuk administrasi, rute harus dikoreksi dan upah ritase driver/kenek ikut tarif rute yang sebenarnya.
+
+- Di rincian trip ada tombol **⚠️ Edit Darurat Rute** (Owner/HR/Finance): pilih rute sebenarnya + alasan wajib. Popup menampilkan upah lama, upah baru, dan selisihnya sebelum disimpan.
+- RPC `emergency_change_plan_route`: ganti `route_id` rencana; kalau trip sudah selesai, baris `delivery_trips` ikut diganti rute + `driver_earning`/`helper_earning` dihitung ulang dari `driver_rate_configs` (mobil × rute baru, ada/tidak kenek). Trip yang belum selesai cukup ganti rute; upah dihitung dari rute baru saat Selesai Kirim.
+- Ditolak kalau upah driver atau kenek trip itu sudah dibayar, atau tarif mobil di rute baru belum disetup.
+- Jejak di tabel `logistics_route_corrections` (rute & upah lama/baru, alasan, siapa, kapan), tampil di rincian trip + badge "Rute dikoreksi kantor" di kartu trip.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/104_logistics_route_emergency_edit.sql` | Tabel jejak + RPC edit darurat rute |
+| `app/(dashboard)/logistik/laporan/page.tsx` | Tombol, popup, dan riwayat Edit Darurat Rute |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).

@@ -16,6 +16,9 @@ type Plan = {
   needs_refuel: boolean | null
   refuel_amount: number | null
   current_target_store_id: string | null
+  vehicle_id: string
+  route_id: string
+  delivery_trip_id: string | null
   vehicles: { name: string; plate_number: string | null } | null
   delivery_routes: { name: string } | null
   driver: { full_name: string } | null
@@ -80,6 +83,30 @@ type PlanReturn = {
   logistics_stores: { name: string } | null
 }
 
+// Jejak Edit Darurat Rute (migrasi 104) -- rute & upah sebelum/sesudah dikoreksi kantor.
+type RouteCorrection = {
+  id: string
+  plan_id: string
+  old_driver_earning: number | null
+  new_driver_earning: number | null
+  old_helper_earning: number | null
+  new_helper_earning: number | null
+  reason: string
+  corrected_by_name: string | null
+  corrected_at: string
+  old_route: { name: string } | null
+  new_route: { name: string } | null
+}
+
+type RouteEdit = {
+  plan: Plan
+  newRouteId: string
+  reason: string
+  // Upah tercatat sekarang (null = trip belum selesai, upah belum dibuat).
+  trip: { has_helper: boolean; driver_earning: number; helper_earning: number; payment_status: string; helper_payment_status: string | null } | null
+  rates: { route_id: string; driver_rate_with_helper: number; driver_rate_without_helper: number; helper_rate: number }[]
+}
+
 type ReturnItem = {
   id: string
   return_id: string
@@ -130,6 +157,10 @@ export default function LaporanPengirimanPage() {
   const [detailModal, setDetailModal] = useState<'incident' | 'failed' | null>(null)
   const [visitDetail, setVisitDetail] = useState<{ id: string; trip: KunjunganTrip } | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  const [routes, setRoutes] = useState<{ id: string; name: string }[]>([])
+  const [correctionsByPlan, setCorrectionsByPlan] = useState<Record<string, RouteCorrection[]>>({})
+  const [routeEdit, setRouteEdit] = useState<RouteEdit | null>(null)
+  const [routeEditSaving, setRouteEditSaving] = useState(false)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -141,6 +172,7 @@ export default function LaporanPengirimanPage() {
       .from('logistics_delivery_plans')
       .select(`
         id, plan_date, status, box_photo_url, garage_photo_url, needs_refuel, refuel_amount, current_target_store_id,
+        vehicle_id, route_id, delivery_trip_id,
         vehicles(name, plate_number),
         delivery_routes(name),
         driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
@@ -231,11 +263,23 @@ export default function LaporanPengirimanPage() {
       } else {
         setReturnItemsByReturn({})
       }
+
+      // Tabel migrasi 104 -- kalau belum dijalankan, query gagal dan cukup dianggap kosong.
+      const { data: corrData } = await supabase.from('logistics_route_corrections')
+        .select(`id, plan_id, old_driver_earning, new_driver_earning, old_helper_earning, new_helper_earning,
+          reason, corrected_by_name, corrected_at,
+          old_route:delivery_routes!logistics_route_corrections_old_route_id_fkey(name),
+          new_route:delivery_routes!logistics_route_corrections_new_route_id_fkey(name)`)
+        .in('plan_id', list.map(p => p.id)).order('corrected_at')
+      const groupedCorr: Record<string, RouteCorrection[]> = {}
+      ;((corrData as unknown as RouteCorrection[]) || []).forEach(c => { (groupedCorr[c.plan_id] ??= []).push(c) })
+      setCorrectionsByPlan(groupedCorr)
     } else {
       setStoresByPlan({})
       setSupplierTasksByPlan({})
       setReturnsByPlan({})
       setReturnItemsByReturn({})
+      setCorrectionsByPlan({})
     }
     setLoading(false)
   }, [filterMonth, supabase])
@@ -258,6 +302,13 @@ export default function LaporanPengirimanPage() {
   }, [supabase])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
+    if (!canVerify) return
+    // Rute "Belanja X" adalah ritase supplier (tugas terpisah), bukan rute pengiriman toko.
+    supabase.from('delivery_routes').select('id, name').eq('is_active', true).not('name', 'ilike', 'Belanja%').order('name')
+      .then(({ data }) => setRoutes(data || []))
+  }, [canVerify, supabase])
 
   function toggleExpand(id: string) {
     setExpanded(prev => {
@@ -285,6 +336,33 @@ export default function LaporanPengirimanPage() {
     if (error) showMessage('error', 'Gagal verifikasi: ' + error.message)
     else { showMessage('success', 'Verifikasi kas berhasil disimpan.'); setVerifyingId(null); await fetchData() }
     setVerifySaving(false)
+  }
+
+  async function openRouteEdit(p: Plan) {
+    const [{ data: trip }, { data: rates }] = await Promise.all([
+      p.delivery_trip_id
+        ? supabase.from('delivery_trips').select('has_helper, driver_earning, helper_earning, payment_status, helper_payment_status').eq('id', p.delivery_trip_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase.from('driver_rate_configs').select('route_id, driver_rate_with_helper, driver_rate_without_helper, helper_rate').eq('vehicle_id', p.vehicle_id),
+    ])
+    setRouteEdit({ plan: p, newRouteId: '', reason: '', trip: trip as RouteEdit['trip'], rates: (rates as RouteEdit['rates']) || [] })
+  }
+
+  async function submitRouteEdit() {
+    if (!routeEdit) return
+    setRouteEditSaving(true)
+    const { data, error } = await supabase.rpc('emergency_change_plan_route', {
+      p_plan_id: routeEdit.plan.id, p_new_route_id: routeEdit.newRouteId, p_reason: routeEdit.reason.trim(),
+    })
+    setRouteEditSaving(false)
+    if (error) { showMessage('error', 'Gagal edit rute: ' + error.message); return }
+    const row = Array.isArray(data) ? data[0] : data
+    const newName = routes.find(r => r.id === routeEdit.newRouteId)?.name
+    showMessage('success', row?.new_driver_earning != null
+      ? `Rute diubah ke ${newName}. Upah driver jadi ${fmtRp(Number(row.new_driver_earning))}${routeEdit.trip?.has_helper ? `, kenek ${fmtRp(Number(row.new_helper_earning))}` : ''}.`
+      : `Rute diubah ke ${newName}. Upah dihitung dari rute ini saat trip selesai.`)
+    setRouteEdit(null)
+    await fetchData()
   }
 
   const allStores = Object.values(storesByPlan).flat()
@@ -496,6 +574,9 @@ export default function LaporanPengirimanPage() {
                             {(PLAN_STATUS_LABEL[p.status] ?? PLAN_STATUS_LABEL.ready).label}
                           </span>
                         </div>
+                        {(correctionsByPlan[p.id] ?? []).length > 0 && (
+                          <span className="inline-block mt-0.5 text-[11px] px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-semibold">⚠️ Rute dikoreksi kantor</span>
+                        )}
                         <p className="text-xs text-slate-500">{new Date(p.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {p.driver?.full_name}{p.helper?.full_name ? ` / ${p.helper.full_name}` : ''} · {stores.length} toko</p>
                         {canVerify && planCash.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -516,6 +597,31 @@ export default function LaporanPengirimanPage() {
                     </button>
                     {isOpen && (
                       <div className="border-t border-slate-100 divide-y divide-slate-50">
+                        {(canVerify || (correctionsByPlan[p.id] ?? []).length > 0) && (
+                          <div className="px-4 py-2.5">
+                            {(correctionsByPlan[p.id] ?? []).map(c => (
+                              <div key={c.id} className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-2">
+                                <p className="font-semibold">⚠️ Edit darurat rute: {c.old_route?.name ?? '-'} → {c.new_route?.name ?? '-'}</p>
+                                {c.new_driver_earning != null && (
+                                  <p className="mt-0.5">
+                                    Upah driver {fmtRp(Number(c.old_driver_earning ?? 0))} → {fmtRp(Number(c.new_driver_earning))}
+                                    {(Number(c.old_helper_earning ?? 0) > 0 || Number(c.new_helper_earning ?? 0) > 0) && <> · kenek {fmtRp(Number(c.old_helper_earning ?? 0))} → {fmtRp(Number(c.new_helper_earning ?? 0))}</>}
+                                  </p>
+                                )}
+                                <p className="mt-0.5">Alasan: {c.reason}</p>
+                                <p className="mt-0.5 text-rose-600">
+                                  oleh {c.corrected_by_name ?? '-'} · {new Date(c.corrected_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                            ))}
+                            {canVerify && (
+                              <button type="button" onClick={() => openRouteEdit(p)}
+                                className="text-xs px-2.5 py-1 border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg font-medium transition">
+                                ⚠️ Edit Darurat Rute
+                              </button>
+                            )}
+                          </div>
+                        )}
                         {(p.box_photo_url || p.garage_photo_url) && (
                           <div className="px-4 py-2.5">
                             <p className="text-xs font-semibold text-slate-500 uppercase mb-2">
@@ -825,6 +931,82 @@ export default function LaporanPengirimanPage() {
           </div>
         </div>
       )}
+
+      {routeEdit && (() => {
+        const { plan, trip } = routeEdit
+        const rate = routeEdit.rates.find(r => r.route_id === routeEdit.newRouteId)
+        const newDriver = rate && trip ? Number(trip.has_helper ? rate.driver_rate_with_helper : rate.driver_rate_without_helper) : 0
+        const newHelper = rate && trip ? Number(trip.has_helper ? rate.helper_rate : 0) : 0
+        const diff = trip ? newDriver + newHelper - Number(trip.driver_earning) - Number(trip.helper_earning) : 0
+        const paid = !!trip && (trip.payment_status === 'paid' || trip.helper_payment_status === 'paid')
+        const canSubmit = !!routeEdit.newRouteId && !!rate && routeEdit.reason.trim().length >= 5 && !paid && !routeEditSaving
+        return (
+          <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" onClick={() => !routeEditSaving && setRouteEdit(null)}>
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                <div>
+                  <h2 className="text-base font-bold text-slate-800">⚠️ Edit Darurat Rute</h2>
+                  <p className="text-xs text-slate-500">
+                    {new Date(plan.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {plan.vehicles?.name} · {plan.driver?.full_name}{plan.helper?.full_name ? ` / ${plan.helper.full_name}` : ''}
+                  </p>
+                </div>
+                <button onClick={() => setRouteEdit(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
+              </div>
+              <div className="px-5 py-4 space-y-3 text-sm">
+                <p className="text-xs text-slate-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Untuk trip yang jalannya tidak sesuai rute di rencana. Rute diganti ke rute sebenarnya dan upah ritase driver/kenek dihitung ulang dari tarif rute itu. Perubahan tercatat beserta alasannya.
+                </p>
+                <div>
+                  <p className="text-xs text-slate-500">Rute sekarang</p>
+                  <p className="font-semibold text-slate-800">{plan.delivery_routes?.name ?? '-'}</p>
+                  {trip ? (
+                    <p className="text-xs text-slate-500">Upah driver {fmtRp(Number(trip.driver_earning))}{trip.has_helper ? ` · kenek ${fmtRp(Number(trip.helper_earning))}` : ''}</p>
+                  ) : (
+                    <p className="text-xs text-slate-500">Trip belum selesai — upah belum tercatat, nanti dihitung dari rute baru.</p>
+                  )}
+                </div>
+                {paid && (
+                  <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    Upah trip ini sudah dibayar, jadi rute tidak bisa diedit dari sini. Koreksi lewat Penggajian Driver.
+                  </p>
+                )}
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Rute sebenarnya</label>
+                  <select value={routeEdit.newRouteId} onChange={e => setRouteEdit({ ...routeEdit, newRouteId: e.target.value })} disabled={paid}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
+                    <option value="">— Pilih rute —</option>
+                    {routes.filter(r => r.id !== plan.route_id).map(r => (
+                      <option key={r.id} value={r.id}>{r.name}{routeEdit.rates.some(x => x.route_id === r.id) ? '' : ' (tarif belum disetup)'}</option>
+                    ))}
+                  </select>
+                  {routeEdit.newRouteId && !rate && (
+                    <p className="text-xs text-red-600 mt-1">Tarif {plan.vehicles?.name} untuk rute ini belum disetup di Penggajian › Tarif &amp; Mobil Driver.</p>
+                  )}
+                  {rate && trip && (
+                    <p className="text-xs text-slate-700 mt-1">
+                      Upah baru: driver <b>{fmtRp(newDriver)}</b>{trip.has_helper && <> · kenek <b>{fmtRp(newHelper)}</b></>}{' '}
+                      (<span className={diff >= 0 ? 'text-green-700' : 'text-red-600'}>{diff >= 0 ? '+' : '−'}{fmtRp(Math.abs(diff))}</span>)
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Alasan (wajib)</label>
+                  <textarea value={routeEdit.reason} onChange={e => setRouteEdit({ ...routeEdit, reason: e.target.value })} rows={3} disabled={paid}
+                    placeholder="Mis. toko di Garut dialihkan, mobil jalan ke Tasik Kota"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100">
+                <button onClick={() => setRouteEdit(null)} disabled={routeEditSaving} className="px-3 py-1.5 text-sm text-slate-600 hover:underline">Batal</button>
+                <button onClick={submitRouteEdit} disabled={!canSubmit}
+                  className="px-3 py-1.5 text-sm font-medium bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition disabled:opacity-50">
+                  {routeEditSaving ? 'Menyimpan...' : 'Simpan Edit Rute'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {visitDetail && (
         <RincianKunjunganModal planStoreId={visitDetail.id} trip={visitDetail.trip} onClose={() => setVisitDetail(null)} />
