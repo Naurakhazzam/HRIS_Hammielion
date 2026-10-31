@@ -68,7 +68,30 @@ type PlanSupplierTask = {
   notes: string | null
   proof_photo_url: string | null
   resolved_at: string | null
+  // Susulan kantor (migrasi 106) -- dicatat Owner/HR/Finance setelah trip selesai, boleh tanpa foto.
+  office_reason: string | null
+  office_by_name: string | null
   delivery_routes: { name: string } | null
+}
+
+// Jejak Susulan / Hapus Belanja oleh kantor (migrasi 106).
+type SupplierCorrection = {
+  id: string
+  plan_id: string
+  action: 'tambah' | 'hapus'
+  driver_earning: number | null
+  helper_earning: number | null
+  reason: string
+  corrected_by_name: string | null
+  corrected_at: string
+  delivery_routes: { name: string } | null
+}
+
+type SupplierAdd = {
+  plan: Plan
+  routeId: string
+  reason: string
+  rates: { route_id: string; driver_rate_with_helper: number; driver_rate_without_helper: number; helper_rate: number }[]
 }
 
 type PlanReturn = {
@@ -161,6 +184,11 @@ export default function LaporanPengirimanPage() {
   const [correctionsByPlan, setCorrectionsByPlan] = useState<Record<string, RouteCorrection[]>>({})
   const [routeEdit, setRouteEdit] = useState<RouteEdit | null>(null)
   const [routeEditSaving, setRouteEditSaving] = useState(false)
+  const [belanjaRoutes, setBelanjaRoutes] = useState<{ id: string; name: string }[]>([])
+  const [supplierCorrByPlan, setSupplierCorrByPlan] = useState<Record<string, SupplierCorrection[]>>({})
+  const [supplierAdd, setSupplierAdd] = useState<SupplierAdd | null>(null)
+  const [supplierDel, setSupplierDel] = useState<{ task: PlanSupplierTask; plan: Plan; reason: string } | null>(null)
+  const [supplierSaving, setSupplierSaving] = useState(false)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -230,7 +258,7 @@ export default function LaporanPengirimanPage() {
       setStoresByPlan(grouped)
 
       const { data: taskData } = await supabase.from('logistics_plan_supplier_tasks')
-        .select('id, plan_id, status, notes, proof_photo_url, resolved_at, delivery_routes(name)')
+        .select('id, plan_id, status, notes, proof_photo_url, resolved_at, office_reason, office_by_name, delivery_routes(name)')
         .in('plan_id', list.map(p => p.id)).order('created_at')
       const groupedTasks: Record<string, PlanSupplierTask[]> = {}
       ;(taskData as unknown as PlanSupplierTask[] || []).forEach(t => {
@@ -274,12 +302,21 @@ export default function LaporanPengirimanPage() {
       const groupedCorr: Record<string, RouteCorrection[]> = {}
       ;((corrData as unknown as RouteCorrection[]) || []).forEach(c => { (groupedCorr[c.plan_id] ??= []).push(c) })
       setCorrectionsByPlan(groupedCorr)
+
+      // Tabel migrasi 106 -- sama, kalau belum dijalankan cukup dianggap kosong.
+      const { data: supCorrData } = await supabase.from('logistics_supplier_task_corrections')
+        .select('id, plan_id, action, driver_earning, helper_earning, reason, corrected_by_name, corrected_at, delivery_routes(name)')
+        .in('plan_id', list.map(p => p.id)).order('corrected_at')
+      const groupedSupCorr: Record<string, SupplierCorrection[]> = {}
+      ;((supCorrData as unknown as SupplierCorrection[]) || []).forEach(c => { (groupedSupCorr[c.plan_id] ??= []).push(c) })
+      setSupplierCorrByPlan(groupedSupCorr)
     } else {
       setStoresByPlan({})
       setSupplierTasksByPlan({})
       setReturnsByPlan({})
       setReturnItemsByReturn({})
       setCorrectionsByPlan({})
+      setSupplierCorrByPlan({})
     }
     setLoading(false)
   }, [filterMonth, supabase])
@@ -308,6 +345,8 @@ export default function LaporanPengirimanPage() {
     // Rute "Belanja X" adalah ritase supplier (tugas terpisah), bukan rute pengiriman toko.
     supabase.from('delivery_routes').select('id, name').eq('is_active', true).not('name', 'ilike', 'Belanja%').order('name')
       .then(({ data }) => setRoutes(data || []))
+    supabase.from('delivery_routes').select('id, name').eq('is_active', true).ilike('name', 'Belanja%').order('name')
+      .then(({ data }) => setBelanjaRoutes(data || []))
   }, [canVerify, supabase])
 
   function toggleExpand(id: string) {
@@ -362,6 +401,39 @@ export default function LaporanPengirimanPage() {
       ? `Rute diubah ke ${newName}. Upah driver jadi ${fmtRp(Number(row.new_driver_earning))}${routeEdit.trip?.has_helper ? `, kenek ${fmtRp(Number(row.new_helper_earning))}` : ''}.`
       : `Rute diubah ke ${newName}. Upah dihitung dari rute ini saat trip selesai.`)
     setRouteEdit(null)
+    await fetchData()
+  }
+
+  async function openSupplierAdd(p: Plan) {
+    const { data: rates } = await supabase.from('driver_rate_configs')
+      .select('route_id, driver_rate_with_helper, driver_rate_without_helper, helper_rate').eq('vehicle_id', p.vehicle_id)
+    setSupplierAdd({ plan: p, routeId: '', reason: '', rates: (rates as SupplierAdd['rates']) || [] })
+  }
+
+  async function submitSupplierAdd() {
+    if (!supplierAdd) return
+    setSupplierSaving(true)
+    const { data, error } = await supabase.rpc('office_add_supplier_task', {
+      p_plan_id: supplierAdd.plan.id, p_route_id: supplierAdd.routeId, p_reason: supplierAdd.reason.trim(),
+    })
+    setSupplierSaving(false)
+    if (error) { showMessage('error', 'Gagal menambah susulan belanja: ' + error.message); return }
+    const row = Array.isArray(data) ? data[0] : data
+    const name = belanjaRoutes.find(r => r.id === supplierAdd.routeId)?.name
+    showMessage('success', `Susulan "${name}" tercatat. Upah driver ${fmtRp(Number(row?.driver_earning ?? 0))}${supplierAdd.plan.helper ? `, kenek ${fmtRp(Number(row?.helper_earning ?? 0))}` : ''}.`
+      + (row?.week_already_paid ? ' ⚠ Minggu gajian trip ini sudah ada yang dibayar — upah susulan masih BELUM DIBAYAR, cek di Gaji Driver.' : ''))
+    setSupplierAdd(null)
+    await fetchData()
+  }
+
+  async function submitSupplierDel() {
+    if (!supplierDel) return
+    setSupplierSaving(true)
+    const { error } = await supabase.rpc('office_delete_supplier_task', { p_task_id: supplierDel.task.id, p_reason: supplierDel.reason.trim() })
+    setSupplierSaving(false)
+    if (error) { showMessage('error', 'Gagal menghapus belanja: ' + error.message); return }
+    showMessage('success', `Belanja "${supplierDel.task.delivery_routes?.name}" dihapus beserta upahnya.`)
+    setSupplierDel(null)
     await fetchData()
   }
 
@@ -597,7 +669,7 @@ export default function LaporanPengirimanPage() {
                     </button>
                     {isOpen && (
                       <div className="border-t border-slate-100 divide-y divide-slate-50">
-                        {(canVerify || (correctionsByPlan[p.id] ?? []).length > 0) && (
+                        {(canVerify || (correctionsByPlan[p.id] ?? []).length > 0 || (supplierCorrByPlan[p.id] ?? []).length > 0) && (
                           <div className="px-4 py-2.5">
                             {(correctionsByPlan[p.id] ?? []).map(c => (
                               <div key={c.id} className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-2">
@@ -614,11 +686,36 @@ export default function LaporanPengirimanPage() {
                                 </p>
                               </div>
                             ))}
+                            {(supplierCorrByPlan[p.id] ?? []).map(c => (
+                              <div key={c.id} className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+                                <p className="font-semibold">🛒 {c.action === 'tambah' ? 'Susulan belanja' : 'Belanja dihapus'}: {c.delivery_routes?.name ?? '-'}</p>
+                                {c.driver_earning != null && (
+                                  <p className="mt-0.5">
+                                    Upah driver {c.action === 'hapus' ? '−' : '+'}{fmtRp(Number(c.driver_earning))}
+                                    {Number(c.helper_earning ?? 0) > 0 && <> · kenek {c.action === 'hapus' ? '−' : '+'}{fmtRp(Number(c.helper_earning))}</>}
+                                  </p>
+                                )}
+                                <p className="mt-0.5">Alasan: {c.reason}</p>
+                                <p className="mt-0.5 text-amber-700">
+                                  oleh {c.corrected_by_name ?? '-'} · {new Date(c.corrected_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                            ))}
                             {canVerify && (
-                              <button type="button" onClick={() => openRouteEdit(p)}
-                                className="text-xs px-2.5 py-1 border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg font-medium transition">
-                                ⚠️ Edit Darurat Rute
-                              </button>
+                              <div className="flex flex-wrap gap-2">
+                                <button type="button" onClick={() => openRouteEdit(p)}
+                                  className="text-xs px-2.5 py-1 border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg font-medium transition">
+                                  ⚠️ Edit Darurat Rute
+                                </button>
+                                {/* Trip Selesai sudah hilang dari HP driver -- belanja yang lupa dilaporkan
+                                    cuma bisa disusulkan kantor dari sini (trip yang masih jalan: lewat Rencana). */}
+                                {p.status === 'completed' && (
+                                  <button type="button" onClick={() => openSupplierAdd(p)}
+                                    className="text-xs px-2.5 py-1 border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg font-medium transition">
+                                    🛒 Susulan Belanja
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
@@ -654,6 +751,9 @@ export default function LaporanPengirimanPage() {
                                   <span className="flex-1 text-slate-700">
                                     {t.delivery_routes?.name}
                                     {t.notes && <span className="text-slate-400"> — {t.notes}</span>}
+                                    {t.office_reason && (
+                                      <span className="block text-[11px] text-amber-700">📝 Susulan kantor ({t.office_by_name ?? '-'}): {t.office_reason}</span>
+                                    )}
                                   </span>
                                   {t.resolved_at && (
                                     <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">🕐 {fmtJam(t.resolved_at)}</span>
@@ -667,6 +767,10 @@ export default function LaporanPengirimanPage() {
                                     )
                                   ) : (
                                     <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-medium shrink-0">Belum Diproses</span>
+                                  )}
+                                  {canVerify && (
+                                    <button type="button" onClick={() => setSupplierDel({ task: t, plan: p, reason: '' })} title="Hapus belanja ini beserta upahnya"
+                                      className="text-[11px] text-red-600 hover:underline shrink-0">Hapus</button>
                                   )}
                                 </div>
                               ))}
@@ -1007,6 +1111,99 @@ export default function LaporanPengirimanPage() {
           </div>
         )
       })()}
+
+      {supplierAdd && (() => {
+        const { plan } = supplierAdd
+        const rate = supplierAdd.rates.find(r => r.route_id === supplierAdd.routeId)
+        const hasHelper = !!plan.helper
+        const canSubmit = !!supplierAdd.routeId && !!rate && supplierAdd.reason.trim().length >= 5 && !supplierSaving
+        return (
+          <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" onClick={() => !supplierSaving && setSupplierAdd(null)}>
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                <div>
+                  <h2 className="text-base font-bold text-slate-800">🛒 Susulan Belanja Supplier</h2>
+                  <p className="text-xs text-slate-500">
+                    {new Date(plan.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {plan.vehicles?.name} · {plan.driver?.full_name}{plan.helper?.full_name ? ` / ${plan.helper.full_name}` : ''}
+                  </p>
+                </div>
+                <button onClick={() => setSupplierAdd(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
+              </div>
+              <div className="px-5 py-4 space-y-3 text-sm">
+                <p className="text-xs text-slate-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Untuk belanja yang benar-benar dikerjakan di trip ini tapi tidak tercatat (lupa dilaporkan driver / tidak ada di rencana). Upah ritase belanja dicatat ke tanggal trip ini dan tercatat beserta alasannya.
+                </p>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Rute belanja</label>
+                  <select value={supplierAdd.routeId} onChange={e => setSupplierAdd({ ...supplierAdd, routeId: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
+                    <option value="">— Pilih rute belanja —</option>
+                    {belanjaRoutes.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}{supplierAdd.rates.some(x => x.route_id === r.id) ? '' : ' (tarif belum disetup)'}</option>
+                    ))}
+                  </select>
+                  {supplierAdd.routeId && !rate && (
+                    <p className="text-xs text-red-600 mt-1">Tarif {plan.vehicles?.name} untuk rute ini belum disetup di Penggajian › Tarif &amp; Mobil Driver.</p>
+                  )}
+                  {rate && (
+                    <p className="text-xs text-slate-700 mt-1">
+                      Upah: driver <b>{fmtRp(Number(hasHelper ? rate.driver_rate_with_helper : rate.driver_rate_without_helper))}</b>
+                      {hasHelper && <> · kenek <b>{fmtRp(Number(rate.helper_rate))}</b></>}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Alasan (wajib)</label>
+                  <textarea value={supplierAdd.reason} onChange={e => setSupplierAdd({ ...supplierAdd, reason: e.target.value })} rows={3}
+                    placeholder="Mis. driver lupa lapor belanja Aina, nota sudah dicek kantor"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100">
+                <button onClick={() => setSupplierAdd(null)} disabled={supplierSaving} className="px-3 py-1.5 text-sm text-slate-600 hover:underline">Batal</button>
+                <button onClick={submitSupplierAdd} disabled={!canSubmit}
+                  className="px-3 py-1.5 text-sm font-medium bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition disabled:opacity-50">
+                  {supplierSaving ? 'Menyimpan...' : 'Simpan Susulan'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {supplierDel && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" onClick={() => !supplierSaving && setSupplierDel(null)}>
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Hapus Belanja &quot;{supplierDel.task.delivery_routes?.name}&quot;</h2>
+                <p className="text-xs text-slate-500">
+                  {new Date(supplierDel.plan.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {supplierDel.plan.vehicles?.name} · {supplierDel.plan.driver?.full_name}
+                </p>
+              </div>
+              <button onClick={() => setSupplierDel(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-sm">
+              <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                Tugas belanja ini dan upah ritasenya (driver{supplierDel.plan.helper ? ' & kenek' : ''}) akan dihapus. Tidak bisa kalau upahnya sudah dibayar.
+              </p>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Alasan (wajib)</label>
+                <textarea value={supplierDel.reason} onChange={e => setSupplierDel({ ...supplierDel, reason: e.target.value })} rows={3}
+                  placeholder="Mis. belanja tidak jadi, salah tekan selesai"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100">
+              <button onClick={() => setSupplierDel(null)} disabled={supplierSaving} className="px-3 py-1.5 text-sm text-slate-600 hover:underline">Batal</button>
+              <button onClick={submitSupplierDel} disabled={supplierDel.reason.trim().length < 5 || supplierSaving}
+                className="px-3 py-1.5 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition disabled:opacity-50">
+                {supplierSaving ? 'Menghapus...' : 'Hapus Belanja'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {visitDetail && (
         <RincianKunjunganModal planStoreId={visitDetail.id} trip={visitDetail.trip} onClose={() => setVisitDetail(null)} />

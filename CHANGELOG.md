@@ -2470,6 +2470,23 @@ Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_updat
 
 ---
 
+### 152. Susulan & Hapus Belanja Supplier oleh Kantor di Laporan Pengiriman (migrasi 106)
+
+**Masalah:** trip sudah Selesai tapi belanja supplier yang dikerjakan driver tidak tercatat (lupa dilaporkan / tidak ada di rencana), jadi upah ritase belanjanya hilang. Trip Selesai sudah tidak muncul di HP driver dan Rencana tidak bisa diubah lagi, jadi tidak ada cara memperbaikinya. Belanja yang salah dicatat juga tidak bisa dihapus beserta upahnya.
+
+- Di rincian trip Selesai ada tombol **🛒 Susulan Belanja** (Owner/HR/Finance): pilih rute Belanja + alasan wajib, **tanpa foto nota**. RPC `office_add_supplier_task` membuat tugas belanja berstatus selesai + baris `delivery_trips` dari tarif mobil × rute belanja, dengan **tanggal = tanggal trip**. Ada peringatan kalau di minggu gajian itu sudah ada upah yang dibayar.
+- Tiap belanja punya tombol **Hapus** (Owner/HR/Finance, alasan wajib). RPC `office_delete_supplier_task` menghapus tugas + upahnya, dan ditolak kalau upah driver/kenek sudah dibayar.
+- Jejak tambah/hapus di tabel `logistics_supplier_task_corrections`, ditampilkan di rincian trip. Belanja susulan diberi label "Susulan kantor".
+- Constraint `supplier_task_requires_proof_when_done` dilonggarkan: belanja selesai boleh tanpa foto kalau ada `office_reason`.
+- Fix `complete_supplier_task` (oleh driver): `trip_date` sekarang = tanggal trip, bukan hari ini. Sebelumnya belanja yang diproses lewat tengah malam bisa masuk minggu gajian yang salah.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/106_logistics_supplier_task_office_fix.sql` | Kolom susulan, tabel jejak, RPC susulan/hapus, fix tanggal `complete_supplier_task` |
+| `app/(dashboard)/logistik/laporan/page.tsx` | Tombol Susulan Belanja, tombol Hapus, popup, dan riwayat koreksi belanja |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).
