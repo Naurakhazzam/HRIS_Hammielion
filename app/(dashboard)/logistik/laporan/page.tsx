@@ -145,6 +145,35 @@ const fmtJam = (ts: string) => new Date(ts).toLocaleTimeString('id-ID', { hour: 
 
 const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
+type DatePreset = 'today' | 'yesterday' | 'week' | 'month' | 'pickMonth'
+
+const DATE_PRESETS: { value: Exclude<DatePreset, 'pickMonth'>; label: string }[] = [
+  { value: 'today', label: 'Hari ini' },
+  { value: 'yesterday', label: 'Kemarin' },
+  { value: 'week', label: 'Minggu ini' },
+  { value: 'month', label: 'Bulan ini' },
+]
+
+// Rentang tanggal (inklusif) untuk filter. "Minggu ini" = minggu gajian driver, Jumat s/d Kamis
+// (sama dengan week_start_date di complete_logistics_delivery).
+function presetRange(preset: DatePreset, pickedMonth: string): { start: string; end: string } {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+  if (preset === 'today') return { start: localDateStr(today), end: localDateStr(today) }
+  if (preset === 'yesterday') { const y = addDays(today, -1); return { start: localDateStr(y), end: localDateStr(y) } }
+  if (preset === 'week') {
+    const start = addDays(today, -((today.getDay() - 5 + 7) % 7))
+    return { start: localDateStr(start), end: localDateStr(addDays(start, 6)) }
+  }
+  const [year, month] = (preset === 'month'
+    ? [today.getFullYear(), today.getMonth() + 1]
+    : pickedMonth.split('-').map(Number))
+  return { start: localDateStr(new Date(year, month - 1, 1)), end: localDateStr(new Date(year, month, 0)) }
+}
+
+const fmtTgl = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+
 // Sementara sebelum tab verifikasi finance (Tahap 3): satu kunjungan bisa membawa Nota Gudang
 // + nota cabang, dan driver mengetik SATU angka uang diterima untuk semuanya (received_total).
 // Data lama (sebelum migrasi 083) cuma punya payment_amount = uang diterima.
@@ -163,10 +192,14 @@ export default function LaporanPengirimanPage() {
   // Verifikasi kas fisik cuma untuk tim kantor (Owner/HR/Finance) -- beda dari canView, karena
   // Kepala Gudang boleh LIHAT laporan tapi bukan yang pegang/hitung uang setoran driver.
   const [canVerify, setCanVerify] = useState(false)
+  const [datePreset, setDatePreset] = useState<DatePreset>('month')
   const [filterMonth, setFilterMonth] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
+  // '' = semua mobil. Disaring di browser, jadi semua total di kartu ikut mobil yang dipilih.
+  const [filterVehicle, setFilterVehicle] = useState('')
+  const [vehicles, setVehicles] = useState<{ id: string; name: string; plate_number: string | null }[]>([])
   const [plans, setPlans] = useState<Plan[]>([])
   const [storesByPlan, setStoresByPlan] = useState<Record<string, PlanStore[]>>({})
   const [supplierTasksByPlan, setSupplierTasksByPlan] = useState<Record<string, PlanSupplierTask[]>>({})
@@ -192,9 +225,7 @@ export default function LaporanPengirimanPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const [year, month] = filterMonth.split('-').map(Number)
-    const startDate = `${filterMonth}-01`
-    const endDate = localDateStr(new Date(year, month, 0))
+    const { start: startDate, end: endDate } = presetRange(datePreset, filterMonth)
 
     const { data: planData } = await supabase
       .from('logistics_delivery_plans')
@@ -319,7 +350,7 @@ export default function LaporanPengirimanPage() {
       setSupplierCorrByPlan({})
     }
     setLoading(false)
-  }, [filterMonth, supabase])
+  }, [datePreset, filterMonth, supabase])
 
   useEffect(() => {
     async function init() {
@@ -339,6 +370,11 @@ export default function LaporanPengirimanPage() {
   }, [supabase])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  useEffect(() => {
+    supabase.from('vehicles').select('id, name, plate_number').order('name')
+      .then(({ data }) => setVehicles(data || []))
+  }, [supabase])
 
   useEffect(() => {
     if (!canVerify) return
@@ -437,7 +473,10 @@ export default function LaporanPengirimanPage() {
     await fetchData()
   }
 
-  const allStores = Object.values(storesByPlan).flat()
+  // Semua angka di bawah dihitung dari trip yang lolos filter mobil -- jadi total uang, nota,
+  // piutang, kejadian, dan gagal kirim ikut menyesuaikan mobil yang dipilih.
+  const filteredPlans = filterVehicle ? plans.filter(p => p.vehicle_id === filterVehicle) : plans
+  const allStores = filteredPlans.flatMap(p => storesByPlan[p.id] ?? [])
   const cashStores = allStores.filter(s => s.payment_method === 'cash')
   const totalCash = cashStores.reduce((sum, s) => sum + reported(s), 0)
   const totalTransfer = allStores.filter(s => s.payment_method === 'transfer').length
@@ -469,7 +508,7 @@ export default function LaporanPengirimanPage() {
   const totalSelisihKas = verifiedReceived - verifiedReported
   const unverifiedAmount = sumReported(unverifiedStores)
   const unverifiedPlanIds = new Set(unverifiedStores.map(s => s.plan_id))
-  const visiblePlans = onlyUnverified ? plans.filter(p => unverifiedPlanIds.has(p.id)) : plans
+  const visiblePlans = onlyUnverified ? filteredPlans.filter(p => unverifiedPlanIds.has(p.id)) : filteredPlans
 
   // Rincian kartu Kejadian / Gagal Kirim: satu baris per toko, lengkap dengan trip, keterangan, dan foto.
   const planById = new Map(plans.map(p => [p.id, p]))
@@ -489,6 +528,13 @@ export default function LaporanPengirimanPage() {
     d.setMonth(d.getMonth() - i)
     return { value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) }
   })
+
+  const range = presetRange(datePreset, filterMonth)
+  const vehicleName = vehicles.find(v => v.id === filterVehicle)?.name
+  const periodLabel = (datePreset === 'pickMonth'
+    ? monthOptions.find(m => m.value === filterMonth)?.label ?? filterMonth
+    : `${DATE_PRESETS.find(d => d.value === datePreset)?.label} (${range.start === range.end ? fmtTgl(range.start) : `${fmtTgl(range.start)} – ${fmtTgl(range.end)}`})`)
+    + (vehicleName ? ` · ${vehicleName}` : '')
 
   return (
     <div>
@@ -511,10 +557,27 @@ export default function LaporanPengirimanPage() {
         <>
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
             <label className="block text-xs text-slate-500 mb-1">Periode</label>
-            <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+            <div className="flex flex-wrap items-center gap-2">
+              {DATE_PRESETS.map(d => (
+                <button key={d.value} type="button" onClick={() => setDatePreset(d.value)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition ${datePreset === d.value ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'}`}>
+                  {d.label}
+                </button>
+              ))}
+              <select value={datePreset === 'pickMonth' ? filterMonth : ''}
+                onChange={e => { if (e.target.value) { setFilterMonth(e.target.value); setDatePreset('pickMonth') } }}
+                className={`px-3 py-1.5 border rounded-lg text-sm bg-white outline-none ${datePreset === 'pickMonth' ? 'border-blue-600 text-blue-700 font-medium' : 'border-slate-300 text-slate-600'}`}>
+                <option value="">Pilih bulan lain…</option>
+                {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </div>
+            <label className="block text-xs text-slate-500 mt-3 mb-1">Mobil</label>
+            <select value={filterVehicle} onChange={e => setFilterVehicle(e.target.value)}
               className="w-full sm:w-64 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
-              {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              <option value="">Semua mobil</option>
+              {vehicles.map(v => <option key={v.id} value={v.id}>{v.name}{v.plate_number ? ` (${v.plate_number})` : ''}</option>)}
             </select>
+            <p className="text-xs text-slate-500 mt-2">Menampilkan: <span className="font-medium text-slate-700">{periodLabel}</span> · {filteredPlans.length} trip</p>
             {canVerify && (
               <label className="mt-3 flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                 <input type="checkbox" checked={onlyUnverified} onChange={e => setOnlyUnverified(e.target.checked)} className="rounded" />
@@ -618,7 +681,9 @@ export default function LaporanPengirimanPage() {
             <div className="text-center py-12 text-slate-500 text-sm">Memuat...</div>
           ) : visiblePlans.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
-              {plans.length === 0 ? 'Belum ada trip selesai di periode ini.' : 'Semua uang tunai di periode ini sudah diverifikasi. 👍'}
+              {filteredPlans.length === 0
+                ? (vehicleName ? `Belum ada trip ${vehicleName} di periode ini.` : 'Belum ada trip di periode ini.')
+                : 'Semua uang tunai di periode ini sudah diverifikasi. 👍'}
             </div>
           ) : (
             <div className="space-y-3">
@@ -973,7 +1038,7 @@ export default function LaporanPengirimanPage() {
                 <h2 className="text-base font-bold text-slate-800">
                   {detailModal === 'incident' ? 'Rincian Kejadian (Salah Muat / Retur / Barang Lebih)' : 'Rincian Gagal Kirim'}
                 </h2>
-                <p className="text-xs text-slate-500">{detailStores.length} toko · periode {monthOptions.find(m => m.value === filterMonth)?.label}</p>
+                <p className="text-xs text-slate-500">{detailStores.length} toko · {periodLabel}</p>
               </div>
               <button onClick={() => setDetailModal(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
             </div>

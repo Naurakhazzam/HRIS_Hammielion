@@ -2487,6 +2487,20 @@ Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_updat
 
 ---
 
+### 153. Filter Mobil + Filter Tanggal Cepat di Laporan Pengiriman
+
+**Kebutuhan:** melihat laporan per mobil (dengan total uang yang ikut menyesuaikan) dan pilihan tanggal cepat, bukan cuma per bulan.
+
+- **Periode:** tombol **Hari ini · Kemarin · Minggu ini · Bulan ini**, plus dropdown "Pilih bulan lain…" untuk riwayat 12 bulan. "Minggu ini" = minggu gajian driver, **Jumat s/d Kamis** (sama dengan `week_start_date` upah ritase). Default: Bulan ini.
+- **Mobil:** dropdown "Semua mobil" + daftar mobil. Disaring di browser, jadi **semua kartu** (uang tunai terverifikasi/belum, nota, piutang, lebih bayar, transfer/tempo, kejadian, gagal kirim), daftar trip, dan checkbox "belum diverifikasi" ikut mobil yang dipilih.
+- Baris "Menampilkan: …" menunjukkan periode, mobil, dan jumlah trip yang sedang ditampilkan. Label periode juga dipakai di popup Kejadian/Gagal Kirim.
+
+| File | Perubahan |
+|---|---|
+| `app/(dashboard)/logistik/laporan/page.tsx` | Filter preset tanggal + filter mobil, total dihitung dari trip yang lolos filter |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).
