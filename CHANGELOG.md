@@ -2501,6 +2501,25 @@ Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_updat
 
 ---
 
+### 154. Tutup Paksa Trip Pengiriman oleh Kantor (migrasi 107)
+
+**Masalah:** trip pengiriman toko cuma bisa Selesai lewat HP driver/kenek (Lapor Sampai Garasi). Kalau HP rusak, driver lupa menutup, atau ada toko/retur yang tidak bisa diproses, trip tersangkut di status berjalan selamanya dan upah ritasenya tidak pernah tercatat. (`force_close_tp_trip` yang sudah ada hanya untuk trip Kirim Barang.)
+
+- Di rincian trip yang **Sedang Berjalan / Menuju Garasi** ada tombol **⛔ Tutup Paksa Trip** (Owner/HR/Finance). Popup menampilkan apa yang akan terjadi sebelum disimpan, dengan alasan wajib.
+- RPC `office_force_complete_plan`:
+  - Toko yang belum diproses → `failed` dengan pilihan **Kirim Besok** (default) atau **Gagal**. Surat Jalan/paket cabang diurus trigger `handle_plan_store_outcome`, sama seperti driver menekan tombolnya.
+  - Tugas belanja yang belum diproses **dihapus** (tanpa upah). Kalau ternyata dikerjakan → Susulan Belanja (#152).
+  - Retur/barang potong nota yang masih dibawa → `selesai` dengan catatan tutup paksa (pola sama dengan `force_close_tp_trip`).
+  - Upah ritase dibuat dari tarif mobil × rute di tanggal trip, kecuali centang "Catat upah ritase" dihilangkan (trip ternyata tidak jalan).
+- Kolom baru `force_closed_by`, `force_closed_by_name`, `force_closed_at`, `force_close_reason`, `force_close_summary` di `logistics_delivery_plans`. Tampil sebagai badge "⛔ Ditutup paksa kantor" + kotak keterangan di rincian trip.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/107_logistics_force_complete_plan.sql` | Kolom jejak + RPC tutup paksa trip |
+| `app/(dashboard)/logistik/laporan/page.tsx` | Tombol, popup, badge, dan keterangan Tutup Paksa Trip |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).

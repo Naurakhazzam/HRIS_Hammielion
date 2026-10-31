@@ -19,6 +19,11 @@ type Plan = {
   vehicle_id: string
   route_id: string
   delivery_trip_id: string | null
+  // Tutup Paksa Trip oleh kantor (migrasi 107).
+  force_closed_by_name: string | null
+  force_closed_at: string | null
+  force_close_reason: string | null
+  force_close_summary: string | null
   vehicles: { name: string; plate_number: string | null } | null
   delivery_routes: { name: string } | null
   driver: { full_name: string } | null
@@ -92,6 +97,15 @@ type SupplierAdd = {
   routeId: string
   reason: string
   rates: { route_id: string; driver_rate_with_helper: number; driver_rate_without_helper: number; helper_rate: number }[]
+}
+
+type ForceClose = {
+  plan: Plan
+  reason: string
+  pendingKind: 'kirim_besok' | 'gagal'
+  payWage: boolean
+  // null = tarif mobil x rute belum disetup.
+  rate: { driver_rate_with_helper: number; driver_rate_without_helper: number; helper_rate: number } | null
 }
 
 type PlanReturn = {
@@ -222,6 +236,8 @@ export default function LaporanPengirimanPage() {
   const [supplierAdd, setSupplierAdd] = useState<SupplierAdd | null>(null)
   const [supplierDel, setSupplierDel] = useState<{ task: PlanSupplierTask; plan: Plan; reason: string } | null>(null)
   const [supplierSaving, setSupplierSaving] = useState(false)
+  const [forceClose, setForceClose] = useState<ForceClose | null>(null)
+  const [forceSaving, setForceSaving] = useState(false)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -232,6 +248,7 @@ export default function LaporanPengirimanPage() {
       .select(`
         id, plan_date, status, box_photo_url, garage_photo_url, needs_refuel, refuel_amount, current_target_store_id,
         vehicle_id, route_id, delivery_trip_id,
+        force_closed_by_name, force_closed_at, force_close_reason, force_close_summary,
         vehicles(name, plate_number),
         delivery_routes(name),
         driver:employees!logistics_delivery_plans_driver_id_fkey(full_name),
@@ -459,6 +476,30 @@ export default function LaporanPengirimanPage() {
     showMessage('success', `Susulan "${name}" tercatat. Upah driver ${fmtRp(Number(row?.driver_earning ?? 0))}${supplierAdd.plan.helper ? `, kenek ${fmtRp(Number(row?.helper_earning ?? 0))}` : ''}.`
       + (row?.week_already_paid ? ' ⚠ Minggu gajian trip ini sudah ada yang dibayar — upah susulan masih BELUM DIBAYAR, cek di Gaji Driver.' : ''))
     setSupplierAdd(null)
+    await fetchData()
+  }
+
+  async function openForceClose(p: Plan) {
+    const { data: rate } = await supabase.from('driver_rate_configs')
+      .select('driver_rate_with_helper, driver_rate_without_helper, helper_rate')
+      .eq('vehicle_id', p.vehicle_id).eq('route_id', p.route_id).limit(1).maybeSingle()
+    setForceClose({ plan: p, reason: '', pendingKind: 'kirim_besok', payWage: true, rate: rate as ForceClose['rate'] })
+  }
+
+  async function submitForceClose() {
+    if (!forceClose) return
+    setForceSaving(true)
+    const { data, error } = await supabase.rpc('office_force_complete_plan', {
+      p_plan_id: forceClose.plan.id, p_reason: forceClose.reason.trim(),
+      p_pending_kind: forceClose.pendingKind, p_pay_wage: forceClose.payWage,
+    })
+    setForceSaving(false)
+    if (error) { showMessage('error', 'Gagal tutup paksa: ' + error.message); return }
+    const row = Array.isArray(data) ? data[0] : data
+    showMessage('success', forceClose.payWage
+      ? `Trip ditutup paksa. Upah driver ${fmtRp(Number(row?.driver_earning ?? 0))}${forceClose.plan.helper ? `, kenek ${fmtRp(Number(row?.helper_earning ?? 0))}` : ''} tercatat.`
+      : 'Trip ditutup paksa tanpa upah ritase.')
+    setForceClose(null)
     await fetchData()
   }
 
@@ -714,6 +755,9 @@ export default function LaporanPengirimanPage() {
                         {(correctionsByPlan[p.id] ?? []).length > 0 && (
                           <span className="inline-block mt-0.5 text-[11px] px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-semibold">⚠️ Rute dikoreksi kantor</span>
                         )}
+                        {p.force_closed_at && (
+                          <span className="inline-block mt-0.5 ml-1 text-[11px] px-2 py-0.5 rounded bg-slate-800 text-white font-semibold">⛔ Ditutup paksa kantor</span>
+                        )}
                         <p className="text-xs text-slate-500">{new Date(p.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {p.driver?.full_name}{p.helper?.full_name ? ` / ${p.helper.full_name}` : ''} · {stores.length} toko</p>
                         {canVerify && planCash.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -734,8 +778,18 @@ export default function LaporanPengirimanPage() {
                     </button>
                     {isOpen && (
                       <div className="border-t border-slate-100 divide-y divide-slate-50">
-                        {(canVerify || (correctionsByPlan[p.id] ?? []).length > 0 || (supplierCorrByPlan[p.id] ?? []).length > 0) && (
+                        {(canVerify || (correctionsByPlan[p.id] ?? []).length > 0 || (supplierCorrByPlan[p.id] ?? []).length > 0 || p.force_closed_at) && (
                           <div className="px-4 py-2.5">
+                            {p.force_closed_at && (
+                              <div className="text-xs text-slate-800 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 mb-2">
+                                <p className="font-semibold">⛔ Trip ditutup paksa kantor</p>
+                                {p.force_close_summary && <p className="mt-0.5">{p.force_close_summary}</p>}
+                                <p className="mt-0.5">Alasan: {p.force_close_reason}</p>
+                                <p className="mt-0.5 text-slate-500">
+                                  oleh {p.force_closed_by_name ?? '-'} · {new Date(p.force_closed_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                            )}
                             {(correctionsByPlan[p.id] ?? []).map(c => (
                               <div key={c.id} className="text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-2">
                                 <p className="font-semibold">⚠️ Edit darurat rute: {c.old_route?.name ?? '-'} → {c.new_route?.name ?? '-'}</p>
@@ -778,6 +832,14 @@ export default function LaporanPengirimanPage() {
                                   <button type="button" onClick={() => openSupplierAdd(p)}
                                     className="text-xs px-2.5 py-1 border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg font-medium transition">
                                     🛒 Susulan Belanja
+                                  </button>
+                                )}
+                                {/* Trip cuma bisa Selesai lewat HP driver -- kalau HP rusak / lupa ditutup,
+                                    trip tersangkut dan upahnya tidak pernah tercatat. */}
+                                {(p.status === 'departed' || p.status === 'closing') && (
+                                  <button type="button" onClick={() => openForceClose(p)}
+                                    className="text-xs px-2.5 py-1 border border-slate-400 bg-slate-100 text-slate-800 hover:bg-slate-200 rounded-lg font-medium transition">
+                                    ⛔ Tutup Paksa Trip
                                   </button>
                                 )}
                               </div>
@@ -1229,6 +1291,86 @@ export default function LaporanPengirimanPage() {
                 <button onClick={submitSupplierAdd} disabled={!canSubmit}
                   className="px-3 py-1.5 text-sm font-medium bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition disabled:opacity-50">
                   {supplierSaving ? 'Menyimpan...' : 'Simpan Susulan'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {forceClose && (() => {
+        const { plan, rate } = forceClose
+        const pendingStores = (storesByPlan[plan.id] ?? []).filter(s => s.status === 'pending')
+        const pendingTasks = (supplierTasksByPlan[plan.id] ?? []).filter(t => t.status === 'pending')
+        const openReturns = (returnsByPlan[plan.id] ?? []).filter(r => r.status === 'diambil')
+        const hasHelper = !!plan.helper
+        const canSubmit = forceClose.reason.trim().length >= 5 && (!forceClose.payWage || !!rate) && !forceSaving
+        return (
+          <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" onClick={() => !forceSaving && setForceClose(null)}>
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                <div>
+                  <h2 className="text-base font-bold text-slate-800">⛔ Tutup Paksa Trip</h2>
+                  <p className="text-xs text-slate-500">
+                    {new Date(plan.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {plan.vehicles?.name} — {plan.delivery_routes?.name} · {plan.driver?.full_name}{plan.helper?.full_name ? ` / ${plan.helper.full_name}` : ''}
+                  </p>
+                </div>
+                <button onClick={() => setForceClose(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
+              </div>
+              <div className="px-5 py-4 space-y-3 text-sm">
+                <p className="text-xs text-slate-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Untuk trip yang tidak bisa ditutup driver (HP rusak, lupa Lapor Sampai Garasi, dll). Trip langsung jadi Selesai dan tidak bisa dibuka lagi. Semua tercatat beserta alasannya.
+                </p>
+                <div className="text-xs text-slate-700 space-y-1">
+                  <p className="font-semibold text-slate-500 uppercase">Yang akan terjadi</p>
+                  {pendingStores.length > 0 ? (
+                    <div>
+                      <p>• {pendingStores.length} toko belum diproses ({pendingStores.map(s => s.logistics_stores?.name).join(', ')}) ditandai:</p>
+                      <div className="flex gap-2 mt-1 ml-3">
+                        {(['kirim_besok', 'gagal'] as const).map(k => (
+                          <label key={k} className={`px-2.5 py-1 rounded-lg border cursor-pointer ${forceClose.pendingKind === k ? 'border-blue-600 bg-blue-50 text-blue-700 font-medium' : 'border-slate-300'}`}>
+                            <input type="radio" className="hidden" checked={forceClose.pendingKind === k} onChange={() => setForceClose({ ...forceClose, pendingKind: k })} />
+                            {k === 'kirim_besok' ? 'Kirim Besok' : 'Gagal'}
+                          </label>
+                        ))}
+                      </div>
+                      <p className="ml-3 mt-1 text-slate-500">{forceClose.pendingKind === 'kirim_besok' ? 'Surat jalan/paket kembali ke antrean untuk dikirim lagi.' : 'Surat jalan/paket masuk "perlu keputusan".'}</p>
+                    </div>
+                  ) : <p>• Semua toko sudah diproses.</p>}
+                  {pendingTasks.length > 0 && (
+                    <p>• {pendingTasks.length} tugas belanja belum diproses ({pendingTasks.map(t => t.delivery_routes?.name).join(', ')}) <b>dihapus</b>. Kalau ternyata dikerjakan, tambahkan lewat Susulan Belanja.</p>
+                  )}
+                  {openReturns.length > 0 && (
+                    <p>• {openReturns.length} retur yang masih dibawa ({openReturns.map(r => r.logistics_stores?.name).join(', ')}) ditandai selesai dengan catatan tutup paksa.</p>
+                  )}
+                </div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" checked={forceClose.payWage} onChange={e => setForceClose({ ...forceClose, payWage: e.target.checked })} className="rounded mt-0.5" />
+                  <span>
+                    Catat upah ritase trip ini
+                    {rate ? (
+                      <span className="block text-xs text-slate-600">
+                        Driver <b>{fmtRp(Number(hasHelper ? rate.driver_rate_with_helper : rate.driver_rate_without_helper))}</b>
+                        {hasHelper && <> · kenek <b>{fmtRp(Number(rate.helper_rate))}</b></>}
+                      </span>
+                    ) : (
+                      <span className="block text-xs text-red-600">Tarif {plan.vehicles?.name} untuk rute ini belum disetup di Penggajian › Tarif &amp; Mobil Driver.</span>
+                    )}
+                    <span className="block text-xs text-slate-500">Hilangkan centang kalau trip ini ternyata tidak jalan.</span>
+                  </span>
+                </label>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Alasan (wajib)</label>
+                  <textarea value={forceClose.reason} onChange={e => setForceClose({ ...forceClose, reason: e.target.value })} rows={3}
+                    placeholder="Mis. HP driver rusak, sudah konfirmasi lewat telepon semua toko terkirim"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100">
+                <button onClick={() => setForceClose(null)} disabled={forceSaving} className="px-3 py-1.5 text-sm text-slate-600 hover:underline">Batal</button>
+                <button onClick={submitForceClose} disabled={!canSubmit}
+                  className="px-3 py-1.5 text-sm font-medium bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition disabled:opacity-50">
+                  {forceSaving ? 'Menyimpan...' : 'Tutup Paksa'}
                 </button>
               </div>
             </div>
