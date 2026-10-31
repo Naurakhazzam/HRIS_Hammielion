@@ -237,8 +237,8 @@ export default function PanduanKaryawanPage() {
             <ul className="list-disc pl-5 space-y-1">
               <li>Setiap periode, Anda punya jatah <strong>4 hari libur gratis</strong>. Pilih tanggalnya sendiri di kalender menu <em>Ajukan Libur</em> di Portal.</li>
               <li>Maksimal <strong>1 tanggal Sabtu/Minggu</strong> per periode boleh dipilih jadi hari libur — supaya weekend bisa bergantian dengan rekan kerja, tidak dikuasai orang yang sama terus.</li>
-              <li>Satu tanggal maksimal <strong>3 orang</strong> libur (semua cabang digabung). Tanggal yang sudah penuh tampil abu-abu di kalender — siapa cepat dia dapat.</li>
-              <li>Usahakan <strong>tidak libur barengan</strong> rekan satu cabang, dan beri jarak minimal <strong>5 hari</strong> antar libur (misal libur Senin, paling cepat libur lagi Sabtu). Kalau terpaksa tetap boleh diajukan, tapi ditandai ⚠️ untuk Owner/HR dan bisa ditolak.</li>
+              <li>Per cabang, satu tanggal maksimal <strong>2 orang</strong> libur (cabang yang karyawannya cuma 2 orang atau kurang: maksimal <strong>1 orang</strong>). Driver &amp; karyawan gaji flat tidak dihitung. Tanggal yang sudah penuh tampil abu-abu di kalender — siapa cepat dia dapat.</li>
+              <li>Aturan yang sama berlaku juga saat <em>Ganti Libur</em> dan saat menukar libur waktu absen masuk di hari libur. Kalau tanggal bisa diklik di kalender, berarti sudah sesuai aturan.</li>
               <li>Kalau libur yang Anda ambil <strong>kurang dari 4 hari</strong> dalam satu periode, sisanya <strong>dibayar tunai</strong> sebagai kompensasi (dianggap Anda "menabung" hari libur jadi uang).</li>
               <li>Kalau hari kosong (tidak ada absen sama sekali) <strong>lebih dari 4 hari</strong>, kelebihannya bukan lagi dianggap libur — masuk hitungan Izin/Alpha (lihat bagian 9 &amp; 10).</li>
               <li>Kalau ternyata hari itu terjadwal libur tapi Anda tetap masuk kerja, sistem akan minta Anda memilih <strong>tanggal pengganti</strong> untuk libur Anda — pilih lewat kalender yang muncul saat absen masuk.</li>

@@ -9,7 +9,7 @@ type RequestRow = {
   requested_date: string
   period_start: string
   period_end: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'rejected' | 'moved'
   rejection_reason: string | null
   created_at: string
   employees: { full_name: string; employee_code: string; branches: { name: string } | null } | null
@@ -30,7 +30,7 @@ type ChangeRequestRow = {
 }
 
 type WorkSchedule = { id: string; name: string; applies_to_dept: string }
-// Aturan lunak Ajukan Libur (migration 066) -- tetap boleh diajukan, tapi yang menyetujui wajib tahu.
+// Info untuk yang menyetujui (migrasi 108: near_dates selalu null, aturan jarak 5 hari dihapus).
 type PickWarning = { request_id: string; same_branch_names: string | null; near_dates: string | null }
 
 const CHANGE_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -127,8 +127,7 @@ export default function PersetujuanLiburPage() {
     const w = warningsById[id]
     if (!w) return []
     const lines: string[] = []
-    if (w.same_branch_names) lines.push(`Libur barengan rekan satu cabang: ${w.same_branch_names}`)
-    if (w.near_dates) lines.push(`Kurang dari 5 hari dari libur dia yang lain: ${w.near_dates}`)
+    if (w.same_branch_names) lines.push(`Rekan satu cabang yang juga libur: ${w.same_branch_names} (masih dalam batas cabang)`)
     return lines
   }
 
@@ -231,12 +230,14 @@ export default function PersetujuanLiburPage() {
   // Berapa orang lain yang minta tanggal sama, dari yang SEDANG ditampilkan — bantu HR lihat
   // tanggal mana yang "ramai" sebelum memutuskan.
   const countByDate: Record<string, number> = {}
-  requests.forEach(r => { if (r.status !== 'rejected') countByDate[r.requested_date] = (countByDate[r.requested_date] || 0) + 1 })
+  requests.forEach(r => { if (r.status === 'pending' || r.status === 'approved') countByDate[r.requested_date] = (countByDate[r.requested_date] || 0) + 1 })
 
   const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
     pending: { label: 'Menunggu', color: 'bg-yellow-100 text-yellow-800' },
     approved: { label: 'Disetujui', color: 'bg-green-100 text-green-800' },
     rejected: { label: 'Ditolak', color: 'bg-red-100 text-red-800' },
+    // Sudah disetujui, lalu dipindah lewat Ganti Libur / Tukar saat Absen / Jadwal & Shift.
+    moved: { label: 'Dipindah', color: 'bg-slate-100 text-slate-600' },
   }
 
   const pendingRows = requests.filter(r => r.status === 'pending')

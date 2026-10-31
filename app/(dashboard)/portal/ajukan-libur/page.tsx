@@ -7,18 +7,15 @@ import { getUpcomingRosterPeriod, getCurrentRosterPeriod, rosterPeriodLabel, dat
 import { todayLocalStr, localDateStr } from '@/lib/date'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
-type OwnRequest = { id: string; requested_date: string; status: 'draft' | 'pending' | 'approved' | 'rejected'; rejection_reason: string | null; discipline_fee: number }
-type CalendarEntry = { off_date: string; employee_id: string; full_name: string; branch_id: string | null; branch_name: string | null; status: 'pending' | 'approved' }
+type OwnRequest = { id: string; requested_date: string; status: 'draft' | 'pending' | 'approved' | 'rejected' | 'moved'; rejection_reason: string | null; discipline_fee: number }
+type CalendarEntry = { off_date: string; employee_id: string; full_name: string; branch_id: string | null; branch_name: string | null; status: 'pending' | 'approved'; counted: boolean }
 
-// MAX_OFF_PER_DAY = batas keras, HARUS sama dengan check_dayoff_pick_rules (migration 066).
-// MIN_GAP_DAYS & libur barengan satu cabang cuma PERINGATAN -- tetap boleh diajukan, dan
-// ditandai untuk Owner/HR di Persetujuan Libur (get_dayoff_pick_warnings).
+// Semua aturan (jatah 4, 1 weekend, maks. orang libur per cabang per hari) dihitung di DB lewat
+// dayoff_block_reason (migrasi 108) -- halaman ini cuma menampilkan hasil get_dayoff_block_reasons,
+// supaya tidak ada lagi versi aturan yang beda antara tampilan dan database.
 const MAX_PICKS = DAYOFF_PICK_QUOTA
-const MAX_OFF_PER_DAY = 3
-const MIN_GAP_DAYS = 5
 const WEEKDAYS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab']
 
-const dayDiff = (a: string, b: string) => Math.round((new Date(a + 'T00:00:00').getTime() - new Date(b + 'T00:00:00').getTime()) / 86400000)
 const shiftDate = (d: Date, days: number) => { const c = new Date(d); c.setDate(c.getDate() + days); return c }
 
 export default function AjukanLiburPage() {
@@ -32,6 +29,9 @@ export default function AjukanLiburPage() {
   const [ownRequests, setOwnRequests] = useState<OwnRequest[]>([])
   const [entriesByDate, setEntriesByDate] = useState<Record<string, CalendarEntry[]>>({})
   const [rejectedByDate, setRejectedByDate] = useState<Record<string, string>>({})
+  const [blockedByDate, setBlockedByDate] = useState<Record<string, string>>({})
+  // Maks. orang libur per hari di cabang sendiri (null = tidak dibatasi, mis. driver/gaji flat).
+  const [branchCap, setBranchCap] = useState<number | null>(null)
   const [busyDate, setBusyDate] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -70,13 +70,17 @@ export default function AjukanLiburPage() {
     const effectiveId = previewing ? PREVIEW_EMPLOYEE_ID : userData.employee_id
     setEmployeeId(effectiveId)
 
-    const { data: emp } = await supabase.from('employees').select('branch_id').eq('id', effectiveId).single()
+    const [{ data: emp }, { data: cap }] = await Promise.all([
+      supabase.from('employees').select('branch_id').eq('id', effectiveId).single(),
+      supabase.rpc('get_dayoff_branch_cap', { p_employee_id: effectiveId }),
+    ])
     setMyBranchId(emp?.branch_id ?? null)
+    setBranchCap(typeof cap === 'number' ? cap : null)
 
     const currentStartStr = localDateStr(currentPeriod.start)
     const { data: currentRows } = await supabase.from('roster_pick_requests')
       .select('status')
-      .eq('employee_id', effectiveId).eq('period_start', currentStartStr).neq('status', 'rejected')
+      .eq('employee_id', effectiveId).eq('period_start', currentStartStr).in('status', ['draft', 'pending', 'approved'])
     const currentActiveCount = currentRows?.length ?? 0
     // Hitungan SAJA tidak cukup -- kalau salah satu pick itu masih 'draft' (peninggalan alur
     // lama), totalnya sudah penuh tapi draft itu belum pernah terkirim ke HR. Tanpa cek ini,
@@ -97,25 +101,24 @@ export default function AjukanLiburPage() {
 
   async function fetchData(empId: string, p: { start: Date; end: Date } = period) {
     const startStr = localDateStr(p.start)
-    // Kalender diambil sedikit melebar dari periode -- libur sendiri di akhir periode lalu / awal
-    // periode depan tetap ikut aturan jarak 5 hari.
-    const [{ data: reqs }, { data: calRows }, { data: rej }] = await Promise.all([
+    const endStr = localDateStr(p.end)
+    // 'moved' = sudah disetujui tapi kemudian dipindah (Ganti Libur / Tukar saat Absen / diedit HR)
+    // -- tanggal barunya sudah ikut lewat kalender (employee_roster).
+    const [{ data: reqs }, { data: calRows }, { data: rej }, { data: blocked }] = await Promise.all([
       supabase.from('roster_pick_requests')
         .select('id, requested_date, status, rejection_reason, discipline_fee')
         .eq('employee_id', empId)
         .eq('period_start', startStr)
-        .neq('status', 'rejected')
+        .in('status', ['draft', 'pending', 'approved'])
         .order('requested_date'),
-      supabase.rpc('get_dayoff_pick_calendar', {
-        p_from: localDateStr(shiftDate(p.start, -(MIN_GAP_DAYS - 1))),
-        p_to: localDateStr(shiftDate(p.end, MIN_GAP_DAYS - 1)),
-      }),
+      supabase.rpc('get_dayoff_pick_calendar', { p_from: startStr, p_to: endStr }),
       // Pilihan yang DITOLAK disembunyikan dari pilihan aktif (tanggalnya boleh dipilih lagi),
       // tapi alasannya tetap ditampilkan supaya karyawan tahu kenapa ditolak.
       supabase.from('roster_pick_requests')
         .select('requested_date, rejection_reason')
         .eq('employee_id', empId).eq('period_start', startStr).eq('status', 'rejected')
         .order('decided_at', { ascending: true }),
+      supabase.rpc('get_dayoff_block_reasons', { p_employee_id: empId, p_from: startStr, p_to: endStr }),
     ])
     setOwnRequests((reqs as OwnRequest[]) || [])
     setRejectedByDate(Object.fromEntries(((rej || []) as { requested_date: string; rejection_reason: string | null }[])
@@ -123,6 +126,7 @@ export default function AjukanLiburPage() {
     const grouped: Record<string, CalendarEntry[]> = {}
     for (const r of (calRows || []) as CalendarEntry[]) (grouped[r.off_date] ||= []).push(r)
     setEntriesByDate(grouped)
+    setBlockedByDate(Object.fromEntries(((blocked || []) as { off_date: string; reason: string }[]).map(b => [b.off_date, b.reason])))
   }
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -141,41 +145,29 @@ export default function AjukanLiburPage() {
     setLoading(false)
   }
 
-  const activeCount = ownRequests.filter(r => r.status !== 'rejected').length
   // Peninggalan dari alur draft lama -- sekarang pilih tanggal langsung jadi 'pending'. Baris
   // 'draft' yang masih tersisa cuma bisa dibereskan dengan dibatalkan lalu dipilih ulang.
   const legacyDraftCount = ownRequests.filter(r => r.status === 'draft').length
-  // Weekend (Sabtu/Minggu) jadi primadona karena toko buka tiap hari — SEMUA karyawan dibatasi
-  // cuma boleh 1 pilihan weekend per periode, supaya tidak ada yang "menguasai" weekend terus.
   const isWeekend = (dateStr: string) => [0, 6].includes(new Date(dateStr + 'T00:00:00').getDay())
-  const weekendPicksUsed = ownRequests.filter(r => r.status !== 'rejected' && isWeekend(r.requested_date)).length
   const ownByDate = Object.fromEntries(ownRequests.map(r => [r.requested_date, r]))
 
-  // Semua libur rutin milik sendiri (termasuk periode tetangga & libur yang diatur HR) -- dasar
-  // peringatan jarak minimal 5 hari.
+  // Libur sendiri yang berlaku di periode ini = pengajuan + jadwal (termasuk yang diatur HR atau
+  // hasil Ganti Libur) -- sama dengan cara DB menghitung jatah & weekend.
   const ownOffDates = new Set<string>(ownRequests.map(r => r.requested_date))
   Object.entries(entriesByDate).forEach(([d, list]) => { if (list.some(e => e.employee_id === employeeId)) ownOffDates.add(d) })
+  const activeCount = ownOffDates.size
+  const weekendPicksUsed = [...ownOffDates].filter(isWeekend).length
 
-  // Alasan tanggal TIDAK BISA dipilih -- cerminan check_dayoff_pick_rules() + RLS di DB, supaya
-  // karyawan langsung tahu sebelum klik. DB tetap jadi penentu akhir (misal kalau ada rekan yang
-  // baru saja ambil tanggal yang sama sebelum halaman ini di-refresh).
+  // Rekan SATU CABANG yang ikut dihitung batas per hari (driver & gaji flat tidak dihitung).
+  const branchMates = (dateStr: string) => (entriesByDate[dateStr] || [])
+    .filter(e => e.employee_id !== employeeId && e.branch_id && e.branch_id === myBranchId && e.counted)
+
+  // Alasan tanggal TIDAK BISA dipilih -- dari DB (get_dayoff_block_reasons), ditambah cek tanggal
+  // lewat. DB tetap jadi penentu akhir saat insert (misal ada rekan yang baru saja mengambil
+  // tanggal yang sama sebelum halaman ini di-refresh).
   function blockReason(dateStr: string): string | null {
     if (dateStr <= todayLocalStr()) return 'Tanggal sudah lewat.'
-    const others = (entriesByDate[dateStr] || []).filter(e => e.employee_id !== employeeId)
-    if (others.length >= MAX_OFF_PER_DAY) return `Sudah penuh, maks. ${MAX_OFF_PER_DAY} orang libur per hari.`
-    if (activeCount >= MAX_PICKS) return `Jatah ${MAX_PICKS} tanggal periode ini sudah penuh.`
-    if (isWeekend(dateStr) && weekendPicksUsed >= 1) return 'Jatah 1 weekend (Sabtu/Minggu) periode ini sudah terpakai.'
-    return null
-  }
-
-  // Tetap BOLEH dipilih, tapi ditandai untuk Owner/HR yang menyetujui.
-  function pickWarnings(dateStr: string): string[] {
-    const warnings: string[] = []
-    const sameBranch = (entriesByDate[dateStr] || []).filter(e => e.employee_id !== employeeId && e.branch_id && e.branch_id === myBranchId)
-    if (sameBranch.length) warnings.push(`Rekan satu cabang juga libur: ${sameBranch.map(e => e.full_name).join(', ')}.`)
-    const near = [...ownOffDates].filter(d => d !== dateStr && Math.abs(dayDiff(d, dateStr)) < MIN_GAP_DAYS).sort()
-    if (near.length) warnings.push(`Kurang dari ${MIN_GAP_DAYS} hari dari libur Anda tanggal ${near.map(d => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })).join(', ')}.`)
-    return warnings
+    return blockedByDate[dateStr] ?? null
   }
 
   async function handleCellClick(dateStr: string) {
@@ -201,11 +193,7 @@ export default function AjukanLiburPage() {
 
     // isCurrentPeriod = periode ini sudah berjalan (bukan diajukan di muka) -- begitu dipilih,
     // langsung kena denda disiplin Rp10.000 (dihitung otomatis oleh trigger DB saat insert).
-    const warnings = pickWarnings(dateStr)
-    const warningText = warnings.length
-      ? `⚠️ PERINGATAN:\n- ${warnings.join('\n- ')}\nTetap boleh diajukan, tapi akan ditandai untuk Owner/HR yang menyetujui (bisa saja ditolak).\n\n`
-      : ''
-    const confirmText = warningText + (isCurrentPeriod
+    const confirmText = (isCurrentPeriod
       ? `Periode ini sudah berjalan. Tanggal ${dateLabel} akan langsung terkirim ke HR dan kena denda disiplin Rp10.000 (dipotong otomatis dari gaji periode ini). Lanjutkan?`
       : `Ajukan libur tanggal ${dateLabel}? Langsung terkirim ke HR.`)
     if (!confirm(confirmText)) return
@@ -287,8 +275,10 @@ export default function AjukanLiburPage() {
           <p className="font-semibold text-amber-800 mb-1">Aturan Libur</p>
           <ul className="list-disc ml-4 space-y-0.5">
             <li>Maksimal <strong>{MAX_PICKS} tanggal</strong> per periode, dan hanya <strong>1</strong> di antaranya boleh Sabtu/Minggu.</li>
-            <li>Satu tanggal maksimal <strong>{MAX_OFF_PER_DAY} orang</strong> libur (semua cabang) — kalau sudah penuh tidak bisa dipilih.</li>
-            <li>Usahakan <strong>tidak libur barengan</strong> rekan satu cabang, dan beri jarak minimal <strong>{MIN_GAP_DAYS} hari</strong> antar libur (misal libur Senin, paling cepat libur lagi Sabtu). Kalau terpaksa, tetap boleh diajukan, tapi ditandai ⚠️ untuk Owner/HR dan bisa ditolak.</li>
+            {branchCap !== null && (
+              <li>Di cabang Anda, satu tanggal maksimal <strong>{branchCap} orang</strong> libur — kalau sudah penuh tidak bisa dipilih.</li>
+            )}
+            <li>Tanggal yang bisa diklik berarti <strong>sudah memenuhi semua aturan</strong>. Tanggal abu-abu tidak bisa dipilih — klik untuk melihat alasannya.</li>
           </ul>
         </div>
       </div>
@@ -307,8 +297,7 @@ export default function AjukanLiburPage() {
           <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[11px] text-slate-500">
             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-blue-500" /> Pilihan Anda (menunggu HR)</span>
             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-green-500" /> Pilihan Anda (disetujui)</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-slate-300" /> Rekan libur</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-amber-100 border border-amber-300" /> Boleh, tapi ada peringatan</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-amber-100 border border-amber-300" /> Rekan satu cabang libur</span>
             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-slate-100 border border-slate-200" /> Tidak bisa dipilih</span>
           </div>
         </div>
@@ -328,9 +317,8 @@ export default function AjukanLiburPage() {
             const d = new Date(dateStr + 'T00:00:00')
             const inPeriod = dateStr >= periodStartStr && dateStr <= periodEndStr
             const own = ownByDate[dateStr]
-            const others = (entriesByDate[dateStr] || []).filter(e => e.employee_id !== employeeId)
-            const reason = inPeriod && !own ? blockReason(dateStr) : null
-            const warnings = inPeriod && !own && !reason ? pickWarnings(dateStr) : []
+            const others = branchMates(dateStr)
+            const reason = inPeriod && !own && !ownOffDates.has(dateStr) ? blockReason(dateStr) : null
             const selectable = inPeriod && !previewReadOnly && (own ? own.status !== 'approved' : !reason)
             const showMonth = d.getDate() === 1 || dateStr === localDateStr(gridStart)
             // Sengaja tanpa opacity (/60 dll) -- override dark mode di globals.css cuma menyasar
@@ -339,7 +327,6 @@ export default function AjukanLiburPage() {
               : own?.status === 'approved' ? 'bg-green-50'
               : own ? 'bg-blue-50'
               : reason ? 'bg-slate-100'
-              : warnings.length ? 'bg-amber-50 hover:bg-amber-100'
               : 'hover:bg-blue-50'
             return (
               <button
@@ -347,15 +334,14 @@ export default function AjukanLiburPage() {
                 type="button"
                 onClick={() => inPeriod && handleCellClick(dateStr)}
                 disabled={!inPeriod || previewReadOnly || busyDate === dateStr}
-                title={reason ?? (warnings.length ? '⚠️ ' + warnings.join(' ') : own ? (own.status === 'approved' ? 'Disetujui HR' : 'Klik untuk batalkan') : inPeriod ? 'Klik untuk ajukan libur' : undefined)}
+                title={reason ?? (own ? (own.status === 'approved' ? 'Disetujui HR' : 'Klik untuk batalkan') : inPeriod ? 'Klik untuk ajukan libur' : undefined)}
                 className={`min-h-[84px] sm:min-h-[104px] border-b border-r border-slate-100 p-1 sm:p-1.5 text-left align-top flex flex-col transition ${cellBg} ${selectable ? 'cursor-pointer' : 'cursor-default'}`}>
                 <div className="flex items-center justify-between w-full mb-1">
                   <span className={`text-xs font-semibold ${!inPeriod ? 'text-slate-300' : dateStr === todayStr ? 'text-blue-700' : reason ? 'text-slate-400' : 'text-slate-700'}`}>
                     {d.getDate()}{showMonth && <span className="font-normal text-[10px] ml-0.5">{d.toLocaleDateString('id-ID', { month: 'short' })}</span>}
                   </span>
-                  {warnings.length > 0 && <span className="text-[10px] leading-none" aria-label="Ada peringatan">⚠️</span>}
-                  {inPeriod && others.length > 0 && (
-                    <span className={`text-[9px] font-bold ${others.length >= MAX_OFF_PER_DAY ? 'text-red-500' : 'text-slate-400'}`}>{others.length}/{MAX_OFF_PER_DAY}</span>
+                  {inPeriod && others.length > 0 && branchCap !== null && (
+                    <span className={`text-[9px] font-bold ${others.length >= branchCap ? 'text-red-500' : 'text-slate-400'}`}>{others.length}/{branchCap}</span>
                   )}
                 </div>
                 <div className="space-y-0.5 w-full min-w-0">
@@ -366,12 +352,12 @@ export default function AjukanLiburPage() {
                     </div>
                   )}
                   {!own && inPeriod && ownOffDates.has(dateStr) && (
-                    <div className="text-[10px] px-1 py-0.5 rounded truncate font-semibold text-white bg-green-500" title="Libur yang diatur langsung oleh HR">✓ Anda (HR)</div>
+                    <div className="text-[10px] px-1 py-0.5 rounded truncate font-semibold text-white bg-green-500" title="Libur di jadwal (diatur HR atau hasil ganti libur)">✓ Anda (jadwal)</div>
                   )}
                   {others.map(e => (
                     <div key={e.employee_id}
-                      className={`text-[10px] px-1 py-0.5 rounded truncate ${e.branch_id === myBranchId ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700'} ${e.status === 'pending' ? 'border border-dashed border-slate-400' : ''}`}
-                      title={`${e.full_name}${e.branch_name ? ' · ' + e.branch_name : ''}${e.status === 'pending' ? ' (menunggu HR)' : ''}`}>
+                      className={`text-[10px] px-1 py-0.5 rounded truncate bg-amber-100 text-amber-800 ${e.status === 'pending' ? 'border border-dashed border-slate-400' : ''}`}
+                      title={`${e.full_name}${e.status === 'pending' ? ' (menunggu HR)' : ''}`}>
                       {e.full_name.split(' ')[0]}
                     </div>
                   ))}
@@ -385,7 +371,7 @@ export default function AjukanLiburPage() {
           })}
         </div>
       </div>
-      <p className="text-xs text-slate-400 mt-2">Nama bergaris putus-putus = masih menunggu persetujuan HR. Nama kuning = rekan satu cabang. Tanggal ⚠️ boleh dipilih tapi ditandai untuk HR; klik tanggal abu-abu untuk melihat alasan tidak bisa dipilih.</p>
+      <p className="text-xs text-slate-400 mt-2">Nama di kalender = rekan satu cabang yang libur (bergaris putus-putus = masih menunggu persetujuan HR). Klik tanggal abu-abu untuk melihat alasan tidak bisa dipilih.</p>
     </div>
   )
 }

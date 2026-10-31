@@ -763,7 +763,7 @@ export default function PenggajianBulananPage() {
       supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
       // Denda disiplin Ajukan Libur periode-berjalan -- period_start roster SELALU persis sama
       // dengan firstDay payroll (keduanya tanggal 26), bukan rentang.
-      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', empId).eq('period_start', firstDay),
+      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', empId).eq('period_start', firstDay).neq('status', 'rejected'),
     ])
 
     const sc   = scRes.data?.[0]
@@ -1658,7 +1658,7 @@ export default function PenggajianBulananPage() {
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, status, admin_fee').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
       supabase.from('employees').select('join_date, employee_type').eq('id', p.employee_id).single(),
-      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', p.employee_id).eq('period_start', firstDay),
+      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', p.employee_id).eq('period_start', firstDay).neq('status', 'rejected'),
     ])
 
     const sc = scRes.data?.[0]

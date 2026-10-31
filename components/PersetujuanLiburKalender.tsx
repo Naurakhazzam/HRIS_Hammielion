@@ -7,8 +7,8 @@ import { localDateStr, todayLocalStr } from '@/lib/date'
 
 // Mode kalender tab "Jadwal Libur Awal" di Persetujuan Libur -- Owner/HR lihat siapa saja yang
 // libur per tanggal dalam satu periode 26–25, lalu setujui/tolak langsung dari kotak tanggalnya.
-// Batas & peringatan HARUS sama dengan migration 066 (check_dayoff_pick_rules, get_dayoff_pick_warnings).
-const MAX_OFF_PER_DAY = 3
+// Batas libur sekarang PER CABANG (migrasi 108, dayoff_block_reason) dan dicek ulang oleh DB saat
+// HR menyetujui -- kalender se-perusahaan ini cuma menampilkan jumlah orang, bukan batas.
 const WEEKDAYS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab']
 
 type CalendarEntry = { off_date: string; employee_id: string; full_name: string; branch_id: string | null; branch_name: string | null; status: 'pending' | 'approved' }
@@ -82,8 +82,7 @@ export default function PersetujuanLiburKalender({ onChanged }: { onChanged?: ()
     const w = requestId ? warningsById[requestId] : undefined
     if (!w) return []
     const lines: string[] = []
-    if (w.same_branch_names) lines.push(`Libur barengan rekan satu cabang: ${w.same_branch_names}`)
-    if (w.near_dates) lines.push(`Kurang dari 5 hari dari libur dia yang lain: ${w.near_dates}`)
+    if (w.same_branch_names) lines.push(`Rekan satu cabang yang juga libur: ${w.same_branch_names} (masih dalam batas cabang)`)
     return lines
   }
 
@@ -148,8 +147,7 @@ export default function PersetujuanLiburKalender({ onChanged }: { onChanged?: ()
       <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-slate-500">
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-100 border border-green-300" /> Disetujui</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-100 border border-dashed border-yellow-400" /> Menunggu keputusan</span>
-        <span className="flex items-center gap-1.5">⚠️ Bentrok satu cabang / jarak &lt; 5 hari</span>
-        <span className="flex items-center gap-1.5"><strong className="text-red-600">3/3</strong> Tanggal penuh</span>
+        <span className="flex items-center gap-1.5">⚠️ Ada rekan satu cabang yang juga libur</span>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -178,7 +176,7 @@ export default function PersetujuanLiburKalender({ onChanged }: { onChanged?: ()
                       {d.getDate()}{showMonth && <span className="font-normal text-[10px] ml-0.5">{d.toLocaleDateString('id-ID', { month: 'short' })}</span>}
                     </span>
                     {entries.length > 0 && (
-                      <span className={`text-[10px] font-bold ${entries.length >= MAX_OFF_PER_DAY ? 'text-red-600' : 'text-slate-400'}`}>{entries.length}/{MAX_OFF_PER_DAY}</span>
+                      <span className="text-[10px] font-bold text-slate-400">{entries.length} org</span>
                     )}
                   </div>
                   <div className="space-y-0.5 w-full min-w-0">
@@ -214,8 +212,8 @@ export default function PersetujuanLiburKalender({ onChanged }: { onChanged?: ()
                 </h3>
                 <button onClick={() => setOpenDate(null)} className="text-slate-400 hover:text-slate-600 px-1" aria-label="Tutup">✕</button>
               </div>
-              <p className={`text-xs mb-4 ${openEntries.length >= MAX_OFF_PER_DAY ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
-                {openEntries.length} dari maks. {MAX_OFF_PER_DAY} orang libur
+              <p className="text-xs mb-4 text-slate-500">
+                {openEntries.length} orang libur (semua cabang). Batas per cabang dicek otomatis saat disetujui.
               </p>
               <div className="space-y-3">
                 {openEntries.map(e => {

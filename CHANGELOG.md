@@ -2520,6 +2520,42 @@ Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_updat
 
 ---
 
+### 155. Satukan Aturan Libur — Ajukan Libur, Ganti Libur, Tukar saat Absen (migrasi 108)
+
+**Masalah:** Owner melaporkan karyawan kesulitan mengajukan libur. Ditemukan aturan yang saling tumpang tindih:
+- Batas **3 orang/hari se-perusahaan** (bukan per cabang) — 25 karyawan × 4 libur = 100 hari libur, slotnya cuma ~90.
+- Batas 1 weekend: RLS mengecualikan cabang ≤ 2 orang, halaman memblokir semua orang, HR menolak manual.
+- "Jangan barengan satu cabang" & "jarak 5 hari" tertulis cuma peringatan, tapi separuh alasan penolakan HR justru soal barengan.
+- Ganti Libur & Tukar saat Absen tidak mengecek kuota/weekend/batas per hari (Ganti Libur malah wajib tukar begitu ada 1 rekan libur).
+- Libur yang dipindah tetap tercatat `approved` di tanggal lama ("libur hantu", 8 kasus) — tetap memakan slot & hitungan weekend.
+
+**Aturan baru (dikonfirmasi Owner), satu sumber `dayoff_block_reason` dipakai di semua jalur:**
+1. Jatah 4 hari libur per periode 26–25, dihitung dari jadwal yang benar-benar berlaku (`employee_roster`) + pengajuan yang belum diputuskan.
+2. Maks. 1 Sabtu/Minggu per periode untuk semua karyawan.
+3. Per cabang per hari maks. **2 orang** libur; cabang dengan ≤ 2 karyawan maks. **1 orang**. Driver & gaji flat tidak dihitung.
+4. Aturan jarak 5 hari dihapus.
+
+**Perubahan:**
+- Status baru `moved` di `roster_pick_requests` + trigger `trg_mark_roster_pick_moved` di `employee_roster`; 8 libur hantu dirapikan.
+- Aturan isi pindah dari RLS ke trigger (pesan error jelas, bukan "row-level security"); cek tanggal pakai WIB.
+- RPC baru `get_dayoff_block_reasons` & `get_dayoff_branch_cap` — kalender Ajukan Libur, Ganti Libur, dan Tukar saat Absen mengunci tanggal yang melanggar beserta alasannya.
+- Ganti Libur: pindah langsung boleh selama cabang belum penuh; tukar cuma wajib kalau penuh; kuota/weekend dicek untuk kedua pihak, dan dicek ulang saat HR menyetujui.
+- Tukar saat Absen tetap jadi jalur darurat, tapi tanggal penggantinya ikut aturan yang sama.
+- `get_dayoff_quota_status`: "disetujui" = libur yang ada di jadwal periode itu.
+- Penggajian: denda disiplin libur tidak lagi ikut menghitung pengajuan yang ditolak.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/108_dayoff_rules_unified.sql` | Fungsi aturan terpusat, status `moved`, RLS/trigger, RPC baru, Ganti/Tukar Libur ikut aturan |
+| `app/(dashboard)/portal/ajukan-libur/page.tsx` | Alasan blokir dari DB, batas per cabang, hapus peringatan jarak/barengan |
+| `app/(dashboard)/portal/ganti-libur/page.tsx` | Tukar cuma wajib kalau cabang penuh, tampilkan alasan blokir |
+| `components/AbsenSekarang.tsx` | Kalender tanggal pengganti mengunci tanggal yang melanggar aturan |
+| `app/(dashboard)/absensi/persetujuan-libur/page.tsx`, `components/PersetujuanLiburKalender.tsx` | Status Dipindah, hapus batas 3/hari & peringatan jarak |
+| `app/(dashboard)/panduan/page.tsx` | Teks aturan libur diperbarui |
+| `app/(dashboard)/penggajian/bulanan/page.tsx` | Denda disiplin abaikan pengajuan ditolak |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).

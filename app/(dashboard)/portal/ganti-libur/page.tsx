@@ -62,6 +62,9 @@ export default function GantiLiburPage() {
   const [newDate, setNewDate] = useState('')
   const [collision, setCollision] = useState<Colleague[]>([])
   const [collisionChecked, setCollisionChecked] = useState(false)
+  // Hasil dayoff_block_reason (migrasi 108) untuk tanggal baru: 'full' = cabang sudah penuh di
+  // tanggal itu -> wajib tukar dengan salah satu rekan; kode lain (jatah/weekend) = tidak bisa.
+  const [newDateBlock, setNewDateBlock] = useState<{ code: string; reason: string } | null>(null)
   const [selectedCounterpart, setSelectedCounterpart] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [respondingId, setRespondingId] = useState<string | null>(null)
@@ -142,23 +145,33 @@ export default function GantiLiburPage() {
     setTimeout(() => setMessage(null), 6000)
   }
 
-  async function checkCollision(dateStr: string) {
-    setNewDate(dateStr)
+  // Dicek ulang setiap tanggal lama ATAU tanggal baru berubah -- tanggal lama ikut menentukan
+  // (dilepas dari hitungan jatah & weekend).
+  async function checkNewDate(orig: string, dateStr: string) {
     setSelectedCounterpart('')
     setCollisionChecked(false)
     setCollision([])
-    if (!dateStr) return
-    const { data, error } = await supabase.rpc('get_branch_dayoff_colleagues', { p_date: dateStr })
+    setNewDateBlock(null)
+    if (!orig || !dateStr) return
+    const [{ data, error }, { data: blocked }] = await Promise.all([
+      supabase.rpc('get_branch_dayoff_colleagues', { p_date: dateStr }),
+      supabase.rpc('get_dayoff_block_reasons', { p_employee_id: employeeId, p_from: dateStr, p_to: dateStr, p_ignore_date: orig }),
+    ])
     if (!error) {
       setCollision((data as Colleague[]) || [])
+      setNewDateBlock(((blocked || []) as { code: string; reason: string }[])[0] ?? null)
       setCollisionChecked(true)
     }
   }
 
+  const mustSwap = newDateBlock?.code === 'full'
+  const cannotMove = !!newDateBlock && !mustSwap
+
   async function submitRequest() {
     if (previewReadOnly) return
     if (!originalDate || !newDate) { showMessage('error', 'Pilih tanggal libur lama dan tanggal baru dulu.'); return }
-    if (collision.length > 0 && !selectedCounterpart) { showMessage('error', 'Tanggal itu sudah jadi libur rekan — pilih siapa yang diajak tukar.'); return }
+    if (cannotMove) { showMessage('error', newDateBlock!.reason); return }
+    if (mustSwap && !selectedCounterpart) { showMessage('error', 'Cabang sudah penuh di tanggal itu — pilih siapa yang diajak tukar.'); return }
     setSubmitting(true)
     const { error } = await supabase.rpc('request_day_off_change', {
       p_original_date: originalDate,
@@ -168,8 +181,8 @@ export default function GantiLiburPage() {
     if (error) {
       showMessage('error', 'Gagal mengajukan: ' + error.message)
     } else {
-      showMessage('success', collision.length > 0 ? 'Diajukan — menunggu respon rekan yang diajak tukar.' : 'Diajukan — menunggu persetujuan HR/Owner.')
-      setOriginalDate(''); setNewDate(''); setCollision([]); setCollisionChecked(false); setSelectedCounterpart('')
+      showMessage('success', selectedCounterpart ? 'Diajukan — menunggu respon rekan yang diajak tukar.' : 'Diajukan — menunggu persetujuan HR/Owner.')
+      setOriginalDate(''); setNewDate(''); setCollision([]); setCollisionChecked(false); setSelectedCounterpart(''); setNewDateBlock(null)
     }
     await fetchData(employeeId, previewReadOnly)
     setSubmitting(false)
@@ -203,7 +216,7 @@ export default function GantiLiburPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Ganti Hari Libur</h1>
-        <p className="text-sm text-slate-500">Ubah hari libur yang sudah disetujui ke tanggal lain. Kalau tanggal baru sudah jadi libur rekan, ini jadi pengajuan tukar — perlu rekan itu setuju dulu sebelum diproses HR/Owner. Pengajuan minimal 2 hari sebelum tanggal yang paling dekat (baik tanggal lama maupun baru).</p>
+        <p className="text-sm text-slate-500">Ubah hari libur yang sudah disetujui ke tanggal lain. Aturannya sama dengan Ajukan Libur (jatah 4 per periode, maks. 1 Sabtu/Minggu, batas orang libur per hari di cabang). Kalau cabang sudah penuh di tanggal baru, ini jadi pengajuan tukar — perlu rekan itu setuju dulu sebelum diproses HR/Owner. Pengajuan minimal 2 hari sebelum tanggal yang paling dekat (baik tanggal lama maupun baru).</p>
       </div>
 
       {message && (
@@ -250,7 +263,7 @@ export default function GantiLiburPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Tanggal Libur yang Mau Diganti</label>
-              <select value={originalDate} onChange={e => setOriginalDate(e.target.value)}
+              <select value={originalDate} onChange={e => { setOriginalDate(e.target.value); checkNewDate(e.target.value, newDate) }}
                 className="w-full sm:w-80 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                 <option value="">— Pilih tanggal —</option>
                 {ownDayOffs.map(o => <option key={o.date} value={o.date}>{fmtDate(o.date)}</option>)}
@@ -258,13 +271,16 @@ export default function GantiLiburPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Tanggal Libur Baru yang Diinginkan</label>
-              <input type="date" value={newDate} min={minFuture} onChange={e => checkCollision(e.target.value)}
+              <input type="date" value={newDate} min={minFuture} onChange={e => { setNewDate(e.target.value); checkNewDate(originalDate, e.target.value) }}
                 className="w-full sm:w-80 px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
 
-            {collisionChecked && collision.length > 0 && (
+            {collisionChecked && cannotMove && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">✕ {newDateBlock!.reason} Pilih tanggal lain.</p>
+            )}
+            {collisionChecked && mustSwap && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <p className="text-xs text-amber-700 mb-2">⚠️ Tanggal itu sudah jadi hari libur rekan berikut — pilih siapa yang diajak tukar (dia akan mendapat tanggal libur lama Anda sebagai gantinya, dan harus setuju dulu):</p>
+                <p className="text-xs text-amber-700 mb-2">⚠️ Cabang Anda sudah penuh di tanggal itu — pilih siapa yang diajak tukar (dia akan mendapat tanggal libur lama Anda sebagai gantinya, dan harus setuju dulu):</p>
                 <div className="space-y-1.5">
                   {collision.map(c => (
                     <label key={c.employee_id} className="flex items-center gap-2 text-sm text-slate-700">
@@ -276,11 +292,14 @@ export default function GantiLiburPage() {
                 </div>
               </div>
             )}
-            {collisionChecked && collision.length === 0 && (
-              <p className="text-xs text-green-600">✓ Tanggal itu masih kosong — bisa langsung diajukan ke HR/Owner tanpa perlu tukar.</p>
+            {collisionChecked && !newDateBlock && (
+              <p className="text-xs text-green-600">
+                ✓ Tanggal itu masih bisa — langsung diajukan ke HR/Owner tanpa perlu tukar.
+                {collision.length > 0 && <> (Rekan yang juga libur: {collision.map(c => c.full_name).join(', ')}.)</>}
+              </p>
             )}
 
-            <button onClick={submitRequest} disabled={submitting || !originalDate || !newDate || previewReadOnly}
+            <button onClick={submitRequest} disabled={submitting || !originalDate || !newDate || cannotMove || previewReadOnly}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50">
               {submitting ? 'Mengajukan...' : 'Ajukan Ganti Libur'}
             </button>

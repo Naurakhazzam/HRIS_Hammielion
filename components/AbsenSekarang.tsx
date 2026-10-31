@@ -93,6 +93,9 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   // tanggal (YYYY-MM-DD) -> nama rekan SATU CABANG yang libur di tanggal itu (dari RPC, bukan tabel langsung — employee biasa tidak punya akses baca roster orang lain)
   const [dayoffCalendar, setDayoffCalendar] = useState<Record<string, string>>({})
   const [ownFutureDayOff, setOwnFutureDayOff] = useState<Set<string>>(new Set())
+  // Tanggal yang tidak boleh jadi pengganti + alasannya (aturan libur yang sama dengan Ajukan
+  // Libur, lihat dayoff_block_reason di migrasi 108).
+  const [blockedReplacement, setBlockedReplacement] = useState<Record<string, string>>({})
   const [selectedReplacementDate, setSelectedReplacementDate] = useState<string | null>(null)
   const [swapSubmitting, setSwapSubmitting] = useState(false)
   const [swapError, setSwapError] = useState<string | null>(null)
@@ -477,17 +480,20 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
 
     // Jadwal libur rekan SATU CABANG SAJA — lewat RPC, karena employee biasa tidak punya
     // akses baca roster karyawan lain (lihat migrasi get_branch_dayoff_calendar_rpc).
-    const [{ data: branchOff }, { data: ownOff }] = await Promise.all([
+    const [{ data: branchOff }, { data: ownOff }, { data: blocked }] = await Promise.all([
       supabase.rpc('get_branch_dayoff_calendar', { p_from: fromStr, p_to: toStr }),
       supabase.from('employee_roster').select('date')
         .eq('employee_id', employeeId).eq('is_day_off', true)
         .gte('date', fromStr).lte('date', toStr),
+      // p_ignore_date = hari ini, karena libur hari ini yang sedang dilepas.
+      supabase.rpc('get_dayoff_block_reasons', { p_employee_id: employeeId, p_from: fromStr, p_to: toStr, p_ignore_date: todayLocalStr() }),
     ])
 
     const map: Record<string, string> = {}
     ;(branchOff as { off_date: string; employee_names: string }[] | null)?.forEach(r => { map[r.off_date] = r.employee_names })
     setDayoffCalendar(map)
     setOwnFutureDayOff(new Set((ownOff || []).map((r: { date: string }) => r.date)))
+    setBlockedReplacement(Object.fromEntries(((blocked || []) as { off_date: string; reason: string }[]).map(b => [b.off_date, b.reason])))
     setCalendarLoading(false)
   }
 
@@ -788,7 +794,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       )}
       {step === 'pick-date' && (
         <div className="space-y-3">
-          <p className="text-xs text-slate-500">Pilih tanggal pengganti untuk libur Anda hari ini. Tanggal dengan tanda menunjukkan rekan satu cabang yang sudah libur di hari itu.</p>
+          <p className="text-xs text-slate-500">Pilih tanggal pengganti untuk libur Anda hari ini. Tanggal dengan tanda menunjukkan rekan satu cabang yang sudah libur di hari itu. Tanggal abu-abu tidak bisa dipilih (sudah lewat, cabang penuh, atau jatah libur/weekend periode itu habis).</p>
           <div className="flex items-center justify-between">
             <button type="button" onClick={() => changeCalendarMonth(-1)} disabled={atOrBeforeCurrentMonth}
               className="px-2 py-1 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:cursor-not-allowed">◀</button>
@@ -811,11 +817,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
                 const isOwnOff = ownFutureDayOff.has(dateStr)
                 const colleagueNames = dayoffCalendar[dateStr]
                 const isSelected = selectedReplacementDate === dateStr
-                const disabled = isPast || isOwnOff
+                const blockedReason = !isPast && !isOwnOff ? blockedReplacement[dateStr] : undefined
+                const disabled = isPast || isOwnOff || !!blockedReason
                 return (
                   <button key={dateStr} type="button" disabled={disabled}
                     onClick={() => setSelectedReplacementDate(dateStr)}
-                    title={colleagueNames ? `Libur: ${colleagueNames}` : undefined}
+                    title={blockedReason ?? (colleagueNames ? `Libur: ${colleagueNames}` : undefined)}
                     className={`relative aspect-square rounded-lg text-xs flex items-center justify-center transition
                       ${disabled ? 'text-slate-300 cursor-not-allowed' : 'hover:bg-blue-50 text-slate-700'}
                       ${isSelected ? 'bg-blue-600 text-white hover:bg-blue-600 font-semibold' : ''}
