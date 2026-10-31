@@ -2454,6 +2454,20 @@ Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_updat
 | `database/migrations/104_logistics_route_emergency_edit.sql` | Tabel jejak + RPC edit darurat rute |
 | `app/(dashboard)/logistik/laporan/page.tsx` | Tombol, popup, dan riwayat Edit Darurat Rute |
 
+### 151. Persetujuan Kasbon oleh Owner/HR/Finance + Nominal Cair Bisa Diatur (migrasi 105)
+
+**Masalah:** kasbon driver/kenek tidak masuk potongan di Penggajian Driver karena masih `pending_approval` — cuma Owner yang bisa menyetujui, dan Penggajian Driver hanya memotong kasbon `active`. Nominal cair kasbon driver/kenek juga selalu sama dengan pengajuan.
+
+- **Verifikasi Keuangan → Kasbon:** alur 2 tahap (Finance cek nominal → Owner verifikasi) diganti satu langkah **Setujui** oleh Owner/HR/Finance. Di popup diisi **Nominal yang Cair** (default = pengajuan) + cicilan per bulan. RPC `approve_kasbon_request` mengunci baris, menyimpan nominal pengajuan awal di `original_amount_requested`, dan membuat cicilan `kasbon_deductions` dalam satu transaksi. Tolak lewat RPC `reject_kasbon_request`. Baris lama berstatus `finance_reviewed` tetap bisa disetujui.
+- **Verifikasi Keuangan → Kasbon Driver/Kenek:** Owner/HR/Finance bisa menyetujui, dengan popup **Nominal yang Cair**. `approve_driver_kasbon`/`approve_helper_kasbon` sekarang menerima `p_amount` (opsional), mengubah `total_amount`/`remaining_amount`, dan menyimpan nominal awal di kolom baru `original_amount`. Kas Keluar pencairan otomatis ikut nominal cair.
+- **Menu Kasbon → tab Driver/Kenek:** tombol Setujui (Owner-saja) diganti link ke Verifikasi Keuangan, supaya persetujuan + pengaturan nominal cair cuma di satu tempat.
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/105_kasbon_approval_hr_finance.sql` | RPC approve/reject kasbon untuk Owner/HR/Finance, nominal cair |
+| `app/(dashboard)/keuangan/approval/page.tsx` | Popup Setujui dengan Nominal Cair (kasbon karyawan & driver/kenek) |
+| `app/(dashboard)/kasbon/page.tsx` | Tombol Setujui driver/kenek → link Verifikasi Keuangan; label status |
+
 ---
 
 ### Masih Tertunda (per 2026-10-09)

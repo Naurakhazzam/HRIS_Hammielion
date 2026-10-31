@@ -77,11 +77,9 @@ type PendingKasbon = {
   employees: { full_name: string; employee_code: string; departments: { name: string } | null }
 }
 // Kasbon Driver & Kenek — dari 2 tabel TERPISAH (driver_kasbon, helper_kasbon), beda dari
-// kasbon_requests (kasbon karyawan biasa) di atas. Sebelumnya tidak pernah muncul di halaman
-// ini sama sekali (cuma bisa diproses lewat menu Kasbon), digabung ke sini biar HR/Owner
-// tidak kelewat — approve tetap lewat RPC approve_driver_kasbon/approve_helper_kasbon yang
-// sudah ada (dibatasi role Owner), "Hapus" untuk menolak (tidak ada status "ditolak" formal
-// untuk 2 tabel ini, sama seperti alur yang sudah ada di menu Kasbon).
+// kasbon_requests (kasbon karyawan biasa) di atas. Approve lewat RPC approve_driver_kasbon/
+// approve_helper_kasbon (Owner/HR/Finance, nominal cair bisa disesuaikan — migrasi 105),
+// "Hapus" untuk menolak (tidak ada status "ditolak" formal untuk 2 tabel ini).
 type PendingDriverHelperKasbon = {
   id: string
   kind: 'driver' | 'helper'
@@ -126,25 +124,24 @@ export default function ApprovalKasKeluarPage() {
   const [rejectModal, setRejectModal] = useState<{ ids: string[] } | null>(null)
   const [rejectReasonText, setRejectReasonText] = useState('')
 
-  // Kasbon sekarang 2 tahap: (1) Finance cek & boleh sesuaikan nominal yang diizinkan
-  // (status pending -> finance_reviewed, ditegakkan RLS kasbon_req_finance_review), (2) Owner
-  // ("atasan lebih tinggi") verifikasi akhir & tentukan cicilan (finance_reviewed -> approved,
-  // ditegakkan RLS kasbon_req_update) — begitu Owner meng-OK-kan, kasbon otomatis langsung
-  // cair (trigger fin_autopost_kasbon_request menandai disbursed_at sendiri), tidak perlu
-  // langkah pencairan manual terpisah lagi.
-  const canReviewKasbon = role === 'finance' || role === 'owner'
-  const canApproveKasbon = role === 'owner'
+  // Kasbon disetujui satu langkah oleh Owner/HR/Finance (RPC approve_kasbon_request, migrasi
+  // 105): sekaligus tentukan nominal yang cair (boleh beda dari pengajuan) + rencana cicilan.
+  // Begitu disetujui, kasbon otomatis langsung cair (trigger fin_autopost_kasbon_request
+  // mencatat Kas Keluar & menandai disbursed_at). Baris lama berstatus 'finance_reviewed'
+  // tetap bisa disetujui dari sini.
+  const canApproveKasbon = ['owner', 'hr', 'finance'].includes(role)
   const today = new Date()
-  const [kasbonReviewModal, setKasbonReviewModal] = useState<PendingKasbon | null>(null)
-  const [kasbonReviewAmount, setKasbonReviewAmount] = useState('')
   const [kasbonApproveModal, setKasbonApproveModal] = useState<PendingKasbon | null>(null)
   const [kasbonApproveForm, setKasbonApproveForm] = useState({
+    amount: '',
     deduction_per_month: '',
     deduction_start_month: today.getMonth() + 1,
     deduction_start_year: today.getFullYear(),
   })
   const [kasbonRejectModal, setKasbonRejectModal] = useState<PendingKasbon | null>(null)
   const [kasbonRejectReason, setKasbonRejectReason] = useState('')
+  const [dhApproveModal, setDhApproveModal] = useState<PendingDriverHelperKasbon | null>(null)
+  const [dhApproveAmount, setDhApproveAmount] = useState('')
 
   const isAdmin = ADMIN_ROLES.includes(role)
 
@@ -330,83 +327,39 @@ export default function ApprovalKasKeluarPage() {
     setProcessing(false)
   }
 
-  async function handleKasbonReview(e: React.FormEvent) {
-    e.preventDefault()
-    if (!kasbonReviewModal || !myUserId) return
-    const amt = Number(kasbonReviewAmount)
-    if (!amt || amt <= 0) { showMessage('error', 'Masukkan nominal yang diizinkan (harus lebih dari 0).'); return }
-    setProcessing(true)
-
-    // .eq('status', 'pending') mencegah dua Finance memproses pengajuan yang sama bersamaan.
-    const { data: updatedRows, error } = await supabase.from('kasbon_requests').update({
-      amount_requested: amt,
-      original_amount_requested: kasbonReviewModal.amount_requested,
-      status: 'finance_reviewed',
-      finance_reviewed_by: myUserId,
-      finance_reviewed_at: new Date().toISOString(),
-    }).eq('id', kasbonReviewModal.id).eq('status', 'pending').select('id')
-
-    if (error) { showMessage('error', 'Gagal memproses: ' + error.message); setProcessing(false); return }
-    if (!updatedRows || updatedRows.length === 0) {
-      showMessage('error', 'Pengajuan ini sudah diproses orang lain. Silakan refresh.')
-      setKasbonReviewModal(null)
-      fetchAll()
-      setProcessing(false)
-      return
-    }
-
-    showMessage('success', 'Nominal kasbon dikonfirmasi, dilempar ke Owner untuk verifikasi akhir.')
-    setKasbonReviewModal(null)
-    setKasbonReviewAmount('')
-    fetchAll()
-    setProcessing(false)
+  function openKasbonApprove(en: PendingKasbon) {
+    setKasbonApproveModal(en)
+    setKasbonApproveForm({ amount: String(en.amount_requested), deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() })
   }
 
   async function handleKasbonApprove(e: React.FormEvent) {
     e.preventDefault()
     if (!kasbonApproveModal || !myUserId) return
+    const amt = Number(kasbonApproveForm.amount)
+    if (!amt || amt <= 0) { showMessage('error', 'Masukkan nominal yang cair (harus lebih dari 0).'); return }
     const dpm = Number(kasbonApproveForm.deduction_per_month)
     if (!dpm || dpm <= 0) { showMessage('error', 'Masukkan cicilan yang valid.'); return }
     setProcessing(true)
 
-    // .eq('status', 'finance_reviewed') + cek jumlah baris yang benar-benar ter-update mencegah
-    // dua Owner yang menyetujui pengajuan yang sama nyaris bersamaan sama-sama lolos dan
-    // sama-sama insert cicilan kasbon_deductions (dobel-catat cicilan untuk 1 pengajuan). Begitu
-    // status jadi 'approved', trigger fin_autopost_kasbon_request otomatis mencatat pengeluaran
-    // kas & menandai kasbon ini cair (disbursed_at) -- tidak perlu langkah manual lagi.
-    const { data: updatedRows, error } = await supabase.from('kasbon_requests').update({
-      status: 'approved',
-      approved_by: myUserId,
-      approved_at: new Date().toISOString(),
-      deduction_per_month: dpm,
-      deduction_start_month: kasbonApproveForm.deduction_start_month,
-      deduction_start_year: kasbonApproveForm.deduction_start_year,
-    }).eq('id', kasbonApproveModal.id).eq('status', 'finance_reviewed').select('id')
+    // RPC mengunci baris + cek status, update nominal cair & status, dan membuat cicilan
+    // kasbon_deductions dalam satu transaksi — tidak bisa dobel walau disetujui bersamaan.
+    const { data: totalCicilan, error } = await supabase.rpc('approve_kasbon_request', {
+      p_id: kasbonApproveModal.id,
+      p_amount: amt,
+      p_deduction_per_month: dpm,
+      p_start_month: kasbonApproveForm.deduction_start_month,
+      p_start_year: kasbonApproveForm.deduction_start_year,
+    })
 
-    if (error) { showMessage('error', 'Gagal menyetujui: ' + error.message); setProcessing(false); return }
-    if (!updatedRows || updatedRows.length === 0) {
-      showMessage('error', 'Pengajuan ini sudah diproses (bukan menunggu verifikasi lagi) — kemungkinan sudah disetujui/ditolak orang lain, atau belum dicek Finance. Silakan refresh.')
-      setKasbonApproveModal(null)
+    if (error) {
+      showMessage('error', 'Gagal menyetujui: ' + error.message)
       fetchAll()
       setProcessing(false)
       return
     }
 
-    // Auto-generate kasbon_deductions, satu baris per cicilan
-    const totalCicilan = Math.ceil(kasbonApproveModal.amount_requested / dpm)
-    const inserts = []
-    for (let i = 0; i < totalCicilan; i++) {
-      const bulan = ((kasbonApproveForm.deduction_start_month - 1 + i) % 12) + 1
-      const tahun = kasbonApproveForm.deduction_start_year + Math.floor((kasbonApproveForm.deduction_start_month - 1 + i) / 12)
-      const isLast = i === totalCicilan - 1
-      const amount = isLast ? kasbonApproveModal.amount_requested - (dpm * (totalCicilan - 1)) : dpm
-      inserts.push({ kasbon_request_id: kasbonApproveModal.id, employee_id: kasbonApproveModal.employee_id, deduction_month: bulan, deduction_year: tahun, amount, status: 'pending' })
-    }
-    await supabase.from('kasbon_deductions').insert(inserts)
-
-    showMessage('success', `Kasbon disetujui. ${totalCicilan} cicilan otomatis dibuat.`)
+    showMessage('success', `Kasbon disetujui, cair ${formatRupiah(amt)}. ${totalCicilan} cicilan otomatis dibuat.`)
     setKasbonApproveModal(null)
-    setKasbonApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() })
     fetchAll()
     setProcessing(false)
   }
@@ -415,21 +368,29 @@ export default function ApprovalKasKeluarPage() {
     e.preventDefault()
     if (!kasbonRejectModal || !kasbonRejectReason.trim()) return
     setProcessing(true)
-    const { error } = await supabase.from('kasbon_requests').update({
-      status: 'rejected', rejection_reason: kasbonRejectReason.trim(),
-    }).eq('id', kasbonRejectModal.id)
+    const { error } = await supabase.rpc('reject_kasbon_request', {
+      p_id: kasbonRejectModal.id, p_reason: kasbonRejectReason.trim(),
+    })
     if (error) showMessage('error', 'Gagal menolak: ' + error.message)
     else { showMessage('success', 'Pengajuan kasbon ditolak.'); setKasbonRejectModal(null); setKasbonRejectReason(''); fetchAll() }
     setProcessing(false)
   }
 
-  async function handleDriverHelperApprove(item: PendingDriverHelperKasbon) {
-    if (!confirm(`Setujui kasbon ${item.kind === 'driver' ? 'driver' : 'kenek'} ini supaya aktif?`)) return
+  async function handleDriverHelperApprove(e: React.FormEvent) {
+    e.preventDefault()
+    if (!dhApproveModal) return
+    const amt = Number(dhApproveAmount)
+    if (!amt || amt <= 0) { showMessage('error', 'Masukkan nominal yang cair (harus lebih dari 0).'); return }
+    const item = dhApproveModal
     setDhBusyId(item.id)
     const rpc = item.kind === 'driver' ? 'approve_driver_kasbon' : 'approve_helper_kasbon'
-    const { error } = await supabase.rpc(rpc, { p_kasbon_id: item.id })
+    const { error } = await supabase.rpc(rpc, { p_kasbon_id: item.id, p_amount: amt })
     if (error) showMessage('error', 'Gagal menyetujui: ' + error.message)
-    else { showMessage('success', 'Kasbon disetujui, sekarang aktif.'); fetchAll() }
+    else {
+      showMessage('success', `Kasbon disetujui, cair ${formatRupiah(amt)} — sekarang aktif dan bisa dipotong di Penggajian Driver.`)
+      setDhApproveModal(null)
+      fetchAll()
+    }
     setDhBusyId(null)
   }
 
@@ -564,14 +525,14 @@ export default function ApprovalKasKeluarPage() {
         {tab === 'kasbon' ? (
           <div className="p-4 border-b border-slate-200 bg-slate-50">
             <span className="text-sm text-slate-500">
-              Alur 2 tahap: Finance cek &amp; sesuaikan nominal dulu, baru Owner verifikasi akhir (langsung cair begitu di-OK-kan). Diproses per pengajuan, tidak bisa massal.
-              {!canReviewKasbon && ' Anda tidak punya akses memproses tahap manapun.'}
+              Owner/HR/Finance menyetujui sekaligus menentukan nominal yang cair &amp; cicilannya (langsung cair begitu disetujui). Diproses per pengajuan, tidak bisa massal.
+              {!canApproveKasbon && ' Anda tidak punya akses memproses pengajuan kasbon.'}
             </span>
           </div>
         ) : tab === 'kasbon_driver_kenek' ? (
           <div className="p-4 border-b border-slate-200 bg-slate-50">
             <span className="text-sm text-slate-500">
-              {canApproveKasbon ? 'Setujui/Tolak per pengajuan — kasbon driver & kenek diproses lewat menu Kasbon, ini cuma pengingat.' : 'Persetujuan kasbon dibatasi untuk role Owner.'}
+              {canApproveKasbon ? 'Setujui per pengajuan dan tentukan nominal yang cair — setelah disetujui, kasbon aktif dan bisa dipotong di Penggajian Driver.' : 'Persetujuan kasbon dibatasi untuk role Owner/HR/Finance.'}
             </span>
           </div>
         ) : (
@@ -760,8 +721,8 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-sm">
                     <p className="font-medium text-slate-800">{en.employees?.full_name}</p>
                     <p className="text-xs text-slate-500">{en.employees?.employee_code} · diajukan {new Date(en.created_at).toLocaleDateString('id-ID')}</p>
-                    <span className={`inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${en.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                      {en.status === 'pending' ? '① Menunggu Cek Finance' : '② Menunggu Verifikasi Owner'}
+                    <span className="inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
+                      Menunggu Persetujuan
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-700">{en.employees?.departments?.name || '—'}</td>
@@ -773,23 +734,16 @@ export default function ApprovalKasKeluarPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-500">{en.reason || '—'}</td>
                   <td className="px-4 py-3 text-center">
-                    {en.status === 'pending' && canReviewKasbon ? (
+                    {canApproveKasbon ? (
                       <div className="flex gap-1 justify-center">
-                        <button onClick={() => { setKasbonReviewModal(en); setKasbonReviewAmount(String(en.amount_requested)) }}
-                          disabled={processing} className="px-2 py-1 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded text-xs font-medium transition">Cek Nominal</button>
-                        <button onClick={() => { setKasbonRejectModal(en); setKasbonRejectReason('') }}
-                          disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
-                      </div>
-                    ) : en.status === 'finance_reviewed' && canApproveKasbon ? (
-                      <div className="flex gap-1 justify-center">
-                        <button onClick={() => { setKasbonApproveModal(en); setKasbonApproveForm({ deduction_per_month: '', deduction_start_month: today.getMonth() + 1, deduction_start_year: today.getFullYear() }) }}
-                          disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Verifikasi &amp; Setujui</button>
+                        <button onClick={() => openKasbonApprove(en)}
+                          disabled={processing} className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition">Setujui</button>
                         <button onClick={() => { setKasbonRejectModal(en); setKasbonRejectReason('') }}
                           disabled={processing} className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition">Tolak</button>
                       </div>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">
-                        {en.status === 'pending' ? '⏳ Menunggu Finance' : '⏳ Menunggu Owner'}
+                        ⏳ Menunggu Persetujuan
                       </span>
                     )}
                   </td>
@@ -806,13 +760,13 @@ export default function ApprovalKasKeluarPage() {
                   <td className="px-4 py-3 text-center">
                     {canApproveKasbon ? (
                       <div className="flex gap-1 justify-center">
-                        <button onClick={() => handleDriverHelperApprove(en)} disabled={dhBusyId === en.id}
+                        <button onClick={() => { setDhApproveModal(en); setDhApproveAmount(String(en.amount_requested)) }} disabled={dhBusyId === en.id}
                           className="px-2 py-1 bg-green-100 text-green-700 hover:bg-green-200 rounded text-xs font-medium transition disabled:opacity-50">Setujui</button>
                         <button onClick={() => handleDriverHelperReject(en)} disabled={dhBusyId === en.id}
                           className="px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded text-xs font-medium transition disabled:opacity-50">Tolak</button>
                       </div>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">⏳ Menunggu Owner</span>
+                      <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap">⏳ Menunggu Persetujuan</span>
                     )}
                   </td>
                 </tr>
@@ -855,65 +809,43 @@ export default function ApprovalKasKeluarPage() {
         </div>
       )}
 
-      {/* Modal Tahap 1: Cek Nominal (Finance) — boleh sesuaikan nominal yang diizinkan sebelum
-          dilempar ke Owner untuk verifikasi akhir. */}
-      {kasbonReviewModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold text-slate-800 mb-1">Cek Nominal Kasbon</h2>
-            <p className="text-sm text-slate-500 mb-4">
-              {kasbonReviewModal.employees?.full_name} mengajukan {formatRupiah(kasbonReviewModal.amount_requested)}
-              {kasbonReviewModal.reason && <> — <span className="italic">&quot;{kasbonReviewModal.reason}&quot;</span></>}
-            </p>
-            <form onSubmit={handleKasbonReview} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Nominal yang Diizinkan (Rp) *</label>
-                <RupiahInput required value={kasbonReviewAmount}
-                  onChange={setKasbonReviewAmount}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="Contoh: 200000" />
-                {Number(kasbonReviewAmount) > 0 && Number(kasbonReviewAmount) !== Number(kasbonReviewModal.amount_requested) && (
-                  <p className="text-xs text-amber-600 mt-1">
-                    Beda dari yang diajukan ({formatRupiah(kasbonReviewModal.amount_requested)}) — karyawan akan menerima nominal ini, bukan nominal pengajuan awal.
-                  </p>
-                )}
-              </div>
-              <p className="text-xs text-slate-400">Setelah ini, pengajuan akan menunggu verifikasi akhir dari Owner. Uang baru cair setelah Owner meng-OK-kan.</p>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setKasbonReviewModal(null)}
-                  className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
-                <button type="submit" disabled={processing}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
-                  {processing ? 'Menyimpan...' : 'Lempar ke Owner'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Tahap 2: Verifikasi & Setujui (Owner) — butuh rencana cicilan, jadi tidak ikut alur bulk approve generik */}
+      {/* Modal Setujui Kasbon — nominal cair + rencana cicilan, jadi tidak ikut alur bulk approve generik */}
       {kasbonApproveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold text-slate-800 mb-1">Verifikasi &amp; Setujui Kasbon</h2>
-            <p className="text-sm text-slate-500 mb-1">{kasbonApproveModal.employees?.full_name} — {formatRupiah(kasbonApproveModal.amount_requested)}</p>
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Setujui Kasbon</h2>
+            <p className="text-sm text-slate-500 mb-1">
+              {kasbonApproveModal.employees?.full_name} mengajukan {formatRupiah(kasbonApproveModal.amount_requested)}
+              {kasbonApproveModal.reason && <> — <span className="italic">&quot;{kasbonApproveModal.reason}&quot;</span></>}
+            </p>
             {kasbonApproveModal.original_amount_requested != null && Number(kasbonApproveModal.original_amount_requested) !== Number(kasbonApproveModal.amount_requested) && (
-              <p className="text-xs text-slate-400 mb-3">Diajukan awal {formatRupiah(kasbonApproveModal.original_amount_requested)}, sudah disesuaikan Finance.</p>
+              <p className="text-xs text-slate-400 mb-3">Diajukan awal {formatRupiah(kasbonApproveModal.original_amount_requested)}, sudah disesuaikan sebelumnya.</p>
             )}
-            <p className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-4">
+            <p className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 my-4">
               Begitu disetujui, kasbon langsung tercatat cair — tidak perlu langkah pencairan manual lagi.
             </p>
             <form onSubmit={handleKasbonApprove} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Nominal yang Cair (Rp) *</label>
+                <RupiahInput required value={kasbonApproveForm.amount}
+                  onChange={v => setKasbonApproveForm({ ...kasbonApproveForm, amount: v })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="Contoh: 200000" />
+                {Number(kasbonApproveForm.amount) > 0 && Number(kasbonApproveForm.amount) !== Number(kasbonApproveModal.amount_requested) && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Beda dari yang diajukan ({formatRupiah(kasbonApproveModal.amount_requested)}) — karyawan menerima &amp; mencicil nominal ini.
+                  </p>
+                )}
+              </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Potongan Gaji per Bulan (Rp) *</label>
                 <RupiahInput required value={kasbonApproveForm.deduction_per_month}
                   onChange={v => setKasbonApproveForm({ ...kasbonApproveForm, deduction_per_month: v })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Contoh: 500000" />
-                {kasbonApproveForm.deduction_per_month && (
+                {Number(kasbonApproveForm.deduction_per_month) > 0 && Number(kasbonApproveForm.amount) > 0 && (
                   <p className="text-xs text-slate-500 mt-1">
-                    Estimasi: {Math.ceil(kasbonApproveModal.amount_requested / Number(kasbonApproveForm.deduction_per_month))} cicilan
+                    Estimasi: {Math.ceil(Number(kasbonApproveForm.amount) / Number(kasbonApproveForm.deduction_per_month))} cicilan
                   </p>
                 )}
               </div>
@@ -939,6 +871,45 @@ export default function ApprovalKasKeluarPage() {
                 <button type="submit" disabled={processing}
                   className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
                   {processing ? 'Memproses...' : 'Konfirmasi Setujui'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Setujui Kasbon Driver/Kenek — nominal cair bisa disesuaikan; dipotong mingguan
+          di Penggajian Driver (tidak ada rencana cicilan bulanan) */}
+      {dhApproveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Setujui Kasbon {dhApproveModal.kind === 'driver' ? 'Driver' : 'Kenek'}</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              {dhApproveModal.employees?.full_name} mengajukan {formatRupiah(dhApproveModal.amount_requested)}
+              {dhApproveModal.reason && <> — <span className="italic">&quot;{dhApproveModal.reason}&quot;</span></>}
+            </p>
+            <form onSubmit={handleDriverHelperApprove} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Nominal yang Cair (Rp) *</label>
+                <RupiahInput required value={dhApproveAmount}
+                  onChange={setDhApproveAmount}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="Contoh: 200000" />
+                {Number(dhApproveAmount) > 0 && Number(dhApproveAmount) !== Number(dhApproveModal.amount_requested) && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Beda dari yang diajukan ({formatRupiah(dhApproveModal.amount_requested)}) — nominal ini yang cair &amp; dipotong dari upah.
+                  </p>
+                )}
+              </div>
+              <p className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                Begitu disetujui, kasbon aktif, tercatat cair di Kas Keluar, dan muncul di Penggajian Driver untuk dipotong.
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setDhApproveModal(null)}
+                  className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
+                <button type="submit" disabled={dhBusyId === dhApproveModal.id}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                  {dhBusyId === dhApproveModal.id ? 'Memproses...' : 'Konfirmasi Setujui'}
                 </button>
               </div>
             </form>

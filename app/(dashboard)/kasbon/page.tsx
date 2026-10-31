@@ -121,8 +121,8 @@ export default function KasbonPage() {
 
 // ─── STATUS CONFIG ────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  pending:          { label: 'Menunggu Cek Finance',  className: 'bg-yellow-100 text-yellow-700' },
-  finance_reviewed: { label: 'Menunggu Verifikasi Owner', className: 'bg-indigo-100 text-indigo-700' },
+  pending:          { label: 'Menunggu Persetujuan',  className: 'bg-yellow-100 text-yellow-700' },
+  finance_reviewed: { label: 'Menunggu Persetujuan', className: 'bg-indigo-100 text-indigo-700' },
   approved:         { label: 'Disetujui & Cair',      className: 'bg-blue-100 text-blue-700' },
   rejected:         { label: 'Ditolak',               className: 'bg-red-100 text-red-600' },
   lunas:            { label: 'Lunas',                 className: 'bg-green-100 text-green-700' },
@@ -379,7 +379,7 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <h2 className="text-lg font-bold text-slate-800 mb-1">{canSelfSubmit ? 'Ajukan Kasbon' : 'Ajukan Kasbon Baru'}</h2>
             <p className="text-sm text-slate-500 mb-4">
-              {canSelfSubmit ? 'Pengajuan atas nama Anda sendiri, menunggu persetujuan Owner.' : 'Diinput oleh Admin/HR atas permintaan karyawan.'}
+              {canSelfSubmit ? 'Pengajuan atas nama Anda sendiri, menunggu persetujuan Owner/HR/Finance.' : 'Diinput oleh Admin/HR atas permintaan karyawan.'}
             </p>
             <form onSubmit={handleAjukan} className="space-y-4">
               {canSelfSubmit ? (
@@ -704,13 +704,11 @@ type DriverKasbonDeductionRecord = {
 
 function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | 'error', msg: string) => void; role: string }) {
   const supabase = createClient()
-  const isOwner = role === 'owner'
   const [kasbons, setKasbons] = useState<DriverKasbonRecord[]>([])
   const [deductions, setDeductions] = useState<DriverKasbonDeductionRecord[]>([])
   const [drivers, setDrivers] = useState<{ id: string; full_name: string; employee_code: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [approvingId, setApprovingId] = useState<string | null>(null)
   const [activeSubTab, setActiveSubTab] = useState<'aktif' | 'tambah' | 'riwayat'>('aktif')
   const [filterStatus, setFilterStatus] = useState<'pending_approval' | 'active' | 'lunas' | 'all'>('active')
 
@@ -753,28 +751,19 @@ function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | '
       total_amount: amt,
       remaining_amount: amt,
       notes: form.notes || null,
-      // Wajib disetujui Owner dulu sebelum aktif (dulu langsung 'active' tanpa kontrol apa pun) —
+      // Wajib disetujui (Owner/HR/Finance) dulu sebelum aktif (dulu langsung 'active' tanpa kontrol apa pun) —
       // menyamakan level kontrolnya dengan kasbon staff (kasbon_requests).
       status: 'pending_approval',
     })
     if (error) showMessage('error', 'Gagal: ' + error.message)
     else {
-      showMessage('success', 'Kasbon driver diajukan, menunggu persetujuan Owner.')
+      showMessage('success', 'Kasbon driver diajukan, menunggu persetujuan Owner/HR/Finance.')
       setForm({ driver_id: '', total_amount: '', notes: '' })
       fetchAll()
       setActiveSubTab('aktif')
       setFilterStatus('pending_approval')
     }
     setSubmitting(false)
-  }
-
-  async function handleApprove(id: string) {
-    if (!confirm('Setujui kasbon ini supaya aktif?')) return
-    setApprovingId(id)
-    const { error } = await supabase.rpc('approve_driver_kasbon', { p_kasbon_id: id })
-    setApprovingId(null)
-    if (error) showMessage('error', 'Gagal menyetujui: ' + error.message)
-    else { showMessage('success', 'Kasbon disetujui, sekarang aktif.'); fetchAll() }
   }
 
   async function handleLunas(id: string) {
@@ -814,8 +803,8 @@ function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | '
         <div className="space-y-4">
           {pendingCount > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
-              ⏳ Ada <strong>{pendingCount}</strong> kasbon driver menunggu persetujuan Owner sebelum aktif.
-              {!isOwner && ' Cuma Owner yang bisa menyetujui.'}
+              ⏳ Ada <strong>{pendingCount}</strong> kasbon driver menunggu persetujuan sebelum aktif.
+              {' '}Setujui &amp; atur nominal cairnya di <Link href="/keuangan/approval" className="font-semibold underline">Verifikasi Keuangan</Link> (Owner/HR/Finance).
             </div>
           )}
 
@@ -893,11 +882,11 @@ function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | '
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex gap-2">
-                            {k.status === 'pending_approval' && isOwner && (
-                              <button onClick={() => handleApprove(k.id)} disabled={approvingId === k.id}
-                                className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50">
-                                {approvingId === k.id ? 'Menyetujui...' : 'Setujui'}
-                              </button>
+                            {k.status === 'pending_approval' && (
+                              <Link href="/keuangan/approval"
+                                className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition">
+                                Proses di Verifikasi Keuangan
+                              </Link>
                             )}
                             {k.status === 'active' && (
                               <button onClick={() => handleLunas(k.id)}
@@ -1040,13 +1029,11 @@ type HelperKasbonDeductionRecord = {
 
 function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'error', msg: string) => void; role: string }) {
   const supabase = createClient()
-  const isOwner = role === 'owner'
   const [kasbons, setKasbons] = useState<HelperKasbonRecord[]>([])
   const [deductions, setDeductions] = useState<HelperKasbonDeductionRecord[]>([])
   const [keneks, setKeneks] = useState<{ id: string; full_name: string; employee_code: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [approvingId, setApprovingId] = useState<string | null>(null)
   const [activeSubTab, setActiveSubTab] = useState<'aktif' | 'tambah' | 'riwayat'>('aktif')
   const [filterStatus, setFilterStatus] = useState<'pending_approval' | 'active' | 'lunas' | 'all'>('active')
 
@@ -1101,28 +1088,19 @@ function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'e
       total_amount: amt,
       remaining_amount: amt,
       notes: form.notes || null,
-      // Wajib disetujui Owner dulu sebelum aktif (dulu langsung 'active' tanpa kontrol apa pun) —
+      // Wajib disetujui (Owner/HR/Finance) dulu sebelum aktif (dulu langsung 'active' tanpa kontrol apa pun) —
       // menyamakan level kontrolnya dengan kasbon staff (kasbon_requests).
       status: 'pending_approval',
     })
     if (error) showMessage('error', 'Gagal: ' + error.message)
     else {
-      showMessage('success', 'Kasbon kenek diajukan, menunggu persetujuan Owner.')
+      showMessage('success', 'Kasbon kenek diajukan, menunggu persetujuan Owner/HR/Finance.')
       setForm({ helper_id: '', total_amount: '', notes: '' })
       fetchAll()
       setActiveSubTab('aktif')
       setFilterStatus('pending_approval')
     }
     setSubmitting(false)
-  }
-
-  async function handleApprove(id: string) {
-    if (!confirm('Setujui kasbon ini supaya aktif?')) return
-    setApprovingId(id)
-    const { error } = await supabase.rpc('approve_helper_kasbon', { p_kasbon_id: id })
-    setApprovingId(null)
-    if (error) showMessage('error', 'Gagal menyetujui: ' + error.message)
-    else { showMessage('success', 'Kasbon disetujui, sekarang aktif.'); fetchAll() }
   }
 
   async function handleLunas(id: string) {
@@ -1162,8 +1140,8 @@ function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'e
         <div className="space-y-4">
           {pendingCount > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
-              ⏳ Ada <strong>{pendingCount}</strong> kasbon kenek menunggu persetujuan Owner sebelum aktif.
-              {!isOwner && ' Cuma Owner yang bisa menyetujui.'}
+              ⏳ Ada <strong>{pendingCount}</strong> kasbon kenek menunggu persetujuan sebelum aktif.
+              {' '}Setujui &amp; atur nominal cairnya di <Link href="/keuangan/approval" className="font-semibold underline">Verifikasi Keuangan</Link> (Owner/HR/Finance).
             </div>
           )}
 
@@ -1239,11 +1217,11 @@ function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'e
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex gap-2">
-                            {k.status === 'pending_approval' && isOwner && (
-                              <button onClick={() => handleApprove(k.id)} disabled={approvingId === k.id}
-                                className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50">
-                                {approvingId === k.id ? 'Menyetujui...' : 'Setujui'}
-                              </button>
+                            {k.status === 'pending_approval' && (
+                              <Link href="/keuangan/approval"
+                                className="px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition">
+                                Proses di Verifikasi Keuangan
+                              </Link>
                             )}
                             {k.status === 'active' && (
                               <button onClick={() => handleLunas(k.id)}
