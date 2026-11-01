@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import RecalcLateMinutes from '@/components/RecalcLateMinutes'
 
 type Department = { id: string; name: string }
 
@@ -31,10 +32,18 @@ export default function JadwalKerjaPage() {
   const [detectUntil, setDetectUntil] = useState('')
   const [allowOvertime, setAllowOvertime] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [myRole, setMyRole] = useState('')
 
   const supabase = createClient()
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => { fetchData(); fetchMyRole() }, [])
+
+  async function fetchMyRole() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('users').select('role').eq('id', user.id).single()
+    if (data) setMyRole(data.role)
+  }
 
   async function fetchData() {
     setLoading(true)
@@ -91,7 +100,9 @@ export default function JadwalKerjaPage() {
     if (error) {
       showMessage('error', (editingId ? 'Gagal menyimpan perubahan: ' : 'Gagal menambah jadwal: ') + error.message)
     } else {
-      showMessage('success', editingId ? 'Jadwal kerja berhasil diperbarui.' : 'Jadwal kerja berhasil ditambahkan.')
+      showMessage('success', editingId
+        ? 'Jadwal kerja berhasil diperbarui. Absen yang sudah tercatat tidak ikut berubah — pakai "Hitung Ulang Telat" di bawah kalau perlu.'
+        : 'Jadwal kerja berhasil ditambahkan.')
       resetForm()
       setShowForm(false)
       fetchData()
@@ -296,6 +307,10 @@ export default function JadwalKerjaPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {['owner', 'hr'].includes(myRole) && (
+        <div className="mt-6"><RecalcLateMinutes departments={departments} /></div>
       )}
     </div>
   )
