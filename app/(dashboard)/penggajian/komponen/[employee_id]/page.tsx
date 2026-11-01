@@ -20,6 +20,30 @@ type SalaryComponent = {
   effective_date: string
 }
 
+// Slip gaji memakai SATU baris komponen per periode (26–25): baris terakhir yang tanggal
+// efektifnya <= tanggal 25 akhir periode (lihat buildSlipPreview di penggajian/bulanan). Jadi baris
+// bertanggal efektif d berlaku mulai periode yang memuat d -- dan TERTIMPA (tidak pernah dipakai)
+// kalau ada baris lebih baru yang tanggalnya masih di periode yang sama.
+function periodEndOf(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const endY = d >= 26 && m === 12 ? y + 1 : y
+  const endM = d >= 26 ? (m % 12) + 1 : m
+  return `${endY}-${String(endM).padStart(2, '0')}-25`
+}
+function periodLabelOf(date: string): string {
+  const end = periodEndOf(date)
+  return new Date(end + 'T00:00:00').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })
+}
+function fmtTgl(date: string): string {
+  return new Date(date + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+/** Baris lebih baru yang menimpa baris bertanggal `date` di periode yang sama (kalau ada). */
+function overriddenBy(date: string, rows: { effective_date: string }[]): string | null {
+  const end = periodEndOf(date)
+  const newer = rows.map(r => r.effective_date).filter(d => d > date && d <= end).sort()
+  return newer.length ? newer[newer.length - 1] : null
+}
+
 export default function DetailKomponenGajiPage({ params }: { params: Promise<{ employee_id: string }> }) {
   const { employee_id } = use(params)
   const router = useRouter()
@@ -39,14 +63,19 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
     effective_date: localDateStr(new Date())
   })
 
+  function showMessage(type: 'success' | 'error', text: string, ms = 5000) {
+    setMessage({ type, text })
+    setTimeout(() => setMessage(null), ms)
+  }
+
   useEffect(() => {
     if (employee_id) {
       fetchData(employee_id)
     }
   }, [employee_id])
 
-  async function fetchData(empId: string) {
-    setLoading(true)
+  async function fetchData(empId: string, keepForm = false) {
+    if (!keepForm) setLoading(true)
     
     // Fetch Employee Info
     const { data: empData, error: empError } = await supabase
@@ -76,7 +105,9 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
     } else {
       setHistory(salaryData || [])
 
-      if (salaryData && salaryData.length > 0) {
+      if (keepForm) {
+        // Sesudah simpan/hapus: biarkan isi form apa adanya.
+      } else if (salaryData && salaryData.length > 0) {
         // Sudah ada riwayat — isi form dari data terbaru seperti biasa.
         const latest = salaryData[0]
         setFormData({
@@ -103,11 +134,6 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
     }
 
     setLoading(false)
-  }
-
-  function showMessage(type: 'success' | 'error', text: string) {
-    setMessage({ type, text })
-    setTimeout(() => setMessage(null), 5000)
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -162,15 +188,48 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
       console.error('Supabase error:', error.message, error.details, error.hint)
       showMessage('error', `Gagal menyimpan komponen gaji: ${error.message} (Detail: ${error.details || '-'})`)
     } else {
-      showMessage('success', existing ? 'Komponen gaji untuk tanggal efektif ini diperbarui.' : 'Baris riwayat gaji baru ditambahkan.')
-      fetchData(employee_id) // Refresh list
+      const base = existing ? 'Komponen gaji untuk tanggal efektif ini diperbarui.' : 'Baris riwayat gaji baru ditambahkan.'
+      // Peringatkan kalau perubahan ini tertimpa baris yang lebih baru di periode yang sama --
+      // dulu disimpan "berhasil" tapi slip tetap memakai baris lain tanpa penjelasan apa pun.
+      const over = overriddenBy(formattedDate, history)
+      if (over) {
+        showMessage('error', `${base} TAPI slip periode ${periodLabelOf(formattedDate)} tetap memakai baris tanggal ${fmtTgl(over)} (lebih baru). Hapus baris ${fmtTgl(over)} kalau perubahan ini yang harus berlaku.`, 15000)
+      } else {
+        showMessage('success', `${base} Berlaku mulai slip periode ${periodLabelOf(formattedDate)}.`)
+      }
+      fetchData(employee_id, true) // Refresh list, form tetap seperti yang baru disimpan
     }
     setSubmitting(false)
+  }
+
+  function loadRowToForm(h: SalaryComponent) {
+    setFormData({
+      base_salary: String(h.base_salary),
+      position_allowance: String(h.position_allowance),
+      meal_allowance: String(h.meal_allowance),
+      special_allowance: String(h.special_allowance ?? 0),
+      overtime_rate_per_hour: String(h.overtime_rate_per_hour),
+      effective_date: h.effective_date,
+    })
+    showMessage('success', `Baris ${fmtTgl(h.effective_date)} dimuat ke form. Ubah angkanya lalu Simpan untuk mengoreksi baris ini.`)
+  }
+
+  async function deleteRow(h: SalaryComponent) {
+    if (history.length <= 1) { showMessage('error', 'Baris terakhir tidak bisa dihapus — karyawan harus punya minimal 1 komponen gaji.'); return }
+    if (!confirm(`Hapus baris komponen gaji tanggal efektif ${fmtTgl(h.effective_date)}?\n\nSlip yang SUDAH dibuat tidak berubah. Slip yang dibuat sesudah ini akan memakai baris lain yang berlaku.`)) return
+    const { error } = await supabase.from('salary_components').delete().eq('id', h.id)
+    if (error) showMessage('error', 'Gagal menghapus: ' + error.message)
+    else { showMessage('success', `Baris ${fmtTgl(h.effective_date)} dihapus.`); fetchData(employee_id, true) }
   }
 
   const formatRupiah = (angka: number) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka)
   }
+
+  // Baris yang dipakai slip periode berjalan = baris terakhir dengan tgl efektif <= tgl 25 akhir
+  // periode ini (history sudah urut tanggal efektif menurun).
+  const currentPeriodEnd = periodEndOf(localDateStr(new Date()))
+  const currentRowId = history.find(h => h.effective_date <= currentPeriodEnd)?.id ?? null
 
   if (loading) return <div className="p-8 text-center text-slate-500">Memuat data...</div>
   if (!employee) return <div className="p-8 text-center text-red-500">Karyawan tidak ditemukan.</div>
@@ -215,7 +274,16 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
                 onChange={(e) => setFormData({...formData, effective_date: e.target.value})}
                 className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" 
               />
-              <p className="text-[10px] text-slate-500 mt-1">Gaji dengan tgl efektif terbaru akan digunakan sistem otomatis.</p>
+              {formData.effective_date && (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Berlaku mulai slip periode <strong>{periodLabelOf(formData.effective_date)}</strong> (26–25). Tiap periode memakai baris terakhir yang tanggal efektifnya ≤ tanggal 25 akhir periode.
+                </p>
+              )}
+              {formData.effective_date && overriddenBy(formData.effective_date, history) && (
+                <p className="text-[10px] text-red-600 font-medium mt-1">
+                  ⚠️ Ada baris lebih baru ({fmtTgl(overriddenBy(formData.effective_date, history)!)}) di periode yang sama — perubahan dengan tanggal ini TIDAK akan terpakai di slip {periodLabelOf(formData.effective_date)}.
+                </p>
+              )}
             </div>
 
             <div>
@@ -295,7 +363,7 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Tunjangan</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Tunj. Khusus</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Rate Lembur/Jam</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Denda/Mnt</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -304,13 +372,21 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
                     <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada riwayat gaji untuk karyawan ini.</td>
                   </tr>
                 ) : (
-                  history.map((h, i) => (
-                    <tr key={h.id} className={`${i === 0 ? 'bg-blue-50/30' : 'hover:bg-slate-50'} transition`}>
+                  history.map((h) => {
+                    const over = overriddenBy(h.effective_date, history)
+                    const isCurrent = h.id === currentRowId
+                    return (
+                    <tr key={h.id} className={`${isCurrent ? 'bg-blue-50/30' : over ? 'bg-red-50/40' : 'hover:bg-slate-50'} transition`}>
                       <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-slate-800">
-                          {new Date(h.effective_date).toLocaleDateString('id-ID')}
+                        <div className={`text-sm font-medium ${over ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                          {fmtTgl(h.effective_date)}
                         </div>
-                        {i === 0 && <div className="text-[10px] text-blue-600 font-bold uppercase mt-0.5">Aktif Saat Ini</div>}
+                        {over ? (
+                          <div className="text-[10px] text-red-600 font-bold mt-0.5">Tidak terpakai — tertimpa baris {fmtTgl(over)}</div>
+                        ) : (
+                          <div className="text-[10px] text-slate-500 mt-0.5">Mulai slip {periodLabelOf(h.effective_date)}</div>
+                        )}
+                        {isCurrent && <div className="text-[10px] text-blue-600 font-bold uppercase mt-0.5">Dipakai periode berjalan</div>}
                       </td>
                       <td className="px-4 py-3 text-right text-sm text-slate-700 font-medium">
                         {formatRupiah(h.base_salary)}
@@ -325,11 +401,13 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
                       <td className="px-4 py-3 text-right text-sm text-slate-600">
                         {formatRupiah(h.overtime_rate_per_hour)}
                       </td>
-                      <td className="px-4 py-3 text-right text-sm text-red-600">
-                        -{formatRupiah(h.late_penalty_per_minute)}
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <button type="button" onClick={() => loadRowToForm(h)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Ubah</button>
+                        <button type="button" onClick={() => deleteRow(h)} className="text-xs text-red-600 hover:text-red-800 font-medium">Hapus</button>
                       </td>
                     </tr>
-                  ))
+                    )
+                  })
                 )}
               </tbody>
             </table>
