@@ -44,7 +44,7 @@ export function calcDailyAccrual(
   joinDate: string | null,
   attendances: AccrualAttendanceDay[],
   rosterDayOffDates: Set<string>,
-  opts: { lastDay?: string; isTraining?: boolean; disciplineFeeTotal?: number } = {},
+  opts: { lastDay?: string; isTraining?: boolean; disciplineFeeTotal?: number; lastWorkingDate?: string | null; holidayDates?: Iterable<string> } = {},
 ): DailyAccrualResult {
   const empty: DailyAccrualResult = {
     accruedGross: 0, accruedDeduction: 0, accruedNet: 0, daysCounted: 0, daysElapsed: 0,
@@ -54,6 +54,7 @@ export function calcDailyAccrual(
 
   const r = calcAbsence({
     dailyRate, firstDay, lastDay: opts.lastDay ?? cutoffDate, today: cutoffDate, joinDate,
+    lastWorkingDate: opts.lastWorkingDate ?? null, holidayDates: opts.holidayDates,
     attendances, rosterDayOffDates, isTraining: opts.isTraining === true, proRataFactor: 1,
     flatSalary: false, liburCompApplicable: false, disciplineFeeTotal: opts.disciplineFeeTotal ?? 0,
     applyQuota: false,

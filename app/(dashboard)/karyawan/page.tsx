@@ -20,6 +20,7 @@ type Employee = {
   can_drive: boolean
   can_help: boolean
   join_date: string | null
+  last_working_date: string | null
   is_active: boolean
   deactivation_reason: string | null
   kpi_bonus_max: number
@@ -57,7 +58,7 @@ type Employee = {
 const emptyForm = {
   full_name: '', employee_code: '', nik: '', phone: '',
   branch_id: '', department_id: '', position_id: '',
-  employee_type: 'permanent', can_drive: false, can_help: false, join_date: localDateStr(new Date()),
+  employee_type: 'permanent', can_drive: false, can_help: false, join_date: localDateStr(new Date()), last_working_date: '',
   kpi_bonus_max: '0',
   birth_date: '', birth_place: '', gender: '', address: '',
   religion: '', marital_status: '', dependants: '0',
@@ -224,6 +225,7 @@ export default function KaryawanPage() {
       nik: f.nik || null, phone: f.phone || null,
       branch_id: f.branch_id, department_id: f.department_id, position_id: f.position_id,
       employee_type: f.employee_type, can_drive: f.can_drive, can_help: f.can_help, join_date: f.join_date,
+      last_working_date: f.last_working_date || null,
       kpi_bonus_max: parseFloat(f.kpi_bonus_max) || 0,
       birth_date: f.birth_date || null, birth_place: f.birth_place || null,
       gender: f.gender || null, address: f.address || null,
@@ -288,7 +290,7 @@ export default function KaryawanPage() {
       branch_id: emp.branches?.id || '', department_id: emp.departments?.id || '',
       position_id: emp.positions?.id || '', employee_type: emp.employee_type, can_drive: emp.can_drive || false,
       can_help: emp.can_help || false,
-      join_date: emp.join_date || '', kpi_bonus_max: String(emp.kpi_bonus_max || 0),
+      join_date: emp.join_date || '', last_working_date: emp.last_working_date || '', kpi_bonus_max: String(emp.kpi_bonus_max || 0),
       birth_date: emp.birth_date || '', birth_place: emp.birth_place || '',
       gender: emp.gender || '', address: emp.address || '',
       religion: emp.religion || '', marital_status: emp.marital_status || '',
@@ -438,6 +440,12 @@ export default function KaryawanPage() {
             </FormField>
             <FormField label="Tanggal Bergabung" required>
               <input type="date" required value={f.join_date} onChange={e => setF({ ...f, join_date: e.target.value })} className={inputClass} />
+              <p className="text-xs text-slate-400 mt-1">Karyawan masuk kembali setelah resign: isi tanggal masuk yang baru & kosongkan Tanggal Terakhir Bekerja.</p>
+            </FormField>
+            <FormField label="Tanggal Terakhir Bekerja (Resign)">
+              <input type="date" value={f.last_working_date} min={f.join_date || undefined}
+                onChange={e => setF({ ...f, last_working_date: e.target.value })} className={inputClass} />
+              <p className="text-xs text-slate-400 mt-1">Kosongkan kalau masih bekerja. Gaji periode resign dihitung pro-rata sampai tanggal ini; hari sesudahnya tidak dihitung tidak hadir.</p>
             </FormField>
             <FormField label="Pendidikan Terakhir">
               <select value={f.education} onChange={e => setF({ ...f, education: e.target.value })} className={selectClass}>
@@ -764,6 +772,7 @@ export default function KaryawanPage() {
                   ['Tipe', translateType(detailEmployee.employee_type)],
                   ['Departemen', detailEmployee.departments?.name],
                   ['Tanggal Bergabung', detailEmployee.join_date ? new Date(detailEmployee.join_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : '-'],
+                  ['Tanggal Terakhir Bekerja', detailEmployee.last_working_date ? new Date(detailEmployee.last_working_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) : '— masih bekerja'],
                   ['Pendidikan', detailEmployee.education || '-'],
                   ['ID Fingerprint', detailEmployee.fingerprint_id != null ? String(detailEmployee.fingerprint_id) : '— belum diset'],
                   ['Jam Kerja Khusus', (detailEmployee.custom_check_in_time || detailEmployee.custom_check_out_time)

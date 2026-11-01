@@ -21,10 +21,17 @@ Aturan Potongan, estimasi di Portal) tidak boleh menulis ulang rumusnya. Mereka 
 - Komponen gaji yang dipakai adalah yang **berlaku di periode itu**: `effective_date` ≤ tanggal 25
   akhir periode. Kenaikan gaji yang berlaku mulai periode depan tidak ikut ke slip ini.
 - **Gaji harian** = (gaji pokok + tunj. jabatan + tunj. tetap + tunj. khusus) ÷ 26, dari komponen
-  **penuh**. Pro-rata training tidak mengubah harga 1 hari.
-- **Pro-rata** hanya untuk karyawan **training** yang join di tengah periode: gaji pokok &
-  tunjangan × (hari aktif ÷ hari periode). Jatah libur ikut di-pro-rata. Bonus tidak di-pro-rata.
-- Hari **sebelum tanggal join** dan hari yang **belum terjadi** tidak dihitung sama sekali.
+  **penuh**. Pro-rata tidak mengubah harga 1 hari.
+- **Masa kerja** = `join_date` s/d `last_working_date` (Tanggal Terakhir Bekerja, kosong = masih
+  bekerja). Berlaku untuk permanent & training.
+- **Pro-rata** untuk periode yang masa kerjanya tidak penuh (karyawan baru, **masuk kembali**, atau
+  **resign** di tengah periode): gaji pokok & tunjangan × (hari kalender masa kerja ÷ hari kalender
+  periode). Jatah libur ikut di-pro-rata. Bonus tidak di-pro-rata.
+- Hari **di luar masa kerja** (sebelum join / sesudah tanggal terakhir bekerja) dan hari yang
+  **belum terjadi** tidak dihitung sama sekali — bukan tidak hadir.
+- Resign: tombol **Resign** di Rekap Absensi otomatis mengisi Tanggal Terakhir Bekerja = H-1 tanggal
+  resign. Masuk kembali: ubah Tanggal Bergabung ke tanggal masuk baru & kosongkan Tanggal Terakhir
+  Bekerja di Data Karyawan.
 - Karyawan **gaji flat** (`flat_salary`): gaji pokok apa adanya. Tanpa lembur, telat, potongan
   tidak hadir, kompensasi libur, kehilangan barang/kasir, maupun bonus.
 
@@ -35,12 +42,16 @@ Jatah dipakai **berurutan** (yang lebih dulu menghabiskan jatah):
 1. **Libur terjadwal** (`employee_roster.is_day_off`) yang tidak dimasuki kerja.
 2. **Cuti** (status `leave`).
 3. **Izin / sakit tanpa surat / sakit dengan surat**, digabung satu antrean dari tanggal paling awal.
-4. **Hari kosong** (tidak ada absen, bukan libur terjadwal).
+4. **Hari kosong** (tidak ada absen, bukan libur terjadwal), termasuk **Alpha otomatis**
+   (`auto_flagged`, ditandai sistem karena tidak ada absen sama sekali).
 
 Aturan tambahan:
 
 - Hari yang masuk jatah **tidak dipotong**.
-- **Alpha** dan **Izin Mendadak** tidak pernah mengisi jatah.
+- **Alpha yang ditandai manual oleh HR** dan **Izin Mendadak** tidak pernah mengisi jatah.
+- **Libur nasional/perusahaan** (Kalender Libur, `company_holidays`) **selalu gratis dan tidak
+  memakai jatah**. Masuk kerja di tanggal itu = hari kerja biasa; tercatat izin/sakit/alpha tetap
+  gratis.
 - Libur terjadwal **selalu gratis**, walau melebihi jatah (sudah disetujui HR). Kalau di tanggal
   itu tercatat izin/sakit/alpha, tetap dianggap libur.
 - Masuk kerja di hari libur terjadwal = bukan libur. Jatahnya tidak terpakai.
@@ -54,7 +65,7 @@ Untuk karyawan permanent, periode yang berakhir **mulai 26 Sep 2026**:
 | Jenis | Cara hitung |
 |---|---|
 | Izin / Sakit tanpa surat | Eskalasi per hari, berlanjut lintas kejadian dalam periode: 1× → 1,25× → 1,5× → 1,75× → maks 2× |
-| Alpha (eksplisit + hari kosong di luar jatah) | 1,5× → 2× → 2,25× → 2,5× → 2,75× → maks 3× |
+| Alpha (manual HR + hari kosong/Alpha otomatis di luar jatah) | 1,5× → 2× → 2,25× → 2,5× → 2,75× → maks 3× |
 | Izin Mendadak (tanpa H-2) | 1,25× → 1,5× → 1,6× → 1,7× → 1,8× → 1,9× → maks 2× |
 | Sakit dengan surat | Hari ke-1 gratis, ke-2 & 3 = 0,5×, ke-4 dst = 1× |
 | Lupa Absen Masuk / Pulang | Denda tetap Rp15.000 / Rp5.000 per kejadian (`attendances.admin_fee`) |

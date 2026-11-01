@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { getCurrentPeriodRangeStr, rosterPeriodLabel } from '@/lib/rosterPeriod'
 import { IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, type EscalatingResult } from '@/lib/escalatingDeduction'
-import { calcAbsence, calcProRataFactor, DISCIPLINE_FEE_STATUSES, type AbsenceAttendance, type AbsenceResult } from '@/lib/payrollAbsence'
+import { calcAbsence, calcProRataFactor, fetchHolidayDates, ABSENCE_ATTENDANCE_COLUMNS, DISCIPLINE_FEE_STATUSES, type AbsenceAttendance, type AbsenceResult } from '@/lib/payrollAbsence'
 import { todayLocalStr } from '@/lib/date'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
@@ -25,21 +25,22 @@ type EmployeeRow = {
   absence: AbsenceResult
 }
 
-type EmployeeFlags = { join_date: string | null; employee_type: string | null; flat_salary: boolean | null; libur_compensation_applicable: boolean | null }
+type EmployeeFlags = { join_date: string | null; last_working_date?: string | null; employee_type: string | null; flat_salary: boolean | null; libur_compensation_applicable: boolean | null }
 
 // Status periode berjalan pakai rumus yang SAMA dengan slip gaji (lib/payrollAbsence.ts): jatah
 // libur 4 hari, libur terjadwal, izin mendadak, sakit+surat, & denda -- supaya angka di sini
 // tidak beda dengan slip yang nanti dibuat Finance.
 function absenceForPeriod(
   period: { start: string; end: string }, dailyRate: number, emp: EmployeeFlags | null,
-  attendances: AbsenceAttendance[], rosterDayOffDates: string[], disciplineFeeTotal: number,
+  attendances: AbsenceAttendance[], rosterDayOffDates: string[], disciplineFeeTotal: number, holidayDates: string[],
 ): AbsenceResult {
   const isTraining = emp?.employee_type === 'training'
   const joinDate = emp?.join_date ?? null
+  const lastWorkingDate = emp?.last_working_date ?? null
   return calcAbsence({
-    dailyRate, firstDay: period.start, lastDay: period.end, today: todayLocalStr(), joinDate,
-    attendances, rosterDayOffDates, isTraining,
-    proRataFactor: calcProRataFactor(isTraining, joinDate, period.start, period.end),
+    dailyRate, firstDay: period.start, lastDay: period.end, today: todayLocalStr(), joinDate, lastWorkingDate,
+    attendances, rosterDayOffDates, holidayDates, isTraining,
+    proRataFactor: calcProRataFactor(joinDate, lastWorkingDate, period.start, period.end),
     flatSalary: emp?.flat_salary === true, liburCompApplicable: emp?.libur_compensation_applicable !== false,
     disciplineFeeTotal,
   })
@@ -221,13 +222,15 @@ export default function AturanPotonganPage() {
 
   // Data mentah 1 karyawan untuk status periode berjalan -- query yang sama dengan slip gaji.
   async function fetchOwnAbsenceSource(empId: string) {
-    const [{ data: emp }, { data: atts }, { data: roster }, { data: fees }] = await Promise.all([
-      supabase.from('employees').select('join_date, employee_type, flat_salary, libur_compensation_applicable').eq('id', empId).maybeSingle(),
-      supabase.from('attendances').select('date, status, admin_fee, notes').eq('employee_id', empId).gte('date', period.start).lte('date', period.end),
+    const [{ data: emp }, { data: atts }, { data: roster }, { data: fees }, holidayDates] = await Promise.all([
+      supabase.from('employees').select('join_date, last_working_date, employee_type, flat_salary, libur_compensation_applicable').eq('id', empId).maybeSingle(),
+      supabase.from('attendances').select(ABSENCE_ATTENDANCE_COLUMNS).eq('employee_id', empId).gte('date', period.start).lte('date', period.end),
       supabase.from('employee_roster').select('date').eq('employee_id', empId).eq('is_day_off', true).gte('date', period.start).lte('date', period.end),
       supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', empId).eq('period_start', period.start).in('status', DISCIPLINE_FEE_STATUSES),
+      fetchHolidayDates(supabase, period.start, period.end),
     ])
     return {
+      holidayDates,
       emp: emp as EmployeeFlags | null,
       atts: (atts || []) as AbsenceAttendance[],
       rosterDates: (roster || []).map((r: any) => r.date as string),
@@ -272,21 +275,22 @@ export default function AturanPotonganPage() {
     setMySummary(s)
     // employees_read_self cuma untuk role 'employee' -- role lain jatuh ke employee_type dari RPC.
     const emp: EmployeeFlags = src.emp ?? { join_date: null, employee_type: s?.employee_type ?? null, flat_salary: null, libur_compensation_applicable: null }
-    setMyAbsence(absenceForPeriod(period, s?.daily_rate ?? 0, emp, src.atts, src.rosterDates, src.fee))
+    setMyAbsence(absenceForPeriod(period, s?.daily_rate ?? 0, emp, src.atts, src.rosterDates, src.fee, src.holidayDates))
   }
 
   async function fetchAllEmployees() {
-    const [{ data: emps }, { data: scAll }, { data: attAll }, { data: rosterAll }, { data: feeAll }] = await Promise.all([
+    const [{ data: emps }, { data: scAll }, { data: attAll }, { data: rosterAll }, { data: feeAll }, holidayDates] = await Promise.all([
       supabase.from('employees')
-        .select('id, full_name, employee_code, overtime_applicable, employee_type, join_date, flat_salary, libur_compensation_applicable, branches(name), departments(name)')
+        .select('id, full_name, employee_code, overtime_applicable, employee_type, join_date, last_working_date, flat_salary, libur_compensation_applicable, branches(name), departments(name)')
         .eq('is_active', true).order('full_name'),
       supabase.from('salary_components')
         .select('employee_id, base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour, effective_date')
         .lte('effective_date', period.end)
         .order('effective_date', { ascending: false }),
-      supabase.from('attendances').select('employee_id, date, status, admin_fee, notes').gte('date', period.start).lte('date', period.end),
+      supabase.from('attendances').select('employee_id, ' + ABSENCE_ATTENDANCE_COLUMNS).gte('date', period.start).lte('date', period.end),
       supabase.from('employee_roster').select('employee_id, date').eq('is_day_off', true).gte('date', period.start).lte('date', period.end),
       supabase.from('roster_pick_requests').select('employee_id, discipline_fee').eq('period_start', period.start).in('status', DISCIPLINE_FEE_STATUSES),
+      fetchHolidayDates(supabase, period.start, period.end),
     ])
 
     const scMap = new Map<string, { base: number; pos: number; meal: number; special: number; ot: number }>()
@@ -323,7 +327,7 @@ export default function AturanPotonganPage() {
         base_salary: sc.base, position_allowance: sc.pos, meal_allowance: sc.meal, special_allowance: sc.special,
         dailyRate, overtimeRate: sc.ot, overtimeEligible: e.overtime_applicable !== false && deptName !== 'Team Gudang',
         isTraining,
-        absence: absenceForPeriod(period, dailyRate, e, attByEmp.get(e.id) || [], rosterByEmp.get(e.id) || [], feeByEmp.get(e.id) ?? 0),
+        absence: absenceForPeriod(period, dailyRate, e, attByEmp.get(e.id) || [], rosterByEmp.get(e.id) || [], feeByEmp.get(e.id) ?? 0, holidayDates),
       }
     })
     setRows(result)

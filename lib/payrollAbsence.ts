@@ -50,12 +50,17 @@ function daysBetweenInclusive(from: string, to: string): number {
   return Math.round((b - a) / 86400000) + 1
 }
 
-/** Pro-rata HANYA untuk karyawan training yang join di tengah periode; permanent selalu 1. */
-export function calcProRataFactor(isTraining: boolean, joinDate: string | null, firstDay: string, lastDay: string): number {
-  if (!isTraining) return 1
-  if (!joinDate || joinDate <= firstDay) return 1
-  if (joinDate > lastDay) return 0
-  return daysBetweenInclusive(joinDate, lastDay) / daysBetweenInclusive(firstDay, lastDay)
+/**
+ * Pro-rata gaji = (hari kalender masa kerja di periode) ÷ (hari kalender periode). Masa kerja =
+ * join_date s/d last_working_date (resign). Berlaku untuk permanent & training: karyawan baru,
+ * masuk kembali, atau resign di tengah periode. Bekerja penuh satu periode = 1.
+ */
+export function calcProRataFactor(joinDate: string | null, lastWorkingDate: string | null, firstDay: string, lastDay: string): number {
+  const start = joinDate && joinDate > firstDay ? joinDate : firstDay
+  const end = lastWorkingDate && lastWorkingDate < lastDay ? lastWorkingDate : lastDay
+  if (start > end) return 0
+  if (start === firstDay && end === lastDay) return 1
+  return daysBetweenInclusive(start, end) / daysBetweenInclusive(firstDay, lastDay)
 }
 
 export type AbsenceAttendance = {
@@ -63,6 +68,10 @@ export type AbsenceAttendance = {
   status: string
   admin_fee?: number | string | null
   notes?: string | null
+  // true = Alpha yang ditandai OTOMATIS oleh detect_unexplained_absences (hari tanpa absen sama
+  // sekali). Diperlakukan sama dengan hari kosong: boleh mengisi jatah libur. Alpha yang ditandai
+  // manual oleh HR (auto_flagged false) tetap tidak pernah mengisi jatah.
+  auto_flagged?: boolean | null
 }
 
 export type AbsenceInput = {
@@ -73,7 +82,12 @@ export type AbsenceInput = {
   // dibuat setelah periode selesai, nilainya otomatis >= lastDay.
   today: string
   joinDate: string | null
+  // Tanggal terakhir bekerja (resign). Hari setelahnya di luar masa kerja: tidak dihitung sama
+  // sekali (gajinya sudah dikurangi lewat pro-rata).
+  lastWorkingDate?: string | null
   attendances: AbsenceAttendance[]
+  // Libur nasional/perusahaan (company_holidays): gratis, TIDAK memakai jatah libur.
+  holidayDates?: Iterable<string>
   // Jadwal libur yang berlaku (employee_roster.is_day_off = true).
   rosterDayOffDates: Iterable<string>
   isTraining: boolean
@@ -105,6 +119,9 @@ export type AbsenceBreakdown = {
   liburFromKosong: number
   // Hari libur roster di luar jatah -- tetap gratis (sudah disetujui HR), cuma dicatat.
   rosterBeyondQuota: number
+  // Libur nasional/perusahaan yang tidak dimasuki kerja -- gratis, di luar jatah. (Opsional: slip
+  // sebelum migrasi 112 tidak menyimpannya.)
+  holidayDays?: number
 }
 
 export type AbsenceResult = AbsenceBreakdown & {
@@ -128,6 +145,7 @@ export function toAbsenceBreakdown(r: AbsenceResult): AbsenceBreakdown {
     adminFeeTotal: r.adminFeeTotal, liburDisciplineFeeTotal: r.liburDisciplineFeeTotal, isPreNewRulesPeriod: r.isPreNewRulesPeriod,
     liburQuota: r.liburQuota, liburFromRoster: r.liburFromRoster, liburFromLeave: r.liburFromLeave, liburFromIzin: r.liburFromIzin,
     liburFromSickDoc: r.liburFromSickDoc, liburFromKosong: r.liburFromKosong, rosterBeyondQuota: r.rosterBeyondQuota,
+    holidayDays: r.holidayDays,
   }
 }
 
@@ -140,7 +158,8 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
   const tiers = (m: number[]) => (isTraining || isPreNewRulesPeriod) ? TRAINING_FLAT_MULTIPLIER : m
 
   const lastCounted = today < lastDay ? today : lastDay
-  const inScope = (d: string) => d >= firstDay && d <= lastDay && (!joinDate || d >= joinDate)
+  const lastWorkingDate = input.lastWorkingDate ?? null
+  const inScope = (d: string) => d >= firstDay && d <= lastDay && (!joinDate || d >= joinDate) && (!lastWorkingDate || d <= lastWorkingDate)
 
   let daysElapsed = 0
   for (let d = firstDay; d <= lastCounted; d = addDays(d, 1)) if (inScope(d)) daysElapsed++
@@ -150,7 +169,7 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
       dailyRate, izinGroup: EMPTY_GROUP, alphaGroup: EMPTY_GROUP, suddenPermissionGroup: EMPTY_GROUP,
       sickDays: 0, sick1Free: 0, sick23Half: 0, sick4Full: 0, sickDed: 0, adminFeeTotal: 0, liburDisciplineFeeTotal: 0,
       isPreNewRulesPeriod, liburQuota: 0, liburFromRoster: 0, liburFromLeave: 0, liburFromIzin: 0, liburFromSickDoc: 0,
-      liburFromKosong: 0, rosterBeyondQuota: 0, absentDed: 0, absentDays: 0, liburUsedDays: 0, liburCompDays: 0,
+      liburFromKosong: 0, rosterBeyondQuota: 0, holidayDays: 0, absentDed: 0, absentDays: 0, liburUsedDays: 0, liburCompDays: 0,
       liburKompensasi: 0, alphaDates: [], daysElapsed,
     }
   }
@@ -162,30 +181,41 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
   // Hari libur roster = tanggal libur terjadwal yang sudah lewat & TIDAK dimasuki kerja. Kalau di
   // tanggal itu tercatat izin/sakit/alpha, tetap dianggap libur (tidak dipotong) -- liburnya sudah
   // disetujui. Kalau tetap masuk kerja ('present'), bukan libur: jatahnya tidak terpakai.
-  const rosterDates = [...new Set(input.rosterDayOffDates)]
+  // Libur nasional/perusahaan: aturannya sama dengan libur roster (masuk kerja = bukan libur;
+  // tercatat izin/sakit/alpha tetap gratis), bedanya TIDAK memakai jatah 4 hari. Didahulukan dari
+  // roster supaya libur roster yang jatuh di tanggal merah juga tidak memakan jatah.
+  const holidayDates = [...new Set(input.holidayDates ?? [])]
     .filter(d => inScope(d) && d <= lastCounted && attByDate.get(d)?.status !== 'present')
     .sort()
+  const holidaySet = new Set(holidayDates)
+  const rosterDates = [...new Set(input.rosterDayOffDates)]
+    .filter(d => inScope(d) && d <= lastCounted && !holidaySet.has(d) && attByDate.get(d)?.status !== 'present')
+    .sort()
   const rosterSet = new Set(rosterDates)
+  const isFreeDay = (d: string) => rosterSet.has(d) || holidaySet.has(d)
 
   const datesWithStatus = (...statuses: string[]) => atts
-    .filter(a => !rosterSet.has(a.date) && statuses.includes(a.status))
+    .filter(a => !isFreeDay(a.date) && statuses.includes(a.status))
     .map(a => a.date)
     .sort()
   const leaveDates = datesWithStatus('leave')
   const izinRaw = datesWithStatus('permission', 'sick')
   const sickDocRaw = datesWithStatus('sick_doc')
-  const explicitAlphaDates = datesWithStatus('absent')
+  // Alpha otomatis (hari tanpa absen sama sekali) = hari kosong; Alpha manual HR = Alpha murni.
+  const autoAlphaSet = new Set(atts.filter(a => a.status === 'absent' && a.auto_flagged === true).map(a => a.date))
+  const explicitAlphaDates = datesWithStatus('absent').filter(d => !autoAlphaSet.has(d))
   const suddenPermissionDates = datesWithStatus('sudden_permission')
 
   const emptyDates: string[] = []
   for (let d = firstDay; d <= lastCounted; d = addDays(d, 1)) {
-    if (inScope(d) && !attByDate.has(d) && !rosterSet.has(d)) emptyDates.push(d)
+    if (inScope(d) && !isFreeDay(d) && (!attByDate.has(d) || autoAlphaSet.has(d))) emptyDates.push(d)
   }
 
   // ── Jatah libur 4 hari/periode (di-pro-rata untuk training) ──
   // Urutan yang menghabiskan jatah: (1) libur roster, (2) cuti ('leave'), (3) izin/sakit-tanpa-
   // surat & sakit-dengan-surat digabung satu antrean dari tanggal paling awal, (4) hari kosong.
-  // Alpha eksplisit & Izin Mendadak TIDAK PERNAH mengisi jatah.
+  // Alpha manual HR & Izin Mendadak TIDAK PERNAH mengisi jatah. Alpha otomatis = hari kosong.
+  // Libur nasional tidak masuk antrean ini sama sekali (gratis, di luar jatah).
   const liburQuota = applyQuota ? Math.round(LIBUR_QUOTA_PER_PERIOD * proRataFactor) : 0
   let quotaLeft = liburQuota
   const take = (n: number) => { const t = Math.min(n, quotaLeft); quotaLeft -= t; return t }
@@ -230,6 +260,7 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
     adminFeeTotal, liburDisciplineFeeTotal, isPreNewRulesPeriod,
     liburQuota, liburFromRoster, liburFromLeave, liburFromIzin, liburFromSickDoc, liburFromKosong,
     rosterBeyondQuota: rosterDates.length - liburFromRoster,
+    holidayDays: holidayDates.length,
     absentDed: izinGroup.total + alphaGroup.total + suddenPermissionGroup.total + sickDed + adminFeeTotal + liburDisciplineFeeTotal,
     absentDays: izinDates.length + alphaDates.length + suddenPermissionDates.length + sickDays,
     liburUsedDays,
@@ -240,20 +271,31 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
   }
 }
 
+/** Kolom attendances yang dibutuhkan calcAbsence -- pakai konstanta ini di setiap query. */
+export const ABSENCE_ATTENDANCE_COLUMNS = 'date, status, admin_fee, notes, auto_flagged'
+
+/** Tanggal libur nasional/perusahaan (company_holidays) di rentang ini. */
+export async function fetchHolidayDates(supabase: Pick<SupabaseClient, 'from'>, from: string, to: string): Promise<string[]> {
+  const { data } = await supabase.from('company_holidays').select('holiday_date').gte('holiday_date', from).lte('holiday_date', to)
+  return ((data || []) as { holiday_date: string }[]).map(h => h.holiday_date)
+}
+
 /** Data mentah yang dibutuhkan calcAbsence, diambil dengan query yang sama di semua halaman. */
 export async function fetchAbsenceSource(
   supabase: Pick<SupabaseClient, 'from'>,
   employeeId: string,
   firstDay: string,
   lastDay: string,
-): Promise<{ attendances: AbsenceAttendance[]; rosterDayOffDates: string[]; disciplineFeeTotal: number }> {
-  const [attRes, rosterRes, feeRes] = await Promise.all([
-    supabase.from('attendances').select('date, status, admin_fee, notes').eq('employee_id', employeeId).gte('date', firstDay).lte('date', lastDay),
+): Promise<{ attendances: AbsenceAttendance[]; rosterDayOffDates: string[]; holidayDates: string[]; disciplineFeeTotal: number }> {
+  const [attRes, rosterRes, feeRes, holidayDates] = await Promise.all([
+    supabase.from('attendances').select(ABSENCE_ATTENDANCE_COLUMNS).eq('employee_id', employeeId).gte('date', firstDay).lte('date', lastDay),
     supabase.from('employee_roster').select('date').eq('employee_id', employeeId).eq('is_day_off', true).gte('date', firstDay).lte('date', lastDay),
     // period_start roster SELALU sama dengan firstDay payroll (keduanya tanggal 26).
     supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', employeeId).eq('period_start', firstDay).in('status', DISCIPLINE_FEE_STATUSES),
+    fetchHolidayDates(supabase, firstDay, lastDay),
   ])
   return {
+    holidayDates,
     attendances: (attRes.data || []) as AbsenceAttendance[],
     rosterDayOffDates: ((rosterRes.data || []) as { date: string }[]).map(r => r.date),
     disciplineFeeTotal: ((feeRes.data || []) as { discipline_fee: number | string | null }[]).reduce((s, r) => s + Number(r.discipline_fee ?? 0), 0),
@@ -276,16 +318,17 @@ export async function computeAbsenceForPeriod(
   const [scRes, empRes, src] = await Promise.all([
     supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance')
       .eq('employee_id', employeeId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1),
-    supabase.from('employees').select('join_date, employee_type, flat_salary, libur_compensation_applicable').eq('id', employeeId).single(),
+    supabase.from('employees').select('join_date, last_working_date, employee_type, flat_salary, libur_compensation_applicable').eq('id', employeeId).single(),
     fetchAbsenceSource(supabase, employeeId, firstDay, lastDay),
   ])
-  const emp = empRes.data as { join_date: string | null; employee_type: string | null; flat_salary: boolean | null; libur_compensation_applicable: boolean | null } | null
+  const emp = empRes.data as { join_date: string | null; last_working_date: string | null; employee_type: string | null; flat_salary: boolean | null; libur_compensation_applicable: boolean | null } | null
   const isTraining = emp?.employee_type === 'training'
   const joinDate = emp?.join_date ?? null
+  const lastWorkingDate = emp?.last_working_date ?? null
   return calcAbsence({
-    dailyRate: calcDailyRate(scRes.data?.[0]), firstDay, lastDay, today, joinDate,
-    attendances: src.attendances, rosterDayOffDates: src.rosterDayOffDates,
-    isTraining, proRataFactor: calcProRataFactor(isTraining, joinDate, firstDay, lastDay),
+    dailyRate: calcDailyRate(scRes.data?.[0]), firstDay, lastDay, today, joinDate, lastWorkingDate,
+    attendances: src.attendances, rosterDayOffDates: src.rosterDayOffDates, holidayDates: src.holidayDates,
+    isTraining, proRataFactor: calcProRataFactor(joinDate, lastWorkingDate, firstDay, lastDay),
     flatSalary: emp?.flat_salary === true, liburCompApplicable: emp?.libur_compensation_applicable !== false,
     disciplineFeeTotal: src.disciplineFeeTotal,
   })

@@ -456,6 +456,24 @@ export default function RekapAbsensiPage() {
     }
   }
 
+  // Tandai "Resign" di absensi = karyawan berhenti mulai tanggal itu. Tanggal Terakhir Bekerja
+  // (employees.last_working_date) diisi H-1 dari tanggal resign paling awal, supaya slip gaji
+  // menghitung pro-rata & hari sesudahnya tidak dipotong sebagai tidak hadir (migrasi 112).
+  async function applyResignDates(resignDatesByEmp: Map<string, string[]>): Promise<string | null> {
+    for (const [empId, dates] of resignDatesByEmp) {
+      if (dates.length === 0) continue
+      const first = [...dates].sort()[0]
+      const d = new Date(first + 'T00:00:00'); d.setDate(d.getDate() - 1)
+      const lastWorking = localDateStr(d)
+      const { data: cur } = await supabase.from('employees').select('last_working_date').eq('id', empId).maybeSingle()
+      const existing = (cur as { last_working_date: string | null } | null)?.last_working_date
+      if (existing && existing <= lastWorking) continue
+      const { error } = await supabase.from('employees').update({ last_working_date: lastWorking }).eq('id', empId)
+      if (error) return error.message
+    }
+    return null
+  }
+
   async function handleBulkSave() {
     setBulkSaving(true)
     const items = Array.from(selectedRows.values())
@@ -476,6 +494,12 @@ export default function RekapAbsensiPage() {
       const chunk = upsertData.slice(i, i + 50)
       const { error } = await supabase.from('attendances').upsert(chunk, { onConflict: 'employee_id,date' })
       if (error) { showMsg('error', 'Gagal: ' + error.message); setBulkSaving(false); return }
+    }
+    if (bulkKet === 'resign') {
+      const byEmp = new Map<string, string[]>()
+      items.forEach(it => byEmp.set(it.employeeId, [...(byEmp.get(it.employeeId) ?? []), it.date]))
+      const err = await applyResignDates(byEmp)
+      if (err) { showMsg('error', 'Absen tersimpan, tapi gagal mengisi Tanggal Terakhir Bekerja: ' + err); setBulkSaving(false); return }
     }
 
     showMsg('success', `${items.length} hari berhasil diupdate.`)
@@ -593,8 +617,12 @@ export default function RekapAbsensiPage() {
       { employee_id:absenForm.employee_id, date:absenForm.date, check_in:null, check_out:null, late_minutes:0, overtime_hours:0, status:saveStatus, notes:saveNotes },
       { onConflict:'employee_id,date' }
     )
-    if (error) showMsg('error','Gagal: '+error.message)
-    else { showMsg('success','Keterangan disimpan.'); setAbsenModal(false); fetchAttendances() }
+    if (error) { showMsg('error','Gagal: '+error.message); setAbsenSaving(false); return }
+    if (absenForm.status === 'resign') {
+      const err = await applyResignDates(new Map([[absenForm.employee_id, [absenForm.date]]]))
+      if (err) { showMsg('error', 'Keterangan tersimpan, tapi gagal mengisi Tanggal Terakhir Bekerja: ' + err); setAbsenSaving(false); return }
+    }
+    showMsg('success','Keterangan disimpan.'); setAbsenModal(false); fetchAttendances()
     setAbsenSaving(false)
   }
 
@@ -1449,7 +1477,7 @@ export default function RekapAbsensiPage() {
                     onClick={() => setBulkKet(val)}
                     className={`py-2.5 text-sm font-medium rounded-lg border-2 transition ${bulkKet === val ? active : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50'} ${val === 'resign' ? 'col-span-2' : ''}`}
                   >
-                    {label}{val === 'resign' ? ' (dipotong seperti Izin)' : ''}
+                    {label}{val === 'resign' ? ' (gaji pro-rata s/d H-1)' : ''}
                   </button>
                 ))}
               </div>
@@ -1519,7 +1547,7 @@ export default function RekapAbsensiPage() {
                     { val:'absent',     label:'Alpha',      active:'border-red-400 bg-red-50 text-red-700',         span: false },
                     { val:'sick',       label:'Sakit',      active:'border-blue-400 bg-blue-50 text-blue-700',      span: false },
                     { val:'permission', label:'Izin',       active:'border-yellow-400 bg-yellow-50 text-yellow-700', span: false },
-                    { val:'resign',     label:'Resign (dipotong seperti Izin)', active:'border-rose-500 bg-rose-50 text-rose-700', span: true },
+                    { val:'resign',     label:'Resign (gaji pro-rata s/d H-1)', active:'border-rose-500 bg-rose-50 text-rose-700', span: true },
                   ].map(({val,label,active,span})=>(
                     <button key={val} type="button"
                       onClick={()=>setAbsenForm({...absenForm, status:val})}

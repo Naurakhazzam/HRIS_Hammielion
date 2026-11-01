@@ -10,7 +10,7 @@ import { chargeableLateMinutes } from '@/lib/lateTolerance'
 import { getUpcomingRosterPeriod, rosterPeriodLabel, DAYOFF_PICK_QUOTA } from '@/lib/rosterPeriod'
 import { localDateStr } from '@/lib/date'
 import { calcDailyAccrual, type AccrualAttendanceDay } from '@/lib/salaryAccrualEstimate'
-import { DISCIPLINE_FEE_STATUSES } from '@/lib/payrollAbsence'
+import { DISCIPLINE_FEE_STATUSES, ABSENCE_ATTENDANCE_COLUMNS, fetchHolidayDates, calcProRataFactor } from '@/lib/payrollAbsence'
 import { fetchIncompleteCheckouts as fetchIncompleteCheckoutsShared, type IncompleteCheckoutItem } from '@/lib/checkoutClarification'
 import AlphaKlarifikasiPanel from '@/components/AlphaKlarifikasiPanel'
 import OvertimeKlaimPanel from '@/components/OvertimeKlaimPanel'
@@ -140,14 +140,14 @@ export default function PortalDashboardPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
-    const { data: userData } = await supabase.from('users').select('role, employee_id, employees(full_name, join_date, flat_salary, employee_type)').eq('id', user.id).single()
+    const { data: userData } = await supabase.from('users').select('role, employee_id, employees(full_name, join_date, last_working_date, flat_salary, employee_type)').eq('id', user.id).single()
     if (!userData) { setLoading(false); return }
 
     // Preview Tampilan Karyawan: sama seperti halaman Portal Saya lain, tampilkan data contoh
     // nyata (bukan akun admin sendiri) supaya Owner/HR bisa cek tampilan karyawan biasa.
     const previewing = ['owner', 'hr', 'finance'].includes(userData.role) && isPreviewModeClient()
     const emp = previewing
-      ? (await supabase.from('employees').select('full_name, join_date, flat_salary, employee_type').eq('id', PREVIEW_EMPLOYEE_ID).single()).data
+      ? (await supabase.from('employees').select('full_name, join_date, last_working_date, flat_salary, employee_type').eq('id', PREVIEW_EMPLOYEE_ID).single()).data
       : (userData as any).employees
     const effectiveId = previewing ? PREVIEW_EMPLOYEE_ID : userData.employee_id
     if (!effectiveId) { setLoading(false); return }
@@ -161,8 +161,8 @@ export default function PortalDashboardPage() {
       fetchUpcomingOff(effectiveId),
       fetchKasbonSaldo(effectiveId),
       fetchEstimasiPotongan(effectiveId),
-      fetchEstimasiPendapatan(effectiveId),
-      fetchEstimasiPendapatanBerjalan(effectiveId, emp?.join_date ?? null, emp?.flat_salary === true, emp?.employee_type === 'training'),
+      fetchEstimasiPendapatan(effectiveId, emp?.join_date ?? null, emp?.last_working_date ?? null),
+      fetchEstimasiPendapatanBerjalan(effectiveId, emp?.join_date ?? null, emp?.flat_salary === true, emp?.employee_type === 'training', emp?.last_working_date ?? null),
       fetchStatusBayarPeriode(effectiveId),
       fetchQuotaLibur(effectiveId),
       fetchIncompleteCheckouts(effectiveId),
@@ -271,7 +271,7 @@ export default function PortalDashboardPage() {
   // aktif (bukan dari slip gaji, karena bulan berjalan belum tentu ada slipnya), lembur diambil
   // dari overtime_claims yang sudah APPROVED periode ini (bukan pending, biar tidak terlalu
   // optimis). Bonus (KPI, dll) sengaja tidak diikutkan -- itu baru final saat Finance proses slip.
-  async function fetchEstimasiPendapatan(employeeId: string) {
+  async function fetchEstimasiPendapatan(employeeId: string, joinDate: string | null, lastWorkingDate: string | null) {
     const period = getDisplayedPayrollPeriod(today)
     const firstDay = toDateStr(period.start)
     const lastDay = toDateStr(period.end)
@@ -286,11 +286,13 @@ export default function PortalDashboardPage() {
     ])
     const rate = Number(sc?.overtime_rate_per_hour ?? 0)
     const jamLembur = (claims || []).reduce((s, c: any) => s + Number(c.overtime_hours_detected), 0)
+    // Pro-rata sama dengan slip (masuk/masuk kembali/resign di tengah periode).
+    const pr = calcProRataFactor(joinDate, lastWorkingDate, firstDay, lastDay)
     setEstPendapatan({
-      base: Number(sc?.base_salary ?? 0),
-      posAllow: Number(sc?.position_allowance ?? 0),
-      mealAllow: Number(sc?.meal_allowance ?? 0),
-      specAllow: Number(sc?.special_allowance ?? 0),
+      base: Math.round(Number(sc?.base_salary ?? 0) * pr),
+      posAllow: Math.round(Number(sc?.position_allowance ?? 0) * pr),
+      mealAllow: Math.round(Number(sc?.meal_allowance ?? 0) * pr),
+      specAllow: Math.round(Number(sc?.special_allowance ?? 0) * pr),
       lembur: jamLembur * rate,
     })
   }
@@ -301,7 +303,7 @@ export default function PortalDashboardPage() {
   // valid dihitung di akhir periode) -- jadi angka di sini perkiraan kasar, bisa sedikit lebih
   // pesimis dari slip asli Finance kalau ada izin/sakit di awal periode. Karyawan flat_salary
   // (gaji tetap apa adanya, tanpa potongan/absen) tidak diikutkan akumulasi, cukup tampil penuh.
-  async function fetchEstimasiPendapatanBerjalan(employeeId: string, joinDate: string | null, flatSalary: boolean, isTraining: boolean) {
+  async function fetchEstimasiPendapatanBerjalan(employeeId: string, joinDate: string | null, flatSalary: boolean, isTraining: boolean, lastWorkingDate: string | null) {
     const period = getCurrentPayrollPeriod(today)
     const firstDay = localDateStr(period.start)
     const lastDay = localDateStr(period.end)
@@ -310,15 +312,16 @@ export default function PortalDashboardPage() {
     const yesterday = localDateStr(yesterdayDate)
     const cutoffDate = yesterday > lastDay ? lastDay : yesterday
 
-    const [{ data: sc }, { data: atts }, { data: roster }, { data: claims }, { data: fees }] = await Promise.all([
+    const [{ data: sc }, { data: atts }, { data: roster }, { data: claims }, { data: fees }, holidayDates] = await Promise.all([
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
         .eq('employee_id', employeeId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
       cutoffDate < firstDay ? Promise.resolve({ data: [] }) :
-        supabase.from('attendances').select('date, status, admin_fee, notes').eq('employee_id', employeeId).gte('date', firstDay).lte('date', cutoffDate),
+        supabase.from('attendances').select(ABSENCE_ATTENDANCE_COLUMNS).eq('employee_id', employeeId).gte('date', firstDay).lte('date', cutoffDate),
       cutoffDate < firstDay ? Promise.resolve({ data: [] }) :
         supabase.from('employee_roster').select('date').eq('employee_id', employeeId).eq('is_day_off', true).gte('date', firstDay).lte('date', cutoffDate),
       supabase.from('overtime_claims').select('overtime_hours_detected').eq('employee_id', employeeId).eq('status', 'approved').gte('date', firstDay).lte('date', lastDay),
       supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', employeeId).eq('period_start', firstDay).in('status', DISCIPLINE_FEE_STATUSES),
+      fetchHolidayDates(supabase, firstDay, lastDay),
     ])
 
     const base = Number(sc?.base_salary ?? 0)
@@ -338,7 +341,7 @@ export default function PortalDashboardPage() {
     const dailyRate = Math.round((base + pos + meal + special) / 26)
     const rosterOffDates = new Set((roster || []).map((r: any) => r.date as string))
     const disciplineFeeTotal = (fees || []).reduce((s: number, r: any) => s + Number(r.discipline_fee ?? 0), 0)
-    const result = calcDailyAccrual(dailyRate, firstDay, cutoffDate, joinDate, (atts || []) as AccrualAttendanceDay[], rosterOffDates, { lastDay, isTraining, disciplineFeeTotal })
+    const result = calcDailyAccrual(dailyRate, firstDay, cutoffDate, joinDate, (atts || []) as AccrualAttendanceDay[], rosterOffDates, { lastDay, isTraining, disciplineFeeTotal, lastWorkingDate, holidayDates })
     setEstPendapatanBerjalan({ ...result, lembur, flatSalary: false })
   }
 

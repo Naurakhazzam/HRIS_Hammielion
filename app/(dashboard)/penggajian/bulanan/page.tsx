@@ -749,7 +749,7 @@ export default function PenggajianBulananPage() {
       supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1),
       supabase.from('attendances').select('date, overtime_hours, late_minutes, source').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
-      supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, libur_compensation_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
+      supabase.from('employees').select('full_name, employee_code, join_date, last_working_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, libur_compensation_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
       supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
       fetchAbsenceSource(supabase, empId, firstDay, lastDay),
@@ -812,12 +812,13 @@ export default function PenggajianBulananPage() {
     // adanya untuk histori lama, tapi tidak dipakai lagi untuk hitungan baru.
     const latRate  = Number(lateDefRes.data?.late_penalty_per_minute ?? 0)
     const joinDateVal = (emp as any).join_date ?? null
+    const lastWorkingDateVal: string | null = (emp as { last_working_date?: string | null }).last_working_date ?? null
+    const inEmployment = (d: string) => (!joinDateVal || d >= joinDateVal) && (!lastWorkingDateVal || d <= lastWorkingDateVal)
 
-    // ── Pro-rata: HANYA untuk karyawan training yang join di tengah periode ──
-    // Karyawan permanent selalu dapat gaji penuh
-    // Bonus (KPI, kondisional) TIDAK ikut diprorata
+    // ── Pro-rata: karyawan (permanent & training) yang masuk/masuk kembali/resign di tengah
+    // periode -- gaji pokok + tunjangan × (hari masa kerja ÷ hari periode). Bonus TIDAK diprorata.
     const isTraining = (emp as any).employee_type === 'training'
-    const proRataFactor = calcProRataFactor(isTraining, joinDateVal, firstDay, lastDay)
+    const proRataFactor = calcProRataFactor(joinDateVal, lastWorkingDateVal, firstDay, lastDay)
     const base = Math.round(baseRaw * proRataFactor)
     const pos  = Math.round(posRaw  * proRataFactor)
     const meal = Math.round(mealRaw * proRataFactor)
@@ -829,9 +830,9 @@ export default function PenggajianBulananPage() {
     const lateApplicableForEmp = (emp as any).late_penalty_applicable !== false
     const liburCompApplicableForEmp = (emp as any).libur_compensation_applicable !== false
     const otHours  = (!otApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[])
-      .filter((a: any) => (!joinDateVal || a.date >= joinDateVal) && (silent ? Number(a.overtime_hours ?? 0) > 0 : validatedOtDates.has(a.date)))
+      .filter((a: any) => inEmployment(a.date) && (silent ? Number(a.overtime_hours ?? 0) > 0 : validatedOtDates.has(a.date)))
       .reduce((s: number, a: any) => s + (silent ? roundOvertimeHours(Number(a.overtime_hours ?? 0)) : (validatedOtDates.get(a.date) ?? roundOvertimeHours(Number(a.overtime_hours ?? 0)))), 0)
-    const latMins  = (!lateApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[]).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + chargeableLateMinutes(Number(a.late_minutes ?? 0), a.source), 0)
+    const latMins  = (!lateApplicableForEmp || flatSalaryForEmp) ? 0 : (atts as any[]).filter((a: any) => inEmployment(a.date)).reduce((s: number, a: any) => s + chargeableLateMinutes(Number(a.late_minutes ?? 0), a.source), 0)
     const otTotal  = otHours * otRate
     const latDed   = latMins * latRate
     const kpi      = flatSalaryForEmp ? 0 : Number(kpiRes.data?.[0]?.bonus_cair ?? 0)
@@ -860,8 +861,8 @@ export default function PenggajianBulananPage() {
     // di-pro-rata): pro-rata cuma mengurangi gaji pokok untuk hari sebelum join, bukan harga 1 hari.
     const dailyRate = calcDailyRate(sc)
     const absence = calcAbsence({
-      dailyRate, firstDay, lastDay, today: todayLocalStr(), joinDate: joinDateVal,
-      attendances: absenceSrc.attendances, rosterDayOffDates: absenceSrc.rosterDayOffDates,
+      dailyRate, firstDay, lastDay, today: todayLocalStr(), joinDate: joinDateVal, lastWorkingDate: lastWorkingDateVal,
+      attendances: absenceSrc.attendances, rosterDayOffDates: absenceSrc.rosterDayOffDates, holidayDates: absenceSrc.holidayDates,
       isTraining, proRataFactor, flatSalary: flatSalaryForEmp, liburCompApplicable: liburCompApplicableForEmp,
       disciplineFeeTotal: absenceSrc.disciplineFeeTotal,
     })
