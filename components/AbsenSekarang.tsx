@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { todayLocalStr, localDateStr } from '@/lib/date'
+import { localDateStr, wibTimeStr } from '@/lib/date'
+import { syncServerClock, serverNow, serverTodayStr } from '@/lib/serverClock'
 import { resolveHomeSchedule, matchSchedule, calcLateMinutes, calcOvertimeHours, distanceMeters, type WorkSchedule } from '@/lib/attendanceSchedule'
 import { fetchAlphaAlerts } from '@/lib/alphaDetection'
 import { fetchIncompleteCheckouts } from '@/lib/checkoutClarification'
@@ -24,6 +25,20 @@ type Step = 'idle' | 'confirm-action' | 'confirm-perbantuan' | 'locating' | 'cam
 // pesannya jelas SEBELUM buka kamera) dan juga di database (RLS attendances_mobile_checkin_update,
 // supaya tidak bisa dilewati lewat jalur lain).
 const MIN_CHECKOUT_GAP_MINUTES = 15
+
+// Umur maksimal foto dari jalur cadangan kamera bawaan HP (lihat handleFileCaptured).
+const PHOTO_MAX_AGE_MS = 3 * 60 * 1000
+
+// Pengambilan GPS (lihat getBestPosition): berhenti begitu akurasi sebaik ini, atau setelah
+// selang waktu ini dengan bacaan terbaik yang didapat.
+const GPS_GOOD_ACCURACY_M = 15
+const GPS_SAMPLE_MS = 8000
+
+// Tanggal 1 bulan berjalan menurut jam server (WIB) -- untuk kalender tukar libur.
+function serverMonthStart(): Date {
+  const [y, m] = serverTodayStr().split('-').map(Number)
+  return new Date(y, m - 1, 1)
+}
 
 // Absen mandiri lewat HP — foto WAJIB diambil langsung dari kamera di dalam halaman ini
 // (getUserMedia + canvas), tidak pernah melewati galeri/file picker OS, supaya tidak bisa kirim
@@ -78,8 +93,16 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   // libur ke tanggal lain, nilai ini otomatis ikut berubah tanpa perlu kode tambahan).
   const [todayIsDayOff, setTodayIsDayOff] = useState<boolean | null>(null)
 
+  // Absen QR juga wajib GPS dalam radius cabang TEMPAT QR (bukan cabang penempatan -- bisa
+  // perbantuan), supaya foto/link QR yang disebar tidak bisa dipakai absen dari rumah. Cabang
+  // yang belum diisi koordinatnya di menu Cabang tetap jalan tanpa GPS seperti sebelumnya.
+  // Dicek juga di database (trigger enforce_checkin_radius, migr 114).
+  const [qrBranch, setQrBranch] = useState<BranchGeo | null>(null)
+  const geoTarget = mode === 'qr' ? qrBranch : branch
+  const needsGps = mode === 'gps' || (geoTarget?.latitude != null && geoTarget?.longitude != null)
+
   const [step, setStep] = useState<Step>('idle')
-  const [geo, setGeo] = useState<{ lat: number; lng: number; distance: number } | null>(null)
+  const [geo, setGeo] = useState<{ lat: number; lng: number; distance: number; accuracy: number; radius: number; branchName: string } | null>(null)
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null)
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
   // Video kamera butuh waktu singkat sebelum videoWidth/videoHeight benar-benar terisi
@@ -88,7 +111,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const [cameraReady, setCameraReady] = useState(false)
 
   // ── Tukar hari libur (masuk di hari libur -> pilih tanggal pengganti) ──
-  const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); d.setDate(1); return d })
+  const [calendarMonth, setCalendarMonth] = useState(() => serverMonthStart())
   const [calendarLoading, setCalendarLoading] = useState(false)
   // tanggal (YYYY-MM-DD) -> nama rekan SATU CABANG yang libur di tanggal itu (dari RPC, bukan tabel langsung — employee biasa tidak punya akses baca roster orang lain)
   const [dayoffCalendar, setDayoffCalendar] = useState<Record<string, string>>({})
@@ -137,12 +160,20 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
 
   async function fetchContext() {
     setLoading(true)
+    // Sinkron jam server DULU -- tanggal "hari ini" di bawah (cek absen & roster) pakai jam server.
+    await syncServerClock(supabase)
     const { data: emp } = await supabase
       .from('employees')
       .select('department_id, custom_check_in_time, custom_check_out_time, branches(id, name, latitude, longitude, checkin_radius_meters), departments(name), positions(name)')
       .eq('id', employeeId).single()
     const b = (emp as unknown as { branches: BranchGeo | null } | null)?.branches ?? null
     setBranch(b)
+    if (mode === 'qr' && qrBranchId) {
+      const { data: qb } = await supabase.from('branches')
+        .select('id, name, latitude, longitude, checkin_radius_meters')
+        .eq('id', qrBranchId).maybeSingle()
+      setQrBranch((qb as BranchGeo | null) ?? null)
+    }
     setCustomCheckIn((emp as { custom_check_in_time: string | null } | null)?.custom_check_in_time ?? null)
     setCustomCheckOut((emp as { custom_check_out_time: string | null } | null)?.custom_check_out_time ?? null)
     setDeptName((emp as unknown as { departments: { name: string } | null } | null)?.departments?.name ?? null)
@@ -163,12 +194,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
 
     const { data: att } = await supabase.from('attendances')
       .select('id, check_in, check_out, source')
-      .eq('employee_id', employeeId).eq('date', todayLocalStr()).maybeSingle()
+      .eq('employee_id', employeeId).eq('date', serverTodayStr()).maybeSingle()
     setToday(att)
 
     const { data: roster } = await supabase.from('employee_roster')
       .select('is_day_off')
-      .eq('employee_id', employeeId).eq('date', todayLocalStr()).maybeSingle()
+      .eq('employee_id', employeeId).eq('date', serverTodayStr()).maybeSingle()
     setTodayIsDayOff(roster ? roster.is_day_off : null)
 
     setLoading(false)
@@ -190,7 +221,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     // Absen pulang: cek dulu jarak waktu dari absen masuk, sebelum buka kamera — supaya kalau
     // ditolak, karyawan tidak perlu lewat proses foto dulu baru tahu ditolak di akhir.
     if (today?.check_in && !today?.check_out) {
-      const minutesSinceCheckIn = (Date.now() - new Date(today.check_in).getTime()) / 60000
+      const minutesSinceCheckIn = (serverNow().getTime() - new Date(today.check_in).getTime()) / 60000
       if (minutesSinceCheckIn < MIN_CHECKOUT_GAP_MINUTES) {
         const sisaMenit = Math.ceil(MIN_CHECKOUT_GAP_MINUTES - minutesSinceCheckIn)
         showMessage('error', `Anda baru absen masuk ${Math.floor(minutesSinceCheckIn)} menit lalu. Absen pulang bisa dilakukan minimal ${MIN_CHECKOUT_GAP_MINUTES} menit setelah absen masuk — tunggu ${sisaMenit} menit lagi.`)
@@ -242,15 +273,15 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   // begitu tukar libur berhasil, tanpa kena cek todayIsDayOff lagi (closure state di situ
   // masih nilai lama sesaat sebelum re-render, jadi cek ulang akan salah menganggap masih libur).
   async function proceedToGeoCheckin() {
-    if (mode === 'qr') {
-      // Absen QR: sudah pasti di cabang yang benar (dicek oleh halaman /absen-qr sebelum
-      // komponen ini dirender), jadi tidak perlu GPS — langsung buka kamera.
+    if (!needsGps) {
+      // Absen QR di cabang yang belum diisi koordinatnya: tanpa GPS, langsung buka kamera.
       setGeo(null)
       await openCamera()
       return
     }
 
-    if (!branch?.latitude || !branch?.longitude) {
+    const target = geoTarget
+    if (target?.latitude == null || target?.longitude == null) {
       showMessage('error', 'Cabang Anda belum diaktifkan untuk absen HP. Hubungi HR.')
       return
     }
@@ -259,24 +290,48 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       return
     }
     setStep('locating')
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const distance = distanceMeters(pos.coords.latitude, pos.coords.longitude, branch.latitude!, branch.longitude!)
-        const radius = branch.checkin_radius_meters || 150
-        if (distance > radius) {
-          showMessage('error', `Anda berada ${Math.round(distance)}m dari ${branch.name} — maksimal ${radius}m untuk bisa absen. Mendekat dulu ke lokasi cabang.`)
-          setStep('idle')
-          return
-        }
-        setGeo({ lat: pos.coords.latitude, lng: pos.coords.longitude, distance })
-        await openCamera()
-      },
-      () => {
-        showMessage('error', 'Gagal mengambil lokasi GPS. Pastikan izin lokasi diaktifkan, lalu coba lagi.')
-        setStep('idle')
-      },
-      { enableHighAccuracy: true, timeout: 15000 }
-    )
+    const pos = await getBestPosition()
+    if (!pos) {
+      showMessage('error', 'Gagal mengambil lokasi GPS. Pastikan izin lokasi diaktifkan, lalu coba lagi.')
+      setStep('idle')
+      return
+    }
+    const distance = distanceMeters(pos.coords.latitude, pos.coords.longitude, target.latitude!, target.longitude!)
+    const radius = target.checkin_radius_meters || 150
+    const accuracy = Math.round(pos.coords.accuracy)
+    if (distance > radius) {
+      showMessage('error', `Anda berada ${Math.round(distance)}m dari ${target.name} — maksimal ${radius}m untuk bisa absen (akurasi GPS ±${accuracy}m). Kalau Anda sudah di dalam toko, coba dekat pintu/jendela lalu ulangi.`)
+      setStep('idle')
+      return
+    }
+    setGeo({ lat: pos.coords.latitude, lng: pos.coords.longitude, distance, accuracy, radius, branchName: target.name })
+    await openCamera()
+  }
+
+  // GPS HP butuh beberapa detik untuk "mengunci" -- bacaan pertama sering meleset puluhan meter
+  // (radius absen cuma 50m). Pantau sampai akurasi <= GPS_GOOD_ACCURACY_M atau GPS_SAMPLE_MS
+  // lewat, lalu pakai bacaan PALING AKURAT. null = tidak dapat lokasi sama sekali.
+  function getBestPosition(): Promise<GeolocationPosition | null> {
+    return new Promise(resolve => {
+      let best: GeolocationPosition | null = null
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        navigator.geolocation.clearWatch(watchId)
+        clearTimeout(timer)
+        resolve(best)
+      }
+      const watchId = navigator.geolocation.watchPosition(
+        p => {
+          if (!best || p.coords.accuracy < best.coords.accuracy) best = p
+          if (p.coords.accuracy <= GPS_GOOD_ACCURACY_M) finish()
+        },
+        () => finish(),
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      )
+      const timer = setTimeout(finish, GPS_SAMPLE_MS)
+    })
   }
 
   async function openCamera() {
@@ -308,20 +363,23 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   // sendiri. Dipakai bareng oleh jalur live-preview (takePhoto) maupun jalur cadangan kamera
   // bawaan HP (handleFileCaptured), supaya hasil akhirnya identik dari kedua jalur.
   function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: number) {
-    const now = new Date()
+    const now = serverNow()
     const label1 = employeeName
-    const label2 = `${now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} ${now.toLocaleTimeString('id-ID')}`
-    const label3 = geo ? `${Math.round(geo.distance)}m dari ${branch?.name ?? 'cabang'}` : `QR Absen — ${(mode === 'qr' ? qrBranchName : branch?.name) ?? 'cabang'}`
-    const barHeight = Math.max(64, height * 0.12)
+    const label2 = `${now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' })} ${now.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`
+    const label3 = geo ? `📍 ${Math.round(geo.distance)}m dari ${geo.branchName} (±${geo.accuracy}m)` : `QR Absen — ${(mode === 'qr' ? qrBranchName : branch?.name) ?? 'cabang'}`
+    const label4 = geo ? `${geo.lat.toFixed(6)}, ${geo.lng.toFixed(6)}` : null
+    const fontSize = Math.max(14, Math.round(width / 28))
+    const lineCount = label4 ? 4 : 3
+    const barHeight = Math.max(64, height * 0.12, fontSize * lineCount + 18)
     ctx.fillStyle = 'rgba(0,0,0,0.55)'
     ctx.fillRect(0, height - barHeight, width, barHeight)
     ctx.fillStyle = '#fff'
-    const fontSize = Math.max(14, Math.round(width / 28))
     ctx.font = `bold ${fontSize}px sans-serif`
     ctx.fillText(label1, 12, height - barHeight + fontSize + 4)
     ctx.font = `${fontSize * 0.8}px sans-serif`
     ctx.fillText(label2, 12, height - barHeight + fontSize * 2 + 6)
     ctx.fillText(label3, 12, height - barHeight + fontSize * 3 + 8)
+    if (label4) ctx.fillText(label4, 12, height - barHeight + fontSize * 4 + 10)
   }
 
   // Simpan frame/gambar MENTAH (sebelum watermark, sebelum kemungkinan di-flip) ke canvas
@@ -376,7 +434,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   function takePhoto() {
     const video = videoRef.current
     if (!video) return
-    if (mode === 'gps' && !geo) return
+    if (needsGps && !geo) return
     // Jaring pengaman: kalau video belum benar-benar siap (metadata belum termuat), videoWidth/
     // videoHeight masih 0 dan drawImage akan gagal diam-diam — kasih pesan jelas alih-alih diam.
     if (!video.videoWidth || !video.videoHeight) {
@@ -408,6 +466,14 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     const file = e.target.files?.[0]
     e.target.value = '' // reset supaya bisa pilih file yang sama lagi nanti kalau perlu
     if (!file) return
+    // Sebagian browser tetap menawarkan GALERI di input ini walau ada capture="user". Foto yang
+    // baru dijepret kamera umurnya hitungan detik; foto lama dari galeri ditolak supaya tidak
+    // bisa absen pakai selfie kemarin/hasil edit. Sengaja jam HP vs jam HP (lastModified file
+    // juga dari jam HP) -- mengubah jam HP tidak membuat foto lama jadi baru.
+    if (Date.now() - file.lastModified > PHOTO_MAX_AGE_MS) {
+      showMessage('error', 'Foto harus diambil langsung dari kamera saat ini juga — foto dari galeri tidak bisa dipakai.')
+      return
+    }
     stopCamera()
 
     const objUrl = URL.createObjectURL(file)
@@ -468,7 +534,9 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     setStep('pick-date')
     setSelectedReplacementDate(null)
     setSwapError(null)
-    await loadCalendarMonth(calendarMonth)
+    const month = serverMonthStart()
+    setCalendarMonth(month)
+    await loadCalendarMonth(month)
   }
 
   async function loadCalendarMonth(monthDate: Date) {
@@ -486,7 +554,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         .eq('employee_id', employeeId).eq('is_day_off', true)
         .gte('date', fromStr).lte('date', toStr),
       // p_ignore_date = hari ini, karena libur hari ini yang sedang dilepas.
-      supabase.rpc('get_dayoff_block_reasons', { p_employee_id: employeeId, p_from: fromStr, p_to: toStr, p_ignore_date: todayLocalStr() }),
+      supabase.rpc('get_dayoff_block_reasons', { p_employee_id: employeeId, p_from: fromStr, p_to: toStr, p_ignore_date: serverTodayStr() }),
     ])
 
     const map: Record<string, string> = {}
@@ -509,7 +577,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     setSwapSubmitting(true)
     setSwapError(null)
 
-    const nowTimeStr = new Date().toTimeString().substring(0, 5)
+    const nowTimeStr = wibTimeStr(serverNow())
     const sched = matchSchedule(nowTimeStr, schedules)
     if (!sched) {
       setSwapError('Jadwal kerja departemen Anda belum diatur, hubungi HR dulu.')
@@ -536,15 +604,12 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
 
   async function submitCheckin() {
     if (!capturedBlob) return
-    if (mode === 'gps' && !geo) return
+    if (needsGps && !geo) return
     setStep('uploading')
 
     const isCheckOut = !!today?.check_in && !today?.check_out
-    const now = new Date()
-    const nowIso = now.toISOString()
-    const nowTimeStr = now.toTimeString().substring(0, 5)
-    const dateStr = todayLocalStr()
-    const filePath = `${employeeId}/${dateStr}-${isCheckOut ? 'out' : 'in'}-${Date.now()}.jpg`
+    const dateStr = serverTodayStr()
+    const filePath = `${employeeId}/${dateStr}-${isCheckOut ? 'out' : 'in'}-${serverNow().getTime()}.jpg`
 
     const { error: uploadErr } = await supabase.storage.from('attendance-photos').upload(filePath, capturedBlob, { contentType: 'image/jpeg' })
     if (uploadErr) {
@@ -555,10 +620,24 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
     const { data: pub } = supabase.storage.from('attendance-photos').getPublicUrl(filePath)
     const photoUrl = pub.publicUrl
 
+    // Jam absen pakai JAM SERVER, bukan jam HP (jam HP bisa dimundurkan/dimajukan untuk
+    // menghindari telat / menambah lembur). Diambil SETELAH upload foto supaya sedekat mungkin
+    // dengan saat disimpan. DB tetap memaksa check_in/check_out = now() (trigger migr 113) --
+    // ini supaya hitungan lembur & jam di pesan sukses juga ikut jam server.
+    const now = await syncServerClock(supabase)
+    if (!now) {
+      showMessage('error', 'Gagal mengambil jam server. Periksa koneksi internet, lalu coba lagi.')
+      setStep('preview')
+      return
+    }
+    const nowIso = now.toISOString()
+    const nowTimeStr = wibTimeStr(now)
+
     // Cabang aktual tempat scan ini terjadi — beda dari cabang penempatan kalau perbantuan.
     // Selalu diisi (bukan cuma saat mismatch) supaya konsisten & gampang direkap nanti.
     const eventBranchId = mode === 'qr' ? (qrBranchId ?? branch?.id ?? null) : (branch?.id ?? null)
     const perbantuanSuffix = isPerbantuanAction && qrBranchName ? ` (Perbantuan di ${qrBranchName})` : ''
+    const geoSuffix = geo ? ` 📍 ${Math.round(geo.distance)} m dari ${geo.branchName}.` : ''
 
     if (isCheckOut && today) {
       // LEMBUR selalu ikut jadwal kerja KARYAWAN SENDIRI — termasuk saat perbantuan di cabang
@@ -572,7 +651,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       // pulang -- detect_until itu konsepnya "jam masuk paling lambat untuk shift ini", tidak ada
       // artinya dicocokkan ke jam pulang (hampir selalu sudah lewat detect_until shift manapun,
       // hasilnya selalu jatuh ke shift TERAKHIR yang detect_until-nya null, salah shift).
-      const checkInTimeStr = new Date(today.check_in!).toTimeString().substring(0, 5)
+      const checkInTimeStr = wibTimeStr(new Date(today.check_in!))
       const sched = resolveHomeSchedule(checkInTimeStr, schedules, homeBranchShifts, customCheckIn, customCheckOut)
       // Sama seperti trigger DB: Team Gudang tidak pernah dapat lembur, Helper di cabang Gudang
       // juga tidak (dicek dari cabang PENEMPATAN karyawan, bukan cabang tempat scan/perbantuan).
@@ -588,7 +667,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         check_out_branch_id: eventBranchId,
       }).eq('id', today.id)
       if (error) { showMessage('error', 'Gagal mencatat absen pulang: ' + error.message); setStep('preview'); return }
-      showMessage('success', `Absen pulang tercatat jam ${now.toLocaleTimeString('id-ID')}.${perbantuanSuffix}`)
+      showMessage('success', `Absen pulang tercatat jam ${now.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })}.${geoSuffix}${perbantuanSuffix}`)
     } else {
       const sched = isPerbantuanAction
         ? matchSchedule(nowTimeStr, branchShifts)
@@ -610,15 +689,15 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         check_in_branch_id: eventBranchId,
       })
       if (error) { showMessage('error', 'Gagal mencatat absen masuk: ' + error.message); setStep('preview'); return }
-      const jamStr = now.toLocaleTimeString('id-ID')
+      const jamStr = now.toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })
       // Sengaja TIDAK menyebut apakah telat ini kena potongan atau masuk toleransi -- supaya
       // ambang toleransi absen QR (lihat lib/lateTolerance.ts) tidak jadi "target" yang bisa
       // sengaja dimanfaatkan karyawan untuk telat aman tiap hari. Rincian potongan sesungguhnya
       // tetap bisa dilihat karyawan sendiri lewat menu Aturan Potongan Gaji / slip gaji.
       if (lateMinutes <= 0) {
-        showMessage('success', `Absen masuk tercatat jam ${jamStr}.${perbantuanSuffix}`)
+        showMessage('success', `Absen masuk tercatat jam ${jamStr}.${geoSuffix}${perbantuanSuffix}`)
       } else {
-        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit.${perbantuanSuffix}`)
+        showMessage('success', `Absen masuk tercatat jam ${jamStr} — telat ${lateMinutes} menit.${geoSuffix}${perbantuanSuffix}`)
       }
     }
 
@@ -672,7 +751,24 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
   const daysInMonth = new Date(calYear, calMonthIdx + 1, 0).getDate()
   const firstWeekday = new Date(calYear, calMonthIdx, 1).getDay()
   const calCells: (number | null)[] = [...Array(firstWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
-  const now0 = new Date()
+  // Kotak "lokasi terverifikasi" di layar kamera & pratinjau: jarak ke toko dibanding batas
+  // radius, plus bar visual -- supaya karyawan tahu posisinya aman sebelum kirim absen.
+  const locationBadge = geo && (
+    <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-semibold text-green-800">📍 Lokasi terverifikasi</span>
+        <span className="text-xs text-green-700">akurasi GPS ±{geo.accuracy} m</span>
+      </div>
+      <p className="text-xs text-green-800 mt-0.5">
+        <strong>{Math.round(geo.distance)} m</strong> dari {geo.branchName} — batas {geo.radius} m
+      </p>
+      <div className="mt-1.5 h-1.5 rounded-full bg-green-100 overflow-hidden">
+        <div className="h-full rounded-full bg-green-500" style={{ width: `${Math.min(100, Math.max(4, (geo.distance / geo.radius) * 100))}%` }} />
+      </div>
+    </div>
+  )
+
+  const now0 = serverMonthStart()
   const atOrBeforeCurrentMonth = calYear < now0.getFullYear() || (calYear === now0.getFullYear() && calMonthIdx <= now0.getMonth())
 
   return (
@@ -682,9 +778,9 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">{mode === 'qr' ? `Cabang ${qrBranchName || branch?.name || ''}` : 'via HP'}</span>
       </div>
       <p className="text-xs text-slate-500 mb-3">
-        {mode === 'qr'
-          ? 'Foto wajib diambil langsung dari kamera saat itu juga.'
-          : `Radius ${branch?.checkin_radius_meters}m dari ${branch?.name}. Foto wajib diambil langsung dari kamera saat itu juga.`}
+        {needsGps
+          ? `Wajib berada dalam radius ${geoTarget?.checkin_radius_meters}m dari ${geoTarget?.name} (lokasi/GPS HP harus aktif). Foto wajib diambil langsung dari kamera saat itu juga.`
+          : 'Foto wajib diambil langsung dari kamera saat itu juga.'}
       </p>
 
       {message && (
@@ -753,7 +849,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
             <p className={`text-xl font-bold ${nextAction === 'in' ? 'text-green-700' : 'text-blue-700'}`}>
               {nextAction === 'in' ? '🟢 ABSEN MASUK' : '🔵 ABSEN PULANG'}
             </p>
-            <p className="text-xs text-slate-400 mt-1">{employeeName} — {new Date().toLocaleTimeString('id-ID')}</p>
+            <p className="text-xs text-slate-400 mt-1">{employeeName} — {serverNow().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setStep('idle')} className="flex-1 py-2 border border-slate-300 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">Batal</button>
@@ -813,7 +909,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
               {calCells.map((day, i) => {
                 if (day === null) return <div key={`b${i}`} />
                 const dateStr = localDateStr(new Date(calYear, calMonthIdx, day))
-                const isPast = dateStr <= todayLocalStr()
+                const isPast = dateStr <= serverTodayStr()
                 const isOwnOff = ownFutureDayOff.has(dateStr)
                 const colleagueNames = dayoffCalendar[dateStr]
                 const isSelected = selectedReplacementDate === dateStr
@@ -853,10 +949,11 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
         </div>
       )}
       {step === 'locating' && (
-        <div className="text-center py-4 text-sm text-slate-500">Mendeteksi lokasi Anda...</div>
+        <div className="text-center py-4 text-sm text-slate-500">📍 Mendeteksi lokasi Anda... (maks. 8 detik, tetap diam di tempat)</div>
       )}
       {step === 'camera' && (
         <div className="space-y-3">
+          {locationBadge}
           {/* Cermin cuma di tampilan LIVE ini (CSS saja) supaya terasa natural seperti ngaca —
               tidak memengaruhi foto yang benar-benar diambil (drawImage ke canvas selalu baca
               data mentah kamera, efek CSS di sini tidak ikut kebawa ke hasil fotonya). */}
@@ -878,6 +975,7 @@ export default function AbsenSekarang({ employeeId, employeeName, onDone, mode =
       )}
       {(step === 'preview' || step === 'uploading') && capturedUrl && (
         <div className="space-y-3">
+          {locationBadge}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={capturedUrl} alt="Pratinjau foto absen" className="w-full rounded-lg aspect-[3/4] object-cover" />
           <p className="text-xs text-center text-slate-500">

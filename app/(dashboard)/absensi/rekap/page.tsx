@@ -37,10 +37,22 @@ type DayOffRow = {
 }
 type Employee = { id: string; full_name: string; branch_id: string; department_id: string; join_date: string | null; custom_check_in_time: string | null; custom_check_out_time: string | null }
 type WorkSchedule = { id: string; name: string; check_in_time: string; check_out_time: string; detect_until: string | null; applies_to_dept: string }
+// Titik GPS saat absen QR/HP -- dibuka di Google Maps supaya HR bisa cek lokasi absen sebenarnya.
+function MapPin({ lat, lng, distance, label }: { lat: number | null; lng: number | null; distance: number | null; label: string }) {
+  if (lat == null || lng == null) return null
+  return (
+    <a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" rel="noopener noreferrer"
+      className="ml-1 text-slate-400 hover:text-blue-600"
+      title={`Lihat lokasi ${label} di peta${distance != null ? ` (${Math.round(distance)} m dari cabang)` : ''}`}>📍</a>
+  )
+}
+
 type Attendance = {
   id: string; date: string; check_in: string | null; check_out: string | null
   late_minutes: number; overtime_hours: number; status: string; notes: string | null
   source: string; check_in_photo_url: string | null; check_out_photo_url: string | null
+  check_in_lat: number | null; check_in_lng: number | null; check_in_distance_m: number | null
+  check_out_lat: number | null; check_out_lng: number | null; check_out_distance_m: number | null
   employees: { full_name: string; branch_id: string; department_id: string; custom_check_in_time: string | null; custom_check_out_time: string | null; late_penalty_applicable: boolean; branches: { name: string }; departments: { name: string } }
 }
 
@@ -379,7 +391,7 @@ export default function RekapAbsensiPage() {
     }
 
     let q = supabase.from('attendances')
-      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,source,check_in_photo_url,check_out_photo_url,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,late_penalty_applicable,branches(name),departments(name))')
+      .select('id,date,check_in,check_out,late_minutes,overtime_hours,status,notes,source,check_in_photo_url,check_out_photo_url,check_in_lat,check_in_lng,check_in_distance_m,check_out_lat,check_out_lng,check_out_distance_m,employees!inner(full_name,branch_id,department_id,custom_check_in_time,custom_check_out_time,late_penalty_applicable,branches(name),departments(name))')
       .order('date', { ascending: true })
     if (periodFrom) q = q.gte('date', periodFrom).lte('date', periodTo)
     if (filterBranch) q = q.eq('employees.branch_id', filterBranch)
@@ -1223,10 +1235,12 @@ export default function RekapAbsensiPage() {
                         <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">
                           {fmtTs(att.check_in)}
                           {att.check_in_photo_url && <button type="button" onClick={() => openLightbox(att.check_in_photo_url!, 'Foto absen masuk')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</button>}
+                          <MapPin lat={att.check_in_lat} lng={att.check_in_lng} distance={att.check_in_distance_m} label="absen masuk" />
                         </td>
                         <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">
                           {fmtTs(att.check_out)}
                           {att.check_out_photo_url && <button type="button" onClick={() => openLightbox(att.check_out_photo_url!, 'Foto absen pulang')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</button>}
+                          <MapPin lat={att.check_out_lat} lng={att.check_out_lng} distance={att.check_out_distance_m} label="absen pulang" />
                         </td>
                         <td className="px-4 py-3 text-center">
                           {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}
@@ -1318,10 +1332,12 @@ export default function RekapAbsensiPage() {
                         <td className="px-4 py-3 text-sm text-center font-medium text-emerald-600">
                           {fmtTs(att.check_in)}
                           {att.check_in_photo_url && <button type="button" onClick={() => openLightbox(att.check_in_photo_url!, 'Foto absen masuk')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen masuk">📷</button>}
+                          <MapPin lat={att.check_in_lat} lng={att.check_in_lng} distance={att.check_in_distance_m} label="absen masuk" />
                         </td>
                         <td className="px-4 py-3 text-sm text-center font-medium text-blue-600">
                           {fmtTs(att.check_out)}
                           {att.check_out_photo_url && <button type="button" onClick={() => openLightbox(att.check_out_photo_url!, 'Foto absen pulang')} className="ml-1 text-slate-400 hover:text-blue-600" title="Lihat foto absen pulang">📷</button>}
+                          <MapPin lat={att.check_out_lat} lng={att.check_out_lng} distance={att.check_out_distance_m} label="absen pulang" />
                         </td>
                         <td className="px-4 py-3 text-center">
                           {att.late_minutes > 0 ? <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs font-semibold">{att.late_minutes} mnt</span> : <span className="text-slate-300 text-xs">-</span>}

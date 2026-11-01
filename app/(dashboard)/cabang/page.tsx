@@ -137,6 +137,14 @@ export default function CabangPage() {
     )
   }
 
+  // Google Maps (tekan lama titik toko -> koordinat disalin) menghasilkan "-7.351520, 108.108986"
+  // dalam satu teks. Kalau itu yang ditempel ke Latitude, pecah otomatis ke Latitude & Longitude.
+  function handleLatChange(value: string) {
+    const m = value.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/)
+    if (m) { setEditLat(m[1]); setEditLng(m[2]); return }
+    setEditLat(value)
+  }
+
   async function handleEditSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!editBranch) return
@@ -396,17 +404,17 @@ export default function CabangPage() {
 
                 <div className="pt-2 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-sm font-medium text-slate-700">Absen HP (Test Drive)</label>
+                    <label className="text-sm font-medium text-slate-700">Lokasi Absen (GPS)</label>
                     <button type="button" onClick={useMyLocationForEdit} disabled={locatingMe}
                       className="text-xs px-2.5 py-1 rounded border border-blue-200 text-blue-600 hover:bg-blue-50 transition disabled:opacity-50">
                       {locatingMe ? 'Mendeteksi...' : '📍 Pakai lokasi saya sekarang'}
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-400 mb-2">Kosongkan Latitude/Longitude kalau cabang ini belum ikut test drive absen HP — karyawan tetap pakai fingerprint seperti biasa.</p>
+                  <p className="text-[11px] text-slate-400 mb-2">Kalau diisi, absen QR di cabang ini WAJIB berada dalam radius (GPS HP harus aktif) — foto/link QR yang disebar tidak bisa dipakai absen dari rumah. Kosongkan kalau belum mau diaktifkan. Cara isi: buka Google Maps, tekan lama titik toko, salin angka koordinatnya, lalu tempel ke kolom Latitude (Longitude terisi otomatis). Atau tekan &quot;Pakai lokasi saya sekarang&quot; saat berada di dalam toko.</p>
                   <div className="grid grid-cols-2 gap-3 mb-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">Latitude</label>
-                      <input type="text" inputMode="decimal" value={editLat} onChange={e => setEditLat(e.target.value)}
+                      <input type="text" inputMode="decimal" value={editLat} onChange={e => handleLatChange(e.target.value)}
                         placeholder="Contoh: -6.914744"
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
@@ -417,6 +425,10 @@ export default function CabangPage() {
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                   </div>
+                  {editLat.trim() !== '' && editLng.trim() !== '' && !isNaN(Number(editLat)) && !isNaN(Number(editLng)) && (
+                    <a href={`https://www.google.com/maps?q=${editLat.trim()},${editLng.trim()}`} target="_blank" rel="noopener noreferrer"
+                      className="inline-block text-xs text-blue-600 hover:underline mb-3">🗺️ Cek titik ini di Google Maps</a>
+                  )}
                   <div>
                     <label className="block text-xs font-medium text-slate-600 mb-1">Radius Absen (meter)</label>
                     <input type="number" min={10} value={editRadius} onChange={e => setEditRadius(e.target.value)}

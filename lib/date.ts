@@ -16,3 +16,16 @@ export function localDateStr(date: Date): string {
 export function todayLocalStr(): string {
   return localDateStr(new Date())
 }
+
+/**
+ * Jam "HH:MM" dalam WIB (Asia/Jakarta), tidak bergantung zona waktu HP/browser.
+ * Dipakai untuk jam absen yang datang dari server (zona waktu HP bisa diubah karyawan).
+ */
+export function wibTimeStr(date: Date): string {
+  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' })
+}
+
+/** Tanggal "YYYY-MM-DD" dalam WIB (Asia/Jakarta), tidak bergantung zona waktu HP/browser. */
+export function wibDateStr(date: Date): string {
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' })
+}

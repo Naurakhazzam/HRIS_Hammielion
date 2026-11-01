@@ -35,7 +35,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 
 function fmtTime(ts: string | null) {
   if (!ts) return '—'
-  return new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+  return new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })
 }
 
 export default function PortalAbsensiPage() {
