@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
 import { todayLocalStr } from '@/lib/date'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
-import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, SUDDEN_PERMISSION_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, NEW_RULES_CUTOFF_DATE, type EscalatingResult } from '@/lib/escalatingDeduction'
+import { type EscalatingResult } from '@/lib/escalatingDeduction'
+import { calcAbsence, calcDailyRate, calcProRataFactor, computeAbsenceForPeriod, fetchAbsenceSource, toAbsenceBreakdown, type AbsenceBreakdown } from '@/lib/payrollAbsence'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,8 @@ type Payroll = {
   libur_compensation_amount: number
   extra_bonus_total: number
   promo_bonus: number
+  // Snapshot rincian potongan tidak hadir saat slip dibuat (null untuk slip lama).
+  absent_breakdown: AbsenceBreakdown | null
   ongkir_bonus: number
   grooming_bonus: number
   gross_total: number
@@ -228,23 +231,9 @@ export default function PenggajianBulananPage() {
   const [loadingOt, setLoadingOt] = useState(false)
 
   // ── State: breakdown potongan tidak hadir di modal detail ──
-  // izinGroup = Izin Duka/Periksa/Sakit-tanpa-surat (digabung, eskalasi per kejadian, maks 2x).
-  // alphaGroup = Alpha eksplisit + hari kosong di luar kuota (eskalasi per kejadian, maks 3x).
-  // Sakit-dengan-surat tetap dihitung per-hari-berturut terpisah (sick1Free/sick23Half/sick4Full).
-  type AbsentBreakdownDetail = {
-    dailyRate: number
-    izinGroup: EscalatingResult; alphaGroup: EscalatingResult
-    sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number; sickDed: number
-    adminFeeTotal: number
-    // Izin Mendadak -- eskalasi sendiri (SUDDEN_PERMISSION_MULTIPLIERS), terpisah dari izinGroup.
-    suddenPermissionGroup: EscalatingResult
-    // Denda disiplin Ajukan Libur periode-berjalan (Rp10.000/tanggal) -- dari roster_pick_requests
-    // .discipline_fee, BUKAN dari attendances, jadi dijumlahkan terpisah (lihat migrasi 046).
-    liburDisciplineFeeTotal: number
-    // true = periode ini berakhir sebelum NEW_RULES_CUTOFF_DATE -- semua potongan di atas flat
-    // 1x gaji harian, eskalasi/denda baru belum berlaku (dikonfirmasi user).
-    isPreNewRulesPeriod: boolean
-  }
+  // Bentuknya ditentukan lib/payrollAbsence.ts (izin/alpha/izin mendadak/sakit+surat/denda +
+  // rincian pemakaian jatah libur) -- sama dengan snapshot payrolls.absent_breakdown.
+  type AbsentBreakdownDetail = AbsenceBreakdown
   const [absentBreakdownDetail, setAbsentBreakdownDetail] = useState<AbsentBreakdownDetail | null>(null)
 
   // ── State: buat slip per karyawan (stepper) ──
@@ -260,7 +249,7 @@ export default function PenggajianBulananPage() {
     absentDays: number; absentDed: number; absentRatePerDay: number
     absentBreakdown: AbsentBreakdownDetail | null
     liburCompDays: number; liburKompensasi: number
-    liburQuota: number; liburUsedDays: number; liburFromLeave: number; liburFromIzin: number; liburFromSickDoc: number; liburFromKosong: number
+    liburQuota: number; liburUsedDays: number; liburFromRoster: number; liburFromLeave: number; liburFromIzin: number; liburFromSickDoc: number; liburFromKosong: number
     invLoss: number; cashierLoss: number
     loyAutoRelease: number; loyBalSaldo: number; loyDurasi: number
     gross: number; net: number
@@ -507,7 +496,7 @@ export default function PenggajianBulananPage() {
         overtime_total, kpi_bonus, late_deduction,
         kasbon_deduction, loyalitas_deduction, loyalitas_auto_release, conditional_bonus,
         inventory_loss_deduction, cashier_loss_deduction,
-        absent_days, absent_deduction,
+        absent_days, absent_deduction, absent_breakdown,
         libur_compensation_days, libur_compensation_amount,
         extra_bonus_total, promo_bonus, ongkir_bonus, grooming_bonus,
         gross_total, net_total,
@@ -754,16 +743,16 @@ export default function PenggajianBulananPage() {
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, empRes, loyBalRes, lateDefRes, rosterFeeRes] = await Promise.all([
-      supabase.from('salary_components').select('*').eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1),
-      supabase.from('attendances').select('date, status, overtime_hours, late_minutes, notes, source, admin_fee').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
+    const [scRes, attRes, kpiRes, empRes, loyBalRes, lateDefRes, absenceSrc] = await Promise.all([
+      // Komponen gaji yang BERLAKU di periode ini (effective_date <= akhir periode), bukan yang
+      // terbaru -- kenaikan gaji yang berlaku mulai periode depan tidak boleh ikut ke slip ini.
+      supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1),
+      supabase.from('attendances').select('date, overtime_hours, late_minutes, source').eq('employee_id', empId).gte('date', firstDay).lte('date', lastDay),
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('employees').select('full_name, employee_code, join_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, libur_compensation_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
       supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
-      // Denda disiplin Ajukan Libur periode-berjalan -- period_start roster SELALU persis sama
-      // dengan firstDay payroll (keduanya tanggal 26), bukan rentang.
-      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', empId).eq('period_start', firstDay).neq('status', 'rejected'),
+      fetchAbsenceSource(supabase, empId, firstDay, lastDay),
     ])
 
     const sc   = scRes.data?.[0]
@@ -772,7 +761,7 @@ export default function PenggajianBulananPage() {
 
     if (scRes.error) { if (!silent) { showMessage('error', 'Gagal ambil komponen gaji: ' + scRes.error.message); setBuildingPreview(false) }; return null }
     if (empRes.error) { if (!silent) { showMessage('error', 'Gagal ambil data karyawan: ' + empRes.error.message); setBuildingPreview(false) }; return null }
-    if (!sc) { if (!silent) { showMessage('error', 'Komponen gaji belum diisi untuk karyawan ini. Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false) }; return null }
+    if (!sc) { if (!silent) { showMessage('error', 'Komponen gaji yang berlaku di periode ini belum diisi untuk karyawan ini (tanggal berlakunya harus sebelum/sama dengan akhir periode). Isi dulu di menu Penggajian → Komponen Gaji.'); setBuildingPreview(false) }; return null }
     if (!emp) { if (!silent) { showMessage('error', 'Data karyawan tidak ditemukan.'); setBuildingPreview(false) }; return null }
 
     // Karyawan flat_salary (mis. pencatatan Owner) — gaji tetap flat sesuai gaji pokok,
@@ -828,20 +817,7 @@ export default function PenggajianBulananPage() {
     // Karyawan permanent selalu dapat gaji penuh
     // Bonus (KPI, kondisional) TIDAK ikut diprorata
     const isTraining = (emp as any).employee_type === 'training'
-    const totalPeriodDays = (() => {
-      const s = new Date(firstDay + 'T12:00:00')
-      const e = new Date(lastDay + 'T12:00:00')
-      return Math.round((e.getTime() - s.getTime()) / 86400000) + 1
-    })()
-    const proRataFactor = (() => {
-      if (!isTraining) return 1                              // bukan training → selalu full
-      if (!joinDateVal || joinDateVal <= firstDay) return 1  // join sebelum/awal periode → full
-      if (joinDateVal > lastDay) return 0                    // join setelah periode → 0
-      const joinD  = new Date(joinDateVal + 'T12:00:00')
-      const endD   = new Date(lastDay + 'T12:00:00')
-      const activeDays = Math.round((endD.getTime() - joinD.getTime()) / 86400000) + 1
-      return activeDays / totalPeriodDays
-    })()
+    const proRataFactor = calcProRataFactor(isTraining, joinDateVal, firstDay, lastDay)
     const base = Math.round(baseRaw * proRataFactor)
     const pos  = Math.round(posRaw  * proRataFactor)
     const meal = Math.round(mealRaw * proRataFactor)
@@ -865,6 +841,10 @@ export default function PenggajianBulananPage() {
     // ── Cek auto-cairkan tabungan loyalitas ──────────────────────────────────
     const loyBal = loyBalRes.data as any
     const loyBalSaldo = Number(loyBal?.total_withheld ?? 0)
+    // Bulan pencairan = bulan tabungan ke-N (N = durasi). Tabungan bulan ini TETAP dipotong seperti
+    // biasa (baris Potongan "Tabungan Loyalitas"), lalu SELURUH tabungan -- saldo lama + potongan
+    // bulan ini -- dicairkan di baris Pendapatan. Dulu potongan bulan ini di-nol-kan padahal tetap
+    // ikut dicairkan, jadi karyawan menerima kelebihan 1 bulan tabungan.
     let loyAutoRelease = 0  // bonus masuk ke pendapatan jika bulan pencairan
     if (loyBal && loyDurasi > 0 && loyBal.start_month && loyBal.start_year) {
       const monthsElapsed = (filterYear - loyBal.start_year) * 12 + (filterMonth - loyBal.start_month) + 1
@@ -874,150 +854,23 @@ export default function PenggajianBulananPage() {
       }
     }
 
-    // ── Hitung potongan tidak hadir (frontend, rumus baku) ──────────────────
-    // Daily rate = total semua komponen ÷ 26 — tunjangan khusus ikut dihitung, diperlakukan
-    // sama seperti tunjangan jabatan/tetap (bagian dari gaji rutin, bukan bonus insidental).
-    const dailyRate = Math.round((base + pos + meal + special) / 26)
-
-    // Pisahkan status dari data attendance
-    // Exclude hari sebelum bergabung dan record "Belum Masuk (Training)" lama
-    const validAtts = atts.filter((a: any) => {
-      if (joinDateVal && a.date < joinDateVal) return false
-      if (a.status === 'absent' && a.notes === 'Belum Masuk (Training)') return false
-      return true
+    // ── Potongan tidak hadir + jatah libur 4 hari + kompensasi libur ──────────
+    // Rumusnya cuma ada di lib/payrollAbsence.ts (aturan tertulis: docs/ATURAN-PENGGAJIAN.md) --
+    // jangan ditulis ulang di sini. Gaji harian dihitung dari komponen PENUH (bukan yang sudah
+    // di-pro-rata): pro-rata cuma mengurangi gaji pokok untuk hari sebelum join, bukan harga 1 hari.
+    const dailyRate = calcDailyRate(sc)
+    const absence = calcAbsence({
+      dailyRate, firstDay, lastDay, today: todayLocalStr(), joinDate: joinDateVal,
+      attendances: absenceSrc.attendances, rosterDayOffDates: absenceSrc.rosterDayOffDates,
+      isTraining, proRataFactor, flatSalary: flatSalaryForEmp, liburCompApplicable: liburCompApplicableForEmp,
+      disciplineFeeTotal: absenceSrc.disciplineFeeTotal,
     })
-    const recordedDates = new Set(validAtts.map((a: any) => a.date))
-    // Izin Duka/Periksa + Sakit TANPA surat digabung 1 kelompok (disamakan — supaya tidak jadi
-    // celah pura-pura sakit). Sakit DENGAN surat (sick_doc) tetap dihitung terpisah, per hari
-    // berturut (bukan per kejadian). Cuti Tahunan ('leave') tidak pernah dipotong gajinya, tapi
-    // TETAP memakan kuota 4 hari/periode yang sama (lihat blok Kuota Libur di bawah) — baik yang
-    // diajukan resmi di muka (Cuti & Izin) maupun yang dipilih lewat klarifikasi Alpha "pakai
-    // jatah 4 hari/periode", dua-duanya sama-sama status 'leave' dan sekarang dianggap SATU
-    // kuota (keputusan Owner, supaya tidak dobel: bebas potongan Alpha DAN masih dibayar
-    // "Kompensasi Libur" seolah belum pakai jatah sama sekali).
-    const izinGroupDatesRaw = validAtts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
-    const sickDocDatesRaw = validAtts.filter((a: any) => a.status === 'sick_doc').map((a: any) => a.date as string)
-    const explicitAlphaDates = validAtts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
-    const leaveDates      = validAtts.filter((a: any) => a.status === 'leave').map((a: any) => a.date as string)
-
-    // Hari kosong (tidak ada record sama sekali)
-    const allPeriodDates: string[] = []
-    const cur = new Date(firstDay + 'T00:00:00')
-    const endD = new Date(lastDay + 'T00:00:00')
-    const pad = (n: number) => String(n).padStart(2, '0')
-    while (cur <= endD) {
-      allPeriodDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`)
-      cur.setDate(cur.getDate()+1)
-    }
-    // Hari yang BELUM TERJADI (masih di masa depan dari hari ini) jangan ikut dihitung sebagai
-    // "kosong/tidak hadir" — kalau tidak, preview untuk periode yang belum selesai berjalan akan
-    // salah besar (hari-hari yang belum dijalani ikut dianggap absen).
-    const today = todayLocalStr()
-    const emptyDateList = allPeriodDates.filter(d => {
-      if (joinDateVal && d < joinDateVal) return false  // sebelum bergabung — diabaikan
-      if (d > today) return false                        // belum terjadi — diabaikan
-      return !recordedDates.has(d)
-    })
-    const emptyDays = emptyDateList.length
-
-    // ── Kuota libur 4 hari/periode ───────────────────────────────────────────
-    // Kuota dipakai lewat EMPAT cara, berurutan sesuai prioritas (yang duluan menghabiskan kuota):
-    // (1) hari berstatus 'leave' (Cuti Tahunan resmi ATAU klarifikasi Alpha "pakai jatah 4 hari"),
-    // (2) hari Izin/Sakit-tanpa-surat DAN Sakit-dengan-surat digabung satu antrean, dipromosikan
-    // jadi "Libur" kalau kuota belum penuh -- dari yang tanggalnya paling awal duluan -- supaya
-    // karyawan yang alasannya ditulis "izin"/"sakit" tidak dihukum lebih berat cuma karena tidak
-    // disebut "libur", padahal jatahnya sama (izin & sakit sama-sama bisa mengisi jatah libur),
-    // (3) hari kosong tanpa record sama sekali (ditoleransi diam-diam, prioritas terakhir --
-    // supaya karyawan yang setidaknya kasih alasan didahulukan daripada yang diam saja).
-    // Alpha (eksplisit ATAU hari kosong di luar kuota) TIDAK PERNAH ikut dipromosikan -- tetap
-    // kena eskalasi Alpha penuh, sesuai arahan Owner.
-    // 'leave', Izin, & Sakit yang melebihi sisa kuota TETAP tidak "dipromosikan" tapi kena
-    // potongannya masing-masing seperti biasa (bukan dihukum ganda, cuma tidak lagi gratis).
-    // Kuota ikut di-pro-rata pakai proRataFactor yang sama dengan gaji pokok — karyawan training
-    // yang baru join di tengah periode tidak adil kalau dianggap harus punya 4 hari libur penuh
-    // dari periode yang cuma dijalani sebagian.
-    const kuotaLibur     = Math.round(4 * proRataFactor)
-    const leaveUsed      = Math.min(leaveDates.length, kuotaLibur)
-    const quotaAfterLeave = Math.max(kuotaLibur - leaveUsed, 0)
-    const fillableDates = [
-      ...izinGroupDatesRaw.map(d => ({ date: d, kind: 'izin' as const })),
-      ...sickDocDatesRaw.map(d => ({ date: d, kind: 'sick_doc' as const })),
-    ].sort((a, b) => a.date.localeCompare(b.date))
-    const fillUsedForQuota = Math.min(fillableDates.length, quotaAfterLeave)
-    const izinUsedForQuota = fillableDates.slice(0, fillUsedForQuota).filter(x => x.kind === 'izin').length
-    const sickDocUsedForQuota = fillUsedForQuota - izinUsedForQuota
-    const izinGroupDates  = fillableDates.slice(fillUsedForQuota).filter(x => x.kind === 'izin').map(x => x.date) // sisa yang benar-benar kena eskalasi Izin
-    const sickDocDates    = fillableDates.slice(fillUsedForQuota).filter(x => x.kind === 'sick_doc').map(x => x.date) // sisa yang benar-benar kena tarif Sakit+Surat
-    const quotaAfterFill  = quotaAfterLeave - fillUsedForQuota
-    const freeEmptyUsed  = Math.min(emptyDays, quotaAfterFill)
-    const excessEmptyDates = emptyDateList.slice(freeEmptyUsed) // sisa di luar kuota → gabung ke kelompok Alpha
-    const kurangLibur     = (flatSalaryForEmp || !liburCompApplicableForEmp) ? 0 : Math.max(kuotaLibur - leaveUsed - fillUsedForQuota - freeEmptyUsed, 0)
-    const liburKompensasi = (flatSalaryForEmp || !liburCompApplicableForEmp) ? 0 : Math.round(kurangLibur * dailyRate)
-
-    // Periode yang berakhir SEBELUM NEW_RULES_CUTOFF_DATE (26 Sep 2026) masih dihitung FLAT --
-    // aturan eskalasi/denda baru cuma berlaku mulai periode itu (dikonfirmasi user, supaya
-    // periode transisi fingerprint->QR yang penuh bug tidak kena aturan yang baru selesai
-    // diperbaiki belakangan). Karyawan training SUDAH flat sejak awal, jadi tidak terpengaruh.
-    const isPreNewRulesPeriod = lastDay < NEW_RULES_CUTOFF_DATE
-    const useFlatDeduction = isTraining || isPreNewRulesPeriod
-
-    // Kelompok Izin (Duka/Periksa/Sakit-tanpa-surat) — eskalasi per kejadian (blok tanggal
-    // bersambung), reset tiap periode: 1x, 1.25x, 1.5x, 1.75x, mentok 2x. Flat 1x untuk training
-    // maupun periode sebelum aturan baru berlaku (lihat NEW_RULES_CUTOFF_DATE).
-    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
-
-    // Kelompok Alpha — mangkir eksplisit + hari kosong di luar kuota, digabung jadi satu deret
-    // kejadian: 1.5x, 2x, 2.25x, 2.5x, 2.75x, mentok 3x. Sama seperti Izin di atas.
-    const alphaGroupDates = [...explicitAlphaDates, ...excessEmptyDates]
-    const alphaGroup = calcEscalatingDeduction(alphaGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
-
-    // Izin Mendadak -- leave_type baru utk izin TANPA H-2 (termasuk pengajuan mundur setelah
-    // Alpha sudah tercatat). TIDAK ikut mengisi kuota libur gratis (sama seperti Alpha, ini
-    // kasus disiplin, bukan jatah normal) -- eskalasi sendiri: 1.25x, 1.5x, 1.6x, 1.7x, 1.8x,
-    // 1.9x, mentok 2x per kejadian, reset tiap periode.
-    const suddenPermissionDates = validAtts.filter((a: any) => a.status === 'sudden_permission').map((a: any) => a.date as string)
-    const suddenPermissionGroup = calcEscalatingDeduction(suddenPermissionDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : SUDDEN_PERMISSION_MULTIPLIERS)
-
-    // Sakit DENGAN surat dokter: hari ke-1 gratis, ke-2&3 = 0.5×, ke-4+ = 1× (dihitung kumulatif
-    // per hari dalam periode, bukan per kejadian, dan cuma dari SISA hari yang tidak kepakai
-    // mengisi jatah libur di atas). Aturan ini SUDAH lama berlaku (bukan bagian dari eskalasi
-    // Izin/Alpha yang baru), jadi TETAP sama untuk periode lama maupun baru -- dikonfirmasi user,
-    // hari pertama sakit dengan surat selalu gratis, tidak ikut aturan flat.
-    const sickCount   = sickDocDates.length
-    const sick1Free   = Math.min(sickCount, 1)
-    const sick23Half  = Math.max(0, Math.min(sickCount - 1, 2))
-    const sick4Full   = Math.max(0, sickCount - 3)
-    const sickDed     = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
-
-    // Denda administratif Lupa Absen Masuk/Pulang -- nominal flat per kejadian (Rp15.000/Rp5.000,
-    // lihat migrasi checkout_clarifications & submit_alpha_clarification), BUKAN bagian dari
-    // eskalasi Izin/Alpha. TIDAK berlaku untuk periode sebelum aturan baru (dendanya sendiri baru
-    // ada mulai periode ini, jadi tidak adil ditagih surut).
-    const adminFeeTotal = (flatSalaryForEmp || isPreNewRulesPeriod) ? 0 : validAtts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
-
-    // Denda disiplin Ajukan Libur periode-berjalan -- dari roster_pick_requests.discipline_fee
-    // (lihat migrasi 046), BUKAN dari attendances.admin_fee -- supaya tidak mengganggu hitungan
-    // "hari kosong" di Kompensasi Libur Tidak Diambil (tanggalnya belum tentu punya record
-    // attendances sampai harinya tiba).
-    const liburDisciplineFeeTotal = flatSalaryForEmp ? 0 : (rosterFeeRes.data || []).reduce((s: number, r: any) => s + Number(r.discipline_fee ?? 0), 0)
-
-    const absentDed        = flatSalaryForEmp ? 0 : izinGroup.total + alphaGroup.total + suddenPermissionGroup.total + sickDed + adminFeeTotal + liburDisciplineFeeTotal
-    const absentDays       = flatSalaryForEmp ? 0 : izinGroupDates.length + alphaGroupDates.length + suddenPermissionDates.length + sickCount
+    const absentDed        = absence.absentDed
+    const absentDays       = absence.absentDays
     const absentRatePerDay = dailyRate
-    const absentBreakdown: AbsentBreakdownDetail = {
-      dailyRate,
-      izinGroup,
-      alphaGroup,
-      suddenPermissionGroup,
-      liburDisciplineFeeTotal,
-      sickDed,
-      sickDays:       sickCount,
-      sick1Free,
-      sick23Half,
-      sick4Full,
-      adminFeeTotal,
-      isPreNewRulesPeriod,
-    }
+    const kurangLibur      = absence.liburCompDays
+    const liburKompensasi  = absence.liburKompensasi
+    const absentBreakdown: AbsentBreakdownDetail = toAbsenceBreakdown(absence)
 
     // Bonus kondisional — fetch langsung dari DB (hindari race condition dengan state)
     const { data: freshCriteria } = await supabase
@@ -1060,7 +913,7 @@ export default function PenggajianBulananPage() {
     const groomingBonus = Number(groomingData) || 0
 
     const gross = base + pos + meal + special + otTotal + kpi + loyAutoRelease + conditionalBonus + liburKompensasi + ongkirBonus + groomingBonus
-    const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyAutoRelease > 0 ? 0 : loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
+    const net   = calcNet({ gross_total: gross, late_deduction: latDed, kasbon_deduction: kasbonDed, loyalitas_deduction: loyalitas, inventory_loss_deduction: invLoss, cashier_loss_deduction: cashLoss, absent_deduction: absentDed })
 
     const preview: SlipPreview = {
       employeeId: empId, employeeName: emp.full_name, employeeCode: emp.employee_code,
@@ -1070,8 +923,8 @@ export default function PenggajianBulananPage() {
       kasbonDed,
       absentDays, absentDed, absentRatePerDay, absentBreakdown,
       liburCompDays: kurangLibur, liburKompensasi,
-      liburQuota: kuotaLibur, liburUsedDays: leaveUsed + fillUsedForQuota + freeEmptyUsed,
-      liburFromLeave: leaveUsed, liburFromIzin: izinUsedForQuota, liburFromSickDoc: sickDocUsedForQuota, liburFromKosong: freeEmptyUsed,
+      liburQuota: absence.liburQuota, liburUsedDays: absence.liburUsedDays,
+      liburFromRoster: absence.liburFromRoster, liburFromLeave: absence.liburFromLeave, liburFromIzin: absence.liburFromIzin, liburFromSickDoc: absence.liburFromSickDoc, liburFromKosong: absence.liburFromKosong,
       invLoss, cashierLoss: cashLoss,
       loyAutoRelease, loyBalSaldo, loyDurasi,
       conditionalBonus,
@@ -1100,9 +953,12 @@ export default function PenggajianBulananPage() {
       ongkir_bonus: p.ongkirBonus,
       grooming_bonus: p.groomingBonus,
       late_deduction: p.latDed, kasbon_deduction: p.kasbonDed,
-      loyalitas_deduction: p.loyAutoRelease > 0 ? 0 : p.loyalitasDed,
+      loyalitas_deduction: p.loyalitasDed,
       loyalitas_auto_release: p.loyAutoRelease,
       absent_days: p.absentDays, absent_deduction: p.absentDed,
+      // Snapshot rincian potongan tidak hadir SAAT slip dibuat -- rincian di detail slip, slip
+      // cetak, & Ringkasan Gaji membaca ini (bukan menghitung ulang dari absensi/gaji terbaru).
+      absent_breakdown: p.absentBreakdown,
       libur_compensation_days: p.liburCompDays, libur_compensation_amount: p.liburKompensasi,
       inventory_loss_deduction: p.invLoss, cashier_loss_deduction: p.cashierLoss,
       gross_total: p.gross, net_total: p.net, status: 'draft', approved_by: null,
@@ -1245,14 +1101,20 @@ export default function PenggajianBulananPage() {
       const loyalitasRelease = Number((p as any).loyalitas_auto_release ?? 0)
 
       if (loyalitasRelease > 0) {
-        // Bulan pencairan otomatis — release balance lama, buat siklus baru
-        const { data: oldBal } = await supabase.from('loyalitas_balances').select('id').eq('employee_id', p.employee_id).eq('status', 'active').maybeSingle()
+        // Bulan pencairan otomatis — tabungan bulan ini tetap tercatat dipotong, lalu seluruh
+        // saldo (termasuk bulan ini) dicairkan & siklus lama ditutup.
+        const { data: oldBal } = await supabase.from('loyalitas_balances').select('id, cycle_number').eq('employee_id', p.employee_id).eq('status', 'active').maybeSingle()
         if (oldBal) {
           await supabase.from('loyalitas_balances').update({ status: 'released', released_at: new Date().toISOString(), notes: `Auto-cair bulan ${p.period_month}/${p.period_year}`, updated_at: new Date().toISOString() }).eq('id', oldBal.id)
         }
+        if (loyalitasDed > 0) {
+          await supabase.from('loyalitas_transactions').insert({ employee_id: p.employee_id, payroll_id: p.id, type: 'deduction', amount: loyalitasDed, notes: `Tabung bulan ${p.period_month}/${p.period_year} (bulan terakhir siklus)` })
+        }
         await supabase.from('loyalitas_transactions').insert({ employee_id: p.employee_id, payroll_id: p.id, type: 'auto_release', amount: loyalitasRelease, notes: `Pencairan otomatis bulan ${p.period_month}/${p.period_year}` })
-        // Mulai siklus baru
-        await supabase.from('loyalitas_balances').insert({ employee_id: p.employee_id, total_withheld: 0, status: 'active', start_month: p.period_month, start_year: p.period_year, cycle_number: (oldBal ? 2 : 1) })
+        // Siklus baru dimulai dari potongan BULAN DEPAN -- start_month dikosongkan dan baru diisi
+        // saat potongan pertama siklus baru (cabang "bulan normal" di bawah). Kalau diisi bulan
+        // ini, siklus berikutnya kurang 1 bulan tabungan.
+        await supabase.from('loyalitas_balances').insert({ employee_id: p.employee_id, total_withheld: 0, status: 'active', start_month: null, start_year: null, cycle_number: Number((oldBal as any)?.cycle_number ?? 0) + 1 })
       } else if (loyalitasDed > 0) {
         // Bulan normal — tambah ke saldo
         const { data: existBal } = await supabase.from('loyalitas_balances').select('id, total_withheld, start_month, start_year').eq('employee_id', p.employee_id).eq('status', 'active').maybeSingle()
@@ -1646,95 +1508,14 @@ export default function PenggajianBulananPage() {
   }
 
   // ─── Fetch Breakdown Potongan Tidak Hadir (modal detail) ─────────────────
+  // Dibaca dari snapshot slip (payrolls.absent_breakdown) -- persis yang dipotong saat slip dibuat,
+  // tidak berubah walau absensi/gaji diedit belakangan. Slip lama yang belum punya snapshot
+  // dihitung ulang dengan rumus yang sama (lib/payrollAbsence.ts).
   async function fetchAbsentBreakdown(p: Payroll) {
     setAbsentBreakdownDetail(null)
-    const pad = (n: number) => String(n).padStart(2, '0')
-    const sm = p.period_month === 1 ? 12 : p.period_month - 1
-    const sy = p.period_month === 1 ? p.period_year - 1 : p.period_year
-    const firstDay = `${sy}-${pad(sm)}-26`
-    const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
-
-    const [scRes, attRes, empRes, rosterFeeRes] = await Promise.all([
-      supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
-      supabase.from('attendances').select('date, status, admin_fee').eq('employee_id', p.employee_id).gte('date', firstDay).lte('date', lastDay),
-      supabase.from('employees').select('join_date, employee_type').eq('id', p.employee_id).single(),
-      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', p.employee_id).eq('period_start', firstDay).neq('status', 'rejected'),
-    ])
-
-    const sc = scRes.data?.[0]
-    const joinDateVal = empRes.data?.join_date ?? null
-    const dailyRate = sc ? Math.round((Number(sc.base_salary)+Number(sc.position_allowance)+Number(sc.meal_allowance)+Number(sc.special_allowance ?? 0))/26) : 0
-
-    // Buang record & tanggal sebelum karyawan bergabung
-    const atts = (attRes.data || []).filter((a: any) => !joinDateVal || a.date >= joinDateVal)
-    const recordedDates = new Set(atts.map((a: any) => a.date))
-    const allDates: string[] = []
-    const cur = new Date(firstDay + 'T12:00:00')
-    const endD = new Date(lastDay + 'T12:00:00')
-    while (cur <= endD) { allDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`); cur.setDate(cur.getDate()+1) }
-    const totalPeriodDays = allDates.length
-
-    const todayD = todayLocalStr()
-    const emptyDateList = allDates.filter(d => (!joinDateVal || d >= joinDateVal) && d <= todayD && !recordedDates.has(d))
-
-    // Kuota libur ikut di-pro-rata untuk training yang join di tengah periode —
-    // samakan dengan kalkulasi utama saat slip dibuat.
-    const isTraining = empRes.data?.employee_type === 'training'
-    let proRataFactor = 1
-    if (isTraining && joinDateVal) {
-      if (joinDateVal > lastDay) proRataFactor = 0
-      else if (joinDateVal > firstDay) {
-        const joinD = new Date(joinDateVal + 'T12:00:00')
-        const activeDays = Math.round((endD.getTime() - joinD.getTime()) / 86400000) + 1
-        proRataFactor = activeDays / totalPeriodDays
-      }
-    }
-    // 'leave' lalu Izin/Sakit-tanpa-surat DAN Sakit-dengan-surat (satu antrean, dipromosikan dari
-    // yang tanggalnya paling awal) lalu hari kosong menghabiskan kuota berurutan, sama seperti
-    // buildSlipPreview -- supaya rincian di modal ini konsisten dengan yang benar-benar dipotong
-    // saat slip dibuat. Alpha tidak pernah ikut dipromosikan.
-    const leaveDatesForQuota = atts.filter((a: any) => a.status === 'leave').map((a: any) => a.date as string)
-    const izinGroupDatesRaw = atts.filter((a: any) => a.status === 'permission' || a.status === 'sick').map((a: any) => a.date as string)
-    const sickDocDatesRaw = atts.filter((a: any) => a.status === 'sick_doc').map((a: any) => a.date as string)
-    const kuotaLibur = Math.round(4 * proRataFactor)
-    const leaveUsedForQuota = Math.min(leaveDatesForQuota.length, kuotaLibur)
-    const quotaAfterLeaveForBreakdown = Math.max(kuotaLibur - leaveUsedForQuota, 0)
-    const fillableDatesForBreakdown = [
-      ...izinGroupDatesRaw.map((d: string) => ({ date: d, kind: 'izin' as const })),
-      ...sickDocDatesRaw.map((d: string) => ({ date: d, kind: 'sick_doc' as const })),
-    ].sort((a, b) => a.date.localeCompare(b.date))
-    const fillUsedForQuotaForBreakdown = Math.min(fillableDatesForBreakdown.length, quotaAfterLeaveForBreakdown)
-    const izinGroupDates = fillableDatesForBreakdown.slice(fillUsedForQuotaForBreakdown).filter(x => x.kind === 'izin').map(x => x.date)
-    const sickDocDates = fillableDatesForBreakdown.slice(fillUsedForQuotaForBreakdown).filter(x => x.kind === 'sick_doc').map(x => x.date)
-    const quotaAfterFillForBreakdown = quotaAfterLeaveForBreakdown - fillUsedForQuotaForBreakdown
-    const freeEmptyUsed = Math.min(emptyDateList.length, quotaAfterFillForBreakdown)
-    const excessEmptyDates = emptyDateList.slice(freeEmptyUsed)
-
-    // Periode yang berakhir sebelum NEW_RULES_CUTOFF_DATE masih dihitung FLAT -- lihat catatan
-    // lengkap di buildSlipPreview di atas.
-    const isPreNewRulesPeriod = lastDay < NEW_RULES_CUTOFF_DATE
-    const useFlatDeduction = isTraining || isPreNewRulesPeriod
-
-    const explicitAlphaDates = atts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
-    const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS)
-    const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS)
-
-    // Izin Mendadak -- eskalasi sendiri, sama seperti buildSlipPreview di atas.
-    const suddenPermissionDates = atts.filter((a: any) => a.status === 'sudden_permission').map((a: any) => a.date as string)
-    const suddenPermissionGroup = calcEscalatingDeduction(suddenPermissionDates, dailyRate, useFlatDeduction ? TRAINING_FLAT_MULTIPLIER : SUDDEN_PERMISSION_MULTIPLIERS)
-
-    // Sakit dengan surat dokter: hari-1 gratis, dst -- aturan lama, TETAP sama untuk semua
-    // periode (tidak ikut disederhanakan jadi flat), dikonfirmasi user. Cuma dihitung dari SISA
-    // hari yang tidak kepakai mengisi jatah libur di atas.
-    const sickDays   = sickDocDates.length
-    const sick1Free  = Math.min(sickDays, 1)
-    const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
-    const sick4Full  = Math.max(0, sickDays - 3)
-    const sickDed    = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
-    const adminFeeTotal = isPreNewRulesPeriod ? 0 : atts.reduce((s: number, a: any) => s + Number(a.admin_fee ?? 0), 0)
-    const liburDisciplineFeeTotal = (rosterFeeRes.data || []).reduce((s: number, r: any) => s + Number(r.discipline_fee ?? 0), 0)
-
-    setAbsentBreakdownDetail({ dailyRate, izinGroup, alphaGroup, suddenPermissionGroup, liburDisciplineFeeTotal, sickDays, sick1Free, sick23Half, sick4Full, sickDed, adminFeeTotal, isPreNewRulesPeriod })
+    if (p.absent_breakdown) { setAbsentBreakdownDetail(p.absent_breakdown); return }
+    const result = await computeAbsenceForPeriod(supabase, p.employee_id, p.period_month, p.period_year, todayLocalStr())
+    setAbsentBreakdownDetail(toAbsenceBreakdown(result))
   }
 
   // ─── Bonus Kondisional Modal ───────────────────────────────────────────────
@@ -2813,7 +2594,19 @@ export default function PenggajianBulananPage() {
                       <div>Kompensasi Libur Tidak Diambil ({(selectedPayroll as any).libur_compensation_days ?? 0} hari)</div>
                       {Number((selectedPayroll as any).libur_compensation_days ?? 0) > 0 && absentBreakdownDetail && (
                         <div className="text-xs text-slate-400 mt-0.5">
-                          └ Kuota libur 4 hari/periode, diambil {4 - (selectedPayroll as any).libur_compensation_days} hari → {(selectedPayroll as any).libur_compensation_days} hari kerja × {formatRupiah(absentBreakdownDetail.dailyRate)}
+                          └ Jatah libur {absentBreakdownDetail.liburQuota} hari/periode, terpakai {absentBreakdownDetail.liburQuota - (selectedPayroll as any).libur_compensation_days} hari
+                          {(() => {
+                            const b = absentBreakdownDetail
+                            const parts = [
+                              b.liburFromRoster > 0 ? `${b.liburFromRoster} libur terjadwal` : '',
+                              b.liburFromLeave > 0 ? `${b.liburFromLeave} cuti` : '',
+                              b.liburFromIzin > 0 ? `${b.liburFromIzin} izin/sakit` : '',
+                              b.liburFromSickDoc > 0 ? `${b.liburFromSickDoc} sakit+surat` : '',
+                              b.liburFromKosong > 0 ? `${b.liburFromKosong} hari kosong` : '',
+                            ].filter(Boolean)
+                            return parts.length > 0 ? ` (${parts.join(' + ')})` : ''
+                          })()}
+                          {' '}→ sisa {(selectedPayroll as any).libur_compensation_days} hari × {formatRupiah(absentBreakdownDetail.dailyRate)}
                         </div>
                       )}
                     </td>
@@ -3370,7 +3163,9 @@ export default function PenggajianBulananPage() {
                   {[
                     ['Keterlambatan', slipPreview.latDed],
                     ['Kasbon', slipPreview.kasbonDed],
-                    ...(slipPreview.loyAutoRelease === 0 ? [[`Tabungan Loyalitas (saldo: ${formatRupiah(slipPreview.loyBalSaldo + slipPreview.loyalitasDed)})`, slipPreview.loyalitasDed]] : []),
+                    [slipPreview.loyAutoRelease > 0
+                      ? 'Tabungan Loyalitas (bulan terakhir, ikut dicairkan di atas)'
+                      : `Tabungan Loyalitas (saldo: ${formatRupiah(slipPreview.loyBalSaldo + slipPreview.loyalitasDed)})`, slipPreview.loyalitasDed],
                     ['Kehilangan Barang', slipPreview.invLoss],
                     ['Kerugian Kasir', slipPreview.cashierLoss],
                     [`Tidak Hadir (${slipPreview.absentDays} hari)`, slipPreview.absentDed],
@@ -3546,7 +3341,8 @@ export default function PenggajianBulananPage() {
                       }>{row.preview.absentDed > 0 ? formatRupiah(row.preview.absentDed) : '—'}</td>
                       <td className="px-3 py-2 text-right" title={
                         [
-                          row.preview.liburFromLeave > 0 ? `${row.preview.liburFromLeave} libur/cuti` : '',
+                          row.preview.liburFromRoster > 0 ? `${row.preview.liburFromRoster} libur terjadwal` : '',
+                          row.preview.liburFromLeave > 0 ? `${row.preview.liburFromLeave} cuti` : '',
                           row.preview.liburFromIzin > 0 ? `${row.preview.liburFromIzin} dari izin` : '',
                           row.preview.liburFromSickDoc > 0 ? `${row.preview.liburFromSickDoc} dari sakit+surat` : '',
                           row.preview.liburFromKosong > 0 ? `${row.preview.liburFromKosong} hari kosong` : '',

@@ -4,7 +4,9 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { getCurrentPeriodRangeStr, rosterPeriodLabel } from '@/lib/rosterPeriod'
-import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, type EscalatingResult } from '@/lib/escalatingDeduction'
+import { IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, TRAINING_FLAT_MULTIPLIER, type EscalatingResult } from '@/lib/escalatingDeduction'
+import { calcAbsence, calcProRataFactor, DISCIPLINE_FEE_STATUSES, type AbsenceAttendance, type AbsenceResult } from '@/lib/payrollAbsence'
+import { todayLocalStr } from '@/lib/date'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
 
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
@@ -20,7 +22,27 @@ type EmployeeRow = {
   branchName: string; departmentName: string
   base_salary: number; position_allowance: number; meal_allowance: number; special_allowance: number
   dailyRate: number; overtimeRate: number; overtimeEligible: boolean; isTraining: boolean
-  izin: EscalatingResult; alpha: EscalatingResult; sickDocDays: number
+  absence: AbsenceResult
+}
+
+type EmployeeFlags = { join_date: string | null; employee_type: string | null; flat_salary: boolean | null; libur_compensation_applicable: boolean | null }
+
+// Status periode berjalan pakai rumus yang SAMA dengan slip gaji (lib/payrollAbsence.ts): jatah
+// libur 4 hari, libur terjadwal, izin mendadak, sakit+surat, & denda -- supaya angka di sini
+// tidak beda dengan slip yang nanti dibuat Finance.
+function absenceForPeriod(
+  period: { start: string; end: string }, dailyRate: number, emp: EmployeeFlags | null,
+  attendances: AbsenceAttendance[], rosterDayOffDates: string[], disciplineFeeTotal: number,
+): AbsenceResult {
+  const isTraining = emp?.employee_type === 'training'
+  const joinDate = emp?.join_date ?? null
+  return calcAbsence({
+    dailyRate, firstDay: period.start, lastDay: period.end, today: todayLocalStr(), joinDate,
+    attendances, rosterDayOffDates, isTraining,
+    proRataFactor: calcProRataFactor(isTraining, joinDate, period.start, period.end),
+    flatSalary: emp?.flat_salary === true, liburCompApplicable: emp?.libur_compensation_applicable !== false,
+    disciplineFeeTotal,
+  })
 }
 
 function fmtDateShort(d: string) {
@@ -125,6 +147,33 @@ function EscalatingStatus({ title, result, colorClass }: { title: string; result
   )
 }
 
+function PeriodStatus({ absence }: { absence: AbsenceResult }) {
+  const a = absence
+  const liburParts = [
+    a.liburFromRoster > 0 ? `${a.liburFromRoster} libur terjadwal` : '',
+    a.liburFromLeave > 0 ? `${a.liburFromLeave} cuti` : '',
+    a.liburFromIzin > 0 ? `${a.liburFromIzin} izin/sakit` : '',
+    a.liburFromSickDoc > 0 ? `${a.liburFromSickDoc} sakit+surat` : '',
+    a.liburFromKosong > 0 ? `${a.liburFromKosong} hari kosong` : '',
+  ].filter(Boolean)
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-slate-600">
+        Jatah libur terpakai: <strong>{a.liburUsedDays}/{a.liburQuota} hari</strong>{liburParts.length > 0 ? ` (${liburParts.join(' + ')})` : ''}.
+        {' '}Hari izin/sakit yang masih masuk jatah ini <strong>tidak dipotong</strong>.
+      </p>
+      <EscalatingStatus title="Izin/Sakit Tanpa Surat" result={a.izinGroup} colorClass="text-orange-600" />
+      <EscalatingStatus title="Alpha" result={a.alphaGroup} colorClass="text-red-600" />
+      {a.suddenPermissionGroup.blocks.length > 0 && <EscalatingStatus title="Izin Mendadak" result={a.suddenPermissionGroup} colorClass="text-orange-700" />}
+      {a.sickDays > 0 && <p className="text-sm text-blue-600">Sakit Dengan Surat (di luar jatah libur): {a.sickDays} hari → {fmtRp(a.sickDed)}</p>}
+      {a.adminFeeTotal > 0 && <p className="text-sm text-slate-600">Denda Lupa Absen Masuk/Pulang: {fmtRp(a.adminFeeTotal)}</p>}
+      {a.liburDisciplineFeeTotal > 0 && <p className="text-sm text-slate-600">Denda Disiplin Pengajuan Libur: {fmtRp(a.liburDisciplineFeeTotal)}</p>}
+      <p className="text-sm font-semibold text-slate-800">Total potongan tidak hadir sejauh ini: {a.absentDed > 0 ? <span className="text-red-600">{fmtRp(a.absentDed)}</span> : 'Rp 0'}</p>
+      <p className="text-xs text-slate-400">Perkiraan sampai hari ini — angka final ada di slip gaji setelah periode selesai.</p>
+    </div>
+  )
+}
+
 export default function AturanPotonganPage() {
   const supabase = createClient()
   const router = useRouter()
@@ -135,9 +184,7 @@ export default function AturanPotonganPage() {
 
   // Diri sendiri (karyawan)
   const [mySummary, setMySummary] = useState<SalarySummary | null>(null)
-  const [myIzin, setMyIzin] = useState<EscalatingResult>({ total: 0, blocks: [] })
-  const [myAlpha, setMyAlpha] = useState<EscalatingResult>({ total: 0, blocks: [] })
-  const [mySickDoc, setMySickDoc] = useState(0)
+  const [myAbsence, setMyAbsence] = useState<AbsenceResult | null>(null)
 
   // Semua karyawan (Owner/HR/Finance)
   const [rows, setRows] = useState<EmployeeRow[]>([])
@@ -172,24 +219,40 @@ export default function AturanPotonganPage() {
     setLoading(false)
   }
 
+  // Data mentah 1 karyawan untuk status periode berjalan -- query yang sama dengan slip gaji.
+  async function fetchOwnAbsenceSource(empId: string) {
+    const [{ data: emp }, { data: atts }, { data: roster }, { data: fees }] = await Promise.all([
+      supabase.from('employees').select('join_date, employee_type, flat_salary, libur_compensation_applicable').eq('id', empId).maybeSingle(),
+      supabase.from('attendances').select('date, status, admin_fee, notes').eq('employee_id', empId).gte('date', period.start).lte('date', period.end),
+      supabase.from('employee_roster').select('date').eq('employee_id', empId).eq('is_day_off', true).gte('date', period.start).lte('date', period.end),
+      supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', empId).eq('period_start', period.start).in('status', DISCIPLINE_FEE_STATUSES),
+    ])
+    return {
+      emp: emp as EmployeeFlags | null,
+      atts: (atts || []) as AbsenceAttendance[],
+      rosterDates: (roster || []).map((r: any) => r.date as string),
+      fee: (fees || []).reduce((s: number, r: any) => s + Number(r.discipline_fee ?? 0), 0),
+    }
+  }
+
   async function fetchMyStatus(empId: string) {
-    const [{ data: summary }, { data: atts }] = await Promise.all([
+    const [{ data: summary }, src] = await Promise.all([
       supabase.rpc('get_my_salary_summary'),
-      supabase.from('attendances').select('date, status').eq('employee_id', empId).gte('date', period.start).lte('date', period.end),
+      fetchOwnAbsenceSource(empId),
     ])
     const s = (summary as SalarySummary[] | null)?.[0] ?? null
-    applyStatus(s, atts || [])
+    applyStatus(s, src)
   }
 
   // Dipakai admin saat Preview — get_my_salary_summary() RPC selalu mengembalikan data
   // pemanggil sendiri, jadi untuk lihat data Rahmat Saleh, admin (yang sudah punya akses baca
   // penuh lewat RLS owner/hr/finance) query tabel langsung, bukan lewat RPC.
   async function fetchPreviewStatus(empId: string) {
-    const [{ data: emp }, { data: sc }, { data: atts }] = await Promise.all([
+    const [{ data: emp }, { data: sc }, src] = await Promise.all([
       supabase.from('employees').select('overtime_applicable, employee_type, branches(name), departments(name)').eq('id', empId).single(),
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
-        .eq('employee_id', empId).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('attendances').select('date, status').eq('employee_id', empId).gte('date', period.start).lte('date', period.end),
+        .eq('employee_id', empId).lte('effective_date', period.end).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
+      fetchOwnAbsenceSource(empId),
     ])
     const base = Number(sc?.base_salary ?? 0), pos = Number(sc?.position_allowance ?? 0)
     const meal = Number(sc?.meal_allowance ?? 0), special = Number(sc?.special_allowance ?? 0)
@@ -202,30 +265,28 @@ export default function AturanPotonganPage() {
       branch_name: (emp as any)?.branches?.name ?? null, department_name: deptName,
       employee_type: (emp as any)?.employee_type ?? null,
     }
-    applyStatus(s, atts || [])
+    applyStatus(s, src)
   }
 
-  function applyStatus(s: SalarySummary | null, atts: { date: string; status: string }[]) {
+  function applyStatus(s: SalarySummary | null, src: Awaited<ReturnType<typeof fetchOwnAbsenceSource>>) {
     setMySummary(s)
-    const dailyRate = s?.daily_rate ?? 0
-    // Training tidak eskalasi -- flat 1x gaji harian per hari (kebijakan eksplisit).
-    const isTraining = s?.employee_type === 'training'
-    const izinDates = atts.filter(a => a.status === 'sick' || a.status === 'permission').map(a => a.date)
-    const alphaDates = atts.filter(a => a.status === 'absent').map(a => a.date)
-    setMyIzin(calcEscalatingDeduction(izinDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS))
-    setMyAlpha(calcEscalatingDeduction(alphaDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS))
-    setMySickDoc(atts.filter(a => a.status === 'sick_doc').length)
+    // employees_read_self cuma untuk role 'employee' -- role lain jatuh ke employee_type dari RPC.
+    const emp: EmployeeFlags = src.emp ?? { join_date: null, employee_type: s?.employee_type ?? null, flat_salary: null, libur_compensation_applicable: null }
+    setMyAbsence(absenceForPeriod(period, s?.daily_rate ?? 0, emp, src.atts, src.rosterDates, src.fee))
   }
 
   async function fetchAllEmployees() {
-    const [{ data: emps }, { data: scAll }, { data: attAll }] = await Promise.all([
+    const [{ data: emps }, { data: scAll }, { data: attAll }, { data: rosterAll }, { data: feeAll }] = await Promise.all([
       supabase.from('employees')
-        .select('id, full_name, employee_code, overtime_applicable, employee_type, branches(name), departments(name)')
+        .select('id, full_name, employee_code, overtime_applicable, employee_type, join_date, flat_salary, libur_compensation_applicable, branches(name), departments(name)')
         .eq('is_active', true).order('full_name'),
       supabase.from('salary_components')
         .select('employee_id, base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour, effective_date')
+        .lte('effective_date', period.end)
         .order('effective_date', { ascending: false }),
-      supabase.from('attendances').select('employee_id, date, status').gte('date', period.start).lte('date', period.end),
+      supabase.from('attendances').select('employee_id, date, status, admin_fee, notes').gte('date', period.start).lte('date', period.end),
+      supabase.from('employee_roster').select('employee_id, date').eq('is_day_off', true).gte('date', period.start).lte('date', period.end),
+      supabase.from('roster_pick_requests').select('employee_id, discipline_fee').eq('period_start', period.start).in('status', DISCIPLINE_FEE_STATUSES),
     ])
 
     const scMap = new Map<string, { base: number; pos: number; meal: number; special: number; ot: number }>()
@@ -238,19 +299,22 @@ export default function AturanPotonganPage() {
         })
       }
     })
-    const attByEmp = new Map<string, { date: string; status: string }[]>()
+    const attByEmp = new Map<string, AbsenceAttendance[]>()
     ;(attAll || []).forEach((a: any) => {
       if (!attByEmp.has(a.employee_id)) attByEmp.set(a.employee_id, [])
       attByEmp.get(a.employee_id)!.push(a)
     })
+    const rosterByEmp = new Map<string, string[]>()
+    ;(rosterAll || []).forEach((r: any) => {
+      if (!rosterByEmp.has(r.employee_id)) rosterByEmp.set(r.employee_id, [])
+      rosterByEmp.get(r.employee_id)!.push(r.date)
+    })
+    const feeByEmp = new Map<string, number>()
+    ;(feeAll || []).forEach((r: any) => feeByEmp.set(r.employee_id, (feeByEmp.get(r.employee_id) ?? 0) + Number(r.discipline_fee ?? 0)))
 
     const result: EmployeeRow[] = (emps || []).map((e: any) => {
       const sc = scMap.get(e.id) ?? { base: 0, pos: 0, meal: 0, special: 0, ot: 0 }
       const dailyRate = Math.round((sc.base + sc.pos + sc.meal + sc.special) / 26)
-      const atts = attByEmp.get(e.id) || []
-      const izinDates = atts.filter(a => a.status === 'sick' || a.status === 'permission').map(a => a.date)
-      const alphaDates = atts.filter(a => a.status === 'absent').map(a => a.date)
-      const sickDocDays = atts.filter(a => a.status === 'sick_doc').length
       const deptName = e.departments?.name ?? null
       const isTraining = e.employee_type === 'training'
       return {
@@ -259,9 +323,7 @@ export default function AturanPotonganPage() {
         base_salary: sc.base, position_allowance: sc.pos, meal_allowance: sc.meal, special_allowance: sc.special,
         dailyRate, overtimeRate: sc.ot, overtimeEligible: e.overtime_applicable !== false && deptName !== 'Team Gudang',
         isTraining,
-        izin: calcEscalatingDeduction(izinDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS),
-        alpha: calcEscalatingDeduction(alphaDates, dailyRate, isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS),
-        sickDocDays,
+        absence: absenceForPeriod(period, dailyRate, e, attByEmp.get(e.id) || [], rosterByEmp.get(e.id) || [], feeByEmp.get(e.id) ?? 0),
       }
     })
     setRows(result)
@@ -289,9 +351,7 @@ export default function AturanPotonganPage() {
               />
               <div className="pt-4 border-t border-slate-100 space-y-3">
                 <p className="text-sm font-semibold text-slate-800">Status Periode Ini</p>
-                <EscalatingStatus title="Izin/Sakit Tanpa Surat" result={myIzin} colorClass="text-orange-600" />
-                <EscalatingStatus title="Alpha" result={myAlpha} colorClass="text-red-600" />
-                {mySickDoc > 0 && <p className="text-sm text-blue-600">Sakit Dengan Surat: {mySickDoc} hari periode ini.</p>}
+                {myAbsence && <PeriodStatus absence={myAbsence} />}
               </div>
             </>
           ) : (
@@ -331,13 +391,13 @@ export default function AturanPotonganPage() {
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-slate-700">{r.dailyRate > 0 ? fmtRp(r.dailyRate) : <span className="text-red-400 text-xs italic">Belum diatur</span>}</td>
                         <td className="px-4 py-3 text-center">
-                          {r.izin.blocks.length > 0 ? <span className="px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 text-xs font-medium">{r.izin.blocks.length}×</span> : <span className="text-slate-300">—</span>}
+                          {r.absence.izinGroup.blocks.length > 0 ? <span className="px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 text-xs font-medium">{r.absence.izinGroup.blocks.length}×</span> : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {r.alpha.blocks.length > 0 ? <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">{r.alpha.blocks.length}×</span> : <span className="text-slate-300">—</span>}
+                          {r.absence.alphaGroup.blocks.length > 0 ? <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">{r.absence.alphaGroup.blocks.length}×</span> : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-red-500">
-                          {(r.izin.total + r.alpha.total) > 0 ? fmtRp(r.izin.total + r.alpha.total) : <span className="text-slate-300">—</span>}
+                          {r.absence.absentDed > 0 ? fmtRp(r.absence.absentDed) : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <button onClick={() => setDetailRow(r)} className="text-xs text-blue-600 hover:underline font-medium">Lihat Detail</button>
@@ -371,9 +431,7 @@ export default function AturanPotonganPage() {
               />
               <div className="pt-4 mt-4 border-t border-slate-100 space-y-3">
                 <p className="text-sm font-semibold text-slate-800">Status Periode Ini</p>
-                <EscalatingStatus title="Izin/Sakit Tanpa Surat" result={detailRow.izin} colorClass="text-orange-600" />
-                <EscalatingStatus title="Alpha" result={detailRow.alpha} colorClass="text-red-600" />
-                {detailRow.sickDocDays > 0 && <p className="text-sm text-blue-600">Sakit Dengan Surat: {detailRow.sickDocDays} hari periode ini.</p>}
+                <PeriodStatus absence={detailRow.absence} />
               </div>
             </div>
           </div>

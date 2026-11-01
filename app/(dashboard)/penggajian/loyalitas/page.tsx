@@ -136,7 +136,9 @@ export default function TabunganLoyalitasPage() {
     const duration = emp.loyalitas_duration_months
     const monthsElapsed = Math.max(0, elapsed)
     const monthsLeft = Math.max(0, duration - monthsElapsed)
-    const payoutDate = new Date(bal.start_year, bal.start_month - 1 + duration, 1)
+    // Cair di slip bulan tabungan ke-N (bulan mulai + N - 1), sama dengan buildSlipPreview di
+    // Penggajian Bulanan -- bukan sebulan setelahnya.
+    const payoutDate = new Date(bal.start_year, bal.start_month - 1 + duration - 1, 1)
     const payoutLabel = `${MONTHS[payoutDate.getMonth()]} ${payoutDate.getFullYear()}`
     const progressPct = Math.min(100, Math.round((monthsElapsed / duration) * 100))
     return { monthsElapsed, monthsLeft, payoutLabel, progressPct }

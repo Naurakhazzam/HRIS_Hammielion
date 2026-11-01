@@ -239,13 +239,15 @@ export default function PanduanKaryawanPage() {
               <li>Maksimal <strong>1 tanggal Sabtu/Minggu</strong> per periode boleh dipilih jadi hari libur — supaya weekend bisa bergantian dengan rekan kerja, tidak dikuasai orang yang sama terus.</li>
               <li>Per cabang, satu tanggal maksimal <strong>2 orang</strong> libur (cabang yang karyawannya cuma 2 orang atau kurang: maksimal <strong>1 orang</strong>). Driver &amp; karyawan gaji flat tidak dihitung. Tanggal yang sudah penuh tampil abu-abu di kalender — siapa cepat dia dapat.</li>
               <li>Aturan yang sama berlaku juga saat <em>Ganti Libur</em> dan saat menukar libur waktu absen masuk di hari libur. Kalau tanggal bisa diklik di kalender, berarti sudah sesuai aturan.</li>
-              <li>Kalau libur yang Anda ambil <strong>kurang dari 4 hari</strong> dalam satu periode, sisanya <strong>dibayar tunai</strong> sebagai kompensasi (dianggap Anda "menabung" hari libur jadi uang).</li>
-              <li>Kalau hari kosong (tidak ada absen sama sekali) <strong>lebih dari 4 hari</strong>, kelebihannya bukan lagi dianggap libur — masuk hitungan Izin/Alpha (lihat bagian 9 &amp; 10).</li>
+              <li>Jatah 4 hari itu dipakai berurutan oleh: <strong>(1)</strong> libur terjadwal yang sudah disetujui, <strong>(2)</strong> cuti, <strong>(3)</strong> izin/sakit (dari tanggal paling awal), <strong>(4)</strong> hari kosong tanpa absen. Izin/sakit yang masih masuk sisa jatah <strong>tidak dipotong</strong>. Alpha dan Izin Mendadak tidak pernah mengisi jatah.</li>
+              <li>Libur terjadwal yang sudah disetujui <strong>tidak pernah dipotong</strong> dan tidak pernah dianggap Alpha.</li>
+              <li>Kalau jatah yang terpakai <strong>kurang dari 4 hari</strong> dalam satu periode, sisanya <strong>dibayar tunai</strong> sebagai kompensasi (dianggap Anda "menabung" hari libur jadi uang).</li>
+              <li>Kalau jatah sudah habis, izin/sakit berikutnya kena potongan Izin/Sakit (bagian 9 &amp; 11), dan hari kosong berikutnya dihitung Alpha (bagian 10).</li>
               <li>Kalau ternyata hari itu terjadwal libur tapi Anda tetap masuk kerja, sistem akan minta Anda memilih <strong>tanggal pengganti</strong> untuk libur Anda — pilih lewat kalender yang muncul saat absen masuk.</li>
             </ul>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
               <p className="font-medium text-red-800">⚠️ Telat ajukan = denda disiplin Rp10.000/tanggal</p>
-              <p className="text-red-700 mt-0.5">Tanggal libur seharusnya diajukan <strong>sebelum</strong> periodenya mulai berjalan. Kalau Anda baru melengkapi/mengajukan setelah periodenya sudah berjalan, pengajuan tetap diterima — tapi kena denda disiplin <strong>Rp10.000 per tanggal</strong> (4 tanggal telat = Rp40.000), otomatis terpotong dari gaji periode itu. Sistem akan menampilkan peringatan ini sebelum tanggal terkirim.</p>
+              <p className="text-red-700 mt-0.5">Tanggal libur seharusnya diajukan <strong>sebelum</strong> periodenya mulai berjalan. Kalau Anda baru melengkapi/mengajukan setelah periodenya sudah berjalan, pengajuan tetap diterima — tapi kena denda disiplin <strong>Rp10.000 per tanggal</strong> (4 tanggal telat = Rp40.000), otomatis terpotong dari gaji periode itu begitu tanggalnya <strong>disetujui</strong> (pengajuan yang ditolak tidak didenda; libur yang sudah disetujui lalu dipindah tetap didenda). Sistem akan menampilkan peringatan ini sebelum tanggal terkirim.</p>
             </div>
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
               <p className="font-medium text-emerald-800">✅ Hari libur otomatis tercatat sendiri</p>
@@ -450,7 +452,8 @@ export default function PanduanKaryawanPage() {
             <li>✔️ Simpan surat dokter kalau sakit lebih dari 2 hari berturut — wajib mulai hari ke-3, dan potongannya jauh lebih ringan dibanding tanpa surat.</li>
             <li>🛑 Jangan biarkan Sakit/Izin/Alpha tidak jelas memanjang lebih dari 7 hari berturut — akun Anda bisa <strong>otomatis dinonaktifkan</strong> (bagian 7).</li>
             <li>✔️ Manfaatkan jatah 4 hari libur tiap periode — kalau tidak dipakai penuh, sisanya tetap dibayar tunai, jadi tidak rugi.</li>
-            <li>✔️ Satu tanggal maksimal 3 orang libur & weekend cuma boleh 1 per periode — pilih tanggal dari awal supaya kebagian tanggal yang diinginkan.</li>
+            <li>✔️ Per cabang satu tanggal maksimal 2 orang libur (1 orang untuk cabang kecil) & weekend cuma boleh 1 per periode — pilih tanggal dari awal supaya kebagian tanggal yang diinginkan.</li>
+            <li>ℹ️ Telat dan tidak hadir juga menurunkan nilai KPI <em>Tepat Waktu</em> &amp; <em>Kehadiran</em> (yang menentukan Bonus KPI). Ini terpisah dari potongan gaji: potongan gaji mengganti waktu kerja yang hilang, KPI menilai kedisiplinan Anda.</li>
             <li>✔️ Masih bingung soal gaji atau absen Anda sendiri? Klik <DiSiniLink /> untuk lihat angka asli Anda, atau tanya HR langsung.</li>
           </ul>
         </section>

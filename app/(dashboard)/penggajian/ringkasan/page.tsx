@@ -2,7 +2,8 @@
 
 import { useState, useEffect, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS } from '@/lib/escalatingDeduction'
+import { todayLocalStr } from '@/lib/date'
+import { computeAbsenceForPeriod, toAbsenceBreakdown, type AbsenceBreakdown } from '@/lib/payrollAbsence'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ type PayrollRow = {
   kasbon_deduction: number
   loyalitas_deduction: number
   absent_deduction: number
+  absent_breakdown: AbsenceBreakdown | null
   inventory_loss_deduction: number
   cashier_loss_deduction: number
   gross_total: number
@@ -58,6 +60,8 @@ type SummaryRow = {
   sickDeduction: number
   izinDeduction: number
   alphaDeduction: number
+  // Izin Mendadak + denda Lupa Absen + denda disiplin Ajukan Libur.
+  otherAbsentDeduction: number
   absentDeductionRecorded: number
   absentMismatch: boolean
   totalLateMinutes: number
@@ -148,7 +152,7 @@ export default function RingkasanOwnerPage() {
         base_salary, position_allowance, meal_allowance, special_allowance,
         overtime_total, kpi_bonus, conditional_bonus, extra_bonus_total,
         libur_compensation_days, libur_compensation_amount,
-        late_deduction, kasbon_deduction, loyalitas_deduction, absent_deduction,
+        late_deduction, kasbon_deduction, loyalitas_deduction, absent_deduction, absent_breakdown,
         inventory_loss_deduction, cashier_loss_deduction,
         gross_total, net_total, status,
         employee:employees!payrolls_employee_id_fkey(
@@ -191,57 +195,26 @@ export default function RingkasanOwnerPage() {
       const emp = p.employee
       const { data: atts } = await supabase
         .from('attendances')
-        .select('date, status, late_minutes')
+        .select('date, late_minutes')
         .eq('employee_id', p.employee_id)
         .gte('date', firstDay).lte('date', lastDay)
-
       const joinDateVal = emp?.join_date ?? null
-      const validAtts = (atts || []).filter((a: any) => !joinDateVal || a.date >= joinDateVal)
-      const recordedDates = new Set(validAtts.map((a: any) => a.date))
-      // Izin Duka/Periksa + Sakit tanpa surat digabung 1 kelompok (eskalasi per kejadian).
-      // Cuti Tahunan ('leave') tidak lagi ikut kuota/potongan sama sekali.
-      const izinGroupDates = validAtts.filter((a: any) => a.status === 'sick' || a.status === 'permission').map((a: any) => a.date as string)
-      const explicitAlphaDates = validAtts.filter((a: any) => a.status === 'absent').map((a: any) => a.date as string)
-      const sickDocDays = validAtts.filter((a: any) => a.status === 'sick_doc').length
-      const totalLateMinutes = validAtts.reduce((s: number, a: any) => s + Number(a.late_minutes || 0), 0)
+      const totalLateMinutes = (atts || []).filter((a: any) => !joinDateVal || a.date >= joinDateVal).reduce((s: number, a: any) => s + Number(a.late_minutes || 0), 0)
 
-      const allDates: string[] = []
-      const cur = new Date(firstDay + 'T12:00:00')
-      const endD = new Date(lastDay + 'T12:00:00')
-      while (cur <= endD) { allDates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`); cur.setDate(cur.getDate()+1) }
-      const totalPeriodDays = allDates.length
-      const emptyDateList = allDates.filter(d => (!joinDateVal || d >= joinDateVal) && !recordedDates.has(d))
-
-      const isTraining = emp?.employee_type === 'training'
-      let proRataFactor = 1
-      if (isTraining && joinDateVal) {
-        if (joinDateVal > lastDay) proRataFactor = 0
-        else if (joinDateVal > firstDay) {
-          const joinD = new Date(joinDateVal + 'T12:00:00')
-          const activeDays = Math.round((endD.getTime() - joinD.getTime()) / 86400000) + 1
-          proRataFactor = activeDays / totalPeriodDays
-        }
-      }
-      const kuotaLibur = Math.round(4 * proRataFactor)
-      const freeEmptyUsed = Math.min(emptyDateList.length, kuotaLibur)
-      const excessEmptyDates = emptyDateList.slice(freeEmptyUsed)
-
-      // Rincian potongan tidak hadir — dihitung langsung dari data absensi asli (bukan angka
-      // gabungan di slip), supaya Sakit/Izin/Alpha selalu konsisten dengan yang tertulis di
-      // Catatan. Sama persis dengan rumus di Slip Gaji Bulanan (izin & alpha per-kejadian).
       const gajiAwal = Number(p.base_salary) + Number(p.position_allowance) + Number(p.meal_allowance) + Number(p.special_allowance ?? 0)
-      const dailyRate = Math.round(gajiAwal / 26)
-      const izinGroup = calcEscalatingDeduction(izinGroupDates, dailyRate, IZIN_GROUP_MULTIPLIERS)
-      const alphaGroup = calcEscalatingDeduction([...explicitAlphaDates, ...excessEmptyDates], dailyRate, ALPHA_GROUP_MULTIPLIERS)
-      const sickDays = sickDocDays
-      const izinDays = izinGroupDates.length
-      const alphaDays = alphaGroup.blocks.reduce((s, b) => s + b.dates.length, 0)
-      const sick1Free  = Math.min(sickDays, 1)
-      const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
-      const sick4Full  = Math.max(0, sickDays - 3)
-      const sickDeduction = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
-      const izinDeduction = izinGroup.total
-      const alphaDeduction = alphaGroup.total
+
+      // Rincian potongan tidak hadir: snapshot slip (payrolls.absent_breakdown) = persis yang
+      // dipotong saat slip dibuat. Slip lama tanpa snapshot dihitung ulang dengan rumus yang sama
+      // (lib/payrollAbsence.ts) dari absensi SAAT INI -- karena itu bisa beda dari angka tercatat.
+      const b = p.absent_breakdown
+        ?? toAbsenceBreakdown(await computeAbsenceForPeriod(supabase, p.employee_id, filterMonth, filterYear, todayLocalStr()))
+      const sickDays = b.sickDays
+      const izinDays = b.izinGroup.blocks.reduce((s, x) => s + x.dates.length, 0)
+      const alphaDays = b.alphaGroup.blocks.reduce((s, x) => s + x.dates.length, 0)
+      const sickDeduction = b.sickDed
+      const izinDeduction = b.izinGroup.total
+      const alphaDeduction = b.alphaGroup.total
+      const otherAbsentDeduction = b.suddenPermissionGroup.total + b.adminFeeTotal + b.liburDisciplineFeeTotal
 
       const invLossTotal = lossTotalByBranch[emp?.branch_id || ''] || 0
       const cashierLossTotal = cashierTotalByBranch[emp?.branch_id || ''] || 0
@@ -249,13 +222,11 @@ export default function RingkasanOwnerPage() {
       const overtimeTotal = Number(p.overtime_total || 0)
       const bonusTotal = Number(p.kpi_bonus||0) + Number(p.conditional_bonus||0) + Number(p.extra_bonus_total||0) + Number(p.libur_compensation_amount||0)
 
-      // Rincian Sakit/Izin/Alpha di atas direkonstruksi dari data absensi SAAT INI, bukan dibaca
-      // dari slip — kalau absensi periode ini diedit setelah gaji difinalisasi, rekonstruksinya
-      // bisa beda dari absent_deduction yang benar-benar dipakai waktu itu (dan yang beneran
-      // dipotong dari gaji). Total resmi tetap pakai absent_deduction tercatat, supaya Total
-      // Potongan di laporan ini selalu rekonsil dengan gross_total - net_total yang sebenarnya.
+      // Total resmi tetap pakai absent_deduction tercatat, supaya Total Potongan di laporan ini
+      // selalu rekonsil dengan gross_total - net_total. Selisih cuma mungkin di slip lama tanpa
+      // snapshot yang absensinya diedit setelah difinalisasi.
       const absentDeductionRecorded = Number(p.absent_deduction || 0)
-      const absentMismatch = Math.round(sickDeduction + izinDeduction + alphaDeduction) !== Math.round(absentDeductionRecorded)
+      const absentMismatch = Math.round(sickDeduction + izinDeduction + alphaDeduction + otherAbsentDeduction) !== Math.round(absentDeductionRecorded)
 
       return {
         payrollId: p.id, employeeId: p.employee_id,
@@ -264,7 +235,7 @@ export default function RingkasanOwnerPage() {
         gajiAwal,
         sickDays, izinDays, alphaDays,
         kurangLiburDays: Number(p.libur_compensation_days || 0), kurangLiburAmount: Number(p.libur_compensation_amount || 0),
-        sickDeduction, izinDeduction, alphaDeduction, absentDeductionRecorded, absentMismatch,
+        sickDeduction, izinDeduction, alphaDeduction, otherAbsentDeduction, absentDeductionRecorded, absentMismatch,
         totalLateMinutes, lateDeduction: Number(p.late_deduction || 0),
         kasbonDeduction: Number(p.kasbon_deduction || 0), loyalitasDeduction: Number(p.loyalitas_deduction || 0),
         invLossDeduction: Number(p.inventory_loss_deduction || 0),
@@ -369,7 +340,7 @@ export default function RingkasanOwnerPage() {
               </div>
               {notes.length > 0 && <p className="text-xs text-amber-700 mt-1">{notes.join(' · ')}</p>}
               {r.absentMismatch && (
-                <p className="text-xs text-red-600 mt-1">⚠ Absensi periode ini berubah setelah gaji difinalisasi — rincian Sakit/Izin/Alpha di bawah cuma rekonstruksi terbaru. Potongan tidak hadir yang benar-benar dipakai: {fmtRp(r.absentDeductionRecorded)}.</p>
+                <p className="text-xs text-red-600 mt-1">⚠ Absensi periode ini berubah setelah gaji difinalisasi — slip lama ini belum punya snapshot, rincian Sakit/Izin/Alpha di bawah cuma rekonstruksi terbaru. Potongan tidak hadir yang benar-benar dipakai: {fmtRp(r.absentDeductionRecorded)}.</p>
               )}
               <div className="grid grid-cols-2 gap-x-8 mt-2 text-xs text-slate-600">
                 <div>
@@ -378,6 +349,7 @@ export default function RingkasanOwnerPage() {
                   {r.sickDeduction > 0 && <div className="flex justify-between"><span>Sakit+Surat ({r.sickDays} hari)</span><span>-{fmtRp(r.sickDeduction)}</span></div>}
                   {r.izinDeduction > 0 && <div className="flex justify-between"><span>Izin/Sakit ({r.izinDays} hari)</span><span>-{fmtRp(r.izinDeduction)}</span></div>}
                   {r.alphaDeduction > 0 && <div className="flex justify-between"><span>Alpha ({r.alphaDays} hari)</span><span>-{fmtRp(r.alphaDeduction)}</span></div>}
+                  {r.otherAbsentDeduction > 0 && <div className="flex justify-between"><span>Izin Mendadak &amp; Denda</span><span>-{fmtRp(r.otherAbsentDeduction)}</span></div>}
                   {r.kasbonDeduction > 0 && <div className="flex justify-between"><span>Kasbon</span><span>-{fmtRp(r.kasbonDeduction)}</span></div>}
                   {r.loyalitasDeduction > 0 && <div className="flex justify-between"><span>Tabungan Loyalitas</span><span>-{fmtRp(r.loyalitasDeduction)}</span></div>}
                   {r.invLossDeduction > 0 && <div className="flex justify-between"><span>Kehilangan Barang (~{r.invLossPercent}% dr {fmtRp(r.invLossTotal)})</span><span>-{fmtRp(r.invLossDeduction)}</span></div>}
@@ -460,7 +432,7 @@ export default function RingkasanOwnerPage() {
                         <tr className="bg-slate-50/60">
                           <td colSpan={7} className="px-6 py-4">
                             {r.absentMismatch && (
-                              <p className="text-xs text-red-600 mb-3">⚠ Absensi periode ini berubah setelah gaji difinalisasi — rincian Sakit/Izin/Alpha di bawah cuma rekonstruksi terbaru. Potongan tidak hadir yang benar-benar dipakai: {fmtRp(r.absentDeductionRecorded)}.</p>
+                              <p className="text-xs text-red-600 mb-3">⚠ Absensi periode ini berubah setelah gaji difinalisasi — slip lama ini belum punya snapshot, rincian Sakit/Izin/Alpha di bawah cuma rekonstruksi terbaru. Potongan tidak hadir yang benar-benar dipakai: {fmtRp(r.absentDeductionRecorded)}.</p>
                             )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
                               <div>
@@ -470,6 +442,7 @@ export default function RingkasanOwnerPage() {
                                   {r.sickDeduction > 0 && <div className="flex justify-between"><span>Sakit+Surat ({r.sickDays} hari)</span><span className="text-red-500">-{fmtRp(r.sickDeduction)}</span></div>}
                                   {r.izinDeduction > 0 && <div className="flex justify-between"><span>Izin/Sakit ({r.izinDays} hari)</span><span className="text-red-500">-{fmtRp(r.izinDeduction)}</span></div>}
                                   {r.alphaDeduction > 0 && <div className="flex justify-between"><span>Alpha ({r.alphaDays} hari)</span><span className="text-red-500">-{fmtRp(r.alphaDeduction)}</span></div>}
+                                  {r.otherAbsentDeduction > 0 && <div className="flex justify-between"><span>Izin Mendadak &amp; Denda</span><span className="text-red-500">-{fmtRp(r.otherAbsentDeduction)}</span></div>}
                                   {r.kasbonDeduction > 0 && <div className="flex justify-between"><span>Kasbon</span><span className="text-red-500">-{fmtRp(r.kasbonDeduction)}</span></div>}
                                   {r.loyalitasDeduction > 0 && <div className="flex justify-between"><span>Tabungan Loyalitas</span><span className="text-red-500">-{fmtRp(r.loyalitasDeduction)}</span></div>}
                                   {r.invLossDeduction > 0 && <div className="flex justify-between"><span>Kehilangan Barang (~{r.invLossPercent}% dari {fmtRp(r.invLossTotal)})</span><span className="text-red-500">-{fmtRp(r.invLossDeduction)}</span></div>}
