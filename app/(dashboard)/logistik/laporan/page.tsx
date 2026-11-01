@@ -18,6 +18,8 @@ type Plan = {
   current_target_store_id: string | null
   vehicle_id: string
   route_id: string
+  driver_id: string
+  helper_id: string | null
   delivery_trip_id: string | null
   // Tutup Paksa Trip oleh kantor (migrasi 107).
   force_closed_by_name: string | null
@@ -144,6 +146,37 @@ type RouteEdit = {
   rates: { route_id: string; driver_rate_with_helper: number; driver_rate_without_helper: number; helper_rate: number }[]
 }
 
+// Jejak Koreksi Mobil/Driver/Kenek (migrasi 110). Upah = total trip utama + belanja.
+type CrewCorrection = {
+  id: string
+  plan_id: string
+  old_driver_earning: number | null
+  new_driver_earning: number | null
+  old_helper_earning: number | null
+  new_helper_earning: number | null
+  reason: string
+  corrected_by_name: string | null
+  corrected_at: string
+  old_vehicle: { name: string } | null
+  new_vehicle: { name: string } | null
+  old_driver: { full_name: string } | null
+  new_driver: { full_name: string } | null
+  old_helper: { full_name: string } | null
+  new_helper: { full_name: string } | null
+}
+
+type CrewEdit = {
+  plan: Plan
+  vehicleId: string
+  driverId: string
+  helperId: string
+  reason: string
+  // Semua baris upah plan ini (trip utama + belanja selesai); kosong = trip belum selesai.
+  trips: { route_id: string; has_helper: boolean; driver_earning: number; helper_earning: number; payment_status: string; helper_payment_status: string | null }[]
+  // Tarif semua mobil untuk rute-rute di atas + rute rencana, supaya pratinjau ikut mobil yang dipilih.
+  rates: { vehicle_id: string; route_id: string; driver_rate_with_helper: number; driver_rate_without_helper: number; helper_rate: number }[]
+}
+
 type ReturnItem = {
   id: string
   return_id: string
@@ -238,6 +271,11 @@ export default function LaporanPengirimanPage() {
   const [supplierSaving, setSupplierSaving] = useState(false)
   const [forceClose, setForceClose] = useState<ForceClose | null>(null)
   const [forceSaving, setForceSaving] = useState(false)
+  const [crewCorrByPlan, setCrewCorrByPlan] = useState<Record<string, CrewCorrection[]>>({})
+  const [crewEdit, setCrewEdit] = useState<CrewEdit | null>(null)
+  const [crewSaving, setCrewSaving] = useState(false)
+  const [drivers, setDrivers] = useState<{ id: string; full_name: string }[]>([])
+  const [helpers, setHelpers] = useState<{ id: string; full_name: string }[]>([])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -247,7 +285,7 @@ export default function LaporanPengirimanPage() {
       .from('logistics_delivery_plans')
       .select(`
         id, plan_date, status, box_photo_url, garage_photo_url, needs_refuel, refuel_amount, current_target_store_id,
-        vehicle_id, route_id, delivery_trip_id,
+        vehicle_id, route_id, driver_id, helper_id, delivery_trip_id,
         force_closed_by_name, force_closed_at, force_close_reason, force_close_summary,
         vehicles(name, plate_number),
         delivery_routes(name),
@@ -358,6 +396,21 @@ export default function LaporanPengirimanPage() {
       const groupedSupCorr: Record<string, SupplierCorrection[]> = {}
       ;((supCorrData as unknown as SupplierCorrection[]) || []).forEach(c => { (groupedSupCorr[c.plan_id] ??= []).push(c) })
       setSupplierCorrByPlan(groupedSupCorr)
+
+      // Tabel migrasi 110 -- sama, kalau belum dijalankan cukup dianggap kosong.
+      const { data: crewCorrData } = await supabase.from('logistics_crew_corrections')
+        .select(`id, plan_id, old_driver_earning, new_driver_earning, old_helper_earning, new_helper_earning,
+          reason, corrected_by_name, corrected_at,
+          old_vehicle:vehicles!logistics_crew_corrections_old_vehicle_id_fkey(name),
+          new_vehicle:vehicles!logistics_crew_corrections_new_vehicle_id_fkey(name),
+          old_driver:employees!logistics_crew_corrections_old_driver_id_fkey(full_name),
+          new_driver:employees!logistics_crew_corrections_new_driver_id_fkey(full_name),
+          old_helper:employees!logistics_crew_corrections_old_helper_id_fkey(full_name),
+          new_helper:employees!logistics_crew_corrections_new_helper_id_fkey(full_name)`)
+        .in('plan_id', list.map(p => p.id)).order('corrected_at')
+      const groupedCrewCorr: Record<string, CrewCorrection[]> = {}
+      ;((crewCorrData as unknown as CrewCorrection[]) || []).forEach(c => { (groupedCrewCorr[c.plan_id] ??= []).push(c) })
+      setCrewCorrByPlan(groupedCrewCorr)
     } else {
       setStoresByPlan({})
       setSupplierTasksByPlan({})
@@ -365,6 +418,7 @@ export default function LaporanPengirimanPage() {
       setReturnItemsByReturn({})
       setCorrectionsByPlan({})
       setSupplierCorrByPlan({})
+      setCrewCorrByPlan({})
     }
     setLoading(false)
   }, [datePreset, filterMonth, supabase])
@@ -400,6 +454,29 @@ export default function LaporanPengirimanPage() {
       .then(({ data }) => setRoutes(data || []))
     supabase.from('delivery_routes').select('id, name').eq('is_active', true).ilike('name', 'Belanja%').order('name')
       .then(({ data }) => setBelanjaRoutes(data || []))
+
+    // Sama dengan dropdown Driver/Kenek di /logistik/rencana: driver = employee_type driver atau
+    // can_drive; kenek = karyawan Team Gudang (fallback semua permanent) + driver yang can_help.
+    async function loadCrew() {
+      const [{ data: drvData }, { data: allPerm }, { data: helperDrivers }] = await Promise.all([
+        supabase.from('employees').select('id, full_name')
+          .or('employee_type.eq.driver,can_drive.eq.true').eq('is_active', true).order('full_name'),
+        supabase.from('employees').select('id, full_name, departments(name)')
+          .eq('employee_type', 'permanent').eq('is_active', true).order('full_name'),
+        supabase.from('employees').select('id, full_name')
+          .eq('employee_type', 'driver').eq('can_help', true).eq('is_active', true).order('full_name'),
+      ])
+      setDrivers(drvData || [])
+      type PermRow = { id: string; full_name: string; departments: { name: string } | { name: string }[] | null }
+      const perm = (allPerm as unknown as PermRow[]) || []
+      const gudang = perm.filter(pw => {
+        const dept = Array.isArray(pw.departments) ? pw.departments[0] : pw.departments
+        return dept?.name === 'Team Gudang'
+      })
+      const base = (gudang.length > 0 ? gudang : perm).map(pw => ({ id: pw.id, full_name: pw.full_name }))
+      setHelpers([...base, ...(helperDrivers || [])])
+    }
+    loadCrew()
   }, [canVerify, supabase])
 
   function toggleExpand(id: string) {
@@ -500,6 +577,39 @@ export default function LaporanPengirimanPage() {
       ? `Trip ditutup paksa. Upah driver ${fmtRp(Number(row?.driver_earning ?? 0))}${forceClose.plan.helper ? `, kenek ${fmtRp(Number(row?.helper_earning ?? 0))}` : ''} tercatat.`
       : 'Trip ditutup paksa tanpa upah ritase.')
     setForceClose(null)
+    await fetchData()
+  }
+
+  async function openCrewEdit(p: Plan) {
+    const { data: taskRows } = await supabase.from('logistics_plan_supplier_tasks')
+      .select('delivery_trip_id').eq('plan_id', p.id).not('delivery_trip_id', 'is', null)
+    const tripIds = [p.delivery_trip_id, ...((taskRows || []).map(t => t.delivery_trip_id as string))].filter(Boolean) as string[]
+    const { data: trips } = tripIds.length > 0
+      ? await supabase.from('delivery_trips').select('route_id, has_helper, driver_earning, helper_earning, payment_status, helper_payment_status').in('id', tripIds)
+      : { data: [] }
+    const routeIds = [...new Set([p.route_id, ...((trips || []).map(t => t.route_id as string))])]
+    const { data: rates } = await supabase.from('driver_rate_configs')
+      .select('vehicle_id, route_id, driver_rate_with_helper, driver_rate_without_helper, helper_rate').in('route_id', routeIds)
+    setCrewEdit({
+      plan: p, vehicleId: p.vehicle_id, driverId: p.driver_id, helperId: p.helper_id ?? '', reason: '',
+      trips: (trips as CrewEdit['trips']) || [], rates: (rates as CrewEdit['rates']) || [],
+    })
+  }
+
+  async function submitCrewEdit() {
+    if (!crewEdit) return
+    setCrewSaving(true)
+    const { data, error } = await supabase.rpc('office_change_plan_crew', {
+      p_plan_id: crewEdit.plan.id, p_vehicle_id: crewEdit.vehicleId, p_driver_id: crewEdit.driverId,
+      p_helper_id: crewEdit.helperId || null, p_reason: crewEdit.reason.trim(),
+    })
+    setCrewSaving(false)
+    if (error) { showMessage('error', 'Gagal koreksi mobil/driver/kenek: ' + error.message); return }
+    const row = Array.isArray(data) ? data[0] : data
+    showMessage('success', row?.new_driver_earning != null
+      ? `Koreksi tersimpan. Upah driver jadi ${fmtRp(Number(row.new_driver_earning))}${crewEdit.helperId ? `, kenek ${fmtRp(Number(row.new_helper_earning ?? 0))}` : ''} (${row.trips_updated} ritase).`
+      : 'Koreksi tersimpan. Upah dihitung saat trip selesai.')
+    setCrewEdit(null)
     await fetchData()
   }
 
@@ -755,6 +865,9 @@ export default function LaporanPengirimanPage() {
                         {(correctionsByPlan[p.id] ?? []).length > 0 && (
                           <span className="inline-block mt-0.5 text-[11px] px-2 py-0.5 rounded bg-rose-100 text-rose-700 font-semibold">⚠️ Rute dikoreksi kantor</span>
                         )}
+                        {(crewCorrByPlan[p.id] ?? []).length > 0 && (
+                          <span className="inline-block mt-0.5 ml-1 text-[11px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-semibold">✏️ Mobil/Driver dikoreksi kantor</span>
+                        )}
                         {p.force_closed_at && (
                           <span className="inline-block mt-0.5 ml-1 text-[11px] px-2 py-0.5 rounded bg-slate-800 text-white font-semibold">⛔ Ditutup paksa kantor</span>
                         )}
@@ -778,7 +891,7 @@ export default function LaporanPengirimanPage() {
                     </button>
                     {isOpen && (
                       <div className="border-t border-slate-100 divide-y divide-slate-50">
-                        {(canVerify || (correctionsByPlan[p.id] ?? []).length > 0 || (supplierCorrByPlan[p.id] ?? []).length > 0 || p.force_closed_at) && (
+                        {(canVerify || (correctionsByPlan[p.id] ?? []).length > 0 || (supplierCorrByPlan[p.id] ?? []).length > 0 || (crewCorrByPlan[p.id] ?? []).length > 0 || p.force_closed_at) && (
                           <div className="px-4 py-2.5">
                             {p.force_closed_at && (
                               <div className="text-xs text-slate-800 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 mb-2">
@@ -805,6 +918,28 @@ export default function LaporanPengirimanPage() {
                                 </p>
                               </div>
                             ))}
+                            {(crewCorrByPlan[p.id] ?? []).map(c => {
+                              const changes = [
+                                c.old_vehicle?.name !== c.new_vehicle?.name && `Mobil ${c.old_vehicle?.name ?? '-'} → ${c.new_vehicle?.name ?? '-'}`,
+                                c.old_driver?.full_name !== c.new_driver?.full_name && `Driver ${c.old_driver?.full_name ?? '-'} → ${c.new_driver?.full_name ?? '-'}`,
+                                c.old_helper?.full_name !== c.new_helper?.full_name && `Kenek ${c.old_helper?.full_name ?? 'tanpa kenek'} → ${c.new_helper?.full_name ?? 'tanpa kenek'}`,
+                              ].filter(Boolean)
+                              return (
+                                <div key={c.id} className="text-xs text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 mb-2">
+                                  <p className="font-semibold">✏️ Koreksi: {changes.join(' · ')}</p>
+                                  {c.new_driver_earning != null && (
+                                    <p className="mt-0.5">
+                                      Upah driver {fmtRp(Number(c.old_driver_earning ?? 0))} → {fmtRp(Number(c.new_driver_earning))}
+                                      {(Number(c.old_helper_earning ?? 0) > 0 || Number(c.new_helper_earning ?? 0) > 0) && <> · kenek {fmtRp(Number(c.old_helper_earning ?? 0))} → {fmtRp(Number(c.new_helper_earning ?? 0))}</>}
+                                    </p>
+                                  )}
+                                  <p className="mt-0.5">Alasan: {c.reason}</p>
+                                  <p className="mt-0.5 text-indigo-600">
+                                    oleh {c.corrected_by_name ?? '-'} · {new Date(c.corrected_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                  </p>
+                                </div>
+                              )
+                            })}
                             {(supplierCorrByPlan[p.id] ?? []).map(c => (
                               <div key={c.id} className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
                                 <p className="font-semibold">🛒 {c.action === 'tambah' ? 'Susulan belanja' : 'Belanja dihapus'}: {c.delivery_routes?.name ?? '-'}</p>
@@ -825,6 +960,10 @@ export default function LaporanPengirimanPage() {
                                 <button type="button" onClick={() => openRouteEdit(p)}
                                   className="text-xs px-2.5 py-1 border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg font-medium transition">
                                   ⚠️ Edit Darurat Rute
+                                </button>
+                                <button type="button" onClick={() => openCrewEdit(p)}
+                                  className="text-xs px-2.5 py-1 border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium transition">
+                                  ✏️ Koreksi Mobil/Driver/Kenek
                                 </button>
                                 {/* Trip Selesai sudah hilang dari HP driver -- belanja yang lupa dilaporkan
                                     cuma bisa disusulkan kantor dari sini (trip yang masih jalan: lewat Rencana). */}
@@ -1371,6 +1510,106 @@ export default function LaporanPengirimanPage() {
                 <button onClick={submitForceClose} disabled={!canSubmit}
                   className="px-3 py-1.5 text-sm font-medium bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition disabled:opacity-50">
                   {forceSaving ? 'Menyimpan...' : 'Tutup Paksa'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {crewEdit && (() => {
+        const { plan, trips } = crewEdit
+        const hasHelper = !!crewEdit.helperId
+        // Server menghitung ulang upah hanya kalau mobil berubah atau kenek ditambah/dihapus.
+        const recalc = crewEdit.vehicleId !== plan.vehicle_id || hasHelper !== !!plan.helper_id
+        const rateFor = (routeId: string) => crewEdit.rates.find(r => r.vehicle_id === crewEdit.vehicleId && r.route_id === routeId)
+        const missingRate = (crewEdit.vehicleId !== plan.vehicle_id && !rateFor(plan.route_id))
+          || (recalc && trips.some(t => !rateFor(t.route_id)))
+        const oldDriver = trips.reduce((s, t) => s + Number(t.driver_earning), 0)
+        const oldHelper = trips.reduce((s, t) => s + Number(t.helper_earning), 0)
+        const newDriver = recalc
+          ? trips.reduce((s, t) => { const r = rateFor(t.route_id); return s + Number(r ? (hasHelper ? r.driver_rate_with_helper : r.driver_rate_without_helper) : 0) }, 0)
+          : oldDriver
+        const newHelper = recalc
+          ? trips.reduce((s, t) => { const r = rateFor(t.route_id); return s + Number(r && hasHelper ? r.helper_rate : 0) }, 0)
+          : oldHelper
+        const paid = trips.some(t => t.payment_status === 'paid' || t.helper_payment_status === 'paid')
+        const unchanged = crewEdit.vehicleId === plan.vehicle_id && crewEdit.driverId === plan.driver_id && crewEdit.helperId === (plan.helper_id ?? '')
+        const sameCrew = !!crewEdit.helperId && crewEdit.helperId === crewEdit.driverId
+        const canSubmit = !!crewEdit.vehicleId && !!crewEdit.driverId && !unchanged && !sameCrew && !missingRate && !paid
+          && crewEdit.reason.trim().length >= 5 && !crewSaving
+        // Orang yang tercatat sekarang tetap muncul walau sudah tidak aktif / di luar daftar.
+        const driverOpts = drivers.some(d => d.id === plan.driver_id) ? drivers : [{ id: plan.driver_id, full_name: plan.driver?.full_name ?? '-' }, ...drivers]
+        const helperOpts = !plan.helper_id || helpers.some(h => h.id === plan.helper_id) ? helpers : [{ id: plan.helper_id, full_name: plan.helper?.full_name ?? '-' }, ...helpers]
+        return (
+          <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" onClick={() => !crewSaving && setCrewEdit(null)}>
+            <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                <div>
+                  <h2 className="text-base font-bold text-slate-800">✏️ Koreksi Mobil/Driver/Kenek</h2>
+                  <p className="text-xs text-slate-500">
+                    {new Date(plan.plan_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} · {plan.vehicles?.name} — {plan.delivery_routes?.name} · {plan.driver?.full_name}{plan.helper?.full_name ? ` / ${plan.helper.full_name}` : ''}
+                  </p>
+                </div>
+                <button onClick={() => setCrewEdit(null)} aria-label="Tutup" className="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
+              </div>
+              <div className="px-5 py-4 space-y-3 text-sm">
+                <p className="text-xs text-slate-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Untuk salah pilih mobil, driver, atau kenek. Upah ritase yang sudah tercatat (trip & belanja) ikut pindah ke orang yang benar; kalau mobil berubah atau kenek ditambah/dihapus, upah dihitung ulang dari tarif. Perubahan tercatat beserta alasannya.
+                </p>
+                {paid && (
+                  <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    Upah trip ini sudah dibayar, jadi tidak bisa dikoreksi dari sini. Koreksi lewat Penggajian Driver.
+                  </p>
+                )}
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Mobil</label>
+                  <select value={crewEdit.vehicleId} onChange={e => setCrewEdit({ ...crewEdit, vehicleId: e.target.value })} disabled={paid}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
+                    {vehicles.map(v => <option key={v.id} value={v.id}>{v.name}{v.plate_number ? ` (${v.plate_number})` : ''}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Driver</label>
+                  <select value={crewEdit.driverId} onChange={e => setCrewEdit({ ...crewEdit, driverId: e.target.value })} disabled={paid}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
+                    {driverOpts.map(d => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Kenek</label>
+                  <select value={crewEdit.helperId} onChange={e => setCrewEdit({ ...crewEdit, helperId: e.target.value })} disabled={paid}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
+                    <option value="">— Tanpa kenek —</option>
+                    {helperOpts.filter(h => h.id !== crewEdit.driverId).map(h => <option key={h.id} value={h.id}>{h.full_name}</option>)}
+                  </select>
+                  {sameCrew && <p className="text-xs text-red-600 mt-1">Driver dan Kenek tidak boleh orang yang sama.</p>}
+                </div>
+                {missingRate && (
+                  <p className="text-xs text-red-600">Tarif mobil ini untuk rute trip/belanja ini belum disetup di Penggajian › Tarif &amp; Mobil Driver.</p>
+                )}
+                {!unchanged && !missingRate && (
+                  trips.length > 0 ? (
+                    <p className="text-xs text-slate-700">
+                      Upah {trips.length > 1 ? `(${trips.length} ritase) ` : ''}driver {fmtRp(oldDriver)} → <b>{fmtRp(newDriver)}</b>
+                      {(oldHelper > 0 || newHelper > 0) && <> · kenek {fmtRp(oldHelper)} → <b>{fmtRp(newHelper)}</b></>}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-500">Trip belum selesai — upah belum tercatat, nanti dihitung dari data yang baru.</p>
+                  )
+                )}
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Alasan (wajib)</label>
+                  <textarea value={crewEdit.reason} onChange={e => setCrewEdit({ ...crewEdit, reason: e.target.value })} rows={3} disabled={paid}
+                    placeholder="Mis. salah pilih driver di rencana, yang jalan sebenarnya Budi"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100">
+                <button onClick={() => setCrewEdit(null)} disabled={crewSaving} className="px-3 py-1.5 text-sm text-slate-600 hover:underline">Batal</button>
+                <button onClick={submitCrewEdit} disabled={!canSubmit}
+                  className="px-3 py-1.5 text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition disabled:opacity-50">
+                  {crewSaving ? 'Menyimpan...' : 'Simpan Koreksi'}
                 </button>
               </div>
             </div>

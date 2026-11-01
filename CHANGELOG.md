@@ -2556,6 +2556,24 @@ Ditemukan saat memeriksa struktur database untuk dokumen v3. Policy `users_updat
 
 ---
 
+### 156. Koreksi Mobil/Driver/Kenek di Laporan Pengiriman (migrasi 110)
+
+**Masalah:** Ganti Driver/Kenek cuma ada di Detail Rencana (Kepala Gudang/Owner, sampai trip berjalan, tanpa jejak). Mobil tidak bisa diganti sama sekali, dan setelah trip Selesai upah ritase tercatat atas nama orang/tarif mobil yang salah.
+
+**Fitur (Owner/HR/Finance):** tombol **✏️ Koreksi Mobil/Driver/Kenek** di rincian setiap trip (semua status kecuali dibatalkan), alasan wajib minimal 5 huruf, dan pratinjau upah sebelum disimpan.
+- Upah yang sudah tercatat (trip utama + setiap belanja selesai) ikut dipindah ke orang/mobil yang baru.
+- Upah dihitung ulang dari tarif mobil × rute **hanya** kalau mobil berubah atau kenek ditambah/dihapus (tarif driver dengan/tanpa kenek berbeda). Kalau cuma ganti orang, nominalnya tetap.
+- Ditolak kalau ada upah driver/kenek trip itu yang sudah dibayar (koreksi lewat Penggajian Driver), kalau tarif mobil baru untuk rute itu belum disetup, atau kalau mobil baru sedang dipakai trip lain yang masih berjalan di tanggal yang sama.
+- Retur yang sedang dibawa ikut pindah ke driver baru (trigger `guard_plan_store_returns`).
+- Jejak koreksi disimpan di tabel `logistics_crew_corrections` dan tampil di kartu trip dengan badge "✏️ Mobil/Driver dikoreksi kantor".
+
+| File | Perubahan |
+|---|---|
+| `database/migrations/110_logistics_crew_correction.sql` | Tabel jejak + RPC `office_change_plan_crew` |
+| `app/(dashboard)/logistik/laporan/page.tsx` | Tombol, popup koreksi + pratinjau upah, riwayat & badge |
+
+---
+
 ### Masih Tertunda (per 2026-10-09)
 
 - **Setelah semua staf refresh aplikasi:** aktifkan di server kewajiban foto bukti transfer & tanggal jatuh tempo untuk antar sendiri (saat ini baru dicek di tampilan).
