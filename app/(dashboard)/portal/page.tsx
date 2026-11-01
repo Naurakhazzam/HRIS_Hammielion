@@ -10,7 +10,9 @@ import { chargeableLateMinutes } from '@/lib/lateTolerance'
 import { getUpcomingRosterPeriod, rosterPeriodLabel, DAYOFF_PICK_QUOTA } from '@/lib/rosterPeriod'
 import { localDateStr } from '@/lib/date'
 import { calcDailyAccrual, type AccrualAttendanceDay } from '@/lib/salaryAccrualEstimate'
-import { DISCIPLINE_FEE_STATUSES, ABSENCE_ATTENDANCE_COLUMNS, fetchHolidayDates, calcProRataFactor } from '@/lib/payrollAbsence'
+import { DISCIPLINE_FEE_STATUSES, ABSENCE_ATTENDANCE_COLUMNS, fetchHolidayDates, calcProRataFactor, adminFeeItemsFrom, type AbsenceAttendance, type AdminFeeItem } from '@/lib/payrollAbsence'
+import { NEW_RULES_CUTOFF_DATE } from '@/lib/escalatingDeduction'
+import AdminFeeDetail from '@/components/AdminFeeDetail'
 import { fetchIncompleteCheckouts as fetchIncompleteCheckoutsShared, type IncompleteCheckoutItem } from '@/lib/checkoutClarification'
 import AlphaKlarifikasiPanel from '@/components/AlphaKlarifikasiPanel'
 import OvertimeKlaimPanel from '@/components/OvertimeKlaimPanel'
@@ -98,7 +100,7 @@ export default function PortalDashboardPage() {
   const [upcomingOff, setUpcomingOff] = useState<string[]>([])
   const [leaveInfo, setLeaveInfo] = useState<{ joinDate: string | null; usedDays: number }>({ joinDate: null, usedDays: 0 })
   const [kasbonSaldo, setKasbonSaldo] = useState(0)
-  const [estPotongan, setEstPotongan] = useState({ keterlambatan: 0, kasbon: 0 })
+  const [estPotongan, setEstPotongan] = useState({ keterlambatan: 0, kasbon: 0, denda: 0, dendaItems: [] as AdminFeeItem[] })
   const [estPendapatan, setEstPendapatan] = useState({ base: 0, posAllow: 0, mealAllow: 0, specAllow: 0, lembur: 0 })
   const [estPeriodStatus, setEstPeriodStatus] = useState<'belum' | 'proses' | 'lunas'>('belum')
   // Perkiraan pendapatan PERIODE BERJALAN (live, 26 bulan ini s/d sekarang) -- beda dari
@@ -108,6 +110,7 @@ export default function PortalDashboardPage() {
   const [estPendapatanBerjalan, setEstPendapatanBerjalan] = useState({
     accruedGross: 0, accruedDeduction: 0, accruedNet: 0,
     daysCounted: 0, daysElapsed: 0, alphaDays: 0, lembur: 0, flatSalary: false,
+    adminFeeTotal: 0, adminFeeItems: [] as AdminFeeItem[],
   })
   const [quotaLibur, setQuotaLibur] = useState<{ submitted: number; draft: number; label: string; daysUntil: number } | null>(null)
 
@@ -246,15 +249,21 @@ export default function PortalDashboardPage() {
     const lastDay = toDateStr(period.end)
     const m = period.labelMonth + 1, y = period.labelYear
 
-    const [{ data: lateDef }, { data: atts }, { data: kasbonDed }] = await Promise.all([
+    const [{ data: lateDef }, { data: atts }, { data: kasbonDed }, { data: feeAtts }] = await Promise.all([
       supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
       supabase.from('attendances').select('late_minutes, source').eq('employee_id', employeeId).gte('date', firstDay).lte('date', lastDay).gt('late_minutes', 0),
       supabase.from('kasbon_deductions').select('amount').eq('employee_id', employeeId).eq('deduction_month', m).eq('deduction_year', y).eq('status', 'pending'),
+      // Denda Lupa Absen (klarifikasi disetujui HR) -- nominal pasti, sama dengan yang dipotong slip.
+      // Periode sebelum aturan baru tidak kena denda (lihat calcAbsence).
+      lastDay < NEW_RULES_CUTOFF_DATE ? Promise.resolve({ data: [] }) :
+        supabase.from('attendances').select(ABSENCE_ATTENDANCE_COLUMNS).eq('employee_id', employeeId).gte('date', firstDay).lte('date', lastDay).gt('admin_fee', 0),
     ])
     const rate = Number(lateDef?.late_penalty_per_minute ?? 0)
     const keterlambatan = (atts || []).reduce((s, a: any) => s + chargeableLateMinutes(Number(a.late_minutes), a.source) * rate, 0)
     const kasbon = (kasbonDed || []).reduce((s, d: any) => s + Number(d.amount), 0)
-    setEstPotongan({ keterlambatan, kasbon })
+    const dendaItems = adminFeeItemsFrom((feeAtts || []) as AbsenceAttendance[])
+    const denda = dendaItems.reduce((s, i) => s + i.amount, 0)
+    setEstPotongan({ keterlambatan, kasbon, denda, dendaItems })
   }
 
   // Keterangan "Sudah/Belum Dibayarkan" buat kartu Perkiraan -- murni informasi, TIDAK dipakai
@@ -334,7 +343,7 @@ export default function PortalDashboardPage() {
 
     if (flatSalary) {
       const full = base + pos + meal + special
-      setEstPendapatanBerjalan({ accruedGross: full, accruedDeduction: 0, accruedNet: full, daysCounted: 0, daysElapsed: 0, alphaDays: 0, lembur, flatSalary: true })
+      setEstPendapatanBerjalan({ accruedGross: full, accruedDeduction: 0, accruedNet: full, daysCounted: 0, daysElapsed: 0, alphaDays: 0, lembur, flatSalary: true, adminFeeTotal: 0, adminFeeItems: [] })
       return
     }
 
@@ -449,7 +458,7 @@ export default function PortalDashboardPage() {
   // tidak memasukkan bonus apa pun, dan potongan sengaja tidak memasukkan kehilangan kasir/barang
   // (lihat fetchEstimasiPotongan/fetchEstimasiPendapatan) -- murni perkiraan kasar.
   const estTotalPendapatan = estPendapatan.base + estPendapatan.posAllow + estPendapatan.mealAllow + estPendapatan.specAllow + estPendapatan.lembur
-  const estTotalPotongan = estPotongan.keterlambatan + estPotongan.kasbon
+  const estTotalPotongan = estPotongan.keterlambatan + estPotongan.kasbon + estPotongan.denda
 
   const eligible = leaveInfo.joinDate ? isEligibleForAnnualLeave(leaveInfo.joinDate) : false
   const remainingLeave = Math.max(0, ANNUAL_LEAVE_QUOTA_DAYS - leaveInfo.usedDays)
@@ -656,7 +665,13 @@ export default function PortalDashboardPage() {
           <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
             {estPotongan.keterlambatan > 0 && <div className="flex justify-between"><span>Keterlambatan</span><span className="text-red-500">-{fmtRp(estPotongan.keterlambatan)}</span></div>}
             {estPotongan.kasbon > 0 && <div className="flex justify-between"><span>Cicilan Kasbon</span><span className="text-red-500">-{fmtRp(estPotongan.kasbon)}</span></div>}
-            {estPotongan.keterlambatan === 0 && estPotongan.kasbon === 0 && <p className="text-slate-300 italic">Belum ada potongan tercatat periode ini 🎉</p>}
+            {estPotongan.denda > 0 && (
+              <div>
+                <div className="flex justify-between"><span>Denda Lupa Absen</span><span className="text-red-500">-{fmtRp(estPotongan.denda)}</span></div>
+                <AdminFeeDetail items={estPotongan.dendaItems} />
+              </div>
+            )}
+            {estPotongan.keterlambatan === 0 && estPotongan.kasbon === 0 && estPotongan.denda === 0 && <p className="text-slate-300 italic">Belum ada potongan tercatat periode ini 🎉</p>}
           </div>
           <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100">
             Perkiraan sementara. Belum termasuk kehilangan kasir, kehilangan barang, sakit/izin/alpha, dll -- baru dihitung final saat slip gaji diproses Finance.
@@ -701,7 +716,13 @@ export default function PortalDashboardPage() {
               </p>
               <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-xs text-slate-600">
                 <div className="flex justify-between"><span>Akumulasi Gaji Pokok + Tunjangan</span><span className="font-medium">{fmtRp(estPendapatanBerjalan.accruedGross)}</span></div>
-                {estPendapatanBerjalan.accruedDeduction > 0 && <div className="flex justify-between text-red-500"><span>Potongan Izin/Sakit/Alpha (akumulasi)</span><span>-{fmtRp(estPendapatanBerjalan.accruedDeduction)}</span></div>}
+                {estPendapatanBerjalan.accruedDeduction - estPendapatanBerjalan.adminFeeTotal > 0 && <div className="flex justify-between text-red-500"><span>Potongan Izin/Sakit/Alpha (akumulasi)</span><span>-{fmtRp(estPendapatanBerjalan.accruedDeduction - estPendapatanBerjalan.adminFeeTotal)}</span></div>}
+                {estPendapatanBerjalan.adminFeeTotal > 0 && (
+                  <div>
+                    <div className="flex justify-between text-red-500"><span>Denda Lupa Absen</span><span>-{fmtRp(estPendapatanBerjalan.adminFeeTotal)}</span></div>
+                    <AdminFeeDetail items={estPendapatanBerjalan.adminFeeItems} />
+                  </div>
+                )}
                 {estPendapatanBerjalan.lembur > 0 && <div className="flex justify-between text-emerald-600"><span>Upah Lembur (disetujui)</span><span>+{fmtRp(estPendapatanBerjalan.lembur)}</span></div>}
                 {estPendapatanBerjalan.alphaDays > 0 && <p className="text-amber-600 italic pt-1">{estPendapatanBerjalan.alphaDays} hari tanpa keterangan (alpha) belum ditambahkan ke saldo.</p>}
               </div>

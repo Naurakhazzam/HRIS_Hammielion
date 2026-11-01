@@ -6,7 +6,8 @@ import RupiahInput from '@/components/RupiahInput'
 import { todayLocalStr } from '@/lib/date'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
 import { type EscalatingResult } from '@/lib/escalatingDeduction'
-import { calcAbsence, calcDailyRate, calcProRataFactor, computeAbsenceForPeriod, fetchAbsenceSource, toAbsenceBreakdown, type AbsenceBreakdown } from '@/lib/payrollAbsence'
+import { calcAbsence, calcDailyRate, calcProRataFactor, computeAbsenceForPeriod, fetchAbsenceSource, toAbsenceBreakdown, splitAbsentDeduction, ADMIN_FEE_KIND_LABEL, type AbsenceBreakdown } from '@/lib/payrollAbsence'
+import AdminFeeDetail from '@/components/AdminFeeDetail'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -235,6 +236,8 @@ export default function PenggajianBulananPage() {
   // rincian pemakaian jatah libur) -- sama dengan snapshot payrolls.absent_breakdown.
   type AbsentBreakdownDetail = AbsenceBreakdown
   const [absentBreakdownDetail, setAbsentBreakdownDetail] = useState<AbsentBreakdownDetail | null>(null)
+  // Potongan Tidak Hadir vs Denda Lupa Absen di modal detail slip (lihat splitAbsentDeduction).
+  const selectedAbsentSplit = splitAbsentDeduction(Number(selectedPayroll?.absent_deduction ?? 0), absentBreakdownDetail)
 
   // ── State: buat slip per karyawan (stepper) ──
   type SlipPreview = {
@@ -1729,9 +1732,14 @@ export default function PenggajianBulananPage() {
           ${ab.alphaGroup.blocks.length > 0 ? `<div class="detail-row" style="font-weight:700;">Alpha (termasuk hari kosong di luar kuota)</div>${fmtEscalatingBlocksHtml(ab.alphaGroup)}` : ''}
           ${ab.suddenPermissionGroup.blocks.length > 0 ? `<div class="detail-row" style="font-weight:700;">Izin Mendadak (tanpa H-2)</div>${fmtEscalatingBlocksHtml(ab.suddenPermissionGroup)}` : ''}
           ${ab.sickDays > 0 ? `<div class="detail-row"><span>Sakit dengan surat dokter (${ab.sickDays} hari)</span><span class="ded-detail">${fmtR(ab.sickDed)}</span></div>` : ''}
-          ${ab.adminFeeTotal > 0 ? `<div class="detail-row"><span>Denda Lupa Absen Masuk/Pulang</span><span class="ded-detail">${fmtR(ab.adminFeeTotal)}</span></div>` : ''}
           ${ab.liburDisciplineFeeTotal > 0 ? `<div class="detail-row"><span>Denda Disiplin Pengajuan Libur (telat)</span><span class="ded-detail">${fmtR(ab.liburDisciplineFeeTotal)}</span></div>` : ''}
          </div>` : ''
+    // Denda Lupa Absen dipisah dari "Tidak Hadir" -- di hari itu karyawannya HADIR.
+    const { absence: absenceOnlyDed, adminFee: adminFeeDed } = splitAbsentDeduction(Number(p.absent_deduction ?? 0), ab)
+    const adminFeeDetailHtml = ab?.adminFeeItems && ab.adminFeeItems.length > 0
+      ? `<div class="detail-block">${ab.adminFeeItems.map(i =>
+          `<div class="detail-row"><span>${fmtDate(i.date)} — ${ADMIN_FEE_KIND_LABEL[i.kind]}</span><span class="ded-detail">${fmtR(i.amount)}</span></div>`
+        ).join('')}</div>` : ''
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Slip Gaji_${p.employee?.full_name}_${MONTHS[p.period_month - 1]} ${p.period_year}</title>
@@ -1819,7 +1827,8 @@ export default function PenggajianBulananPage() {
       <tr><td>Tabungan Loyalitas</td><td class="${Number(p.loyalitas_deduction??0)>0?'ded-val':'zero'}">${Number(p.loyalitas_deduction??0)>0?'-'+fmtR(Number(p.loyalitas_deduction??0)):'—'}</td></tr>
       <tr><td>Kerugian Kasir</td><td class="${Number(p.cashier_loss_deduction??0)>0?'ded-val':'zero'}">${Number(p.cashier_loss_deduction??0)>0?'-'+fmtR(Number(p.cashier_loss_deduction??0)):'—'}</td></tr>
       <tr><td>Kehilangan Barang${lossDetailHtml}</td><td>${invLoss>0?'-'+fmtR(invLoss):'<span class="zero">—</span>'}</td></tr>
-      <tr><td>Tidak Hadir (${p.absent_days??0} hari)${absentDetailHtml}</td><td class="${Number(p.absent_deduction??0)>0?'ded-val':'zero'}">${Number(p.absent_deduction??0)>0?'-'+fmtR(Number(p.absent_deduction??0)):'—'}</td></tr>
+      <tr><td>Tidak Hadir (${p.absent_days??0} hari)${absentDetailHtml}</td><td class="${absenceOnlyDed>0?'ded-val':'zero'}">${absenceOnlyDed>0?'-'+fmtR(absenceOnlyDed):'—'}</td></tr>
+      ${adminFeeDed > 0 ? `<tr><td>Denda Lupa Absen${adminFeeDetailHtml}</td><td class="ded-val">-${fmtR(adminFeeDed)}</td></tr>` : ''}
       <tr class="bruto-row"><td>Total Bruto</td><td>${fmtR(Number(p.gross_total))}</td></tr>
     </tbody>
   </table>
@@ -2731,11 +2740,6 @@ export default function PenggajianBulananPage() {
                               {absentBreakdownDetail.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(absentBreakdownDetail.sick4Full * absentBreakdownDetail.dailyRate)}</span>}
                             </div>
                           )}
-                          {absentBreakdownDetail.adminFeeTotal > 0 && (
-                            <div className="text-xs text-amber-600">
-                              └ Denda Lupa Absen Masuk/Pulang: {formatRupiah(absentBreakdownDetail.adminFeeTotal)}
-                            </div>
-                          )}
                           {absentBreakdownDetail.suddenPermissionGroup.blocks.length > 0 && (
                             <div>
                               <div className="text-xs text-orange-600 font-medium">└ Izin Mendadak (per kejadian, tanpa H-2):</div>
@@ -2751,9 +2755,19 @@ export default function PenggajianBulananPage() {
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">
-                      {Number(selectedPayroll.absent_deduction ?? 0) > 0 ? `-${formatRupiah(Number(selectedPayroll.absent_deduction))}` : <span className="text-slate-300">—</span>}
+                      {selectedAbsentSplit.absence > 0 ? `-${formatRupiah(selectedAbsentSplit.absence)}` : <span className="text-slate-300">—</span>}
                     </td>
                   </tr>
+                  {/* Denda Lupa Absen -- dipisah dari Tidak Hadir (hari itu karyawannya hadir) */}
+                  {selectedAbsentSplit.adminFee > 0 && (
+                    <tr className="hover:bg-slate-50">
+                      <td className="px-4 py-2.5 text-slate-700 align-top">
+                        <div>Denda Lupa Absen</div>
+                        <AdminFeeDetail items={absentBreakdownDetail?.adminFeeItems} />
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">-{formatRupiah(selectedAbsentSplit.adminFee)}</td>
+                    </tr>
+                  )}
                   {/* Kehilangan Barang dengan detail */}
                   <tr className="hover:bg-slate-50">
                     <td className="px-4 py-2.5 text-slate-700">
@@ -3169,7 +3183,8 @@ export default function PenggajianBulananPage() {
                       : `Tabungan Loyalitas (saldo: ${formatRupiah(slipPreview.loyBalSaldo + slipPreview.loyalitasDed)})`, slipPreview.loyalitasDed],
                     ['Kehilangan Barang', slipPreview.invLoss],
                     ['Kerugian Kasir', slipPreview.cashierLoss],
-                    [`Tidak Hadir (${slipPreview.absentDays} hari)`, slipPreview.absentDed],
+                    [`Tidak Hadir (${slipPreview.absentDays} hari)`, splitAbsentDeduction(slipPreview.absentDed, slipPreview.absentBreakdown).absence],
+                    ['Denda Lupa Absen', splitAbsentDeduction(slipPreview.absentDed, slipPreview.absentBreakdown).adminFee],
                   ].map(([l, v]) => Number(v) > 0 && (
                     <div key={String(l)} className="flex justify-between px-4 py-2 border-t border-slate-100">
                       <span className="text-slate-600">{l}</span>
@@ -3202,7 +3217,10 @@ export default function PenggajianBulananPage() {
                         </div>
                       )}
                       {slipPreview.absentBreakdown.adminFeeTotal > 0 && (
-                        <div className="text-amber-600">└ Denda Lupa Absen Masuk/Pulang: {formatRupiah(slipPreview.absentBreakdown.adminFeeTotal)}</div>
+                        <div>
+                          <div className="text-amber-600 font-medium">└ Denda Lupa Absen (baris terpisah di slip):</div>
+                          <div className="pl-3"><AdminFeeDetail items={slipPreview.absentBreakdown.adminFeeItems} /></div>
+                        </div>
                       )}
                       {slipPreview.absentBreakdown.suddenPermissionGroup.blocks.length > 0 && (
                         <div>

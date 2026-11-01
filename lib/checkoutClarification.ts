@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client'
-import { todayLocalStr, localDateStr } from '@/lib/date'
+import { localDateStr } from '@/lib/date'
+import { syncServerClock, serverTodayStr } from '@/lib/serverClock'
 
 // "Lupa Absen Pulang" -- sudah absen masuk (status present), tapi check_out tidak pernah
 // terisi. Beda dari Alpha (lib/alphaDetection.ts) yang mensyaratkan status='absent' sama
@@ -19,13 +20,17 @@ export async function fetchIncompleteCheckouts(
   employeeId: string,
   daysBack = 14
 ): Promise<IncompleteCheckoutItem[]> {
-  const since = new Date()
-  since.setDate(since.getDate() - daysBack)
+  // Tanggal server (WIB), bukan tanggal HP -- sama dengan pengecekan di RPC submit_checkout_clarification.
+  await syncServerClock(supabase)
+  const today = serverTodayStr()
+  const sinceD = new Date(today + 'T00:00:00')
+  sinceD.setDate(sinceD.getDate() - daysBack)
+  const since = localDateStr(sinceD)
   const { data: rows } = await supabase.from('attendances')
     .select('id, date, check_in')
     .eq('employee_id', employeeId).eq('status', 'present')
     .not('check_in', 'is', null).is('check_out', null)
-    .lt('date', todayLocalStr()).gte('date', localDateStr(since))
+    .lt('date', today).gte('date', since)
     .order('date', { ascending: false })
   if (!rows || rows.length === 0) return []
 

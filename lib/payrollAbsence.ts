@@ -101,6 +101,46 @@ export type AbsenceInput = {
   applyQuota?: boolean
 }
 
+// Denda Lupa Absen per kejadian (attendances.admin_fee, diisi saat HR menyetujui klarifikasi).
+export type AdminFeeKind = 'masuk' | 'pulang' | 'masuk_pulang' | 'lain'
+export type AdminFeeItem = { date: string; amount: number; kind: AdminFeeKind }
+
+export const ADMIN_FEE_KIND_LABEL: Record<AdminFeeKind, string> = {
+  masuk: 'Lupa Absen Masuk',
+  pulang: 'Lupa Absen Pulang',
+  masuk_pulang: 'Lupa Absen Masuk & Pulang',
+  lain: 'Denda Lupa Absen',
+}
+
+// Jenisnya dibaca dari catatan yang ditulis RPC review_*_clarification; nominal sebagai cadangan.
+function adminFeeKind(notes: string | null | undefined, amount: number): AdminFeeKind {
+  const masuk = notes?.includes('Lupa Absen Masuk') ?? false
+  const pulang = notes?.includes('Lupa Absen Pulang') ?? false
+  if (masuk && pulang) return 'masuk_pulang'
+  if (masuk) return 'masuk'
+  if (pulang) return 'pulang'
+  if (amount === 15000) return 'masuk'
+  if (amount === 5000) return 'pulang'
+  return 'lain'
+}
+
+/** Rincian denda Lupa Absen dari baris absensi (admin_fee > 0), urut tanggal. */
+export function adminFeeItemsFrom(atts: AbsenceAttendance[]): AdminFeeItem[] {
+  return atts
+    .filter(a => Number(a.admin_fee ?? 0) > 0)
+    .map(a => ({ date: a.date, amount: Number(a.admin_fee), kind: adminFeeKind(a.notes, Number(a.admin_fee)) }))
+    .sort((x, y) => x.date.localeCompare(y.date))
+}
+
+/**
+ * absent_deduction slip = potongan tidak hadir + denda lupa absen. Di slip ditampilkan sebagai
+ * dua baris terpisah supaya denda (karyawannya HADIR) tidak terbaca sebagai "Tidak Hadir".
+ */
+export function splitAbsentDeduction(absentDeduction: number, b: AbsenceBreakdown | null | undefined): { absence: number; adminFee: number } {
+  const adminFee = Math.min(absentDeduction, Number(b?.adminFeeTotal ?? 0))
+  return { absence: absentDeduction - adminFee, adminFee }
+}
+
 export type AbsenceBreakdown = {
   dailyRate: number
   izinGroup: EscalatingResult
@@ -108,6 +148,8 @@ export type AbsenceBreakdown = {
   suddenPermissionGroup: EscalatingResult
   sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number; sickDed: number
   adminFeeTotal: number
+  // Rincian adminFeeTotal per tanggal. (Opsional: slip sebelum fitur ini cuma menyimpan totalnya.)
+  adminFeeItems?: AdminFeeItem[]
   liburDisciplineFeeTotal: number
   isPreNewRulesPeriod: boolean
   // Rincian pemakaian jatah libur 4 hari (urutan prioritas: roster → cuti → izin/sakit → kosong).
@@ -142,7 +184,7 @@ export function toAbsenceBreakdown(r: AbsenceResult): AbsenceBreakdown {
   return {
     dailyRate: r.dailyRate, izinGroup: r.izinGroup, alphaGroup: r.alphaGroup, suddenPermissionGroup: r.suddenPermissionGroup,
     sickDays: r.sickDays, sick1Free: r.sick1Free, sick23Half: r.sick23Half, sick4Full: r.sick4Full, sickDed: r.sickDed,
-    adminFeeTotal: r.adminFeeTotal, liburDisciplineFeeTotal: r.liburDisciplineFeeTotal, isPreNewRulesPeriod: r.isPreNewRulesPeriod,
+    adminFeeTotal: r.adminFeeTotal, adminFeeItems: r.adminFeeItems, liburDisciplineFeeTotal: r.liburDisciplineFeeTotal, isPreNewRulesPeriod: r.isPreNewRulesPeriod,
     liburQuota: r.liburQuota, liburFromRoster: r.liburFromRoster, liburFromLeave: r.liburFromLeave, liburFromIzin: r.liburFromIzin,
     liburFromSickDoc: r.liburFromSickDoc, liburFromKosong: r.liburFromKosong, rosterBeyondQuota: r.rosterBeyondQuota,
     holidayDays: r.holidayDays,
@@ -167,7 +209,7 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
   if (flatSalary) {
     return {
       dailyRate, izinGroup: EMPTY_GROUP, alphaGroup: EMPTY_GROUP, suddenPermissionGroup: EMPTY_GROUP,
-      sickDays: 0, sick1Free: 0, sick23Half: 0, sick4Full: 0, sickDed: 0, adminFeeTotal: 0, liburDisciplineFeeTotal: 0,
+      sickDays: 0, sick1Free: 0, sick23Half: 0, sick4Full: 0, sickDed: 0, adminFeeTotal: 0, adminFeeItems: [], liburDisciplineFeeTotal: 0,
       isPreNewRulesPeriod, liburQuota: 0, liburFromRoster: 0, liburFromLeave: 0, liburFromIzin: 0, liburFromSickDoc: 0,
       liburFromKosong: 0, rosterBeyondQuota: 0, holidayDays: 0, absentDed: 0, absentDays: 0, liburUsedDays: 0, liburCompDays: 0,
       liburKompensasi: 0, alphaDates: [], daysElapsed,
@@ -248,7 +290,8 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
   const sickDed = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
 
   // Denda Lupa Absen Masuk/Pulang (Rp15.000/Rp5.000 per kejadian) -- belum ada di periode lama.
-  const adminFeeTotal = isPreNewRulesPeriod ? 0 : atts.reduce((s, a) => s + Number(a.admin_fee ?? 0), 0)
+  const adminFeeItems = isPreNewRulesPeriod ? [] : adminFeeItemsFrom(atts)
+  const adminFeeTotal = adminFeeItems.reduce((s, i) => s + i.amount, 0)
   const liburDisciplineFeeTotal = Number(input.disciplineFeeTotal ?? 0)
 
   const liburUsedDays = liburFromRoster + liburFromLeave + fillUsed + liburFromKosong
@@ -257,7 +300,7 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
   return {
     dailyRate, izinGroup, alphaGroup, suddenPermissionGroup,
     sickDays, sick1Free, sick23Half, sick4Full, sickDed,
-    adminFeeTotal, liburDisciplineFeeTotal, isPreNewRulesPeriod,
+    adminFeeTotal, adminFeeItems, liburDisciplineFeeTotal, isPreNewRulesPeriod,
     liburQuota, liburFromRoster, liburFromLeave, liburFromIzin, liburFromSickDoc, liburFromKosong,
     rosterBeyondQuota: rosterDates.length - liburFromRoster,
     holidayDays: holidayDates.length,

@@ -6,6 +6,11 @@ import { useRouter } from 'next/navigation'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
 import { localDateStr } from '@/lib/date'
 import { isPreviewModeClient, PREVIEW_EMPLOYEE_ID } from '@/lib/previewMode'
+import { splitAbsentDeduction, type AbsenceBreakdown } from '@/lib/payrollAbsence'
+import { type EscalatingResult } from '@/lib/escalatingDeduction'
+import AdminFeeDetail from '@/components/AdminFeeDetail'
+
+const fmtDay = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
 
 type Payroll = {
   id: string
@@ -26,6 +31,9 @@ type Payroll = {
   loyalitas_deduction: number
   inventory_loss_deduction: number
   cashier_loss_deduction: number
+  absent_days: number | null
+  absent_deduction: number | null
+  absent_breakdown: AbsenceBreakdown | null
   gross_total: number
   net_total: number
   status: string
@@ -174,6 +182,7 @@ export default function PortalSlipGajiPage() {
         overtime_total, kpi_bonus, conditional_bonus, promo_bonus, ongkir_bonus, grooming_bonus,
         late_deduction, kasbon_deduction, loyalitas_deduction,
         inventory_loss_deduction, cashier_loss_deduction,
+        absent_days, absent_deduction, absent_breakdown,
         gross_total, net_total, status, created_at,
         employees!payrolls_employee_id_fkey(full_name, positions(name), branches(name))
       `)
@@ -358,6 +367,56 @@ export default function PortalSlipGajiPage() {
                         {Number(selectedPayroll.late_deduction) > 0 ? `-${fmtRp(Number(selectedPayroll.late_deduction))}` : <span className="text-slate-300">—</span>}
                       </td>
                     </tr>
+                    {/* Tidak Hadir (izin/alpha/sakit) & Denda Lupa Absen -- dua baris terpisah, rincian
+                        dari snapshot slip (payrolls.absent_breakdown), sama dengan slip versi HR. */}
+                    {(() => {
+                      const b = selectedPayroll.absent_breakdown
+                      const split = splitAbsentDeduction(Number(selectedPayroll.absent_deduction ?? 0), b)
+                      const blocks = (label: string, g: EscalatingResult | undefined) => g && g.blocks.length > 0 && (
+                        <div>
+                          <div className="text-xs text-slate-500 font-medium">└ {label}</div>
+                          {g.blocks.map(bl => (
+                            <div key={bl.occurrence + bl.dates[0]} className="text-xs text-slate-400 pl-3">
+                              {bl.dates.map(fmtDay).join(', ')} = <span className="text-red-400">{fmtRp(bl.subtotal)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                      return (
+                        <>
+                          <tr>
+                            <td className="px-4 py-2.5 text-slate-700">
+                              <div>Tidak Hadir ({selectedPayroll.absent_days ?? 0} hari)</div>
+                              {b && split.absence > 0 && (
+                                <div className="mt-1 space-y-0.5">
+                                  {blocks('Izin / Sakit tanpa surat', b.izinGroup)}
+                                  {blocks('Alpha', b.alphaGroup)}
+                                  {blocks('Izin Mendadak', b.suddenPermissionGroup)}
+                                  {b.sickDays > 0 && b.sickDed > 0 && (
+                                    <div className="text-xs text-slate-400">└ Sakit dengan surat dokter ({b.sickDays} hari) = <span className="text-red-400">{fmtRp(b.sickDed)}</span></div>
+                                  )}
+                                  {b.liburDisciplineFeeTotal > 0 && (
+                                    <div className="text-xs text-slate-400">└ Denda telat ajukan libur = <span className="text-red-400">{fmtRp(b.liburDisciplineFeeTotal)}</span></div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">
+                              {split.absence > 0 ? `-${fmtRp(split.absence)}` : <span className="text-slate-300">—</span>}
+                            </td>
+                          </tr>
+                          {split.adminFee > 0 && (
+                            <tr>
+                              <td className="px-4 py-2.5 text-slate-700">
+                                <div>Denda Lupa Absen</div>
+                                <AdminFeeDetail items={b?.adminFeeItems} />
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-medium text-red-500 align-top">-{fmtRp(split.adminFee)}</td>
+                            </tr>
+                          )}
+                        </>
+                      )
+                    })()}
                     {[
                       ['Kasbon',              selectedPayroll.kasbon_deduction],
                       ['Tabungan Loyalitas', selectedPayroll.loyalitas_deduction ?? 0],

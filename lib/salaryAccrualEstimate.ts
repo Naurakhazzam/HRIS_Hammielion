@@ -14,7 +14,7 @@
 // - Hadir dengan Lupa Absen -> +1 hari, dikurangi denda admin (field admin_fee).
 // - Alpha (tercatat, atau tidak absen & tidak ada pengajuan & bukan libur terjadwal) -> saldo TIDAK
 //   bertambah, DITAMBAH kena potongan eskalasi alpha.
-import { calcAbsence, type AbsenceAttendance } from './payrollAbsence'
+import { calcAbsence, type AbsenceAttendance, type AdminFeeItem } from './payrollAbsence'
 import type { EscalatingResult } from './escalatingDeduction'
 
 export type AccrualAttendanceDay = AbsenceAttendance
@@ -29,7 +29,9 @@ export type DailyAccrualResult = {
   izinGroup: EscalatingResult
   alphaGroup: EscalatingResult
   sickDed: number
+  // Denda Lupa Absen -- termasuk di accruedDeduction, ditampilkan terpisah di Portal.
   adminFeeTotal: number
+  adminFeeItems: AdminFeeItem[]
 }
 
 /**
@@ -48,7 +50,7 @@ export function calcDailyAccrual(
 ): DailyAccrualResult {
   const empty: DailyAccrualResult = {
     accruedGross: 0, accruedDeduction: 0, accruedNet: 0, daysCounted: 0, daysElapsed: 0,
-    alphaDays: 0, izinGroup: { total: 0, blocks: [] }, alphaGroup: { total: 0, blocks: [] }, sickDed: 0, adminFeeTotal: 0,
+    alphaDays: 0, izinGroup: { total: 0, blocks: [] }, alphaGroup: { total: 0, blocks: [] }, sickDed: 0, adminFeeTotal: 0, adminFeeItems: [],
   }
   if (cutoffDate < firstDay) return empty
 
@@ -68,6 +70,6 @@ export function calcDailyAccrual(
     daysCounted,
     daysElapsed: r.daysElapsed,
     alphaDays: r.alphaDates.length,
-    izinGroup: r.izinGroup, alphaGroup: r.alphaGroup, sickDed: r.sickDed, adminFeeTotal: r.adminFeeTotal,
+    izinGroup: r.izinGroup, alphaGroup: r.alphaGroup, sickDed: r.sickDed, adminFeeTotal: r.adminFeeTotal, adminFeeItems: r.adminFeeItems ?? [],
   }
 }
