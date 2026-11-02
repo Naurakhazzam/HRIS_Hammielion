@@ -32,7 +32,7 @@ export default function SetupKomponenGajiPage() {
   const [savingDefaultId, setSavingDefaultId] = useState<string | null>(null)
   const [universalLateRate, setUniversalLateRate] = useState('1000')
   const [savingLateRate, setSavingLateRate] = useState(false)
-  const [universalOvertimeRate, setUniversalOvertimeRate] = useState('7500')
+  const [universalOvertimeRate, setUniversalOvertimeRate] = useState('10000')
   const [savingOvertimeRate, setSavingOvertimeRate] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const supabase = createClient()

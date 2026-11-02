@@ -73,7 +73,7 @@ export default function PanduanKaryawanPage() {
   const [deptSchedules, setDeptSchedules] = useState<SchedRow[]>([])
   const [branchSchedules, setBranchSchedules] = useState<SchedRow[]>([])
   const [lateRate, setLateRate] = useState(1000)
-  const [overtimeRate, setOvertimeRate] = useState(7500)
+  const [overtimeRate, setOvertimeRate] = useState(10000)
   // Gaji standar acuan sistem (salary_defaults) -- dipakai HR sebagai isian awal saat menambah
   // karyawan baru. Dipakai di sini sebagai dasar simulasi supaya angkanya REAL (bukan karangan),
   // walau tetap bukan gaji pribadi siapa pun -- gaji asli tiap orang beda-beda.
@@ -103,7 +103,7 @@ export default function PanduanKaryawanPage() {
       check_out_time: b.check_out_time, detect_until: b.detect_until, allow_overtime: b.allow_overtime,
     })))
     setLateRate(Number(def?.late_penalty_per_minute ?? 1000))
-    setOvertimeRate(Number(def?.overtime_rate_per_hour ?? 7500))
+    setOvertimeRate(Number(def?.overtime_rate_per_hour ?? 10000))
     setContohGajiBulanan(Number(def?.base_salary ?? 0) + Number(def?.position_allowance ?? 0) + Number(def?.meal_allowance ?? 0))
     setLoading(false)
   }
@@ -270,7 +270,7 @@ export default function PanduanKaryawanPage() {
                   <tr><td className="px-3 py-1.5">Sakit (tanpa surat)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Maks. 2 hari berturut — hari ke-3 <strong>wajib</strong> surat dokter, kalau tidak otomatis dianggap Alpha</td></tr>
                   <tr><td className="px-3 py-1.5">Sakit (dengan surat dokter)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Wajib lampirkan foto/scan surat dokter</td></tr>
                   <tr><td className="px-3 py-1.5">Izin Duka Keluarga</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">—</td></tr>
-                  <tr><td className="px-3 py-1.5">Izin Mendadak</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga (atau tanggal mundur)</td><td className="px-3 py-1.5">Tidak dihitung Alpha, tapi kena potongan eskalasi tersendiri (1.25× naik ke 2× per kejadian dalam 1 periode) — lebih berat dari Izin biasa, lebih ringan dari Alpha</td></tr>
+                  <tr><td className="px-3 py-1.5">Izin Mendadak</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga (atau tanggal mundur)</td><td className="px-3 py-1.5">Tidak dihitung Alpha, tapi kena potongan eskalasi dengan tarif yang sama seperti Izin biasa (1.5× naik 0.2× sampai mentok 2× dalam 1 periode), hitungannya tersendiri</td></tr>
                 </tbody>
               </table>
             </div>
@@ -280,7 +280,7 @@ export default function PanduanKaryawanPage() {
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
               <p className="font-medium text-amber-800">⚡ Kapan pakai "Izin Mendadak"?</p>
-              <p className="text-amber-700 mt-0.5">Kalau Anda tidak masuk tanpa sempat lapor dulu (bukan sakit), atau sudah ketahuan Alpha dan mau diperbaiki — pilih jenis ini, boleh untuk tanggal yang sudah lewat. Potongannya naik tiap kejadian dalam periode yang sama (1.25× → 1.5× → 1.6× → 1.7× → 1.8× → 1.9× → mentok 2× gaji harian), jadi makin sering dadakan, makin mahal.</p>
+              <p className="text-amber-700 mt-0.5">Kalau Anda tidak masuk tanpa sempat lapor dulu (bukan sakit), atau sudah ketahuan Alpha dan mau diperbaiki — pilih jenis ini, boleh untuk tanggal yang sudah lewat. Potongannya sama seperti Izin biasa dan naik dalam periode yang sama (1.5× → 1.7× → 1.9× → mentok 2× gaji harian), jadi makin sering dadakan, makin mahal.</p>
             </div>
             <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3">
               <p className="font-bold text-red-800">⚠️ Penting: H-7 itu wajib, bukan sekadar saran</p>
@@ -385,7 +385,7 @@ export default function PanduanKaryawanPage() {
             <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi lengkap (pakai gaji standar sistem {fmtRp(contohGajiBulanan)}/bulan → gaji harian {fmtRp(contohGajiHarian)}):</p>
             <p>Dalam satu periode: Izin 1 hari (tgl 3) — lalu masuk kerja normal — lalu Sakit tanpa surat 2 hari berturut (tgl 15-16).</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Kejadian ke-1 (tgl 3, 1 hari) — hari ke-1 akumulasi × 1× = <strong>{fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[0]))}</strong></li>
+              <li>Kejadian ke-1 (tgl 3, 1 hari) — hari ke-1 akumulasi × {IZIN_GROUP_MULTIPLIERS[0]}× = <strong>{fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[0]))}</strong></li>
               <li>Kejadian ke-2 (tgl 15-16, 2 hari) — <strong>lanjut</strong> dari hari ke-2 &amp; ke-3 akumulasi (bukan balik ke tingkat 1): tgl 15 × {IZIN_GROUP_MULTIPLIERS[1]}× = {fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[1]))}, tgl 16 × {IZIN_GROUP_MULTIPLIERS[2]}× = {fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[2]))}</li>
               <li>Total potongan periode ini: <strong>{fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[0]) + Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[1]) + Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[2]))}</strong></li>
             </ul>
@@ -397,10 +397,10 @@ export default function PanduanKaryawanPage() {
         <section id="potongan-alpha" className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 scroll-mt-4">
           <h2 className="text-lg font-bold text-slate-800 mb-3">10. 💸 Potongan Alpha</h2>
           <div className="space-y-3 text-sm text-slate-600">
-            <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (naik per hari, lanjut lintas kejadian dalam periode yang sama, reset tiap periode, <strong>kecuali karyawan Training</strong> yang flat 1× — lihat catatan di bagian 9) — bedanya tarifnya jauh lebih berat karena ini absen tanpa keterangan sama sekali. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama. Kalau sebenarnya Anda masuk kerja tapi cuma lupa scan, itu bukan Alpha biasa — lihat jalur "Lupa Absen" di bagian 8.</p>
+            <p>Cara hitungnya <strong>sama persis</strong> seperti Izin/Sakit di atas (naik per hari, lanjut lintas kejadian dalam periode yang sama, reset tiap periode, <strong>kecuali karyawan Training</strong> yang flat 1× — lihat catatan di bagian 9) — tabel pengalinya juga <strong>sama</strong> dengan Izin/Sakit tanpa surat (mulai periode Oktober 2026), tapi Alpha punya hitungan hari sendiri, terpisah dari Izin/Sakit. Alpha eksplisit dan hari kosong yang melebihi jatah 4 hari (lihat bagian 5) digabung jadi satu rangkaian kejadian yang sama. Kalau sebenarnya Anda masuk kerja tapi cuma lupa scan, itu bukan Alpha biasa — lihat jalur "Lupa Absen" di bagian 8.</p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
-                <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Kejadian ke-</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan per hari</th></tr></thead>
+                <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Hari ke- (akumulasi dalam periode)</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan hari itu</th></tr></thead>
                 <tbody className="divide-y divide-red-100">
                   {ALPHA_GROUP_MULTIPLIERS.map((m, i) => (
                     <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === ALPHA_GROUP_MULTIPLIERS.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(contohGajiHarian * m))}</td></tr>
@@ -410,7 +410,7 @@ export default function PanduanKaryawanPage() {
             </div>
             <p className="text-xs text-slate-400">(Pakai gaji harian standar sistem {fmtRp(contohGajiHarian)} sebagai contoh — lihat angka Anda sendiri di link bawah.)</p>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-red-700">Ini kenapa klarifikasi Alpha (bagian 7) penting dilakukan cepat — kalau berhasil diubah jadi Izin/Sakit, potongannya jauh lebih ringan (kelompok 1×–2× di bagian 9), dibanding dibiarkan jadi Alpha permanen (kelompok 1.5×–3× di sini).</p>
+              <p className="text-red-700">Klarifikasi Alpha (bagian 7) tetap penting dilakukan cepat — Alpha manual dari HR tidak pernah bisa memakai jatah libur 4 hari, sedangkan Izin/Sakit bisa. Kalau ternyata sakit dengan surat dokter, potongannya jauh lebih ringan (bagian 11), dan kalau cuma lupa scan, cukup denda Lupa Absen (bagian 8).</p>
             </div>
             <p className="text-sm text-slate-500">Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>

@@ -420,8 +420,8 @@ export default function AjukanCutiPage() {
             <div className="bg-orange-50 text-orange-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-orange-200">
               <span>📊</span>
               <p>
-                Izin Mendadak <strong>tidak dihitung Alpha</strong> dan tidak kena aturan H-2, tapi potongannya tersendiri (lebih berat dari Izin biasa): kejadian ke-{suddenPermissionOccurrenceCount + 1} periode ini dipotong{' '}
-                <strong>{SUDDEN_PERMISSION_MULTIPLIERS[Math.min(suddenPermissionOccurrenceCount, SUDDEN_PERMISSION_MULTIPLIERS.length - 1)]}× gaji harian</strong>{suddenPermissionOccurrenceCount > 0 ? ` (sudah ${suddenPermissionOccurrenceCount} kejadian sebelumnya periode ini, naik dari kejadian pertama 1.25×, mentok di ${SUDDEN_PERMISSION_MULTIPLIERS[SUDDEN_PERMISSION_MULTIPLIERS.length - 1]}×)` : '.'}
+                Izin Mendadak <strong>tidak dihitung Alpha</strong> dan tidak kena aturan H-2, tapi tarif potongannya sama dengan Izin biasa, hitungannya tersendiri: kejadian ke-{suddenPermissionOccurrenceCount + 1} periode ini dipotong{' '}
+                <strong>{SUDDEN_PERMISSION_MULTIPLIERS[Math.min(suddenPermissionOccurrenceCount, SUDDEN_PERMISSION_MULTIPLIERS.length - 1)]}× gaji harian</strong>{suddenPermissionOccurrenceCount > 0 ? ` (sudah ${suddenPermissionOccurrenceCount} kejadian sebelumnya periode ini, naik dari kejadian pertama ${SUDDEN_PERMISSION_MULTIPLIERS[0]}×, mentok di ${SUDDEN_PERMISSION_MULTIPLIERS[SUDDEN_PERMISSION_MULTIPLIERS.length - 1]}×)` : '.'}
               </p>
             </div>
           )}

@@ -64,14 +64,16 @@ Untuk karyawan permanent, periode yang berakhir **mulai 26 Sep 2026**:
 
 | Jenis | Cara hitung |
 |---|---|
-| Izin / Sakit tanpa surat | Eskalasi per hari, berlanjut lintas kejadian dalam periode: 1× → 1,25× → 1,5× → 1,75× → maks 2× |
-| Alpha (manual HR + hari kosong/Alpha otomatis di luar jatah) | 1,5× → 2× → 2,25× → 2,5× → 2,75× → maks 3× |
-| Izin Mendadak (tanpa H-2) | 1,25× → 1,5× → 1,6× → 1,7× → 1,8× → 1,9× → maks 2× |
+| Izin / Sakit tanpa surat | Eskalasi per hari, berlanjut lintas kejadian dalam periode: 1,5× → 1,7× → 1,9× → maks 2× |
+| Alpha (manual HR + hari kosong/Alpha otomatis di luar jatah) | Sama dengan Izin: 1,5× → 1,7× → 1,9× → maks 2× (hitungan hari terpisah dari Izin) |
+| Izin Mendadak (tanpa H-2) | Sama dengan Izin: 1,5× → 1,7× → 1,9× → maks 2× (hitungan hari sendiri) |
 | Sakit dengan surat | Hari ke-1 gratis, ke-2 & 3 = 0,5×, ke-4 dst = 1× |
 | Lupa Absen Masuk / Pulang | Denda tetap Rp15.000 / Rp5.000 per kejadian (`attendances.admin_fee`) |
 | Telat ajukan libur | Rp10.000 per tanggal, hanya untuk libur yang **disetujui** atau **disetujui lalu dipindah**. Pending & ditolak tidak didenda. |
 
 - Eskalasi direset setiap periode baru.
+- Tabel 1,5× → maks 2× untuk Izin, Izin Mendadak & Alpha berlaku mulai periode Oktober 2026 (26 Sep – 25 Okt).
+- Tarif lembur standar Rp10.000/jam mulai periode Oktober 2026 (migrasi 117).
 - **Training**: Izin / Alpha / Izin Mendadak **flat 1×**, tanpa eskalasi.
 - **Periode lama** (berakhir sebelum 26 Sep 2026): flat 1× dan tanpa denda Lupa Absen.
 - Sakit dengan surat memakai tarif yang sama untuk semua periode.

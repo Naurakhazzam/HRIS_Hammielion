@@ -70,18 +70,18 @@ function RateCard({ label, base, pos, meal, special, dailyRate, overtimeRate, ov
       {isTraining && (
         <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3 text-sm">
           <p className="font-bold text-amber-800">🔰 Status: Training — potongan Izin/Sakit-tanpa-surat &amp; Alpha FLAT, tidak eskalasi</p>
-          <p className="text-amber-700 mt-1">Karyawan training dipotong <strong>{fmtRp(dailyRate)}/hari (1×)</strong> untuk Izin/Sakit-tanpa-surat maupun Alpha, kejadian ke berapa pun — tidak naik bertahap seperti karyawan permanent (yang bisa sampai 2× untuk Izin dan 3× untuk Alpha).</p>
+          <p className="text-amber-700 mt-1">Karyawan training dipotong <strong>{fmtRp(dailyRate)}/hari (1×)</strong> untuk Izin/Sakit-tanpa-surat maupun Alpha, kejadian ke berapa pun — tidak naik bertahap seperti karyawan permanent (yang mulai 1.5× lalu naik sampai 2× untuk Izin/Sakit-tanpa-surat maupun Alpha).</p>
         </div>
       )}
 
       <div>
-        <p className="text-sm font-semibold text-orange-700 mb-2">Izin Duka / Periksa-Keperluan / Sakit Tanpa Surat — {isTraining ? 'flat, tidak eskalasi (training)' : 'per kejadian, reset tiap periode'}</p>
+        <p className="text-sm font-semibold text-orange-700 mb-2">Izin Duka / Periksa-Keperluan / Sakit Tanpa Surat — {isTraining ? 'flat, tidak eskalasi (training)' : 'naik per hari, reset tiap periode'}</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
-            <thead><tr className="bg-orange-50 text-orange-800"><th className="px-3 py-1.5 text-left">Kejadian</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan</th></tr></thead>
+            <thead><tr className="bg-orange-50 text-orange-800"><th className="px-3 py-1.5 text-left">Hari ke- (akumulasi)</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan</th></tr></thead>
             <tbody className="divide-y divide-orange-100">
               {(isTraining ? TRAINING_FLAT_MULTIPLIER : IZIN_GROUP_MULTIPLIERS).map((m, i) => (
-                <tr key={i}><td className="px-3 py-1.5">{isTraining ? 'Semua kejadian' : `Ke-${i + 1}`}{!isTraining && i === IZIN_GROUP_MULTIPLIERS.length - 1 ? ' (mentok)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(dailyRate * m))}</td></tr>
+                <tr key={i}><td className="px-3 py-1.5">{isTraining ? 'Semua hari' : `Hari ke-${i + 1}`}{!isTraining && i === IZIN_GROUP_MULTIPLIERS.length - 1 ? ' (mentok)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(dailyRate * m))}</td></tr>
               ))}
             </tbody>
           </table>
@@ -89,13 +89,13 @@ function RateCard({ label, base, pos, meal, special, dailyRate, overtimeRate, ov
       </div>
 
       <div>
-        <p className="text-sm font-semibold text-red-700 mb-2">Alpha (termasuk hari kosong tanpa keterangan di luar kuota) — {isTraining ? 'flat, tidak eskalasi (training)' : 'per kejadian, reset tiap periode'}</p>
+        <p className="text-sm font-semibold text-red-700 mb-2">Alpha (termasuk hari kosong tanpa keterangan di luar kuota) — {isTraining ? 'flat, tidak eskalasi (training)' : 'naik per hari, reset tiap periode'}</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
-            <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Kejadian</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan</th></tr></thead>
+            <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Hari ke- (akumulasi)</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan</th></tr></thead>
             <tbody className="divide-y divide-red-100">
               {(isTraining ? TRAINING_FLAT_MULTIPLIER : ALPHA_GROUP_MULTIPLIERS).map((m, i) => (
-                <tr key={i}><td className="px-3 py-1.5">{isTraining ? 'Semua kejadian' : `Ke-${i + 1}`}{!isTraining && i === ALPHA_GROUP_MULTIPLIERS.length - 1 ? ' (mentok)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(dailyRate * m))}</td></tr>
+                <tr key={i}><td className="px-3 py-1.5">{isTraining ? 'Semua hari' : `Hari ke-${i + 1}`}{!isTraining && i === ALPHA_GROUP_MULTIPLIERS.length - 1 ? ' (mentok)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(dailyRate * m))}</td></tr>
               ))}
             </tbody>
           </table>

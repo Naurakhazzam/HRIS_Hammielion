@@ -13,8 +13,14 @@
 // berturut sudah memakai tingkat 1 & 2, lalu kejadian berikutnya lanjut dari tingkat 3, dst.
 // (dikonfirmasi user lewat AskUserQuestion, Oktober 2026). Diimplementasikan dengan 1 "kursor hari"
 // yang jalan terus menerus lintas semua kejadian/blok dalam tanggal yang dikirim ke fungsi ini.
-export const IZIN_GROUP_MULTIPLIERS = [1, 1.25, 1.5, 1.75, 2]
-export const ALPHA_GROUP_MULTIPLIERS = [1.5, 2, 2.25, 2.5, 2.75, 3]
+//
+// Mulai periode Oktober 2026 (26 Sep - 25 Okt) Izin/Sakit-tanpa-surat dan Alpha memakai tabel
+// pengali yang SAMA: 1.5x, naik 0.2x per hari, mentok 2x (keputusan Owner, November 2026).
+// Penghitungnya tetap terpisah: Izin+Sakit-tanpa-surat 1 hitungan, Alpha 1 hitungan sendiri.
+// Periode sebelumnya tidak terpengaruh -- semuanya berakhir sebelum NEW_RULES_CUTOFF_DATE (flat 1x).
+export const ABSENCE_MULTIPLIERS = [1.5, 1.7, 1.9, 2]
+export const IZIN_GROUP_MULTIPLIERS = ABSENCE_MULTIPLIERS
+export const ALPHA_GROUP_MULTIPLIERS = ABSENCE_MULTIPLIERS
 
 // Izin Mendadak -- izin TANPA pemberitahuan H-2 (dadakan, atau diajukan mundur setelah hari itu
 // lewat). Sengaja dipisah dari IZIN_GROUP_MULTIPLIERS (yang untuk Izin/Sakit-tanpa-surat/Duka
@@ -22,7 +28,9 @@ export const ALPHA_GROUP_MULTIPLIERS = [1.5, 2, 2.25, 2.5, 2.75, 3]
 // berat dari Izin biasa (karena dadakan = kurang disiplin), tapi lebih ringan dari Alpha penuh
 // (karena tetap ada keterangan/pengajuan, bukan diam saja). Reset tiap periode, per kejadian
 // (blok tanggal bersambung).
-export const SUDDEN_PERMISSION_MULTIPLIERS = [1.25, 1.5, 1.6, 1.7, 1.8, 1.9, 2]
+// Mulai periode Oktober 2026 disamakan dengan Izin biasa (ABSENCE_MULTIPLIERS) atas keputusan
+// Owner, supaya izin dadakan tidak lebih murah dari izin biasa. Hitungan harinya tetap sendiri.
+export const SUDDEN_PERMISSION_MULTIPLIERS = ABSENCE_MULTIPLIERS
 
 // Karyawan TRAINING tidak kena eskalasi -- Izin/Sakit-tanpa-surat maupun Alpha dipotong FLAT
 // 1x gaji harian per hari, kejadian ke berapa pun, karena mereka belum permanent. Dipakai lewat
