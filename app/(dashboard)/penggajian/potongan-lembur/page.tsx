@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import RupiahInput from '@/components/RupiahInput'
+import { recalcDraftPayrolls } from '@/lib/payrollRecalc'
 import {
   buildMultipliers, fmtMultiplier, normalizeRules, DEFAULT_PAYROLL_RULES, PAYROLL_RULE_NUMBER_KEYS, type PayrollRules,
 } from '@/lib/payrollRules'
@@ -159,13 +160,20 @@ export default function PotonganLemburPage() {
     const { data: { user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('payroll_rules')
       .upsert({ ...payload, updated_by: user?.id ?? null, updated_at: new Date().toISOString() }, { onConflict: 'effective_from' })
+    if (error) { setSaving(false); setMsg({ type: 'error', text: 'Gagal menyimpan: ' + error.message }); return }
+    const rows = await loadHistory()
+    // Slip DRAFT di periode yang kena aturan ini langsung dihitung ulang (potongan, telat, lembur).
+    // Slip yang sudah disetujui/dibayar tidak diubah.
+    const next = rows.filter(r => r.effective_from > effectiveFrom).map(r => r.effective_from).sort()[0] ?? null
+    const { updated, failed } = await recalcDraftPayrolls(supabase, effectiveFrom, next)
     setSaving(false)
-    if (error) { setMsg({ type: 'error', text: 'Gagal menyimpan: ' + error.message }); return }
-    await loadHistory()
+    await checkSlips(effectiveFrom)
     setMsg({
-      type: 'success',
+      type: failed > 0 ? 'error' : 'success',
       text: `Tersimpan. Berlaku mulai ${periodName(effectiveFrom)} dan seterusnya sampai ada aturan baru.`
-        + (slipCount > 0 ? ` Ada ${slipCount} slip yang sudah dibuat di periode itu — buat ulang slipnya supaya ikut aturan baru.` : ''),
+        + (updated > 0 ? ` ${updated} slip draft langsung dihitung ulang dengan angka baru.` : '')
+        + (failed > 0 ? ` ${failed} slip gagal dihitung ulang — buat ulang slipnya di Gaji Staff.` : '')
+        + ' Slip yang sudah disetujui/dibayar tidak diubah.',
     })
   }
 
@@ -198,7 +206,7 @@ export default function PotonganLemburPage() {
             {periodOptions.map(p => <option key={p} value={p}>{periodName(p)}{p === currentStart ? ' — periode berjalan' : ''}</option>)}
           </select>
           <p className="text-xs text-slate-500 mt-1">Berlaku untuk periode ini dan seterusnya. Periode sebelumnya tidak berubah.</p>
-          {slipCount > 0 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">⚠ Sudah ada {slipCount} slip gaji di periode ini. Slip yang sudah dibuat tidak berubah sendiri — buat ulang slipnya di Gaji Staff kalau mau ikut angka baru.</p>}
+          {slipCount > 0 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">ℹ Sudah ada {slipCount} slip gaji di periode ini. Saat disimpan, slip yang masih draft langsung dihitung ulang (potongan, telat, lembur). Slip yang sudah disetujui/dibayar tidak diubah.</p>}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
