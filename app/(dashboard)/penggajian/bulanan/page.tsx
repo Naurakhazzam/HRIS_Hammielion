@@ -399,7 +399,9 @@ export default function PenggajianBulananPage() {
       .eq('overtime_validated', true)
       .gte('date', firstDay)
       .lte('date', lastDay)
-      .gt('overtime_hours', 0)
+      // Lembur yang sudah di-ACC tetap ikut walau jam terdeteksinya belakangan berubah jadi 0
+      // (absensi dihitung ulang) -- yang dibayar adalah jam yang disetujui (overtime_hours_adjusted).
+      .or('overtime_hours.gt.0,overtime_hours_adjusted.gt.0')
       .order('date')
       .then(({ data }) => {
         const list = (data || []).map((a: any) => ({ date: a.date, hours: roundOvertimeHours(Number(a.overtime_hours)) }))
