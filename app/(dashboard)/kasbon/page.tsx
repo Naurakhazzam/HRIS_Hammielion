@@ -52,6 +52,11 @@ type Employee = {
 const fmtRp = (val: number) =>
   new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(val)
 
+// Pengajuan kasbon sedang ditutup — semua pengajuan baru (staff, driver, kenek) langsung ditolak.
+// Set ke false untuk membuka kembali (hapus juga trigger di migrasi 119).
+const KASBON_DITUTUP = true
+const KASBON_DITUTUP_PESAN = 'Kasbon tidak bisa diajukan bulan ini'
+
 const MONTH_NAMES = ['Januari','Februari','Maret','April','Mei','Juni',
   'Juli','Agustus','September','Oktober','November','Desember']
 
@@ -224,6 +229,7 @@ function TabPengajuan({ showMessage, role, myEmployeeId }: { showMessage: (t: 's
   async function handleAjukan(e: React.FormEvent) {
     e.preventDefault()
     const amt = Number(ajukanForm.amount_requested)
+    if (KASBON_DITUTUP) { showMessage('error', KASBON_DITUTUP_PESAN); return }
     if (!ajukanForm.employee_id) { showMessage('error', 'Pilih karyawan dulu.'); return }
     if (!amt || amt <= 0) { showMessage('error', 'Nominal pengajuan tidak valid.'); return }
     setSubmitting(true)
@@ -742,6 +748,7 @@ function TabKasbonDriver({ showMessage, role }: { showMessage: (t: 'success' | '
   async function handleTambahKasbon(e: React.FormEvent) {
     e.preventDefault()
     const amt = parseFloat(form.total_amount)
+    if (KASBON_DITUTUP) { showMessage('error', KASBON_DITUTUP_PESAN); return }
     if (!form.driver_id) { showMessage('error', 'Pilih driver terlebih dahulu.'); return }
     if (isNaN(amt) || amt <= 0) { showMessage('error', 'Nominal kasbon tidak valid.'); return }
     setSubmitting(true)
@@ -1079,6 +1086,7 @@ function TabKasbonKenek({ showMessage, role }: { showMessage: (t: 'success' | 'e
   async function handleTambahKasbon(e: React.FormEvent) {
     e.preventDefault()
     const amt = parseFloat(form.total_amount)
+    if (KASBON_DITUTUP) { showMessage('error', KASBON_DITUTUP_PESAN); return }
     if (!form.helper_id) { showMessage('error', 'Pilih kenek terlebih dahulu.'); return }
     if (isNaN(amt) || amt <= 0) { showMessage('error', 'Nominal kasbon tidak valid.'); return }
     setSubmitting(true)
