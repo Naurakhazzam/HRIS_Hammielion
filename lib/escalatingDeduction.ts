@@ -18,6 +18,8 @@
 // pengali yang SAMA: 1.5x, naik 0.2x per hari, mentok 2x (keputusan Owner, November 2026).
 // Penghitungnya tetap terpisah: Izin+Sakit-tanpa-surat 1 hitungan, Alpha 1 hitungan sendiri.
 // Periode sebelumnya tidak terpengaruh -- semuanya berakhir sebelum NEW_RULES_CUTOFF_DATE (flat 1x).
+// CATATAN (migrasi 118): angka yang benar-benar dipakai sekarang diatur Owner/HR di menu Potongan &
+// Lembur (tabel payroll_rules, lib/payrollRules.ts). Konstanta di bawah tinggal nilai bawaan/referensi.
 export const ABSENCE_MULTIPLIERS = [1.5, 1.7, 1.9, 2]
 export const IZIN_GROUP_MULTIPLIERS = ABSENCE_MULTIPLIERS
 export const ALPHA_GROUP_MULTIPLIERS = ABSENCE_MULTIPLIERS

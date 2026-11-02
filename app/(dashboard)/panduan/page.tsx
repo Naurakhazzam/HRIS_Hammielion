@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getCurrentPeriodRangeStr, rosterPeriodLabel } from '@/lib/rosterPeriod'
-import { IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS } from '@/lib/escalatingDeduction'
+import { LIBUR_QUOTA_PER_PERIOD } from '@/lib/payrollAbsence'
+import { buildMultipliers, fetchPayrollRules, fmtMultiplier, DEFAULT_PAYROLL_RULES, type PayrollRules } from '@/lib/payrollRules'
 import { LATE_CLARIFICATION_THRESHOLD_MINUTES } from '@/lib/lateClarification'
 
 const fmtRp = (v: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(v)
@@ -72,8 +73,18 @@ export default function PanduanKaryawanPage() {
   const [loading, setLoading] = useState(true)
   const [deptSchedules, setDeptSchedules] = useState<SchedRow[]>([])
   const [branchSchedules, setBranchSchedules] = useState<SchedRow[]>([])
-  const [lateRate, setLateRate] = useState(1000)
-  const [overtimeRate, setOvertimeRate] = useState(10000)
+  // Semua angka potongan/lembur/telat dari satu pintu: Potongan & Lembur (payroll_rules).
+  const [rules, setRules] = useState<PayrollRules>(DEFAULT_PAYROLL_RULES)
+  const lateRate = rules.late_penalty_per_minute
+  const overtimeRate = rules.overtime_rate_per_hour
+  const izinTiers = buildMultipliers(rules.izin_start, rules.izin_step, rules.izin_max)
+  const suddenTiers = buildMultipliers(rules.sudden_start, rules.sudden_step, rules.sudden_max)
+  const alphaTiers = buildMultipliers(rules.alpha_start, rules.alpha_step, rules.alpha_max)
+  const seqText = (t: number[]) => t.length > 1 ? t.map(fmtMultiplier).join(' → ') + ' (mentok)' : fmtMultiplier(t[0])
+  const [sick1, sick23, sick4] = [rules.sick_doc_day1, rules.sick_doc_day2_3, rules.sick_doc_day4_plus]
+  const quota = LIBUR_QUOTA_PER_PERIOD
+  // Aman kalau tabel pengalinya lebih pendek dari contoh simulasi (mis. tidak naik sama sekali).
+  const tierAt = (t: number[], i: number) => t[Math.min(i, t.length - 1)]
   // Gaji standar acuan sistem (salary_defaults) -- dipakai HR sebagai isian awal saat menambah
   // karyawan baru. Dipakai di sini sebagai dasar simulasi supaya angkanya REAL (bukan karangan),
   // walau tetap bukan gaji pribadi siapa pun -- gaji asli tiap orang beda-beda.
@@ -85,14 +96,15 @@ export default function PanduanKaryawanPage() {
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
-    const [{ data: dept }, { data: branch }, { data: def }] = await Promise.all([
+    const [{ data: dept }, { data: branch }, { data: def }, periodRules] = await Promise.all([
       supabase.from('work_schedules')
         .select('check_in_time, check_out_time, detect_until, allow_overtime, departments(name)')
         .order('check_in_time'),
       supabase.from('branch_shift_schedules')
         .select('check_in_time, check_out_time, detect_until, allow_overtime, branches(name)')
         .eq('is_active', true).order('check_in_time'),
-      supabase.from('salary_defaults').select('base_salary, position_allowance, meal_allowance, late_penalty_per_minute, overtime_rate_per_hour').limit(1).maybeSingle(),
+      supabase.from('salary_defaults').select('base_salary, position_allowance, meal_allowance').limit(1).maybeSingle(),
+      fetchPayrollRules(supabase, period.start),
     ])
     setDeptSchedules((dept || []).map((d: any) => ({
       label: d.departments?.name ?? 'Departemen', check_in_time: d.check_in_time,
@@ -102,8 +114,7 @@ export default function PanduanKaryawanPage() {
       label: b.branches?.name ?? 'Cabang', check_in_time: b.check_in_time,
       check_out_time: b.check_out_time, detect_until: b.detect_until, allow_overtime: b.allow_overtime,
     })))
-    setLateRate(Number(def?.late_penalty_per_minute ?? 1000))
-    setOvertimeRate(Number(def?.overtime_rate_per_hour ?? 10000))
+    setRules(periodRules)
     setContohGajiBulanan(Number(def?.base_salary ?? 0) + Number(def?.position_allowance ?? 0) + Number(def?.meal_allowance ?? 0))
     setLoading(false)
   }
@@ -239,9 +250,9 @@ export default function PanduanKaryawanPage() {
               <li>Maksimal <strong>1 tanggal Sabtu/Minggu</strong> per periode boleh dipilih jadi hari libur — supaya weekend bisa bergantian dengan rekan kerja, tidak dikuasai orang yang sama terus.</li>
               <li>Per cabang, satu tanggal maksimal <strong>2 orang</strong> libur (cabang yang karyawannya cuma 2 orang atau kurang: maksimal <strong>1 orang</strong>). Driver &amp; karyawan gaji flat tidak dihitung. Tanggal yang sudah penuh tampil abu-abu di kalender — siapa cepat dia dapat.</li>
               <li>Aturan yang sama berlaku juga saat <em>Ganti Libur</em> dan saat menukar libur waktu absen masuk di hari libur. Kalau tanggal bisa diklik di kalender, berarti sudah sesuai aturan.</li>
-              <li>Jatah 4 hari itu dipakai berurutan oleh: <strong>(1)</strong> libur terjadwal yang sudah disetujui, <strong>(2)</strong> cuti, <strong>(3)</strong> izin/sakit (dari tanggal paling awal), <strong>(4)</strong> hari kosong tanpa absen. Izin/sakit yang masih masuk sisa jatah <strong>tidak dipotong</strong>. Alpha dan Izin Mendadak tidak pernah mengisi jatah.</li>
+              <li>Jatah {quota} hari itu dipakai berurutan oleh: <strong>(1)</strong> libur terjadwal yang sudah disetujui, <strong>(2)</strong> cuti, <strong>(3)</strong> izin/sakit (dari tanggal paling awal), <strong>(4)</strong> hari kosong tanpa absen. Izin/sakit yang masih masuk sisa jatah <strong>tidak dipotong</strong>. Alpha dan Izin Mendadak tidak pernah mengisi jatah.</li>
               <li>Libur terjadwal yang sudah disetujui <strong>tidak pernah dipotong</strong> dan tidak pernah dianggap Alpha.</li>
-              <li>Kalau jatah yang terpakai <strong>kurang dari 4 hari</strong> dalam satu periode, sisanya <strong>dibayar tunai</strong> sebagai kompensasi (dianggap Anda "menabung" hari libur jadi uang).</li>
+              <li>Kalau jatah yang terpakai <strong>kurang dari {quota} hari</strong> dalam satu periode, sisanya <strong>dibayar tunai</strong> sebagai kompensasi (dianggap Anda "menabung" hari libur jadi uang).</li>
               <li>Kalau jatah sudah habis, izin/sakit berikutnya kena potongan Izin/Sakit (bagian 9 &amp; 11), dan hari kosong berikutnya dihitung Alpha (bagian 10).</li>
               <li>Kalau ternyata hari itu terjadwal libur tapi Anda tetap masuk kerja, sistem akan minta Anda memilih <strong>tanggal pengganti</strong> untuk libur Anda — pilih lewat kalender yang muncul saat absen masuk.</li>
             </ul>
@@ -270,7 +281,7 @@ export default function PanduanKaryawanPage() {
                   <tr><td className="px-3 py-1.5">Sakit (tanpa surat)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Maks. 2 hari berturut — hari ke-3 <strong>wajib</strong> surat dokter, kalau tidak otomatis dianggap Alpha</td></tr>
                   <tr><td className="px-3 py-1.5">Sakit (dengan surat dokter)</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">Wajib lampirkan foto/scan surat dokter</td></tr>
                   <tr><td className="px-3 py-1.5">Izin Duka Keluarga</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga</td><td className="px-3 py-1.5">—</td></tr>
-                  <tr><td className="px-3 py-1.5">Izin Mendadak</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga (atau tanggal mundur)</td><td className="px-3 py-1.5">Tidak dihitung Alpha, tapi kena potongan eskalasi dengan tarif yang sama seperti Izin biasa (1.5× naik 0.2× sampai mentok 2× dalam 1 periode), hitungannya tersendiri</td></tr>
+                  <tr><td className="px-3 py-1.5">Izin Mendadak</td><td className="px-3 py-1.5 text-green-600">Boleh, hari itu juga (atau tanggal mundur)</td><td className="px-3 py-1.5">Tidak dihitung Alpha, tapi kena potongan eskalasi dengan tarif yang sama seperti Izin biasa ({seqText(suddenTiers)} dalam 1 periode), hitungannya tersendiri</td></tr>
                 </tbody>
               </table>
             </div>
@@ -280,7 +291,7 @@ export default function PanduanKaryawanPage() {
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
               <p className="font-medium text-amber-800">⚡ Kapan pakai "Izin Mendadak"?</p>
-              <p className="text-amber-700 mt-0.5">Kalau Anda tidak masuk tanpa sempat lapor dulu (bukan sakit), atau sudah ketahuan Alpha dan mau diperbaiki — pilih jenis ini, boleh untuk tanggal yang sudah lewat. Potongannya sama seperti Izin biasa dan naik dalam periode yang sama (1.5× → 1.7× → 1.9× → mentok 2× gaji harian), jadi makin sering dadakan, makin mahal.</p>
+              <p className="text-amber-700 mt-0.5">Kalau Anda tidak masuk tanpa sempat lapor dulu (bukan sakit), atau sudah ketahuan Alpha dan mau diperbaiki — pilih jenis ini, boleh untuk tanggal yang sudah lewat. Potongannya sama seperti Izin biasa dan naik dalam periode yang sama ({seqText(suddenTiers)} gaji harian), jadi makin sering dadakan, makin mahal.</p>
             </div>
             <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3">
               <p className="font-bold text-red-800">⚠️ Penting: H-7 itu wajib, bukan sekadar saran</p>
@@ -321,7 +332,7 @@ export default function PanduanKaryawanPage() {
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">📝 Bukan sakit, bukan lupa absen?</p>
-              <p className="text-blue-700 mt-0.5">Jatah libur (4 hari/periode) <strong>tidak bisa lagi</strong> dipakai untuk menghapus Alpha yang sudah terjadi — jatah itu sekarang cuma bisa diajukan di muka lewat <strong>Ajukan Libur</strong> (bagian 5). Kalau Alpha-nya karena izin pribadi/keperluan mendadak, perbaiki lewat <strong>Cuti &amp; Izin → Ajukan</strong>, pilih jenis <em>Izin Mendadak</em> (boleh untuk tanggal mundur) — lihat bagian 6.</p>
+              <p className="text-blue-700 mt-0.5">Jatah libur ({quota} hari/periode) <strong>tidak bisa lagi</strong> dipakai untuk menghapus Alpha yang sudah terjadi — jatah itu sekarang cuma bisa diajukan di muka lewat <strong>Ajukan Libur</strong> (bagian 5). Kalau Alpha-nya karena izin pribadi/keperluan mendadak, perbaiki lewat <strong>Cuti &amp; Izin → Ajukan</strong>, pilih jenis <em>Izin Mendadak</em> (boleh untuk tanggal mundur) — lihat bagian 6.</p>
             </div>
             <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3">
               <p className="font-bold text-emerald-800">✅ Opsi "Saya Hadir" — khusus periode 26 Agustus - 25 September 2026</p>
@@ -366,7 +377,7 @@ export default function PanduanKaryawanPage() {
             <p>Izin (duka, keperluan pribadi, dll) dan Sakit <strong>tanpa</strong> surat dokter digabung jadi satu kelompok yang sama. Setiap <strong>hari</strong> izin/sakit-tanpa-surat dalam 1 periode gaji naik 1 tingkat pengali — tanggal-tanggal yang berturut-turut (tanpa jeda masuk kerja) disebut <strong>1 "kejadian"</strong>, tapi tingkatnya tetap naik <strong>per hari di dalam kejadian itu juga</strong>, bukan cuma 1 tarif flat untuk seluruh kejadian. Begitu Anda masuk kerja lagi lalu izin/sakit lagi di lain waktu (kejadian berikutnya, masih periode yang sama), tingkatnya <strong>lanjut</strong> dari hari terakhir kejadian sebelumnya — tidak kembali ke tingkat 1. Setiap masuk periode baru (tanggal 26), baru benar-benar reset ke tingkat 1 lagi.</p>
             <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3">
               <p className="font-bold text-amber-800">🔰 Kecuali karyawan Training</p>
-              <p className="text-amber-700 mt-0.5">Kalau status Anda masih <strong>Training</strong>, aturan di atas TIDAK berlaku — potongannya <strong>flat 1× gaji harian per hari</strong>, hari/kejadian ke berapa pun, tidak pernah naik bertahap. Berlaku sama untuk Alpha di bagian 10.</p>
+              <p className="text-amber-700 mt-0.5">Kalau status Anda masih <strong>Training</strong>, aturan di atas TIDAK berlaku — potongannya <strong>flat {fmtMultiplier(rules.training_multiplier)} gaji harian per hari</strong>, hari/kejadian ke berapa pun, tidak pernah naik bertahap. Berlaku sama untuk Alpha di bagian 10.</p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
@@ -376,8 +387,8 @@ export default function PanduanKaryawanPage() {
               <table className="w-full text-sm border-collapse">
                 <thead><tr className="bg-orange-50 text-orange-800"><th className="px-3 py-1.5 text-left">Hari ke- (akumulasi dalam periode, lintas kejadian)</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan hari itu</th></tr></thead>
                 <tbody className="divide-y divide-orange-100">
-                  {IZIN_GROUP_MULTIPLIERS.map((m, i) => (
-                    <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === IZIN_GROUP_MULTIPLIERS.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(contohGajiHarian * m))}</td></tr>
+                  {izinTiers.map((m, i) => (
+                    <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === izinTiers.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(contohGajiHarian * m))}</td></tr>
                   ))}
                 </tbody>
               </table>
@@ -385,9 +396,9 @@ export default function PanduanKaryawanPage() {
             <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi lengkap (pakai gaji standar sistem {fmtRp(contohGajiBulanan)}/bulan → gaji harian {fmtRp(contohGajiHarian)}):</p>
             <p>Dalam satu periode: Izin 1 hari (tgl 3) — lalu masuk kerja normal — lalu Sakit tanpa surat 2 hari berturut (tgl 15-16).</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Kejadian ke-1 (tgl 3, 1 hari) — hari ke-1 akumulasi × {IZIN_GROUP_MULTIPLIERS[0]}× = <strong>{fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[0]))}</strong></li>
-              <li>Kejadian ke-2 (tgl 15-16, 2 hari) — <strong>lanjut</strong> dari hari ke-2 &amp; ke-3 akumulasi (bukan balik ke tingkat 1): tgl 15 × {IZIN_GROUP_MULTIPLIERS[1]}× = {fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[1]))}, tgl 16 × {IZIN_GROUP_MULTIPLIERS[2]}× = {fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[2]))}</li>
-              <li>Total potongan periode ini: <strong>{fmtRp(Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[0]) + Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[1]) + Math.round(contohGajiHarian * IZIN_GROUP_MULTIPLIERS[2]))}</strong></li>
+              <li>Kejadian ke-1 (tgl 3, 1 hari) — hari ke-1 akumulasi × {tierAt(izinTiers, 0)}× = <strong>{fmtRp(Math.round(contohGajiHarian * tierAt(izinTiers, 0)))}</strong></li>
+              <li>Kejadian ke-2 (tgl 15-16, 2 hari) — <strong>lanjut</strong> dari hari ke-2 &amp; ke-3 akumulasi (bukan balik ke tingkat 1): tgl 15 × {tierAt(izinTiers, 1)}× = {fmtRp(Math.round(contohGajiHarian * tierAt(izinTiers, 1)))}, tgl 16 × {tierAt(izinTiers, 2)}× = {fmtRp(Math.round(contohGajiHarian * tierAt(izinTiers, 2)))}</li>
+              <li>Total potongan periode ini: <strong>{fmtRp(Math.round(contohGajiHarian * tierAt(izinTiers, 0)) + Math.round(contohGajiHarian * tierAt(izinTiers, 1)) + Math.round(contohGajiHarian * tierAt(izinTiers, 2)))}</strong></li>
             </ul>
             <p className="text-sm text-slate-500">Ini pakai gaji standar sistem sebagai contoh — gaji Anda sendiri kemungkinan beda. Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>
@@ -402,15 +413,15 @@ export default function PanduanKaryawanPage() {
               <table className="w-full text-sm border-collapse">
                 <thead><tr className="bg-red-50 text-red-800"><th className="px-3 py-1.5 text-left">Hari ke- (akumulasi dalam periode)</th><th className="px-3 py-1.5 text-left">Pengali</th><th className="px-3 py-1.5 text-right">Potongan hari itu</th></tr></thead>
                 <tbody className="divide-y divide-red-100">
-                  {ALPHA_GROUP_MULTIPLIERS.map((m, i) => (
-                    <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === ALPHA_GROUP_MULTIPLIERS.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(contohGajiHarian * m))}</td></tr>
+                  {alphaTiers.map((m, i) => (
+                    <tr key={i}><td className="px-3 py-1.5">{i + 1}{i === alphaTiers.length - 1 ? ' (mentok, seterusnya tetap segini)' : ''}</td><td className="px-3 py-1.5">{m}×</td><td className="px-3 py-1.5 text-right font-medium">{fmtRp(Math.round(contohGajiHarian * m))}</td></tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <p className="text-xs text-slate-400">(Pakai gaji harian standar sistem {fmtRp(contohGajiHarian)} sebagai contoh — lihat angka Anda sendiri di link bawah.)</p>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-red-700">Klarifikasi Alpha (bagian 7) tetap penting dilakukan cepat — Alpha manual dari HR tidak pernah bisa memakai jatah libur 4 hari, sedangkan Izin/Sakit bisa. Kalau ternyata sakit dengan surat dokter, potongannya jauh lebih ringan (bagian 11), dan kalau cuma lupa scan, cukup denda Lupa Absen (bagian 8).</p>
+              <p className="text-red-700">Klarifikasi Alpha (bagian 7) tetap penting dilakukan cepat — Alpha manual dari HR tidak pernah bisa memakai jatah libur {quota} hari, sedangkan Izin/Sakit bisa. Kalau ternyata sakit dengan surat dokter, potongannya jauh lebih ringan (bagian 11), dan kalau cuma lupa scan, cukup denda Lupa Absen (bagian 8).</p>
             </div>
             <p className="text-sm text-slate-500">Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>
@@ -422,9 +433,9 @@ export default function PanduanKaryawanPage() {
           <div className="space-y-3 text-sm text-slate-600">
             <p>Beda dengan Izin/Sakit tanpa surat — Sakit <strong>dengan</strong> surat dokter dihitung per <strong>hari berturut</strong> (bukan per kejadian), jadi lebih ringan karena ada bukti resmi.</p>
             <div className="bg-slate-50 rounded-lg p-3 space-y-1">
-              <p>Hari ke-1: <strong className="text-green-600">Gratis</strong> (ditanggung perusahaan)</p>
-              <p>Hari ke-2 &amp; ke-3: <strong>{fmtRp(Math.round(contohGajiHarian * 0.5))}/hari</strong> (0.5×)</p>
-              <p>Hari ke-4 dan seterusnya: <strong>{fmtRp(contohGajiHarian)}/hari</strong> (1×)</p>
+              <p>Hari ke-1: {sick1 > 0 ? <><strong>{fmtRp(Math.round(contohGajiHarian * sick1))}/hari</strong> ({fmtMultiplier(sick1)})</> : <><strong className="text-green-600">Gratis</strong> (ditanggung perusahaan)</>}</p>
+              <p>Hari ke-2 &amp; ke-3: <strong>{fmtRp(Math.round(contohGajiHarian * sick23))}/hari</strong> ({fmtMultiplier(sick23)})</p>
+              <p>Hari ke-4 dan seterusnya: <strong>{fmtRp(Math.round(contohGajiHarian * sick4))}/hari</strong> ({fmtMultiplier(sick4)})</p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-medium text-blue-800">💡 Analogi gampangnya:</p>
@@ -432,10 +443,10 @@ export default function PanduanKaryawanPage() {
             </div>
             <p className="font-semibold text-slate-700 pt-1">🧮 Simulasi: Sakit 5 hari berturut dengan surat dokter (gaji harian standar sistem {fmtRp(contohGajiHarian)}):</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Hari 1: Gratis = <strong>Rp 0</strong></li>
-              <li>Hari 2 &amp; 3: 2 × {fmtRp(Math.round(contohGajiHarian * 0.5))} = <strong>{fmtRp(2 * Math.round(contohGajiHarian * 0.5))}</strong></li>
-              <li>Hari 4 &amp; 5: 2 × {fmtRp(contohGajiHarian)} = <strong>{fmtRp(2 * contohGajiHarian)}</strong></li>
-              <li>Total potongan: <strong>{fmtRp(2 * Math.round(contohGajiHarian * 0.5) + 2 * contohGajiHarian)}</strong></li>
+              <li>Hari 1: <strong>{fmtRp(Math.round(contohGajiHarian * sick1))}</strong></li>
+              <li>Hari 2 &amp; 3: 2 × {fmtRp(Math.round(contohGajiHarian * sick23))} = <strong>{fmtRp(2 * Math.round(contohGajiHarian * sick23))}</strong></li>
+              <li>Hari 4 &amp; 5: 2 × {fmtRp(Math.round(contohGajiHarian * sick4))} = <strong>{fmtRp(2 * Math.round(contohGajiHarian * sick4))}</strong></li>
+              <li>Total potongan: <strong>{fmtRp(Math.round(contohGajiHarian * sick1) + 2 * Math.round(contohGajiHarian * sick23) + 2 * Math.round(contohGajiHarian * sick4))}</strong></li>
             </ul>
             <p className="text-sm text-slate-500">Untuk jelasnya, Anda bisa lihat sendiri potongan Anda yang sesungguhnya berapa, klik <DiSiniLink />.</p>
           </div>
@@ -451,7 +462,7 @@ export default function PanduanKaryawanPage() {
             <li>✔️ Terlanjur tidak absen dan sudah kena Alpha? Segera klarifikasi dalam <strong>2 hari</strong> (bagian 7) — jangan didiamkan.</li>
             <li>✔️ Simpan surat dokter kalau sakit lebih dari 2 hari berturut — wajib mulai hari ke-3, dan potongannya jauh lebih ringan dibanding tanpa surat.</li>
             <li>🛑 Jangan biarkan Sakit/Izin/Alpha tidak jelas memanjang lebih dari 7 hari berturut — akun Anda bisa <strong>otomatis dinonaktifkan</strong> (bagian 7).</li>
-            <li>✔️ Manfaatkan jatah 4 hari libur tiap periode — kalau tidak dipakai penuh, sisanya tetap dibayar tunai, jadi tidak rugi.</li>
+            <li>✔️ Manfaatkan jatah {quota} hari libur tiap periode — kalau tidak dipakai penuh, sisanya tetap dibayar tunai, jadi tidak rugi.</li>
             <li>✔️ Per cabang satu tanggal maksimal 2 orang libur (1 orang untuk cabang kecil) & weekend cuma boleh 1 per periode — pilih tanggal dari awal supaya kebagian tanggal yang diinginkan.</li>
             <li>ℹ️ Telat dan tidak hadir juga menurunkan nilai KPI <em>Tepat Waktu</em> &amp; <em>Kehadiran</em> (yang menentukan Bonus KPI). Ini terpisah dari potongan gaji: potongan gaji mengganti waktu kerja yang hilang, KPI menilai kedisiplinan Anda.</li>
             <li>✔️ Masih bingung soal gaji atau absen Anda sendiri? Klik <DiSiniLink /> untuk lihat angka asli Anda, atau tanya HR langsung.</li>

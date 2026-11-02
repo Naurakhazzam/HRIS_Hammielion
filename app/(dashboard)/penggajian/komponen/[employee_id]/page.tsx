@@ -324,17 +324,8 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
               <p className="text-[10px] text-slate-500 mt-1">Khusus karyawan ini saja — beda dari gaji standar yang sama untuk sesama posisi.</p>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Tarif Lembur / Jam (Rp)</label>
-              <RupiahInput
-                value={formData.overtime_rate_per_hour}
-                onChange={(v) => setFormData({...formData, overtime_rate_per_hour: v})}
-                className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-
             <div className="bg-slate-50 border border-slate-200 rounded p-2.5">
-              <p className="text-xs text-slate-500">Potongan Telat / Menit sekarang <strong>satu tarif untuk semua staff</strong> — atur di <Link href="/penggajian/komponen" className="text-blue-600 hover:underline">Kelola Gaji Standar</Link>, bukan di sini lagi.</p>
+              <p className="text-xs text-slate-500">Tarif <strong>lembur</strong>, <strong>telat</strong>, dan potongan tidak masuk kerja berlaku sama untuk semua staff — atur di <Link href="/penggajian/potongan-lembur" className="text-blue-600 hover:underline">Potongan &amp; Lembur</Link>, bukan di sini.</p>
             </div>
 
             <div className="pt-2">
@@ -362,14 +353,13 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Gaji Pokok</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Tunjangan</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Tunj. Khusus</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Rate Lembur/Jam</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {history.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada riwayat gaji untuk karyawan ini.</td>
+                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">Belum ada riwayat gaji untuk karyawan ini.</td>
                   </tr>
                 ) : (
                   history.map((h) => {
@@ -397,9 +387,6 @@ export default function DetailKomponenGajiPage({ params }: { params: Promise<{ e
                       </td>
                       <td className="px-4 py-3 text-right text-sm text-slate-700">
                         {h.special_allowance > 0 ? formatRupiah(h.special_allowance) : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-right text-sm text-slate-600">
-                        {formatRupiah(h.overtime_rate_per_hour)}
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         <button type="button" onClick={() => loadRowToForm(h)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Ubah</button>

@@ -5,7 +5,8 @@ Satu sumber aturan tertulis untuk slip gaji staff (permanent & training). Rumusn
 | Bagian | Kode |
 |---|---|
 | Potongan tidak hadir, jatah libur, kompensasi libur | `lib/payrollAbsence.ts` → `calcAbsence()` |
-| Tabel pengali eskalasi, tanggal aturan baru | `lib/escalatingDeduction.ts` |
+| **Angka** potongan, telat, lembur (per periode) | Tabel `payroll_rules` → `lib/payrollRules.ts`, diatur di menu **Penggajian → Setup Gaji & Tarif → Potongan & Lembur** |
+| Rumus eskalasi, tanggal aturan baru | `lib/escalatingDeduction.ts` |
 | Toleransi telat absen QR | `lib/lateTolerance.ts` |
 | Gaji bersih | `calcNet()` di `app/(dashboard)/penggajian/bulanan/page.tsx` dan `recalc_payroll_totals()` di DB |
 
@@ -60,7 +61,9 @@ Aturan tambahan:
 
 ## 3. Potongan tidak hadir (di luar jatah)
 
-Untuk karyawan permanent, periode yang berakhir **mulai 26 Sep 2026**:
+Untuk karyawan permanent, periode yang berakhir **mulai 26 Sep 2026**. Angka di tabel ini adalah isi awal
+`payroll_rules` untuk periode Oktober 2026; angka yang berlaku sebenarnya selalu dibaca dari menu
+**Potongan & Lembur** (satu set aturan berlaku mulai periode yang dipilih sampai ada set baru):
 
 | Jenis | Cara hitung |
 |---|---|
@@ -73,7 +76,11 @@ Untuk karyawan permanent, periode yang berakhir **mulai 26 Sep 2026**:
 
 - Eskalasi direset setiap periode baru.
 - Tabel 1,5× → maks 2× untuk Izin, Izin Mendadak & Alpha berlaku mulai periode Oktober 2026 (26 Sep – 25 Okt).
-- Tarif lembur standar Rp10.000/jam mulai periode Oktober 2026 (migrasi 117).
+- Tarif lembur Rp10.000/jam mulai periode Oktober 2026 (migrasi 117). Mulai migrasi 118, tarif lembur
+  & telat hanya dibaca dari `payroll_rules`, bukan lagi dari `salary_defaults` atau tarif lembur per
+  karyawan di `salary_components`.
+- Denda Lupa Absen & telat ajukan libur masih diatur di fungsi database (belum lewat `payroll_rules`).
+- Jatah libur 4 hari tetap konstanta (`LIBUR_QUOTA_PER_PERIOD`), karena juga dipakai kuota Ajukan Libur.
 - **Training**: Izin / Alpha / Izin Mendadak **flat 1×**, tanpa eskalasi.
 - **Periode lama** (berakhir sebelum 26 Sep 2026): flat 1× dan tanpa denda Lupa Absen.
 - Sakit dengan surat memakai tarif yang sama untuk semua periode.

@@ -30,10 +30,6 @@ export default function SetupKomponenGajiPage() {
   const [showDefaultEditor, setShowDefaultEditor] = useState(false)
   const [defaultForm, setDefaultForm] = useState<Record<string, { base_salary: string; position_allowance: string; meal_allowance: string }>>({})
   const [savingDefaultId, setSavingDefaultId] = useState<string | null>(null)
-  const [universalLateRate, setUniversalLateRate] = useState('1000')
-  const [savingLateRate, setSavingLateRate] = useState(false)
-  const [universalOvertimeRate, setUniversalOvertimeRate] = useState('10000')
-  const [savingOvertimeRate, setSavingOvertimeRate] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const supabase = createClient()
 
@@ -83,8 +79,6 @@ export default function SetupKomponenGajiPage() {
     const formInit: typeof defaultForm = {}
     defs.forEach(d => { formInit[d.id] = { base_salary: String(d.base_salary), position_allowance: String(d.position_allowance), meal_allowance: String(d.meal_allowance) } })
     setDefaultForm(formInit)
-    if (defs[0]) setUniversalLateRate(String(defs[0].late_penalty_per_minute))
-    if (defs[0]) setUniversalOvertimeRate(String(defs[0].overtime_rate_per_hour))
     setLoading(false)
   }
 
@@ -127,30 +121,6 @@ export default function SetupKomponenGajiPage() {
     if (error) showMsg('error', 'Gagal menyimpan gaji standar: ' + error.message)
     else { showMsg('success', 'Gaji standar diperbarui. Ini TIDAK mengubah gaji karyawan yang sudah diatur — pakai "Terapkan Gaji Standar" untuk itu.'); await fetchData() }
     setSavingDefaultId(null)
-  }
-
-  async function saveUniversalLateRate() {
-    setSavingLateRate(true)
-    // Berlaku untuk SEMUA baris Gaji Standar sekaligus — memang cuma 1 tarif untuk semua staff,
-    // bukan per-label. Tidak menyentuh salary_components siapa pun; perhitungan gaji langsung
-    // baca dari sini (lihat lib penggajian), jadi begitu disimpan langsung berlaku bulan berjalan.
-    const { error } = await supabase.from('salary_defaults').update({ late_penalty_per_minute: Number(universalLateRate) || 0 })
-    if (error) showMsg('error', 'Gagal menyimpan tarif keterlambatan: ' + error.message)
-    else showMsg('success', 'Tarif keterlambatan universal diperbarui — langsung berlaku untuk semua staff.')
-    await fetchData()
-    setSavingLateRate(false)
-  }
-
-  async function saveUniversalOvertimeRate() {
-    setSavingOvertimeRate(true)
-    // Sama seperti tarif keterlambatan universal -- 1 tarif untuk semua staff (Office & Team
-    // Toko). Team Gudang tidak terpengaruh sama sekali karena lembur mereka sudah dinolkan
-    // total di calc_attendance_times() berdasarkan nama departemen, bukan tarif ini.
-    const { error } = await supabase.from('salary_defaults').update({ overtime_rate_per_hour: Number(universalOvertimeRate) || 0 })
-    if (error) showMsg('error', 'Gagal menyimpan tarif lembur: ' + error.message)
-    else showMsg('success', 'Tarif lembur universal diperbarui. Ini jadi acuan untuk karyawan baru yang belum pernah punya baris gaji -- karyawan yang sudah punya tarif lembur sendiri TIDAK ikut berubah.')
-    await fetchData()
-    setSavingOvertimeRate(false)
   }
 
   async function applyDefaultToSelected() {
@@ -273,36 +243,9 @@ export default function SetupKomponenGajiPage() {
             })}
           </div>
 
-          <div className="mt-5 pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
-            <div className="sm:col-span-1">
-              <p className="text-sm font-semibold text-slate-800">Tarif Keterlambatan</p>
-              <p className="text-xs text-slate-500">Berlaku untuk semua staff, bukan per orang</p>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 block mb-1">Rp / menit</label>
-              <input type="number" value={universalLateRate} onChange={e => setUniversalLateRate(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
-            </div>
-            <button onClick={saveUniversalLateRate} disabled={savingLateRate}
-              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition disabled:opacity-50 w-fit">
-              {savingLateRate ? '...' : 'Simpan Tarif Universal'}
-            </button>
-          </div>
-
-          <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
-            <div className="sm:col-span-1">
-              <p className="text-sm font-semibold text-slate-800">Tarif Lembur</p>
-              <p className="text-xs text-slate-500">Berlaku semua staff kecuali Team Gudang (tidak dapat lembur sama sekali)</p>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 block mb-1">Rp / jam</label>
-              <input type="number" value={universalOvertimeRate} onChange={e => setUniversalOvertimeRate(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
-            </div>
-            <button onClick={saveUniversalOvertimeRate} disabled={savingOvertimeRate}
-              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition disabled:opacity-50 w-fit">
-              {savingOvertimeRate ? '...' : 'Simpan Tarif Universal'}
-            </button>
+          <div className="mt-5 pt-4 border-t border-slate-200 text-sm text-slate-600">
+            Tarif <strong>keterlambatan</strong>, <strong>lembur</strong>, dan semua <strong>potongan tidak masuk kerja</strong> sekarang diatur di satu tempat:{' '}
+            <Link href="/penggajian/potongan-lembur" className="text-blue-600 hover:underline font-medium">Potongan &amp; Lembur</Link>.
           </div>
         </div>
       )}

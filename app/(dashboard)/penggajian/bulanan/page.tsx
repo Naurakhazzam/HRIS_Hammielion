@@ -6,6 +6,7 @@ import RupiahInput from '@/components/RupiahInput'
 import { todayLocalStr } from '@/lib/date'
 import { chargeableLateMinutes, isLateTolerated } from '@/lib/lateTolerance'
 import { type EscalatingResult } from '@/lib/escalatingDeduction'
+import { fetchPayrollRules, periodStartOf } from '@/lib/payrollRules'
 import { calcAbsence, calcDailyRate, calcProRataFactor, computeAbsenceForPeriod, fetchAbsenceSource, toAbsenceBreakdown, splitAbsentDeduction, ADMIN_FEE_KIND_LABEL, type AbsenceBreakdown } from '@/lib/payrollAbsence'
 import AdminFeeDetail from '@/components/AdminFeeDetail'
 
@@ -746,7 +747,7 @@ export default function PenggajianBulananPage() {
     try {
     const { firstDay, lastDay } = getFirstLastDay(filterMonth, filterYear)
 
-    const [scRes, attRes, kpiRes, empRes, loyBalRes, lateDefRes, absenceSrc] = await Promise.all([
+    const [scRes, attRes, kpiRes, empRes, loyBalRes, rules, absenceSrc] = await Promise.all([
       // Komponen gaji yang BERLAKU di periode ini (effective_date <= akhir periode), bukan yang
       // terbaru -- kenaikan gaji yang berlaku mulai periode depan tidak boleh ikut ke slip ini.
       supabase.from('salary_components').select('*').eq('employee_id', empId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1),
@@ -754,7 +755,8 @@ export default function PenggajianBulananPage() {
       supabase.from('kpi_evaluations').select('bonus_cair').eq('employee_id', empId).eq('period_month', filterMonth).eq('period_year', filterYear).limit(1),
       supabase.from('employees').select('full_name, employee_code, join_date, last_working_date, employee_type, loyalitas_per_month, loyalitas_duration_months, branch_id, position_id, late_penalty_applicable, overtime_applicable, libur_compensation_applicable, flat_salary, positions(name), branches(name)').eq('id', empId).single(),
       supabase.from('loyalitas_balances').select('*').eq('employee_id', empId).eq('status', 'active').maybeSingle(),
-      supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
+      // Angka lembur, telat & potongan tidak hadir: satu pintu di Potongan & Lembur (payroll_rules).
+      fetchPayrollRules(supabase, firstDay),
       fetchAbsenceSource(supabase, empId, firstDay, lastDay),
     ])
 
@@ -809,11 +811,9 @@ export default function PenggajianBulananPage() {
     const posRaw   = Number(sc.position_allowance ?? 0)
     const mealRaw  = Number(sc.meal_allowance ?? 0)
     const specialRaw = Number(sc.special_allowance ?? 0)
-    const otRate   = Number(sc.overtime_rate_per_hour ?? 0)
-    // Tarif keterlambatan sekarang universal (1 angka untuk semua staff) — dari Gaji Standar,
-    // bukan per-karyawan lagi. Kolom late_penalty_per_minute di salary_components dibiarkan apa
-    // adanya untuk histori lama, tapi tidak dipakai lagi untuk hitungan baru.
-    const latRate  = Number(lateDefRes.data?.late_penalty_per_minute ?? 0)
+    const otRate   = rules.overtime_rate_per_hour
+    // Tarif lembur & telat: satu angka untuk semua staff, per periode (Potongan & Lembur).
+    const latRate  = rules.late_penalty_per_minute
     const joinDateVal = (emp as any).join_date ?? null
     const lastWorkingDateVal: string | null = (emp as { last_working_date?: string | null }).last_working_date ?? null
     const inEmployment = (d: string) => (!joinDateVal || d >= joinDateVal) && (!lastWorkingDateVal || d <= lastWorkingDateVal)
@@ -867,7 +867,7 @@ export default function PenggajianBulananPage() {
       dailyRate, firstDay, lastDay, today: todayLocalStr(), joinDate: joinDateVal, lastWorkingDate: lastWorkingDateVal,
       attendances: absenceSrc.attendances, rosterDayOffDates: absenceSrc.rosterDayOffDates, holidayDates: absenceSrc.holidayDates,
       isTraining, proRataFactor, flatSalary: flatSalaryForEmp, liburCompApplicable: liburCompApplicableForEmp,
-      disciplineFeeTotal: absenceSrc.disciplineFeeTotal,
+      disciplineFeeTotal: absenceSrc.disciplineFeeTotal, rules,
     })
     const absentDed        = absence.absentDed
     const absentDays       = absence.absentDays
@@ -1342,13 +1342,13 @@ export default function PenggajianBulananPage() {
     const firstDay = `${sy}-${pad(sm)}-26`
     const lastDay  = `${p.period_year}-${pad(p.period_month)}-25`
 
-    // Tarif potongan per menit sekarang universal (Gaji Standar), bukan per-karyawan lagi.
-    const [lateDefRes, empRes] = await Promise.all([
-      supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
+    // Tarif potongan per menit: satu pintu di Potongan & Lembur (payroll_rules), per periode.
+    const [rules, empRes] = await Promise.all([
+      fetchPayrollRules(supabase, firstDay),
       supabase.from('employees').select('join_date').eq('id', p.employee_id).single(),
     ])
 
-    const rate = Number(lateDefRes.data?.late_penalty_per_minute ?? 0)
+    const rate = rules.late_penalty_per_minute
     setLateRate(rate)
 
     // Jangan hitung hari sebelum karyawan bergabung
@@ -1483,11 +1483,11 @@ export default function PenggajianBulananPage() {
     const firstDay = `${sy2}-${pad2(sm2)}-26`
     const lastDay  = `${p.period_year}-${pad2(p.period_month)}-25`
 
-    const [scRes, empRes] = await Promise.all([
-      supabase.from('salary_components').select('overtime_rate_per_hour').eq('employee_id', p.employee_id).order('effective_date', { ascending: false }).limit(1),
+    const [rules, empRes] = await Promise.all([
+      fetchPayrollRules(supabase, periodStartOf(p.period_month, p.period_year)),
       supabase.from('employees').select('join_date').eq('id', p.employee_id).single(),
     ])
-    const otRate = Number(scRes.data?.[0]?.overtime_rate_per_hour ?? 0)
+    const otRate = rules.overtime_rate_per_hour
     const joinDateVal = empRes.data?.join_date ?? null
     const effectiveStart = joinDateVal && joinDateVal > firstDay ? joinDateVal : firstDay
 
@@ -2735,9 +2735,9 @@ export default function PenggajianBulananPage() {
                           {absentBreakdownDetail.sickDays > 0 && (
                             <div className="text-xs text-blue-400">
                               └ Sakit dengan surat dokter: {absentBreakdownDetail.sickDays} hari
-                              {absentBreakdownDetail.sick1Free > 0 && <span> · hari ke-1 gratis</span>}
-                              {absentBreakdownDetail.sick23Half > 0 && <span> · hari ke-{1+absentBreakdownDetail.sick1Free}–{1+absentBreakdownDetail.sick1Free+absentBreakdownDetail.sick23Half-1} = {formatRupiah(Math.round(absentBreakdownDetail.sick23Half * absentBreakdownDetail.dailyRate * 0.5))}</span>}
-                              {absentBreakdownDetail.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(absentBreakdownDetail.sick4Full * absentBreakdownDetail.dailyRate)}</span>}
+                              {absentBreakdownDetail.sick1Free > 0 && <span> · hari ke-1 {(absentBreakdownDetail.sickRates?.[0] ?? 0) > 0 ? `= ${formatRupiah(Math.round(absentBreakdownDetail.sick1Free * absentBreakdownDetail.dailyRate * (absentBreakdownDetail.sickRates?.[0] ?? 0)))}` : 'gratis'}</span>}
+                              {absentBreakdownDetail.sick23Half > 0 && <span> · hari ke-{1+absentBreakdownDetail.sick1Free}–{1+absentBreakdownDetail.sick1Free+absentBreakdownDetail.sick23Half-1} = {formatRupiah(Math.round(absentBreakdownDetail.sick23Half * absentBreakdownDetail.dailyRate * (absentBreakdownDetail.sickRates?.[1] ?? 0.5)))}</span>}
+                              {absentBreakdownDetail.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(Math.round(absentBreakdownDetail.sick4Full * absentBreakdownDetail.dailyRate * (absentBreakdownDetail.sickRates?.[2] ?? 1)))}</span>}
                             </div>
                           )}
                           {absentBreakdownDetail.suddenPermissionGroup.blocks.length > 0 && (
@@ -3211,9 +3211,9 @@ export default function PenggajianBulananPage() {
                       )}
                       {slipPreview.absentBreakdown.sickDays > 0 && (
                         <div>└ Sakit dengan surat dokter: {slipPreview.absentBreakdown.sickDays} hari
-                          {slipPreview.absentBreakdown.sick1Free > 0 && <span> · hari ke-1 gratis</span>}
-                          {slipPreview.absentBreakdown.sick23Half > 0 && <span> · hari ke-{1+slipPreview.absentBreakdown.sick1Free}–{1+slipPreview.absentBreakdown.sick1Free+slipPreview.absentBreakdown.sick23Half-1} = {formatRupiah(Math.round(slipPreview.absentBreakdown.sick23Half * slipPreview.absentBreakdown.dailyRate * 0.5))}</span>}
-                          {slipPreview.absentBreakdown.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(slipPreview.absentBreakdown.sick4Full * slipPreview.absentBreakdown.dailyRate)}</span>}
+                          {slipPreview.absentBreakdown.sick1Free > 0 && <span> · hari ke-1 {(slipPreview.absentBreakdown.sickRates?.[0] ?? 0) > 0 ? `= ${formatRupiah(Math.round(slipPreview.absentBreakdown.sick1Free * slipPreview.absentBreakdown.dailyRate * (slipPreview.absentBreakdown.sickRates?.[0] ?? 0)))}` : 'gratis'}</span>}
+                          {slipPreview.absentBreakdown.sick23Half > 0 && <span> · hari ke-{1+slipPreview.absentBreakdown.sick1Free}–{1+slipPreview.absentBreakdown.sick1Free+slipPreview.absentBreakdown.sick23Half-1} = {formatRupiah(Math.round(slipPreview.absentBreakdown.sick23Half * slipPreview.absentBreakdown.dailyRate * (slipPreview.absentBreakdown.sickRates?.[1] ?? 0.5)))}</span>}
+                          {slipPreview.absentBreakdown.sick4Full > 0 && <span> · hari ke-4+ = {formatRupiah(Math.round(slipPreview.absentBreakdown.sick4Full * slipPreview.absentBreakdown.dailyRate * (slipPreview.absentBreakdown.sickRates?.[2] ?? 1)))}</span>}
                         </div>
                       )}
                       {slipPreview.absentBreakdown.adminFeeTotal > 0 && (

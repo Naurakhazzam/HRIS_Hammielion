@@ -16,6 +16,7 @@
 //   bertambah, DITAMBAH kena potongan eskalasi alpha.
 import { calcAbsence, type AbsenceAttendance, type AdminFeeItem } from './payrollAbsence'
 import type { EscalatingResult } from './escalatingDeduction'
+import type { PayrollRules } from './payrollRules'
 
 export type AccrualAttendanceDay = AbsenceAttendance
 
@@ -46,7 +47,7 @@ export function calcDailyAccrual(
   joinDate: string | null,
   attendances: AccrualAttendanceDay[],
   rosterDayOffDates: Set<string>,
-  opts: { lastDay?: string; isTraining?: boolean; disciplineFeeTotal?: number; lastWorkingDate?: string | null; holidayDates?: Iterable<string> } = {},
+  opts: { lastDay?: string; isTraining?: boolean; disciplineFeeTotal?: number; lastWorkingDate?: string | null; holidayDates?: Iterable<string>; rules?: PayrollRules } = {},
 ): DailyAccrualResult {
   const empty: DailyAccrualResult = {
     accruedGross: 0, accruedDeduction: 0, accruedNet: 0, daysCounted: 0, daysElapsed: 0,
@@ -59,7 +60,7 @@ export function calcDailyAccrual(
     lastWorkingDate: opts.lastWorkingDate ?? null, holidayDates: opts.holidayDates,
     attendances, rosterDayOffDates, isTraining: opts.isTraining === true, proRataFactor: 1,
     flatSalary: false, liburCompApplicable: false, disciplineFeeTotal: opts.disciplineFeeTotal ?? 0,
-    applyQuota: false,
+    applyQuota: false, rules: opts.rules,
   })
   const daysCounted = r.daysElapsed - r.alphaDates.length
   const accruedGross = daysCounted * dailyRate

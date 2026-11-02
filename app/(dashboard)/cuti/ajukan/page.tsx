@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { ANNUAL_LEAVE_QUOTA_DAYS, MIN_TENURE_DAYS_FOR_ANNUAL_LEAVE, tenureDays, isEligibleForAnnualLeave, getCurrentLeaveYear, toDateStr } from '@/lib/leaveQuota'
-import { groupContiguousDates, IZIN_GROUP_MULTIPLIERS, SUDDEN_PERMISSION_MULTIPLIERS } from '@/lib/escalatingDeduction'
+import { buildMultipliers, fetchPayrollRules, fmtMultiplier, DEFAULT_PAYROLL_RULES, type PayrollRules } from '@/lib/payrollRules'
 import { getCurrentPeriodRangeStr } from '@/lib/rosterPeriod'
 
 type Employee = { id: string; full_name: string }
@@ -29,13 +29,18 @@ export default function AjukanCutiPage() {
     loading: boolean; joinDate: string | null; usedDays: number
   }>({ loading: false, joinDate: null, usedDays: 0 })
 
-  // Sudah berapa kejadian Izin Duka/Periksa/Sakit-tanpa-surat karyawan ini di periode berjalan —
-  // dipakai untuk memperingatkan pengali eskalasi yang akan berlaku kalau mereka ajukan lagi.
+  // Sudah berapa HARI Izin Duka/Periksa/Sakit-tanpa-surat karyawan ini di periode berjalan --
+  // pengali naik per hari (lib/payrollAbsence.ts), jadi hari berikutnya kena tingkat ke-(N+1).
   const [izinOccurrenceCount, setIzinOccurrenceCount] = useState(0)
 
-  // Sama seperti di atas, tapi untuk Izin Mendadak -- eskalasinya sendiri (SUDDEN_PERMISSION_
-  // MULTIPLIERS), dihitung terpisah dari kelompok Izin/Sakit-tanpa-surat/Duka yang terencana.
+  // Sama seperti di atas, tapi untuk Izin Mendadak -- hitungan harinya sendiri.
   const [suddenPermissionOccurrenceCount, setSuddenPermissionOccurrenceCount] = useState(0)
+
+  // Angka potongan periode berjalan dari satu pintu Potongan & Lembur (payroll_rules).
+  const [rules, setRules] = useState<PayrollRules>(DEFAULT_PAYROLL_RULES)
+  const izinTiers = buildMultipliers(rules.izin_start, rules.izin_step, rules.izin_max)
+  const suddenTiers = buildMultipliers(rules.sudden_start, rules.sudden_step, rules.sudden_max)
+  const tierAt = (t: number[], i: number) => t[Math.min(i, t.length - 1)]
 
   // Rekan (cabang mana pun) yang juga libur/cuti/mengajukan di tanggal yang tumpang tindih
   // dengan pengajuan ini -- supaya karyawan sadar akan bentrok SEBELUM dikirim ke HR, sama
@@ -82,7 +87,8 @@ export default function AjukanCutiPage() {
 
   useEffect(() => {
     fetchMyUserAndEmployees()
-  }, [])
+    fetchPayrollRules(supabase, getCurrentPeriodRangeStr().start).then(setRules)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!formData.start_date || !formData.end_date || formData.end_date < formData.start_date) {
@@ -113,8 +119,7 @@ export default function AjukanCutiPage() {
       .eq('employee_id', employeeId)
       .in('status', ['sick', 'permission'])
       .gte('date', start).lte('date', end)
-    const dates = (data || []).map(a => a.date as string)
-    setIzinOccurrenceCount(groupContiguousDates(dates).length)
+    setIzinOccurrenceCount(new Set((data || []).map(a => a.date as string)).size)
   }
 
   async function fetchSuddenPermissionOccurrenceCount(employeeId: string) {
@@ -125,8 +130,7 @@ export default function AjukanCutiPage() {
       .eq('employee_id', employeeId)
       .eq('status', 'sudden_permission')
       .gte('date', start).lte('date', end)
-    const dates = (data || []).map(a => a.date as string)
-    setSuddenPermissionOccurrenceCount(groupContiguousDates(dates).length)
+    setSuddenPermissionOccurrenceCount(new Set((data || []).map(a => a.date as string)).size)
   }
 
   async function fetchAnnualEligibility(employeeId: string) {
@@ -410,8 +414,8 @@ export default function AjukanCutiPage() {
             <div className="bg-orange-50 text-orange-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-orange-200">
               <span>📊</span>
               <p>
-                Periode ini Anda sudah punya <strong>{izinOccurrenceCount} kejadian</strong> Izin Duka/Periksa/Sakit-tanpa-surat (dihitung gabungan, per kejadian terpisah).
-                Kalau pengajuan ini jadi kejadian baru, potongannya <strong>{IZIN_GROUP_MULTIPLIERS[Math.min(izinOccurrenceCount, IZIN_GROUP_MULTIPLIERS.length - 1)]}× gaji harian</strong> (naik dari kejadian sebelumnya, mentok di {IZIN_GROUP_MULTIPLIERS[IZIN_GROUP_MULTIPLIERS.length - 1]}×).
+                Periode ini Anda sudah punya <strong>{izinOccurrenceCount} hari</strong> Izin Duka/Periksa/Sakit-tanpa-surat (dihitung gabungan).
+                Kalau di luar jatah libur, hari pertama pengajuan ini dipotong <strong>{fmtMultiplier(tierAt(izinTiers, izinOccurrenceCount))} gaji harian</strong>, naik tiap hari, mentok di {fmtMultiplier(izinTiers[izinTiers.length - 1])}.
               </p>
             </div>
           )}
@@ -420,8 +424,8 @@ export default function AjukanCutiPage() {
             <div className="bg-orange-50 text-orange-800 p-3 rounded-lg text-sm flex gap-2 items-start border border-orange-200">
               <span>📊</span>
               <p>
-                Izin Mendadak <strong>tidak dihitung Alpha</strong> dan tidak kena aturan H-2, tapi tarif potongannya sama dengan Izin biasa, hitungannya tersendiri: kejadian ke-{suddenPermissionOccurrenceCount + 1} periode ini dipotong{' '}
-                <strong>{SUDDEN_PERMISSION_MULTIPLIERS[Math.min(suddenPermissionOccurrenceCount, SUDDEN_PERMISSION_MULTIPLIERS.length - 1)]}× gaji harian</strong>{suddenPermissionOccurrenceCount > 0 ? ` (sudah ${suddenPermissionOccurrenceCount} kejadian sebelumnya periode ini, naik dari kejadian pertama ${SUDDEN_PERMISSION_MULTIPLIERS[0]}×, mentok di ${SUDDEN_PERMISSION_MULTIPLIERS[SUDDEN_PERMISSION_MULTIPLIERS.length - 1]}×)` : '.'}
+                Izin Mendadak <strong>tidak dihitung Alpha</strong> dan tidak kena aturan H-2, tapi tarif potongannya sama dengan Izin biasa, hitungannya tersendiri: hari ke-{suddenPermissionOccurrenceCount + 1} periode ini dipotong{' '}
+                <strong>{fmtMultiplier(tierAt(suddenTiers, suddenPermissionOccurrenceCount))} gaji harian</strong>{suddenPermissionOccurrenceCount > 0 ? ` (sudah ${suddenPermissionOccurrenceCount} hari Izin Mendadak periode ini; naik tiap hari dari ${fmtMultiplier(suddenTiers[0])}, mentok di ${fmtMultiplier(suddenTiers[suddenTiers.length - 1])})` : `, naik tiap hari, mentok di ${fmtMultiplier(suddenTiers[suddenTiers.length - 1])}.`}
               </p>
             </div>
           )}

@@ -1,5 +1,6 @@
 'use client'
 
+import { fetchPayrollRules } from '@/lib/payrollRules'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
@@ -109,14 +110,8 @@ export default function PortalSlipGajiPage() {
     const firstDay = localDateStr(start)
     const lastDay  = localDateStr(end)
 
-    // Tarif keterlambatan sekarang universal (Gaji Standar), bukan per-karyawan lagi.
-    const { data: lateDef } = await supabase
-      .from('salary_defaults')
-      .select('late_penalty_per_minute')
-      .limit(1)
-      .maybeSingle()
-
-    const rate = Number(lateDef?.late_penalty_per_minute ?? 0)
+    // Tarif keterlambatan: satu pintu di Potongan & Lembur (payroll_rules), per periode.
+    const rate = (await fetchPayrollRules(supabase, firstDay)).late_penalty_per_minute
     setLateRate(rate)
 
     const { data: atts } = await supabase

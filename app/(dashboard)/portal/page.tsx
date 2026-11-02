@@ -1,5 +1,6 @@
 'use client'
 
+import { fetchPayrollRules } from '@/lib/payrollRules'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -249,8 +250,8 @@ export default function PortalDashboardPage() {
     const lastDay = toDateStr(period.end)
     const m = period.labelMonth + 1, y = period.labelYear
 
-    const [{ data: lateDef }, { data: atts }, { data: kasbonDed }, { data: feeAtts }] = await Promise.all([
-      supabase.from('salary_defaults').select('late_penalty_per_minute').limit(1).maybeSingle(),
+    const [rules, { data: atts }, { data: kasbonDed }, { data: feeAtts }] = await Promise.all([
+      fetchPayrollRules(supabase, firstDay),
       supabase.from('attendances').select('late_minutes, source').eq('employee_id', employeeId).gte('date', firstDay).lte('date', lastDay).gt('late_minutes', 0),
       supabase.from('kasbon_deductions').select('amount').eq('employee_id', employeeId).eq('deduction_month', m).eq('deduction_year', y).eq('status', 'pending'),
       // Denda Lupa Absen (klarifikasi disetujui HR) -- nominal pasti, sama dengan yang dipotong slip.
@@ -258,7 +259,7 @@ export default function PortalDashboardPage() {
       lastDay < NEW_RULES_CUTOFF_DATE ? Promise.resolve({ data: [] }) :
         supabase.from('attendances').select(ABSENCE_ATTENDANCE_COLUMNS).eq('employee_id', employeeId).gte('date', firstDay).lte('date', lastDay).gt('admin_fee', 0),
     ])
-    const rate = Number(lateDef?.late_penalty_per_minute ?? 0)
+    const rate = rules.late_penalty_per_minute
     const keterlambatan = (atts || []).reduce((s, a: any) => s + chargeableLateMinutes(Number(a.late_minutes), a.source) * rate, 0)
     const kasbon = (kasbonDed || []).reduce((s, d: any) => s + Number(d.amount), 0)
     const dendaItems = adminFeeItemsFrom((feeAtts || []) as AbsenceAttendance[])
@@ -285,15 +286,16 @@ export default function PortalDashboardPage() {
     const firstDay = toDateStr(period.start)
     const lastDay = toDateStr(period.end)
 
-    const [{ data: sc }, { data: claims }] = await Promise.all([
+    const [{ data: sc }, { data: claims }, rules] = await Promise.all([
       // effective_date dibatasi sampai AKHIR periode yg ditampilkan (bukan "hari ini") -- supaya
       // kalau gaji karyawan ini berubah SETELAH periode itu tutup, perkiraan tetap pakai gaji
       // yang benar-benar berlaku SAAT periode itu, bukan gaji terbarunya sekarang.
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
         .eq('employee_id', employeeId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
       supabase.from('overtime_claims').select('overtime_hours_detected').eq('employee_id', employeeId).eq('status', 'approved').gte('date', firstDay).lte('date', lastDay),
+      fetchPayrollRules(supabase, firstDay),
     ])
-    const rate = Number(sc?.overtime_rate_per_hour ?? 0)
+    const rate = rules.overtime_rate_per_hour
     const jamLembur = (claims || []).reduce((s, c: any) => s + Number(c.overtime_hours_detected), 0)
     // Pro-rata sama dengan slip (masuk/masuk kembali/resign di tengah periode).
     const pr = calcProRataFactor(joinDate, lastWorkingDate, firstDay, lastDay)
@@ -321,7 +323,7 @@ export default function PortalDashboardPage() {
     const yesterday = localDateStr(yesterdayDate)
     const cutoffDate = yesterday > lastDay ? lastDay : yesterday
 
-    const [{ data: sc }, { data: atts }, { data: roster }, { data: claims }, { data: fees }, holidayDates] = await Promise.all([
+    const [{ data: sc }, { data: atts }, { data: roster }, { data: claims }, { data: fees }, holidayDates, rules] = await Promise.all([
       supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance, overtime_rate_per_hour')
         .eq('employee_id', employeeId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1).maybeSingle(),
       cutoffDate < firstDay ? Promise.resolve({ data: [] }) :
@@ -331,13 +333,14 @@ export default function PortalDashboardPage() {
       supabase.from('overtime_claims').select('overtime_hours_detected').eq('employee_id', employeeId).eq('status', 'approved').gte('date', firstDay).lte('date', lastDay),
       supabase.from('roster_pick_requests').select('discipline_fee').eq('employee_id', employeeId).eq('period_start', firstDay).in('status', DISCIPLINE_FEE_STATUSES),
       fetchHolidayDates(supabase, firstDay, lastDay),
+      fetchPayrollRules(supabase, firstDay),
     ])
 
     const base = Number(sc?.base_salary ?? 0)
     const pos = Number(sc?.position_allowance ?? 0)
     const meal = Number(sc?.meal_allowance ?? 0)
     const special = Number(sc?.special_allowance ?? 0)
-    const otRate = Number(sc?.overtime_rate_per_hour ?? 0)
+    const otRate = rules.overtime_rate_per_hour
     const jamLembur = (claims || []).reduce((s: number, c: any) => s + Number(c.overtime_hours_detected), 0)
     const lembur = jamLembur * otRate
 
@@ -350,7 +353,7 @@ export default function PortalDashboardPage() {
     const dailyRate = Math.round((base + pos + meal + special) / 26)
     const rosterOffDates = new Set((roster || []).map((r: any) => r.date as string))
     const disciplineFeeTotal = (fees || []).reduce((s: number, r: any) => s + Number(r.discipline_fee ?? 0), 0)
-    const result = calcDailyAccrual(dailyRate, firstDay, cutoffDate, joinDate, (atts || []) as AccrualAttendanceDay[], rosterOffDates, { lastDay, isTraining, disciplineFeeTotal, lastWorkingDate, holidayDates })
+    const result = calcDailyAccrual(dailyRate, firstDay, cutoffDate, joinDate, (atts || []) as AccrualAttendanceDay[], rosterOffDates, { lastDay, isTraining, disciplineFeeTotal, lastWorkingDate, holidayDates, rules })
     setEstPendapatanBerjalan({ ...result, lembur, flatSalary: false })
   }
 

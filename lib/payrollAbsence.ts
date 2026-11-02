@@ -2,10 +2,8 @@
 // (Slip Gaji Bulanan, rincian slip, Ringkasan Gaji, Aturan Potongan, estimasi di Portal) WAJIB
 // memanggil calcAbsence() di sini -- jangan menulis ulang rumusnya di halaman. Aturan tertulisnya
 // (bahasa manusia) ada di docs/ATURAN-PENGGAJIAN.md; kalau aturan berubah, ubah keduanya bersamaan.
-import {
-  calcEscalatingDeduction, IZIN_GROUP_MULTIPLIERS, ALPHA_GROUP_MULTIPLIERS, SUDDEN_PERMISSION_MULTIPLIERS,
-  TRAINING_FLAT_MULTIPLIER, NEW_RULES_CUTOFF_DATE, type EscalatingResult,
-} from './escalatingDeduction'
+import { calcEscalatingDeduction, TRAINING_FLAT_MULTIPLIER, NEW_RULES_CUTOFF_DATE, type EscalatingResult } from './escalatingDeduction'
+import { buildMultipliers, DEFAULT_PAYROLL_RULES, fetchPayrollRules, type PayrollRules } from './payrollRules'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export const LIBUR_QUOTA_PER_PERIOD = 4
@@ -99,6 +97,8 @@ export type AbsenceInput = {
   // false = estimasi berjalan di Portal: tanpa jatah 4 hari (izin langsung dipotong, hari kosong
   // langsung Alpha, tanpa kompensasi). Libur roster & cuti tetap gratis.
   applyQuota?: boolean
+  // Angka potongan yang berlaku di periode ini (payroll_rules). Kosong = DEFAULT_PAYROLL_RULES.
+  rules?: PayrollRules
 }
 
 // Denda Lupa Absen per kejadian (attendances.admin_fee, diisi saat HR menyetujui klarifikasi).
@@ -147,6 +147,9 @@ export type AbsenceBreakdown = {
   alphaGroup: EscalatingResult
   suddenPermissionGroup: EscalatingResult
   sickDays: number; sick1Free: number; sick23Half: number; sick4Full: number; sickDed: number
+  // Pengali Sakit+surat yang dipakai (hari ke-1, ke-2&3, ke-4+). Opsional: slip sebelum migrasi 118
+  // tidak menyimpannya (= 0 / 0.5 / 1).
+  sickRates?: [number, number, number]
   adminFeeTotal: number
   // Rincian adminFeeTotal per tanggal. (Opsional: slip sebelum fitur ini cuma menyimpan totalnya.)
   adminFeeItems?: AdminFeeItem[]
@@ -183,7 +186,7 @@ const EMPTY_GROUP: EscalatingResult = { total: 0, blocks: [] }
 export function toAbsenceBreakdown(r: AbsenceResult): AbsenceBreakdown {
   return {
     dailyRate: r.dailyRate, izinGroup: r.izinGroup, alphaGroup: r.alphaGroup, suddenPermissionGroup: r.suddenPermissionGroup,
-    sickDays: r.sickDays, sick1Free: r.sick1Free, sick23Half: r.sick23Half, sick4Full: r.sick4Full, sickDed: r.sickDed,
+    sickDays: r.sickDays, sick1Free: r.sick1Free, sick23Half: r.sick23Half, sick4Full: r.sick4Full, sickDed: r.sickDed, sickRates: r.sickRates,
     adminFeeTotal: r.adminFeeTotal, adminFeeItems: r.adminFeeItems, liburDisciplineFeeTotal: r.liburDisciplineFeeTotal, isPreNewRulesPeriod: r.isPreNewRulesPeriod,
     liburQuota: r.liburQuota, liburFromRoster: r.liburFromRoster, liburFromLeave: r.liburFromLeave, liburFromIzin: r.liburFromIzin,
     liburFromSickDoc: r.liburFromSickDoc, liburFromKosong: r.liburFromKosong, rosterBeyondQuota: r.rosterBeyondQuota,
@@ -194,10 +197,12 @@ export function toAbsenceBreakdown(r: AbsenceResult): AbsenceBreakdown {
 export function calcAbsence(input: AbsenceInput): AbsenceResult {
   const { dailyRate, firstDay, lastDay, today, joinDate, isTraining, proRataFactor, flatSalary, liburCompApplicable } = input
   const applyQuota = input.applyQuota !== false
+  const rules = input.rules ?? DEFAULT_PAYROLL_RULES
   // Periode yang berakhir SEBELUM NEW_RULES_CUTOFF_DATE dihitung flat 1x tanpa denda admin --
-  // lihat catatan di escalatingDeduction.ts. Training selalu flat.
+  // lihat catatan di escalatingDeduction.ts. Training selalu flat (pengalinya diatur di payroll_rules).
   const isPreNewRulesPeriod = lastDay < NEW_RULES_CUTOFF_DATE
-  const tiers = (m: number[]) => (isTraining || isPreNewRulesPeriod) ? TRAINING_FLAT_MULTIPLIER : m
+  const tiers = (start: number, step: number, max: number) => isPreNewRulesPeriod ? TRAINING_FLAT_MULTIPLIER
+    : isTraining ? [rules.training_multiplier] : buildMultipliers(start, step, max)
 
   const lastCounted = today < lastDay ? today : lastDay
   const lastWorkingDate = input.lastWorkingDate ?? null
@@ -209,7 +214,7 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
   if (flatSalary) {
     return {
       dailyRate, izinGroup: EMPTY_GROUP, alphaGroup: EMPTY_GROUP, suddenPermissionGroup: EMPTY_GROUP,
-      sickDays: 0, sick1Free: 0, sick23Half: 0, sick4Full: 0, sickDed: 0, adminFeeTotal: 0, adminFeeItems: [], liburDisciplineFeeTotal: 0,
+      sickDays: 0, sick1Free: 0, sick23Half: 0, sick4Full: 0, sickDed: 0, sickRates: [0, 0.5, 1], adminFeeTotal: 0, adminFeeItems: [], liburDisciplineFeeTotal: 0,
       isPreNewRulesPeriod, liburQuota: 0, liburFromRoster: 0, liburFromLeave: 0, liburFromIzin: 0, liburFromSickDoc: 0,
       liburFromKosong: 0, rosterBeyondQuota: 0, holidayDays: 0, absentDed: 0, absentDays: 0, liburUsedDays: 0, liburCompDays: 0,
       liburKompensasi: 0, alphaDates: [], daysElapsed,
@@ -276,18 +281,20 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
   const liburFromKosong = take(emptyDates.length)
   const excessEmptyDates = emptyDates.slice(liburFromKosong)
 
-  const izinGroup = calcEscalatingDeduction(izinDates, dailyRate, tiers(IZIN_GROUP_MULTIPLIERS))
+  const izinGroup = calcEscalatingDeduction(izinDates, dailyRate, tiers(rules.izin_start, rules.izin_step, rules.izin_max))
   const alphaDates = [...explicitAlphaDates, ...excessEmptyDates].sort()
-  const alphaGroup = calcEscalatingDeduction(alphaDates, dailyRate, tiers(ALPHA_GROUP_MULTIPLIERS))
-  const suddenPermissionGroup = calcEscalatingDeduction(suddenPermissionDates, dailyRate, tiers(SUDDEN_PERMISSION_MULTIPLIERS))
+  const alphaGroup = calcEscalatingDeduction(alphaDates, dailyRate, tiers(rules.alpha_start, rules.alpha_step, rules.alpha_max))
+  const suddenPermissionGroup = calcEscalatingDeduction(suddenPermissionDates, dailyRate, tiers(rules.sudden_start, rules.sudden_step, rules.sudden_max))
 
-  // Sakit dengan surat (sisa di luar jatah): hari ke-1 gratis, ke-2&3 0.5x, ke-4+ 1x -- aturan
-  // lama, sama untuk periode lama maupun baru.
+  // Sakit dengan surat (sisa di luar jatah): pengali hari ke-1 / ke-2&3 / ke-4+ (bawaan gratis /
+  // 0.5x / 1x). Periode lama selalu memakai bawaan.
+  const sickRates: [number, number, number] = isPreNewRulesPeriod ? [0, 0.5, 1]
+    : [rules.sick_doc_day1, rules.sick_doc_day2_3, rules.sick_doc_day4_plus]
   const sickDays = sickDocDates.length
   const sick1Free = Math.min(sickDays, 1)
   const sick23Half = Math.max(0, Math.min(sickDays - 1, 2))
   const sick4Full = Math.max(0, sickDays - 3)
-  const sickDed = Math.round(sick23Half * dailyRate * 0.5 + sick4Full * dailyRate)
+  const sickDed = Math.round(sick1Free * dailyRate * sickRates[0] + sick23Half * dailyRate * sickRates[1] + sick4Full * dailyRate * sickRates[2])
 
   // Denda Lupa Absen Masuk/Pulang (Rp15.000/Rp5.000 per kejadian) -- belum ada di periode lama.
   const adminFeeItems = isPreNewRulesPeriod ? [] : adminFeeItemsFrom(atts)
@@ -299,7 +306,7 @@ export function calcAbsence(input: AbsenceInput): AbsenceResult {
 
   return {
     dailyRate, izinGroup, alphaGroup, suddenPermissionGroup,
-    sickDays, sick1Free, sick23Half, sick4Full, sickDed,
+    sickDays, sick1Free, sick23Half, sick4Full, sickDed, sickRates,
     adminFeeTotal, adminFeeItems, liburDisciplineFeeTotal, isPreNewRulesPeriod,
     liburQuota, liburFromRoster, liburFromLeave, liburFromIzin, liburFromSickDoc, liburFromKosong,
     rosterBeyondQuota: rosterDates.length - liburFromRoster,
@@ -358,11 +365,12 @@ export async function computeAbsenceForPeriod(
   today: string,
 ): Promise<AbsenceResult> {
   const { firstDay, lastDay } = payrollPeriodRange(month, year)
-  const [scRes, empRes, src] = await Promise.all([
+  const [scRes, empRes, src, rules] = await Promise.all([
     supabase.from('salary_components').select('base_salary, position_allowance, meal_allowance, special_allowance')
       .eq('employee_id', employeeId).lte('effective_date', lastDay).order('effective_date', { ascending: false }).limit(1),
     supabase.from('employees').select('join_date, last_working_date, employee_type, flat_salary, libur_compensation_applicable').eq('id', employeeId).single(),
     fetchAbsenceSource(supabase, employeeId, firstDay, lastDay),
+    fetchPayrollRules(supabase, firstDay),
   ])
   const emp = empRes.data as { join_date: string | null; last_working_date: string | null; employee_type: string | null; flat_salary: boolean | null; libur_compensation_applicable: boolean | null } | null
   const isTraining = emp?.employee_type === 'training'
@@ -373,6 +381,6 @@ export async function computeAbsenceForPeriod(
     attendances: src.attendances, rosterDayOffDates: src.rosterDayOffDates, holidayDates: src.holidayDates,
     isTraining, proRataFactor: calcProRataFactor(joinDate, lastWorkingDate, firstDay, lastDay),
     flatSalary: emp?.flat_salary === true, liburCompApplicable: emp?.libur_compensation_applicable !== false,
-    disciplineFeeTotal: src.disciplineFeeTotal,
+    disciplineFeeTotal: src.disciplineFeeTotal, rules,
   })
 }

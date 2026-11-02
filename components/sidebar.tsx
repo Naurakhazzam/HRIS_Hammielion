@@ -264,6 +264,7 @@ const adminNavItems: NavNode[] = [
         href: '/penggajian/komponen',
         submenu: [
           { name: 'Komponen Gaji', href: '/penggajian/komponen' },
+          { name: 'Potongan & Lembur', href: '/penggajian/potongan-lembur' },
           { name: 'Bonus Kondisional', href: '/penggajian/bonus-kondisional' },
           { name: 'Tarif & Mobil Driver', href: '/penggajian/driver/setup' },
           { name: 'Pekerja Lepas', href: '/penggajian/borongan/pekerja' },
@@ -581,7 +582,7 @@ export default function Sidebar({ forceOpen = null, onNavigate }: SidebarProps) 
 
     'Penggajian': pathname.startsWith('/penggajian'),
     'Kehilangan & Kasir': pathname.startsWith('/penggajian/kehilangan'),
-    'Setup Gaji & Tarif': pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/driver/setup')
+    'Setup Gaji & Tarif': pathname.startsWith('/penggajian/komponen') || pathname.startsWith('/penggajian/potongan-lembur') || pathname.startsWith('/penggajian/driver/setup')
       || pathname.startsWith('/penggajian/borongan/pekerja') || pathname.startsWith('/penggajian/borongan/tarif')
       || pathname.startsWith('/penggajian/kehilangan/setup') || pathname.startsWith('/penggajian/bonus-kondisional'),
 
