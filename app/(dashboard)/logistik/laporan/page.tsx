@@ -192,9 +192,9 @@ const fmtJam = (ts: string) => new Date(ts).toLocaleTimeString('id-ID', { hour: 
 
 const fmtRp = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
 
-type DatePreset = 'today' | 'yesterday' | 'week' | 'month' | 'pickMonth'
+type DatePreset = 'today' | 'yesterday' | 'week' | 'month' | 'pickMonth' | 'custom'
 
-const DATE_PRESETS: { value: Exclude<DatePreset, 'pickMonth'>; label: string }[] = [
+const DATE_PRESETS: { value: Exclude<DatePreset, 'pickMonth' | 'custom'>; label: string }[] = [
   { value: 'today', label: 'Hari ini' },
   { value: 'yesterday', label: 'Kemarin' },
   { value: 'week', label: 'Minggu ini' },
@@ -203,7 +203,11 @@ const DATE_PRESETS: { value: Exclude<DatePreset, 'pickMonth'>; label: string }[]
 
 // Rentang tanggal (inklusif) untuk filter. "Minggu ini" = minggu gajian driver, Jumat s/d Kamis
 // (sama dengan week_start_date di complete_logistics_delivery).
-function presetRange(preset: DatePreset, pickedMonth: string): { start: string; end: string } {
+// "Pilih tanggal" (custom): rentang bebas Dari–Sampai; kalau terbalik otomatis ditukar.
+function presetRange(preset: DatePreset, pickedMonth: string, customStart = '', customEnd = ''): { start: string; end: string } {
+  if (preset === 'custom' && customStart && customEnd) {
+    return customStart <= customEnd ? { start: customStart, end: customEnd } : { start: customEnd, end: customStart }
+  }
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
@@ -244,6 +248,9 @@ export default function LaporanPengirimanPage() {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
+  // Filter per tanggal (preset 'custom'). Default hari ini s/d hari ini.
+  const [customStart, setCustomStart] = useState(() => localDateStr(new Date()))
+  const [customEnd, setCustomEnd] = useState(() => localDateStr(new Date()))
   // '' = semua mobil. Disaring di browser, jadi semua total di kartu ikut mobil yang dipilih.
   const [filterVehicle, setFilterVehicle] = useState('')
   const [vehicles, setVehicles] = useState<{ id: string; name: string; plate_number: string | null }[]>([])
@@ -279,7 +286,7 @@ export default function LaporanPengirimanPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const { start: startDate, end: endDate } = presetRange(datePreset, filterMonth)
+    const { start: startDate, end: endDate } = presetRange(datePreset, filterMonth, customStart, customEnd)
 
     const { data: planData } = await supabase
       .from('logistics_delivery_plans')
@@ -421,7 +428,7 @@ export default function LaporanPengirimanPage() {
       setCrewCorrByPlan({})
     }
     setLoading(false)
-  }, [datePreset, filterMonth, supabase])
+  }, [datePreset, filterMonth, customStart, customEnd, supabase])
 
   useEffect(() => {
     async function init() {
@@ -680,11 +687,14 @@ export default function LaporanPengirimanPage() {
     return { value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) }
   })
 
-  const range = presetRange(datePreset, filterMonth)
+  const range = presetRange(datePreset, filterMonth, customStart, customEnd)
   const vehicleName = vehicles.find(v => v.id === filterVehicle)?.name
+  const rangeText = range.start === range.end ? fmtTgl(range.start) : `${fmtTgl(range.start)} – ${fmtTgl(range.end)}`
   const periodLabel = (datePreset === 'pickMonth'
     ? monthOptions.find(m => m.value === filterMonth)?.label ?? filterMonth
-    : `${DATE_PRESETS.find(d => d.value === datePreset)?.label} (${range.start === range.end ? fmtTgl(range.start) : `${fmtTgl(range.start)} – ${fmtTgl(range.end)}`})`)
+    : datePreset === 'custom'
+      ? `Tanggal ${rangeText}`
+      : `${DATE_PRESETS.find(d => d.value === datePreset)?.label} (${rangeText})`)
     + (vehicleName ? ` · ${vehicleName}` : '')
 
   return (
@@ -721,7 +731,27 @@ export default function LaporanPengirimanPage() {
                 <option value="">Pilih bulan lain…</option>
                 {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
+              <button type="button" onClick={() => setDatePreset('custom')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition ${datePreset === 'custom' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'}`}>
+                Pilih tanggal
+              </button>
             </div>
+            {datePreset === 'custom' && (
+              <div className="flex flex-wrap items-end gap-2 mt-2">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Dari</label>
+                  <input type="date" value={customStart} max={customEnd || undefined}
+                    onChange={e => { if (e.target.value) setCustomStart(e.target.value) }}
+                    className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:border-blue-600" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Sampai</label>
+                  <input type="date" value={customEnd} min={customStart || undefined}
+                    onChange={e => { if (e.target.value) setCustomEnd(e.target.value) }}
+                    className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white outline-none focus:border-blue-600" />
+                </div>
+              </div>
+            )}
             <label className="block text-xs text-slate-500 mt-3 mb-1">Mobil</label>
             <select value={filterVehicle} onChange={e => setFilterVehicle(e.target.value)}
               className="w-full sm:w-64 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white outline-none">
