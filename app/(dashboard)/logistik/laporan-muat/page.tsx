@@ -244,6 +244,8 @@ export default function LaporanMuatPage() {
   const [itemCaptionDraft, setItemCaptionDraft] = useState('')
   const [packageCaptionDraft, setPackageCaptionDraft] = useState('')
   const [finishing, setFinishing] = useState(false)
+  // Error Tandai Selesai ditampilkan dekat tombol (pesan atas halaman sering tidak terlihat).
+  const [finishError, setFinishError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
   function showMessage(type: 'success' | 'error', text: string) {
@@ -410,6 +412,7 @@ export default function LaporanMuatPage() {
     setNotaDraft('')
     setEditMode(null)
     setReassignReason('')
+    setFinishError(null)
   }
 
   // Nominal nota dari form: null = belum diisi / tidak valid.
@@ -542,12 +545,14 @@ export default function LaporanMuatPage() {
 
   async function handleTandaiSelesai() {
     if (!selectedLoadingId || detailPackages.length === 0 || !finishMethod) return
+    setFinishError(null)
+    const fail = (text: string) => { setFinishError(text); showMessage('error', text) }
     const nota = notaFromForm()
-    if (nota === null) { showMessage('error', 'Isi nominal nota dulu (wajib).'); return }
+    if (nota === null) { fail('Isi nominal nota dulu (wajib).'); return }
     const self = finishMethod === 'antar_sendiri'
     const ongkir = self ? ongkirFromForm() : 0
-    if (ongkir === null) { showMessage('error', 'Pilih "Tidak ada ongkir" atau isi nominal ongkirnya.'); return }
-    if (self && !assigneeDraft) { showMessage('error', 'Pilih siapa yang mengantar.'); return }
+    if (ongkir === null) { fail('Pilih "Tidak ada ongkir" atau isi nominal ongkirnya.'); return }
+    if (self && !assigneeDraft) { fail('Pilih siapa yang mengantar.'); return }
     const assignee = candidates.find(c => c.id === assigneeDraft)
     const jalur = !self
       ? 'DIANTAR DRIVER GUDANG (muncul di Jemput Barang Cabang)'
@@ -559,7 +564,7 @@ export default function LaporanMuatPage() {
       p_nota_amount: nota,
     })
     setFinishing(false)
-    if (error) { showMessage('error', 'Gagal menandai selesai: ' + error.message); return }
+    if (error) { fail('Gagal menandai selesai: ' + error.message); return }
     showMessage('success', !self
       ? 'Laporan muat ditandai selesai. Toko tujuan sudah bisa dijemput driver.'
       : `Laporan muat ditandai selesai. Tugas antar muncul di menu Kirim Barang milik ${assignee?.full_name}.`)
@@ -1070,6 +1075,9 @@ export default function LaporanMuatPage() {
                             : finishMethod === 'driver' ? '✓ Tandai Selesai — Dijemput Driver Gudang' : '✓ Tandai Selesai — Diantar Sendiri'}
                         </button>
                       </div>
+                      {finishError && (
+                        <p className="p-3 rounded-lg border text-sm bg-red-50 border-red-200 text-red-700">{finishError}</p>
+                      )}
                     </div>
                   )}
 
