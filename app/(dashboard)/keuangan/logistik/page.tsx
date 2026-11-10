@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localDateStr, todayLocalStr } from '@/lib/date'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 const ADMIN_ROLES = ['owner', 'hr', 'finance']
 const LOGISTIK_BRANCH_ID = 'ff5cd917-39cb-4b83-ab85-3481f4f082e4'
@@ -60,30 +61,37 @@ export default function LogistikPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
 
-    let inQuery = supabase.from('fin_cash_in')
-      .select('id, transaction_date, amount, expense_amount, cash_adjustment, description, status, fin_bank_accounts(bank_name, account_number)')
-      .eq('branch_id', LOGISTIK_BRANCH_ID)
-      .order('transaction_date', { ascending: false })
-    let outQuery = supabase.from('fin_cash_out')
-      .select('id, transaction_date, amount, description, status, fin_bank_accounts(bank_name, account_number), fin_cash_out_categories(label)')
-      .eq('branch_id', LOGISTIK_BRANCH_ID)
-      .order('transaction_date', { ascending: false })
-
+    let range: [string, string] | null = null
     if (viewMode === 'month') {
       const [year, month] = filterMonth.split('-').map(Number)
-      const startDate = localDateStr(new Date(year, month - 1, 1))
-      const endDate = localDateStr(new Date(year, month, 0))
-      inQuery = inQuery.gte('transaction_date', startDate).lte('transaction_date', endDate)
-      outQuery = outQuery.gte('transaction_date', startDate).lte('transaction_date', endDate)
+      range = [localDateStr(new Date(year, month - 1, 1)), localDateStr(new Date(year, month, 0))]
     }
+    type Res<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>
 
-    const [inRes, outRes] = await Promise.all([inQuery, outQuery])
+    // "Semua Periode" tidak dibatasi tanggal -> ambil per batch supaya tidak terpotong di 1000 baris
+    // (kalau terpotong, Total & Sisa Saldo jadi salah tanpa error).
+    const [inRes, outRes] = await Promise.all([
+      fetchAllRows<CashInRow>((from, to) => {
+        let q = supabase.from('fin_cash_in')
+          .select('id, transaction_date, amount, expense_amount, cash_adjustment, description, status, fin_bank_accounts(bank_name, account_number)')
+          .eq('branch_id', LOGISTIK_BRANCH_ID)
+        if (range) q = q.gte('transaction_date', range[0]).lte('transaction_date', range[1])
+        return q.order('transaction_date', { ascending: false }).order('id').range(from, to) as unknown as Res<CashInRow>
+      }),
+      fetchAllRows<CashOutRow>((from, to) => {
+        let q = supabase.from('fin_cash_out')
+          .select('id, transaction_date, amount, description, status, fin_bank_accounts(bank_name, account_number), fin_cash_out_categories(label)')
+          .eq('branch_id', LOGISTIK_BRANCH_ID)
+        if (range) q = q.gte('transaction_date', range[0]).lte('transaction_date', range[1])
+        return q.order('transaction_date', { ascending: false }).order('id').range(from, to) as unknown as Res<CashOutRow>
+      }),
+    ])
 
     if (inRes.error) console.error('Detail error pemasukan:', JSON.stringify(inRes.error, null, 2))
     if (outRes.error) console.error('Detail error pengeluaran:', JSON.stringify(outRes.error, null, 2))
 
-    setPemasukan((inRes.data as unknown as CashInRow[]) || [])
-    setPengeluaran((outRes.data as unknown as CashOutRow[]) || [])
+    setPemasukan(inRes.data)
+    setPengeluaran(outRes.data)
     setAsOf(new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }))
     setLoading(false)
   }, [supabase, viewMode, filterMonth])

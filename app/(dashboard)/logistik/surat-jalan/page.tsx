@@ -117,8 +117,10 @@ function SuratJalanContent() {
     init()
   }, [supabase])
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  // silent = refresh sesudah aksi: daftar lama tetap tampil (tidak diganti spinner), jadi tab &
+  // posisi scroll tidak balik ke atas. Spinner cuma untuk load awal / ganti bulan.
+  const fetchAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     const [y, m] = month.split('-').map(Number)
     const start = `${month}-01`
     const end = new Date(y, m, 0).getDate()
@@ -176,7 +178,7 @@ function SuratJalanContent() {
     // "Simpan & tambah lagi" mempertahankan toko -- untuk surat jalan tambahan toko yang sama.
     setAmount(''); setNoteNumber(''); setNoteText(''); setNewStore(null)
     if (!again) { setStoreText(''); setShowForm(false) }
-    await fetchAll()
+    await fetchAll(true)
   }
 
   function startEdit(n: Note) {
@@ -191,7 +193,7 @@ function SuratJalanContent() {
     if (error) { showMessage('error', error.message); return }
     showMessage('success', 'Surat jalan diperbarui.')
     setEditId(null)
-    await fetchAll()
+    await fetchAll(true)
   }
 
   async function rpcWithPrompt(fn: string, args: Record<string, unknown>, promptText: string, okText: string, paramName = 'p_reason', required = true) {
@@ -202,7 +204,7 @@ function SuratJalanContent() {
     if (error) { showMessage('error', error.message); return }
     showMessage('success', okText)
     window.dispatchEvent(new Event('kirim-barang-badge-refresh'))
-    await fetchAll()
+    await fetchAll(true)
   }
 
   if (access === null) return <div className="text-center py-12 text-slate-500">Memuat...</div>

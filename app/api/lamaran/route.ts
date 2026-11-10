@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { APPLICANT_STATUS_LABELS } from '@/lib/recruitmentStatusLabels'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // Endpoint publik (tanpa login) — pelamar isi form sendiri di /lamaran.
 // Sama seperti app/api/signup/route.ts: pakai service_role di server supaya
@@ -81,10 +82,11 @@ export async function POST(req: NextRequest) {
     // Cegah submit dobel dari nomor HP yang sama selama lamaran sebelumnya masih
     // berjalan. Kalau lamaran sebelumnya sudah "ditolak", tetap boleh melamar lagi.
     const normalizedPhone = normalizePhone(phone)
-    const { data: existingRows } = await supabaseAdmin
-      .from('job_applicants')
-      .select('application_code, phone, status')
-    const existing = (existingRows || []).find(
+    // Per batch — tanpa ini Supabase memotong di 1000 baris dan nomor dobel bisa lolos.
+    const { data: existingRows } = await fetchAllRows<{ application_code: string; phone: string; status: string }>(
+      (from, to) => supabaseAdmin.from('job_applicants').select('application_code, phone, status')
+        .neq('status', 'ditolak').order('id').range(from, to))
+    const existing = existingRows.find(
       r => normalizePhone(r.phone) === normalizedPhone && r.status !== 'ditolak'
     )
     if (existing) {

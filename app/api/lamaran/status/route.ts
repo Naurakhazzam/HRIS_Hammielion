@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 // Endpoint publik (tanpa login) — pelamar cek status pakai Nama + No HP,
 // bukan akun. Sama seperti app/api/lamaran/route.ts: service_role di server,
@@ -24,9 +25,10 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedPhone = normalizePhone(phone)
-    const { data: candidates } = await supabaseAdmin
-      .from('job_applicants')
-      .select('id, application_code, full_name, phone, status')
+    // Per batch — tanpa ini Supabase memotong di 1000 baris dan pelamar lama tidak ketemu.
+    const { data: candidates } = await fetchAllRows<{ id: string; application_code: string; full_name: string; phone: string; status: string }>(
+      (from, to) => supabaseAdmin.from('job_applicants').select('id, application_code, full_name, phone, status')
+        .order('id').range(from, to))
 
     // Cari nama + HP dulu (paling akurat), fallback ke HP saja kalau nama typo.
     const nameNorm = String(full_name).trim().toLowerCase()

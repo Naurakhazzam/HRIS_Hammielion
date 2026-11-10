@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { todayLocalStr, localDateStr } from '@/lib/date'
 import RupiahInput from '@/components/RupiahInput'
+import { fetchAllRows } from '@/lib/fetchAllRows'
 
 const OWNER_ROLES = ['owner', 'hr', 'finance']
 
@@ -72,14 +73,17 @@ export default function PettyCashPage() {
 
   const fetchRows = useCallback(async (userId: string) => {
     setLoading(true)
-    const { data, error } = await supabase
+    // Saldo berjalan butuh SEMUA entri -> ambil per batch supaya tidak terpotong di 1000 baris.
+    const { data, error } = await fetchAllRows<PettyCashEntry>((from, to) => supabase
       .from('petty_cash_entries')
       .select('id, entry_date, type, amount, description, category')
       .eq('user_id', userId)
       .order('entry_date', { ascending: true })
       .order('created_at', { ascending: true })
+      .order('id')
+      .range(from, to) as unknown as PromiseLike<{ data: PettyCashEntry[] | null; error: { message: string } | null }>)
     if (error) console.error('Detail error:', JSON.stringify(error, null, 2))
-    else setAllRows((data as unknown as PettyCashEntry[]) || [])
+    else setAllRows(data)
     setLoading(false)
   }, [supabase])
 

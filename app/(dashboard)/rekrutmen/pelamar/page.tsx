@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { toWhatsAppLink } from '@/lib/waLink'
 import { isBeforeAntiPasteFix } from '@/lib/antiPasteFix'
 import { PSYCHOMETRIC_LABELS, renderPsychometricSummary, psychotestLabel } from '@/lib/psychometricSummary'
+import { fetchAllRows } from '@/lib/fetchAllRows'
+import { Pagination, paginate } from '@/components/Pagination'
 
 type Applicant = {
   id: string
@@ -43,6 +45,14 @@ type Applicant = {
   interview_recommendation: string | null
 }
 
+// Daftar cuma ambil kolom yang tampil di tabel + yang dipakai filter/sort. Kolom teks panjang
+// (alamat, pengalaman, motivasi, hasil interview) baru diambil saat Detail dibuka.
+type ApplicantRow = Pick<Applicant, 'id' | 'application_code' | 'full_name' | 'birth_date' | 'phone' | 'education'
+  | 'status' | 'created_at' | 'placement' | 'distance_km' | 'psychotest_results' | 'screening_answers'>
+const LIST_SELECT = 'id, application_code, full_name, birth_date, phone, education, status, created_at, placement, distance_km, psychotest_results(score), screening_answers(created_at)'
+const DETAIL_SELECT = 'id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_confirmation, interview_confirmed_at, test_impression, interview_conducted_at, interviewer_name, interview_attendance, interview_communication_rating, interview_appearance_rating, interview_motivation_rating, interview_notes, interview_recommendation'
+const PAGE_SIZE = 50
+
 const ATTENDANCE_OPTIONS = [
   { value: 'hadir_tepat_waktu', label: 'Hadir Tepat Waktu' },
   { value: 'hadir_terlambat', label: 'Hadir Terlambat' },
@@ -66,7 +76,7 @@ const RECOMMENDATION_STATUS_MAP: Record<string, string> = {
   tidak_lolos: 'ditolak',
 }
 
-function getScreeningSubmittedAt(a: Applicant): string | null {
+function getScreeningSubmittedAt(a: ApplicantRow): string | null {
   if (!a.screening_answers || a.screening_answers.length === 0) return null
   return a.screening_answers.reduce((earliest, r) => (r.created_at < earliest ? r.created_at : earliest), a.screening_answers[0].created_at)
 }
@@ -131,7 +141,7 @@ function getNextStatus(current: string): string | null {
   return STATUS_ORDER[idx + 1]
 }
 
-function getPsikotesScore(a: Applicant): number | null {
+function getPsikotesScore(a: ApplicantRow): number | null {
   return a.psychotest_results?.score ?? null
 }
 
@@ -159,8 +169,12 @@ function calcAge(birthDate: string | null): number | null {
 
 export default function DaftarPelamarPage() {
   const router = useRouter()
-  const [applicants, setApplicants] = useState<Applicant[]>([])
+  const [applicants, setApplicants] = useState<ApplicantRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [openingId, setOpeningId] = useState<string | null>(null)
+  const loadedOnce = useRef(false)
   const [scoreSort, setScoreSort] = useState<'asc' | 'desc' | null>(null)
   const [distanceSort, setDistanceSort] = useState<'asc' | 'desc' | null>(null)
   const [activeTab, setActiveTab] = useState<'semua' | string>('semua')
@@ -202,12 +216,19 @@ export default function DaftarPelamarPage() {
   const supabase = createClient()
 
   const fetchApplicants = useCallback(async () => {
-    setLoading(true)
-    const { data } = await supabase
+    // "Memuat..." cuma saat load pertama. Refresh sesudah aksi (ubah status, simpan interview)
+    // berjalan diam-diam: data lama tetap tampil, halaman & scroll TIDAK balik ke awal.
+    if (!loadedOnce.current) setLoading(true)
+    // Per batch 1000 — tanpa ini Supabase memotong diam-diam di 1000 pelamar.
+    const { data, error } = await fetchAllRows<ApplicantRow>((from, to) => supabase
       .from('job_applicants')
-      .select('id, application_code, full_name, gender, birth_place, birth_date, address, phone, marital_status, number_of_children, education, work_experience, motivation, status, created_at, placement, distance_km, distance_minutes, psychotest_results(score), screening_answers(created_at), interview_token, interview_confirmation, interview_confirmed_at, test_impression, interview_conducted_at, interviewer_name, interview_attendance, interview_communication_rating, interview_appearance_rating, interview_motivation_rating, interview_notes, interview_recommendation')
-      .order('created_at', { ascending: false })
-    setApplicants((data as unknown as Applicant[]) || [])
+      .select(LIST_SELECT)
+      .order('created_at', { ascending: false }).order('id')
+      .range(from, to) as unknown as PromiseLike<{ data: ApplicantRow[] | null; error: { message: string } | null }>)
+    setLoadError(error ? error.message : null)
+    // Kalau refresh gagal, jangan kosongkan tabel yang sedang dilihat.
+    if (!error || !loadedOnce.current) setApplicants(data)
+    loadedOnce.current = true
     setLoading(false)
   }, [supabase])
 
@@ -226,7 +247,13 @@ export default function DaftarPelamarPage() {
     fetchApplicants()
   }, [fetchApplicants])
 
-  async function openDetail(applicant: Applicant) {
+  async function openDetail(row: ApplicantRow) {
+    setOpeningId(row.id)
+    const { data: full, error: fullErr } = await supabase
+      .from('job_applicants').select(DETAIL_SELECT).eq('id', row.id).maybeSingle()
+    setOpeningId(null)
+    if (fullErr || !full) { setLoadError(fullErr?.message || 'Data pelamar tidak ditemukan'); return }
+    const applicant = full as unknown as Applicant
     setDetail(applicant)
     setDetailStatus(applicant.status)
     setInterviewResultForm({
@@ -382,6 +409,12 @@ export default function DaftarPelamarPage() {
       })
     : criteriaFiltered
 
+  // Balik ke halaman 1 tiap kali tab/filter/sort berubah (pola "adjust state saat render").
+  const filterKey = [activeTab, filterMinAge, filterMaxAge, filterMinEducation, filterPlacement, filterMinScore, scoreSort, distanceSort].join('|')
+  const [pageKey, setPageKey] = useState(filterKey)
+  if (pageKey !== filterKey) { setPageKey(filterKey); setPage(1) }
+  const { rows: pageRows, page: currentPage } = paginate(filteredApplicants, page, PAGE_SIZE)
+
   function toggleScoreSort() {
     setDistanceSort(null)
     setScoreSort(prev => (prev === 'desc' ? 'asc' : prev === 'asc' ? null : 'desc'))
@@ -413,6 +446,12 @@ export default function DaftarPelamarPage() {
         screening, buka halaman{' '}
         <Link href="/rekrutmen" className="text-blue-600 hover:underline">Pengaturan Rekrutmen</Link>.
       </p>
+
+      {loadError && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+          Gagal memuat: {loadError}
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-6 pt-4 border-b border-slate-200">
@@ -520,7 +559,7 @@ export default function DaftarPelamarPage() {
               {!loading && filteredApplicants.length === 0 && (
                 <tr><td colSpan={11} className="px-4 py-6 text-center text-slate-400">Belum ada pelamar di tahap ini.</td></tr>
               )}
-              {filteredApplicants.map(a => (
+              {pageRows.map(a => (
                 <tr key={a.id} className="border-t border-slate-100">
                   <td className="px-4 py-2 font-mono text-xs text-blue-600">{a.application_code}</td>
                   <td className="px-4 py-2 text-slate-800">{a.full_name}</td>
@@ -559,13 +598,17 @@ export default function DaftarPelamarPage() {
                     ) : '-'}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <button onClick={() => openDetail(a)} className="text-blue-600 text-xs font-medium hover:underline">Detail</button>
+                    <button onClick={() => openDetail(a)} disabled={openingId !== null}
+                      className="text-blue-600 text-xs font-medium hover:underline disabled:opacity-50">
+                      {openingId === a.id ? 'Memuat...' : 'Detail'}
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <Pagination page={currentPage} totalItems={filteredApplicants.length} pageSize={PAGE_SIZE} onChange={setPage} />
       </div>
 
       {detail && (
